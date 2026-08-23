@@ -186,6 +186,19 @@ struct BlueCursorView: View {
             // Nearly transparent background (helps with compositing)
             Color.black.opacity(0.001)
 
+            // Assistant-drawn boxes, arrows and highlights for this screen.
+            // Sits below the cursor so the cursor is never hidden behind one.
+            if let annotations = companionManager.activeAnnotationsByDisplayFrame[screenFrame],
+               let screenshotSize = companionManager.annotationScreenshotSizeByDisplayFrame[screenFrame],
+               !annotations.isEmpty {
+                ScreenAnnotationLayer(
+                    annotations: annotations,
+                    screenshotSize: screenshotSize,
+                    displaySize: screenFrame.size
+                )
+                .transition(.opacity)
+            }
+
             // Welcome speech bubble (first launch only)
             if isCursorOnThisScreen && showWelcome && !welcomeText.isEmpty {
                 Text(welcomeText)
