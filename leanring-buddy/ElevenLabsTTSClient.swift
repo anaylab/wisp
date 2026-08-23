@@ -11,7 +11,9 @@ import AVFoundation
 import Foundation
 
 @MainActor
-final class ElevenLabsTTSClient {
+final class ElevenLabsTTSClient: BuddyTTSProvider {
+    var onPlaybackStarted: (@MainActor () -> Void)?
+
     private let proxyURL: URL
     private let session: URLSession
 
@@ -65,6 +67,7 @@ final class ElevenLabsTTSClient {
         let player = try AVAudioPlayer(data: data)
         self.audioPlayer = player
         player.play()
+        onPlaybackStarted?()
         print("🔊 ElevenLabs TTS: playing \(data.count / 1024)KB audio")
     }
 

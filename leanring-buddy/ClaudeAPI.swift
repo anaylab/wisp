@@ -6,7 +6,7 @@
 import Foundation
 
 /// Claude API helper with streaming for progressive text display.
-class ClaudeAPI {
+class ClaudeAPI: BuddyVisionChatClient {
     private static let tlsWarmupLock = NSLock()
     private static var hasStartedTLSWarmup = false
 
