@@ -32,6 +32,8 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarPanelManager: MenuBarPanelManager?
     private let companionManager = CompanionManager()
     private var sparkleUpdaterController: SPUStandardUpdaterController?
+    private var dashboardWindowController: DashboardWindowController?
+    private var openDashboardObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("🎯 Clicky: Starting...")
@@ -43,6 +45,20 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         ClickyAnalytics.trackAppOpened()
 
         menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
+
+        let dashboardController = DashboardWindowController(companionManager: companionManager)
+        dashboardWindowController = dashboardController
+        openDashboardObserver = NotificationCenter.default.addObserver(
+            forName: .clickyOpenDashboard,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
+                dashboardController.showDashboard()
+            }
+        }
+
         companionManager.start()
         // Auto-open the panel if the user still needs to do something:
         // either they haven't onboarded yet, or permissions were revoked.

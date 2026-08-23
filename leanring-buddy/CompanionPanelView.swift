@@ -696,16 +696,30 @@ struct CompanionPanelView: View {
             .buttonStyle(.plain)
             .pointerCursor()
 
-            if companionManager.hasCompletedOnboarding {
-                Spacer()
+            Spacer()
 
+            Button(action: {
+                NotificationCenter.default.post(name: .clickyOpenDashboard, object: nil)
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chart.bar.doc.horizontal")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("Dashboard")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(DS.Colors.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+
+            if companionManager.hasCompletedOnboarding {
                 Button(action: {
                     companionManager.replayOnboarding()
                 }) {
                     HStack(spacing: 6) {
                         Image(systemName: "play.circle")
                             .font(.system(size: 11, weight: .medium))
-                        Text("Watch Onboarding Again")
+                        Text("Onboarding")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundColor(DS.Colors.textTertiary)

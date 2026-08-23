@@ -16,6 +16,10 @@ import SwiftUI
 
 extension Notification.Name {
     static let clickyDismissPanel = Notification.Name("clickyDismissPanel")
+    /// Posted by the panel's Dashboard button. The app delegate owns the
+    /// dashboard window, so the request travels by notification rather than
+    /// threading a controller reference down through the SwiftUI view.
+    static let clickyOpenDashboard = Notification.Name("clickyOpenDashboard")
 }
 
 /// Custom NSPanel subclass that can become the key window even with
