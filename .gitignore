@@ -6,3 +6,6 @@ build/
 releases/
 .claude/
 coding-plans/
+
+# Per-developer Xcode state — not shared
+xcuserdata/

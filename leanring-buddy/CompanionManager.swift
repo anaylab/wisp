@@ -42,6 +42,21 @@ final class CompanionManager: ObservableObject {
     /// BlueCursorView uses this instead of a random pointer phrase.
     @Published var detectedElementBubbleText: String?
 
+    /// Boxes, arrows and highlights the assistant has drawn, keyed by the
+    /// frame of the display they belong to.
+    ///
+    /// Keyed by frame rather than by index because the order of
+    /// `NSScreen.screens` need not match the order screenshots were captured
+    /// in, and an off-by-one there would draw on the wrong monitor. The
+    /// pointing code matches displays the same way.
+    ///
+    /// Cleared when the user speaks again — annotations describe one answer,
+    /// and leaving them up during the next question would be misleading.
+    @Published var activeAnnotationsByDisplayFrame: [CGRect: [ScreenAnnotation]] = [:]
+    /// Pixel size of the screenshot each display's annotations came from,
+    /// needed to scale them onto that display.
+    @Published var annotationScreenshotSizeByDisplayFrame: [CGRect: CGSize] = [:]
+
     // MARK: - Onboarding Video State (shared across all screen overlays)
 
     @Published var onboardingVideoPlayer: AVPlayer?
@@ -72,12 +87,32 @@ final class CompanionManager: ObservableObject {
     /// through this so keys never ship in the app binary.
     private static let workerBaseURL = "https://your-worker-name.your-subdomain.workers.dev"
 
-    private lazy var claudeAPI: ClaudeAPI = {
-        return ClaudeAPI(proxyURL: "\(Self.workerBaseURL)/chat", model: selectedModel)
+    /// Whether a request may run tools across several model calls.
+    ///
+    /// Off by default: tools make some answers possible that otherwise aren't,
+    /// but every extra call adds latency to a pipeline that was deliberately
+    /// tuned down to a few seconds, so this is opt-in via `AgentModeEnabled`
+    /// in Info.plist rather than something everyone pays for.
+    static var isAgentModeEnabled: Bool {
+        AppBundleConfiguration.stringValue(forKey: "AgentModeEnabled")?.lowercased() == "true"
+    }
+
+    private lazy var visionChatClient: any BuddyVisionChatClient = {
+        return BuddyVisionChatClientFactory.makeDefaultProvider(
+            claudeProxyURL: "\(Self.workerBaseURL)/chat",
+            claudeModel: selectedModel
+        )
     }()
 
-    private lazy var elevenLabsTTSClient: ElevenLabsTTSClient = {
-        return ElevenLabsTTSClient(proxyURL: "\(Self.workerBaseURL)/tts")
+    private lazy var ttsProvider: any BuddyTTSProvider = {
+        var provider = BuddyTTSProviderFactory.makeDefaultProvider(elevenLabsProxyURL: "\(Self.workerBaseURL)/tts")
+        // Streaming providers keep speaking after speakText() is awaited, so
+        // the spinner has to be dismissed on this callback rather than when
+        // speakText returns.
+        provider.onPlaybackStarted = { [weak self] in
+            self?.voiceState = .responding
+        }
+        return provider
     }()
 
     /// Conversation history so Claude remembers prior exchanges within a session.
@@ -96,6 +131,19 @@ final class CompanionManager: ObservableObject {
     /// Scheduled hide for transient cursor mode — cancelled if the user
     /// speaks again before the delay elapses.
     private var transientHideTask: Task<Void, Never>?
+    /// Periodically pokes the local model servers so their GPU graphs stay
+    /// resident. See `startLocalModelKeepWarmLoopIfNeeded()`.
+    private var localModelKeepWarmTask: Task<Void, Never>?
+    /// Set while an agent turn is running.
+    ///
+    /// The heartbeat and an agent loop compete for the same thing: the model
+    /// server keeps a cached prompt prefix for the most recent conversation,
+    /// and a heartbeat firing mid-loop displaces it. The next step of the loop
+    /// then re-encodes the screenshot, which costs about six seconds and looks
+    /// to the user like the assistant randomly stalling.
+    private var isAgentTurnInProgress = false
+    /// Watches for monitors being connected, disconnected or rearranged.
+    private var screenConfigurationObserver: NSObjectProtocol?
 
     /// True when all three required permissions (accessibility, screen recording,
     /// microphone) are granted. Used by the panel to show a single "all good" state.
@@ -113,7 +161,7 @@ final class CompanionManager: ObservableObject {
     func setSelectedModel(_ model: String) {
         selectedModel = model
         UserDefaults.standard.set(model, forKey: "selectedClaudeModel")
-        claudeAPI.model = model
+        visionChatClient.model = model
     }
 
     /// User preference for whether the Clicky cursor should be shown.
@@ -149,39 +197,36 @@ final class CompanionManager: ObservableObject {
     /// Whether the user has submitted their email during onboarding.
     @Published var hasSubmittedEmail: Bool = UserDefaults.standard.bool(forKey: "hasSubmittedEmail")
 
-    /// Submits the user's email to FormSpark and identifies them in PostHog.
+    /// Records that onboarding's email step is done.
+    ///
+    /// This used to send the address to the original author's form and
+    /// identify the user in their analytics project. Both destinations belong
+    /// to whoever published the source rather than to whoever is running this
+    /// build, so neither happens now: the address is only used to mark the
+    /// onboarding step complete and is not stored or transmitted.
     func submitEmail(_ email: String) {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedEmail.isEmpty else { return }
 
         hasSubmittedEmail = true
         UserDefaults.standard.set(true, forKey: "hasSubmittedEmail")
-
-        // Identify user in PostHog
-        PostHogSDK.shared.identify(trimmedEmail, userProperties: [
-            "email": trimmedEmail
-        ])
-
-        // Submit to FormSpark
-        Task {
-            var request = URLRequest(url: URL(string: "https://submit-form.com/RWbGJxmIs")!)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": trimmedEmail])
-            _ = try? await URLSession.shared.data(for: request)
-        }
     }
 
     func start() {
         refreshAllPermissions()
         print("🔑 Clicky start — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission), onboarded: \(hasCompletedOnboarding)")
         startPermissionPolling()
+        startLocalModelKeepWarmLoopIfNeeded()
+        observeScreenConfigurationChanges()
+        registerBackgroundWorkTool()
+        connectMCPServersIfAgentModeEnabled()
         bindVoiceStateObservation()
         bindAudioPowerLevel()
         bindShortcutTransitions()
-        // Eagerly touch the Claude API so its TLS warmup handshake completes
-        // well before the onboarding demo fires at ~40s into the video.
-        _ = claudeAPI
+        // Eagerly touch the vision chat client so Claude's TLS warmup
+        // handshake (if applicable) completes well before the onboarding
+        // demo fires at ~40s into the video.
+        _ = visionChatClient
 
         // If the user already completed onboarding AND all permissions are
         // still granted, show the cursor overlay immediately. If permissions
@@ -285,6 +330,8 @@ final class CompanionManager: ObservableObject {
         detectedElementScreenLocation = nil
         detectedElementDisplayFrame = nil
         detectedElementBubbleText = nil
+        activeAnnotationsByDisplayFrame.removeAll()
+        annotationScreenshotSizeByDisplayFrame.removeAll()
     }
 
     func stop() {
@@ -292,6 +339,16 @@ final class CompanionManager: ObservableObject {
         buddyDictationManager.cancelCurrentDictation()
         overlayWindowManager.hideOverlay()
         transientHideTask?.cancel()
+        localModelKeepWarmTask?.cancel()
+        localModelKeepWarmTask = nil
+        if let screenConfigurationObserver {
+            NotificationCenter.default.removeObserver(screenConfigurationObserver)
+            self.screenConfigurationObserver = nil
+        }
+        // Child processes must be terminated explicitly; nothing else will
+        // reap them when the app goes away.
+        MCPManager.shared.disconnectAll()
+        ToolConfirmationCoordinator.shared.cancelPending()
 
         currentResponseTask?.cancel()
         currentResponseTask = nil
@@ -491,10 +548,18 @@ final class CompanionManager: ObservableObject {
             // Dismiss the menu bar panel so it doesn't cover the screen
             NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
 
-            // Cancel any in-progress response and TTS from a previous utterance
-            currentResponseTask?.cancel()
-            elevenLabsTTSClient.stopPlayback()
-            clearDetectedElementLocation()
+            // Normally a new utterance replaces whatever was in flight. The
+            // exception is a turn paused on a confirmation: that turn is
+            // precisely what the user is about to answer, so cancelling it
+            // would discard the thing their "yes" belongs to. Only the audio
+            // is stopped, so the question isn't still playing while they talk.
+            if ToolConfirmationCoordinator.shared.isAwaitingConfirmation {
+                ttsProvider.stopPlayback()
+            } else {
+                currentResponseTask?.cancel()
+                ttsProvider.stopPlayback()
+                clearDetectedElementLocation()
+            }
 
             // Dismiss the onboarding prompt if it's showing
             if showOnboardingPrompt {
@@ -509,6 +574,7 @@ final class CompanionManager: ObservableObject {
     
 
             ClickyAnalytics.trackPushToTalkStarted()
+            PerfMetricsRecorder.shared.beginPhase(.transcription)
 
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = Task {
@@ -518,8 +584,18 @@ final class CompanionManager: ObservableObject {
                         // Partial transcripts are hidden (waveform-only UI)
                     },
                     submitDraftText: { [weak self] finalTranscript in
+                        PerfMetricsRecorder.shared.endPhase(.transcription)
                         self?.lastTranscript = finalTranscript
                         print("🗣️ Companion received transcript: \(finalTranscript)")
+
+                        // If the assistant is waiting on a yes or no, this is
+                        // the answer to that — not a new request. Routing it
+                        // here is what makes the whole exchange work by voice.
+                        if ToolConfirmationCoordinator.shared.handleSpokenResponse(finalTranscript) {
+                            print("✅ Treated as answer to a pending confirmation")
+                            return
+                        }
+
                         ClickyAnalytics.trackUserMessageSent(transcript: finalTranscript)
                         self?.sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
                     }
@@ -585,7 +661,22 @@ final class CompanionManager: ObservableObject {
     /// the buddy to fly to that element on screen.
     private func sendTranscriptToClaudeWithScreenshot(transcript: String) {
         currentResponseTask?.cancel()
-        elevenLabsTTSClient.stopPlayback()
+        ttsProvider.stopPlayback()
+
+        // Record this interaction for the dashboard. Today a turn is a single
+        // model call, so it's a one-step task; the shape already matches what
+        // multi-step tool calling will need.
+        let taskID = AgentTaskRegistry.shared.beginTask(title: transcript)
+        PerfMetricsRecorder.shared.beginTurn(transcript: transcript, modelName: selectedModel)
+        // Whether the screenshot gets attached is the single biggest factor in
+        // how long a turn takes, so timings are only comparable between turns
+        // that made the same choice. Reuses the client's own predicate rather
+        // than restating the rule.
+        let isUsingLocalChat = AppBundleConfiguration
+            .stringValue(forKey: "ChatProvider")?.lowercased() == "ollama"
+        PerfMetricsRecorder.shared.recordScreenshotDecision(
+            didAttach: !isUsingLocalChat || LocalOllamaAPI.promptLikelyRefersToScreen(transcript)
+        )
 
         currentResponseTask = Task {
             // Stay in processing (spinner) state — no streaming text displayed
@@ -593,7 +684,9 @@ final class CompanionManager: ObservableObject {
 
             do {
                 // Capture all connected screens so the AI has full context
+                PerfMetricsRecorder.shared.beginPhase(.screenCapture)
                 let screenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+                PerfMetricsRecorder.shared.endPhase(.screenCapture)
 
                 guard !Task.isCancelled else { return }
 
@@ -610,20 +703,79 @@ final class CompanionManager: ObservableObject {
                     (userPlaceholder: entry.userTranscript, assistantResponse: entry.assistantResponse)
                 }
 
-                let (fullResponseText, _) = try await claudeAPI.analyzeImageStreaming(
-                    images: labeledImages,
-                    systemPrompt: Self.companionVoiceResponseSystemPrompt,
-                    conversationHistory: historyForAPI,
-                    userPrompt: transcript,
-                    onTextChunk: { _ in
-                        // No streaming text display — spinner stays until TTS plays
+                PerfMetricsRecorder.shared.beginPhase(.chat)
+
+                let fullResponseText: String
+                if Self.isAgentModeEnabled {
+                    // Tools are in play, so the reply may take several model
+                    // calls. Hold off the keep-warm heartbeat for the duration
+                    // — see `isAgentTurnInProgress`.
+                    isAgentTurnInProgress = true
+                    defer { isAgentTurnInProgress = false }
+
+                    let runner = AgentTurnRunner(
+                        chatClient: visionChatClient,
+                        speakConfirmation: { [weak self] question in
+                            guard let self else { return }
+                            try? await self.ttsProvider.speakText(question)
+                        }
+                    )
+                    let outcome = try await runner.run(
+                        userText: transcript,
+                        images: labeledImages,
+                        systemPrompt: Self.companionVoiceResponseSystemPrompt
+                            + ScreenAnnotationParser.promptInstructions,
+                        conversationHistory: historyForAPI,
+                        onNarration: { narration in
+                            print("💭 \(narration)")
+                        },
+                        onStep: { step in
+                            AgentTaskRegistry.shared.appendStep(step, to: taskID)
+                        }
+                    )
+                    fullResponseText = outcome.terminalText
+                } else {
+                    AgentTaskRegistry.shared.appendStep(
+                        AgentStepRecord(kind: .modelCall, summary: "Asking \(selectedModel)"),
+                        to: taskID
+                    )
+
+                    // Through the gate even for a single call, so background
+                    // work can never land between this request and the reply
+                    // the user is waiting for.
+                    let (responseText, chatDuration) = try await ModelAccessGate.shared.withAccess(
+                        priority: .interactive
+                    ) {
+                        try await visionChatClient.analyzeImageStreaming(
+                            images: labeledImages,
+                            systemPrompt: Self.companionVoiceResponseSystemPrompt
+                                + ScreenAnnotationParser.promptInstructions,
+                            conversationHistory: historyForAPI,
+                            userPrompt: transcript,
+                            onTextChunk: { _ in
+                                // No streaming text display — spinner stays until TTS plays
+                            }
+                        )
                     }
-                )
+                    AgentTaskRegistry.shared.updateLastStep(of: taskID) { step in
+                        step.durationSeconds = chatDuration
+                    }
+                    fullResponseText = responseText
+                }
+
+                PerfMetricsRecorder.shared.endPhase(.chat)
 
                 guard !Task.isCancelled else { return }
 
                 // Parse the [POINT:...] tag from Claude's response
-                let parseResult = Self.parsePointingCoordinates(from: fullResponseText)
+                // Annotations are pulled out first so their tags are gone
+                // before the pointing parser looks for a trailing tag.
+                let annotationResult = ScreenAnnotationParser.parse(fullResponseText)
+                if !annotationResult.annotations.isEmpty {
+                    applyAnnotations(annotationResult.annotations, from: screenCaptures)
+                }
+
+                let parseResult = Self.parsePointingCoordinates(from: annotationResult.spokenText)
                 let spokenText = parseResult.spokenText
 
                 // Handle element pointing if Claude returned coordinates.
@@ -701,20 +853,44 @@ final class CompanionManager: ObservableObject {
                 // until the audio actually starts playing, then switch to responding.
                 if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     do {
-                        try await elevenLabsTTSClient.speakText(spokenText)
-                        // speakText returns after player.play() — audio is now playing
-                        voiceState = .responding
+                        // Measures time to the FIRST audible sentence, not the
+                        // whole reply — that's the latency the user feels.
+                        PerfMetricsRecorder.shared.beginPhase(.textToSpeechFirstSentence)
+                        var hasRecordedFirstAudio = false
+                        ttsProvider.onPlaybackStarted = { [weak self] in
+                            self?.voiceState = .responding
+                            if !hasRecordedFirstAudio {
+                                hasRecordedFirstAudio = true
+                                PerfMetricsRecorder.shared.endPhase(.textToSpeechFirstSentence)
+                            }
+                        }
+
+                        // voiceState flips to .responding via onPlaybackStarted
+                        // as soon as the first audio is audible; this await
+                        // covers the full reply, which for streaming providers
+                        // continues well past that point.
+                        try await ttsProvider.speakText(spokenText)
                     } catch {
                         ClickyAnalytics.trackTTSError(error: error.localizedDescription)
-                        print("⚠️ ElevenLabs TTS error: \(error)")
+                        print("⚠️ TTS error: \(error)")
                         speakCreditsErrorFallback()
                     }
                 }
+
+                AgentTaskRegistry.shared.finishTask(taskID, status: .succeeded, finalText: spokenText)
+                PerfMetricsRecorder.shared.completeTurn()
             } catch is CancellationError {
-                // User spoke again — response was interrupted
+                // User spoke again — response was interrupted. Any prompt this
+                // turn was waiting on goes with it, so nothing is left asking
+                // about a request that no longer exists.
+                ToolConfirmationCoordinator.shared.cancelPending()
+                AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+                PerfMetricsRecorder.shared.abandonTurn()
             } catch {
                 ClickyAnalytics.trackResponseError(error: error.localizedDescription)
                 print("⚠️ Companion response error: \(error)")
+                AgentTaskRegistry.shared.finishTask(taskID, status: .failed(error.localizedDescription))
+                PerfMetricsRecorder.shared.completeTurn()
                 speakCreditsErrorFallback()
             }
 
@@ -723,6 +899,91 @@ final class CompanionManager: ObservableObject {
                 scheduleTransientHideIfNeeded()
             }
         }
+    }
+
+    /// Keeps the local Ollama and Chatterbox servers warm while Clicky is
+    /// running.
+    ///
+    /// Both back ends lose their compiled GPU graphs after a few idle
+    /// minutes, and rebuilding them is the single largest source of latency
+    /// the user actually feels: measured on an M3 Pro, one short sentence
+    /// costs about 9 seconds to synthesize cold versus about 1.5 seconds
+    /// warm. Because the penalty lands on the first request after a pause,
+    /// it hits real conversations constantly while never showing up in
+    /// back-to-back testing.
+    ///
+    /// The heartbeat is deliberately cheap: Ollama is refreshed with a
+    /// zero-token request that only resets its keep-alive timer, and
+    /// Chatterbox synthesizes a single word. Failures are ignored — a
+    /// server that isn't running simply gets warmed once it is.
+    private func startLocalModelKeepWarmLoopIfNeeded() {
+        let isUsingLocalChat = AppBundleConfiguration
+            .stringValue(forKey: "ChatProvider")?.lowercased() == "ollama"
+        let isUsingLocalTTS = AppBundleConfiguration
+            .stringValue(forKey: "VoiceTTSProvider")?.lowercased() == "chatterbox"
+        guard isUsingLocalChat || isUsingLocalTTS else { return }
+
+        let ollamaBaseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
+            ?? "http://localhost:11434"
+        let ollamaModel = AppBundleConfiguration.stringValue(forKey: "OllamaModel")
+            ?? "qwen2.5vl:7b"
+        let chatterboxBaseURL = AppBundleConfiguration.stringValue(forKey: "ChatterboxTTSServerURL")
+            ?? "http://localhost:8004"
+        let chatterboxVoiceID = AppBundleConfiguration.stringValue(forKey: "ChatterboxVoiceID")
+            ?? "Emily.wav"
+
+        // Comfortably shorter than the idle window that causes eviction.
+        let keepWarmIntervalSeconds: UInt64 = 90
+
+        localModelKeepWarmTask?.cancel()
+        localModelKeepWarmTask = Task.detached(priority: .background) { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: keepWarmIntervalSeconds * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+
+                // Skip entirely while a turn is in flight. A heartbeat sent
+                // mid-conversation evicts that conversation's cached prompt
+                // prefix, and the next step pays to re-encode the screenshot.
+                // A turn is itself the best possible keep-warm anyway.
+                let shouldSkipThisBeat = await MainActor.run { self?.isAgentTurnInProgress ?? false }
+                if shouldSkipThisBeat { continue }
+
+                if isUsingLocalChat {
+                    await Self.sendKeepWarmRequest(
+                        to: "\(ollamaBaseURL)/api/chat",
+                        body: [
+                            "model": ollamaModel,
+                            "stream": false,
+                            "keep_alive": "10m",
+                            "options": ["num_predict": 0],
+                            "messages": [["role": "user", "content": "."]]
+                        ]
+                    )
+                }
+
+                if isUsingLocalTTS {
+                    await Self.sendKeepWarmRequest(
+                        to: "\(chatterboxBaseURL)/v1/audio/speech",
+                        body: [
+                            "model": "tts-1",
+                            "input": "ok",
+                            "voice": chatterboxVoiceID,
+                            "response_format": "wav"
+                        ]
+                    )
+                }
+            }
+        }
+    }
+
+    private static func sendKeepWarmRequest(to urlString: String, body: [String: Any]) async {
+        guard let url = URL(string: urlString) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        _ = try? await URLSession.shared.data(for: request)
     }
 
     /// If the cursor is in transient mode (user toggled "Show Clicky" off),
@@ -735,7 +996,7 @@ final class CompanionManager: ObservableObject {
         transientHideTask?.cancel()
         transientHideTask = Task {
             // Wait for TTS audio to finish playing
-            while elevenLabsTTSClient.isPlaying {
+            while ttsProvider.isPlaying {
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 guard !Task.isCancelled else { return }
             }
@@ -763,6 +1024,145 @@ final class CompanionManager: ObservableObject {
         let synthesizer = NSSpeechSynthesizer()
         synthesizer.startSpeaking(utterance)
         voiceState = .responding
+    }
+
+    /// Registers the tool that lets the assistant hand slow work to the
+    /// background.
+    ///
+    /// Registered here rather than alongside the other built-in tools because
+    /// running one needs the chat client and the speech provider this object
+    /// owns.
+    private func registerBackgroundWorkTool() {
+        guard Self.isAgentModeEnabled else { return }
+
+        AgentToolRegistry.shared.register(
+            BuddyToolDefinition(
+                name: "do_in_background",
+                description: "Hand a slow request off to run in the background and notify the user when it's done, instead of making them wait. Use for anything that needs several steps.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "request": .object([
+                            "type": .string("string"),
+                            "description": .string("What to work on, written so it stands alone.")
+                        ])
+                    ]),
+                    "required": .array([.string("request")])
+                ])
+            )
+        ) { [weak self] input in
+            guard let self else { return "couldn't start that." }
+            guard case .object(let arguments) = input,
+                  case .string(let request)? = arguments["request"],
+                  !request.trimmingCharacters(in: .whitespaces).isEmpty else {
+                return "i need to know what to work on."
+            }
+
+            guard BackgroundTaskLauncher.canStartAnotherTask else {
+                return "there are already too many background tasks running. tell the user to wait for one to finish."
+            }
+
+            BackgroundTaskLauncher.start(
+                request: request,
+                chatClient: self.visionChatClient,
+                systemPrompt: Self.companionVoiceResponseSystemPrompt,
+                speakConfirmation: { [weak self] question in
+                    guard let self else { return }
+                    try? await self.ttsProvider.speakText(question)
+                }
+            )
+
+            return "started working on that in the background. tell the user briefly that you'll let them know when it's done."
+        }
+    }
+
+    /// Starts any configured MCP servers.
+    ///
+    /// Only when agent mode is on: their tools are unusable otherwise, and
+    /// each server is a child process, so starting them for nothing would cost
+    /// memory on a machine that has little to spare.
+    ///
+    /// Runs detached from startup because a server can take seconds to come
+    /// up — often downloading itself through npx first — and none of that
+    /// should delay the assistant becoming usable.
+    private func connectMCPServersIfAgentModeEnabled() {
+        guard Self.isAgentModeEnabled else { return }
+
+        Task {
+            MCPManager.shared.createExampleConfigurationIfMissing()
+            await MCPManager.shared.connectConfiguredServers()
+        }
+    }
+
+    /// Rebuilds the overlays when the display setup changes.
+    ///
+    /// One overlay window is created per screen at the moment the overlay is
+    /// shown, and nothing rebuilt them afterwards — so plugging in, unplugging
+    /// or rearranging a monitor left the cursor and any annotations stranded
+    /// on a layout that no longer exists. Annotations are dropped rather than
+    /// remapped, since they describe positions on a screen arrangement that
+    /// has just changed.
+    private func observeScreenConfigurationChanges() {
+        screenConfigurationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isOverlayVisible else { return }
+
+                self.clearDetectedElementLocation()
+                self.overlayWindowManager.hasShownOverlayBefore = true
+                self.overlayWindowManager.showOverlay(
+                    onScreens: NSScreen.screens,
+                    companionManager: self
+                )
+                print("🖥️ Screen layout changed — overlays rebuilt for \(NSScreen.screens.count) screen(s)")
+            }
+        }
+    }
+
+    // MARK: - Annotations
+
+    /// Routes parsed annotations to the screens they belong to.
+    ///
+    /// The model refers to screens the same way it does for pointing — by the
+    /// 1-based number in each image's label — and omits the number when it
+    /// means the screen the cursor is on.
+    private func applyAnnotations(
+        _ annotations: [ScreenAnnotation],
+        from screenCaptures: [CompanionScreenCapture]
+    ) {
+        guard !screenCaptures.isEmpty else { return }
+
+        let cursorScreenIndex = screenCaptures.firstIndex(where: \.isCursorScreen) ?? 0
+
+        var annotationsByDisplay: [CGRect: [ScreenAnnotation]] = [:]
+        var screenshotSizes: [CGRect: CGSize] = [:]
+
+        for annotation in annotations {
+            let captureIndex: Int
+            if let screenNumber = annotation.screenNumber,
+               screenNumber >= 1, screenNumber <= screenCaptures.count {
+                captureIndex = screenNumber - 1
+            } else {
+                captureIndex = cursorScreenIndex
+            }
+
+            let capture = screenCaptures[captureIndex]
+
+            annotationsByDisplay[capture.displayFrame, default: []].append(annotation)
+            screenshotSizes[capture.displayFrame] = CGSize(
+                width: CGFloat(capture.screenshotWidthInPixels),
+                height: CGFloat(capture.screenshotHeightInPixels)
+            )
+        }
+
+        annotationScreenshotSizeByDisplayFrame = screenshotSizes
+        activeAnnotationsByDisplayFrame = annotationsByDisplay
+
+        let summary = annotations.map { "\($0.style.rawValue)(\($0.label ?? "—"))" }.joined(separator: ", ")
+        print("🖍️ Annotations: \(summary)")
     }
 
     // MARK: - Point Tag Parsing
@@ -982,9 +1382,10 @@ final class CompanionManager: ObservableObject {
                 let dimensionInfo = " (image dimensions: \(cursorScreenCapture.screenshotWidthInPixels)x\(cursorScreenCapture.screenshotHeightInPixels) pixels)"
                 let labeledImages = [(data: cursorScreenCapture.imageData, label: cursorScreenCapture.label + dimensionInfo)]
 
-                let (fullResponseText, _) = try await claudeAPI.analyzeImageStreaming(
+                let (fullResponseText, _) = try await visionChatClient.analyzeImageStreaming(
                     images: labeledImages,
                     systemPrompt: Self.onboardingDemoSystemPrompt,
+                    conversationHistory: [],
                     userPrompt: "look around my screen and find something interesting to point at",
                     onTextChunk: { _ in }
                 )
