@@ -69,28 +69,6 @@ enum WispAnalytics {
         capture("app_opened", properties: ["app_version": version])
     }
 
-    // MARK: - Onboarding
-
-    /// User clicked the Start button to begin onboarding for the first time.
-    static func trackOnboardingStarted() {
-        capture("onboarding_started")
-    }
-
-    /// User clicked "Watch Onboarding Again" from the panel footer.
-    static func trackOnboardingReplayed() {
-        capture("onboarding_replayed")
-    }
-
-    /// The onboarding video finished playing to the end.
-    static func trackOnboardingVideoCompleted() {
-        capture("onboarding_video_completed")
-    }
-
-    /// The 40s onboarding demo interaction where Wisp points at something.
-    static func trackOnboardingDemoTriggered() {
-        capture("onboarding_demo_triggered")
-    }
-
     // MARK: - Permissions
 
     /// All three permissions (accessibility, screen recording, mic) are granted.
