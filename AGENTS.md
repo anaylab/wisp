@@ -148,6 +148,14 @@ open leanring-buddy.xcodeproj
 # deprecated onChange warning in OverlayWindow.swift. Do NOT attempt to fix these.
 ```
 
+**Do NOT launch the app by running its binary directly.** `./Wisp.app/Contents/MacOS/Wisp`
+gets you stdout logs, but the process is not registered with LaunchServices, so TCC cannot
+attribute the Speech Recognition request to the app bundle. The app then aborts with
+`EXC_CRASH (SIGABRT)` and a TCC message claiming `NSSpeechRecognitionUsageDescription` is
+missing — it is not; the key is present and the attribution is what failed. This crashes on
+the first push-to-talk, every time. Launch with `open -a <path-to>/Wisp.app` instead and read
+logs via `log stream --predicate 'process == "Wisp"'`.
+
 **Do NOT run `xcodebuild` from the terminal** — it invalidates TCC (Transparency, Consent, and Control) permissions and the app will need to re-request screen recording, accessibility, etc.
 
 ## Local services
