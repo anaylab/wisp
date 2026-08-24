@@ -577,10 +577,41 @@ final class CompanionManager: ObservableObject {
         // Record this interaction for the dashboard. Today a turn is a single
         // model call, so it's a one-step task; the shape already matches what
         // multi-step tool calling will need.
-        let taskID = AgentTaskRegistry.shared.beginTask(title: transcript)
         // Marks the conversation live, which is what keeps the model resident.
         lastInteractionAt = Date()
         hasReleasedModelWhileIdle = false
+
+        // Requests that need no model at all are answered here, before anything
+        // expensive starts. "Open Safari" is not a question, and routing it
+        // through a 7B model costs seconds to produce a sentence nobody asked
+        // for. The router declines anything it is not certain about, so the
+        // cost of it being wrong is one ordinary model round-trip.
+        if let fastOutcome = FastCommandRouter.handle(transcript) {
+            let fastTaskID = AgentTaskRegistry.shared.beginTask(title: transcript)
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(kind: .modelCall, summary: "Handled natively — no model call"),
+                to: fastTaskID
+            )
+            AgentTaskRegistry.shared.finishTask(
+                fastTaskID, status: .succeeded, finalText: fastOutcome.spokenConfirmation
+            )
+            PerfMetricsRecorder.shared.abandonTurn()
+
+            conversationHistory.append((userTranscript: transcript,
+                                        assistantResponse: fastOutcome.spokenConfirmation))
+            voiceState = .responding
+            currentResponseTask = Task { [weak self] in
+                guard let self else { return }
+                try? await self.ttsProvider.speakText(fastOutcome.spokenConfirmation)
+                if !Task.isCancelled {
+                    self.voiceState = .idle
+                    self.scheduleTransientHideIfNeeded()
+                }
+            }
+            return
+        }
+
+        let taskID = AgentTaskRegistry.shared.beginTask(title: transcript)
         PerfMetricsRecorder.shared.beginTurn(transcript: transcript, modelName: ActiveStackReadout.shared.chatModelName)
         // Whether the screenshot gets attached is the single biggest factor in
         // how long a turn takes, so timings are only comparable between turns
@@ -1184,6 +1215,11 @@ final class CompanionManager: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
+                // Frames captured from a display that has since changed
+                // resolution are not comparable to anything, so the reuse
+                // cache is dropped regardless of overlay state.
+                ScreenshotReuseCache.invalidateAll()
+
                 guard let self, self.isOverlayVisible else { return }
 
                 self.clearDetectedElementLocation()

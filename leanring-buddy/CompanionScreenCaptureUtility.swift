@@ -103,9 +103,25 @@ enum CompanionScreenCaptureUtility {
                 configuration: configuration
             )
 
-            guard let jpegData = NSBitmapImageRep(cgImage: cgImage)
+            guard let freshJPEGData = NSBitmapImageRep(cgImage: cgImage)
                     .representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else {
                 continue
+            }
+
+            // Hand back the previous frame's bytes when the screen has not
+            // changed. Ollama keys its encoded-image cache on the exact bytes,
+            // and a fresh capture of an unchanged screen is never byte-identical
+            // — JPEG noise and a ticking clock are enough — so without this a
+            // follow-up question re-encodes the same picture for 6.4s.
+            let (jpegData, didReuse) = await MainActor.run {
+                ScreenshotReuseCache.bytesToSend(
+                    forDisplay: display.displayID,
+                    freshData: freshJPEGData,
+                    freshImage: cgImage
+                )
+            }
+            if didReuse {
+                print("🖼️ Screen unchanged — reusing the cached frame (skips ~6s of image encoding)")
             }
 
             let screenLabel: String
