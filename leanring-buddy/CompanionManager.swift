@@ -164,6 +164,12 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var isOverlayVisible: Bool = false
 
     /// The Claude model used for voice responses. Persisted to UserDefaults.
+    /// The Claude model id, used only by the cloud chat path that nothing
+    /// currently selects. This is **not** the model in use — ask
+    /// `ActiveStackReadout.shared.chatModelName` for that. Keeping the two
+    /// apart matters because this value was previously what the dashboard
+    /// labelled its timings with, captioning local measurements with the name
+    /// of a model that never ran.
     @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "claude-sonnet-4-6"
 
     func setSelectedModel(_ model: String) {
@@ -680,7 +686,7 @@ final class CompanionManager: ObservableObject {
         // model call, so it's a one-step task; the shape already matches what
         // multi-step tool calling will need.
         let taskID = AgentTaskRegistry.shared.beginTask(title: transcript)
-        PerfMetricsRecorder.shared.beginTurn(transcript: transcript, modelName: selectedModel)
+        PerfMetricsRecorder.shared.beginTurn(transcript: transcript, modelName: ActiveStackReadout.shared.chatModelName)
         // Whether the screenshot gets attached is the single biggest factor in
         // how long a turn takes, so timings are only comparable between turns
         // that made the same choice. Reuses the client's own predicate rather
@@ -749,7 +755,7 @@ final class CompanionManager: ObservableObject {
                     fullResponseText = outcome.terminalText
                 } else {
                     AgentTaskRegistry.shared.appendStep(
-                        AgentStepRecord(kind: .modelCall, summary: "Asking \(selectedModel)"),
+                        AgentStepRecord(kind: .modelCall, summary: "Asking \(ActiveStackReadout.shared.chatModelName)"),
                         to: taskID
                     )
 

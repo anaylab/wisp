@@ -12,6 +12,8 @@ import SwiftUI
 
 struct CompanionPanelView: View {
     @ObservedObject var companionManager: CompanionManager
+    @ObservedObject private var stackReadout = ActiveStackReadout.shared
+    @ObservedObject private var toolRegistry = AgentToolRegistry.shared
     @State private var emailInput: String = ""
 
     var body: some View {
@@ -27,10 +29,18 @@ struct CompanionPanelView: View {
 
             if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
                 Spacer()
-                    .frame(height: 12)
+                    .frame(height: 14)
 
-                modelPickerRow
+                activeStackSection
                     .padding(.horizontal, 16)
+
+                if CompanionManager.isAgentModeEnabled {
+                    Spacer()
+                        .frame(height: 8)
+
+                    agentModeRow
+                        .padding(.horizontal, 16)
+                }
             }
 
             if !companionManager.allPermissionsGranted {
@@ -60,7 +70,7 @@ struct CompanionPanelView: View {
 
             if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
                 Spacer()
-                    .frame(height: 16)
+                    .frame(height: 8)
 
                 localAssuranceCard
                     .padding(.horizontal, 16)
@@ -78,6 +88,8 @@ struct CompanionPanelView: View {
                 .padding(.vertical, 12)
         }
         .frame(width: 320)
+        .onAppear { stackReadout.startPolling() }
+        .onDisappear { stackReadout.stopPolling() }
         .background(panelBackground)
     }
 
@@ -596,49 +608,125 @@ struct CompanionPanelView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Model Picker
+    // MARK: - Active stack
 
-    private var modelPickerRow: some View {
-        HStack {
-            Text("Model")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(DS.Colors.textSecondary)
+    /// What is running, in place of a picker that chose nothing.
+    ///
+    /// The model row leads and carries a residency dot, because whether the
+    /// model is warm is the difference between a reply in about a second and
+    /// one that pays several seconds to load first — the thing a user is
+    /// actually trying to predict when they open this panel mid-conversation.
+    private var activeStackSection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(residencyColor)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: residencyColor.opacity(0.6), radius: 3)
 
-            Spacer()
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(stackReadout.chatModelName)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
-            HStack(spacing: 0) {
-                modelOptionButton(label: "Sonnet", modelID: "claude-sonnet-4-6")
-                modelOptionButton(label: "Opus", modelID: "claude-opus-4-6")
+                    Text(residencyDescription)
+                        .font(.system(size: 10))
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
-            )
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+
+            Divider().background(DS.Colors.borderSubtle)
+
+            stackRow(label: "Speech", value: stackReadout.speechProviderName)
+            stackRow(label: "Voice", value: stackReadout.voiceProviderName)
         }
-        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+        )
     }
 
-    private func modelOptionButton(label: String, modelID: String) -> some View {
-        let isSelected = companionManager.selectedModel == modelID
-        return Button(action: {
-            companionManager.setSelectedModel(modelID)
-        }) {
+    private func stackRow(label: String, value: String) -> some View {
+        HStack(spacing: 8) {
             Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(isSelected ? DS.Colors.textPrimary : DS.Colors.textTertiary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
-                )
+                .font(.system(size: 11))
+                .foregroundColor(DS.Colors.textTertiary)
+                .frame(width: 44, alignment: .leading)
+
+            Text(value)
+                .font(.system(size: 11))
+                .foregroundColor(DS.Colors.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
-        .pointerCursor()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+
+    private var residencyColor: Color {
+        switch stackReadout.residency {
+        case .resident: return DS.Colors.success
+        case .notLoaded: return DS.Colors.warning
+        case .unreachable: return DS.Colors.destructive
+        }
+    }
+
+    private var residencyDescription: String {
+        switch stackReadout.residency {
+        case .resident(_, let sizeText):
+            return "\(stackReadout.chatProviderName) · \(sizeText) loaded"
+        case .notLoaded:
+            // Named as a delay rather than a state: "not loaded" invites the
+            // reading that something is broken, when it only means the next
+            // question pays the load cost once.
+            return "\(stackReadout.chatProviderName) · cold, first reply is slower"
+        case .unreachable:
+            return "Ollama is not running"
+        }
+    }
+
+    // MARK: - Agent mode
+
+    /// Shown only when agent mode is on.
+    ///
+    /// It changes what a request can do — several model calls, tools, work
+    /// that outlives the conversation — so it belongs where the user can see
+    /// it, and absent rather than greyed out when off.
+    private var agentModeRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(DS.Colors.accentText)
+
+            Text("Agent mode on")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+
+            Spacer(minLength: 0)
+
+            Text("\(toolRegistry.definitions.count) tools")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(DS.Colors.textTertiary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(DS.Colors.accentSubtle)
+        )
     }
 
     // MARK: - Local assurance
@@ -656,10 +744,12 @@ struct CompanionPanelView: View {
                 .foregroundColor(DS.Colors.success)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Runs entirely on this Mac")
+                Text(stackReadout.isEntirelyLocal ? "Runs entirely on this Mac" : "Partly using cloud services")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(DS.Colors.textSecondary)
-                Text("Speech, vision and voice are all local. Nothing you say or show it is sent anywhere.")
+                Text(stackReadout.isEntirelyLocal
+                    ? "Speech, vision and voice are all local. Nothing you say or show it is sent anywhere."
+                    : "One or more stages are configured to use a cloud service, so some of what you say or show it leaves this Mac.")
                     .font(.system(size: 10))
                     .foregroundColor(DS.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

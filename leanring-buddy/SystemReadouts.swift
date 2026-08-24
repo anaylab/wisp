@@ -107,11 +107,29 @@ enum SystemReadouts {
     }
 
     /// Which model Ollama currently holds in memory, if any.
-    static func ollamaResidencySummary(
+    /// Whether the model is currently held in memory, as a value rather than
+    /// a sentence.
+    ///
+    /// This is the single best predictor of how long the next question takes:
+    /// a resident model answers in about a second, a cold one pays several to
+    /// load first. The UI needs to colour a dot from it, which a formatted
+    /// string cannot support.
+    enum ModelResidency: Equatable {
+        case resident(name: String, sizeText: String)
+        case notLoaded
+        case unreachable
+
+        var isResident: Bool {
+            if case .resident = self { return true }
+            return false
+        }
+    }
+
+    static func ollamaResidency(
         baseURL: String = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
             ?? "http://localhost:11434"
-    ) async -> String {
-        guard let url = URL(string: "\(baseURL)/api/ps") else { return "unavailable" }
+    ) async -> ModelResidency {
+        guard let url = URL(string: "\(baseURL)/api/ps") else { return .unreachable }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 3
@@ -119,16 +137,27 @@ enum SystemReadouts {
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let models = payload["models"] as? [[String: Any]] else {
-                return "not loaded"
+                  let models = payload["models"] as? [[String: Any]],
+                  let model = models.first else {
+                return .notLoaded
             }
 
-            guard let model = models.first else { return "not loaded (will reload on next request)" }
-
             let name = model["name"] as? String ?? "unknown"
-            guard let sizeBytes = model["size"] as? Double else { return name }
-            return "\(name) · \(formatted(bytes: UInt64(sizeBytes))) resident"
+            let sizeText = (model["size"] as? Double).map { formatted(bytes: UInt64($0)) } ?? "—"
+            return .resident(name: name, sizeText: sizeText)
         } catch {
+            return .unreachable
+        }
+    }
+
+    /// The same reading as a sentence, for the wide rows in the dashboard.
+    static func ollamaResidencySummary() async -> String {
+        switch await ollamaResidency() {
+        case .resident(let name, let sizeText):
+            return "\(name) · \(sizeText) resident"
+        case .notLoaded:
+            return "not loaded (will reload on next request)"
+        case .unreachable:
             return "Ollama not reachable"
         }
     }
