@@ -56,6 +56,14 @@ struct CompanionPanelView: View {
 
                 cursorVisibilityToggleRow
                     .padding(.horizontal, 16)
+
+                if !AppleSpeechSynthesisClient.hasHighQualityVoiceInstalled {
+                    Spacer()
+                        .frame(height: 8)
+
+                    voiceUpgradeHint
+                        .padding(.horizontal, 16)
+                }
             }
 
             if companionManager.allPermissionsGranted {
@@ -653,6 +661,52 @@ struct CompanionPanelView: View {
             RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
                 .fill(DS.Colors.accentSubtle)
         )
+    }
+
+    // MARK: - Voice quality
+
+    /// Shown only while the installed voices are the robotic ones.
+    ///
+    /// macOS ships compact voices and says nothing about the better ones being
+    /// a free download, so someone hearing this app for the first time
+    /// reasonably concludes it just sounds like that. Opening the right pane
+    /// directly matters more than the words — the setting is four levels deep
+    /// and almost nobody finds it by looking.
+    private var voiceUpgradeHint: some View {
+        Button(action: {
+            let url = URL(string: "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent")
+            if let url { NSWorkspace.shared.open(url) }
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(DS.Colors.warningText)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Wisp sounds robotic")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+                    Text("Only basic voices are installed. Get a natural one free →")
+                        .font(.system(size: 10))
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .fill(DS.Colors.warning.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .stroke(DS.Colors.warning.opacity(0.25), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
     }
 
     // MARK: - Local assurance

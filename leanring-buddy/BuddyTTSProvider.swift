@@ -25,6 +25,29 @@ protocol BuddyTTSProvider: AnyObject {
 
     /// Stops any in-progress playback immediately.
     func stopPlayback()
+
+    /// Speaks a fragment now, queued behind anything already speaking.
+    ///
+    /// The point is to start talking before the model has finished thinking.
+    /// A spoken reply is generated at roughly thirty tokens a second, so
+    /// waiting for the whole thing means several seconds of silence during
+    /// which the app looks broken — while the first sentence is usually ready
+    /// in about one.
+    func speakIncremental(_ text: String)
+
+    /// Whether `speakIncremental` actually does anything.
+    var supportsIncrementalSpeech: Bool { get }
+
+    /// Waits for everything queued to finish playing.
+    func waitForPlaybackToFinish() async
+}
+
+extension BuddyTTSProvider {
+    /// Providers that synthesise a whole clip before playing it gain nothing
+    /// from fragments, so they opt out and keep the speak-once path.
+    func speakIncremental(_ text: String) {}
+    var supportsIncrementalSpeech: Bool { false }
+    func waitForPlaybackToFinish() async {}
 }
 
 enum BuddyTTSProviderFactory {

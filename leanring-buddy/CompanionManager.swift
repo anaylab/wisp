@@ -109,6 +109,9 @@ final class CompanionManager: ObservableObject {
     /// resident. See `startLocalModelKeepWarmLoopIfNeeded()`.
     private var localModelKeepWarmTask: Task<Void, Never>?
 
+    /// Live only for the duration of a streaming turn.
+    private var sentenceStreamer: SpokenSentenceStreamer?
+
     /// When the user last spoke to Wisp.
     ///
     /// The keep-warm heartbeat is gated on this. Without a gate it pings
@@ -120,10 +123,27 @@ final class CompanionManager: ObservableObject {
 
     /// How long after the last utterance the model is kept resident.
     ///
-    /// Conversations arrive in bursts, so this only has to outlast the gap
-    /// between consecutive questions, not a whole working session. Going idle
-    /// past this returns the memory; the next question pays a single reload.
-    private static let keepWarmActivityWindow: TimeInterval = 5 * 60
+    /// Adaptive, because the two goals genuinely conflict. Holding the model
+    /// makes the next question instant and costs six gigabytes; releasing it
+    /// returns the memory and makes the next question cost a reload of several
+    /// seconds. A fixed window has to pick a side, and either choice is wrong
+    /// half the time — a short one punishes someone with plenty of free RAM
+    /// with constant reloads, a long one squats on a machine that has none.
+    ///
+    /// So the answer depends on whether the memory is actually wanted. With
+    /// room to spare Wisp stays warm and fast; under pressure it gets out of
+    /// the way quickly, which is the situation where the user notices and
+    /// minds.
+    private static var keepWarmActivityWindow: TimeInterval {
+        let breakdown = SystemReadouts.memoryBreakdown()
+        // Same threshold the dashboard turns its memory bar amber at: past
+        // this, the model starts getting evicted between turns anyway.
+        return breakdown.usedFraction > 0.85 ? 90 : 10 * 60
+    }
+
+    /// Whether the model has already been released for this idle stretch, so
+    /// the unload is sent once rather than every heartbeat.
+    private var hasReleasedModelWhileIdle = false
     /// Set while an agent turn is running.
     ///
     /// The heartbeat and an agent loop compete for the same thing: the model
@@ -560,6 +580,7 @@ final class CompanionManager: ObservableObject {
         let taskID = AgentTaskRegistry.shared.beginTask(title: transcript)
         // Marks the conversation live, which is what keeps the model resident.
         lastInteractionAt = Date()
+        hasReleasedModelWhileIdle = false
         PerfMetricsRecorder.shared.beginTurn(transcript: transcript, modelName: ActiveStackReadout.shared.chatModelName)
         // Whether the screenshot gets attached is the single biggest factor in
         // how long a turn takes, so timings are only comparable between turns
@@ -633,6 +654,24 @@ final class CompanionManager: ObservableObject {
                         to: taskID
                     )
 
+                    // Speech begins mid-generation when the provider can
+                    // queue fragments. Pointing and annotation tags are still
+                    // parsed from the complete reply afterwards — the streamer
+                    // only decides what is spoken, never what is understood.
+                    let isSpeakingIncrementally = ttsProvider.supportsIncrementalSpeech
+                    if isSpeakingIncrementally {
+                        var hasStartedSpeaking = false
+                        sentenceStreamer = SpokenSentenceStreamer { [weak self] sentence in
+                            guard let self else { return }
+                            if !hasStartedSpeaking {
+                                hasStartedSpeaking = true
+                                self.voiceState = .responding
+                                PerfMetricsRecorder.shared.endPhase(.textToSpeechFirstSentence)
+                            }
+                            self.ttsProvider.speakIncremental(sentence)
+                        }
+                    }
+
                     // Through the gate even for a single call, so background
                     // work can never land between this request and the reply
                     // the user is waiting for.
@@ -645,8 +684,13 @@ final class CompanionManager: ObservableObject {
                                 + ScreenAnnotationParser.promptInstructions,
                             conversationHistory: historyForAPI,
                             userPrompt: transcript,
-                            onTextChunk: { _ in
-                                // No streaming text display — spinner stays until TTS plays
+                            onTextChunk: { [weak self] chunk in
+                                // Speak each sentence the moment it is complete
+                                // rather than waiting for the whole reply. This
+                                // is the difference between the first word
+                                // arriving in about a second and in about
+                                // seven.
+                                self?.sentenceStreamer?.append(chunk)
                             }
                         )
                     }
@@ -758,11 +802,19 @@ final class CompanionManager: ObservableObject {
                             }
                         }
 
-                        // voiceState flips to .responding via onPlaybackStarted
-                        // as soon as the first audio is audible; this await
-                        // covers the full reply, which for streaming providers
-                        // continues well past that point.
-                        try await ttsProvider.speakText(spokenText)
+                        if let streamer = sentenceStreamer {
+                            // Already speaking. Flush the trailing fragment and
+                            // wait for the queue rather than re-speaking a reply
+                            // the user has mostly heard.
+                            streamer.finish()
+                            sentenceStreamer = nil
+                            await ttsProvider.waitForPlaybackToFinish()
+                        } else {
+                            // voiceState flips to .responding via
+                            // onPlaybackStarted as soon as the first audio is
+                            // audible; this await covers the full reply.
+                            try await ttsProvider.speakText(spokenText)
+                        }
                     } catch {
                         WispAnalytics.trackTTSError(error: error.localizedDescription)
                         print("⚠️ TTS error: \(error)")
@@ -773,6 +825,7 @@ final class CompanionManager: ObservableObject {
                 AgentTaskRegistry.shared.finishTask(taskID, status: .succeeded, finalText: spokenText)
                 PerfMetricsRecorder.shared.completeTurn()
             } catch is CancellationError {
+                sentenceStreamer = nil
                 // User spoke again — response was interrupted. Any prompt this
                 // turn was waiting on goes with it, so nothing is left asking
                 // about a request that no longer exists.
@@ -780,6 +833,7 @@ final class CompanionManager: ObservableObject {
                 AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
                 PerfMetricsRecorder.shared.abandonTurn()
             } catch {
+                sentenceStreamer = nil
                 WispAnalytics.trackResponseError(error: error.localizedDescription)
                 print("⚠️ Companion response error: \(error)")
                 AgentTaskRegistry.shared.finishTask(taskID, status: .failed(error.localizedDescription))
@@ -844,12 +898,43 @@ final class CompanionManager: ObservableObject {
                     // conversation is relying on, and a turn keeps the model
                     // warm by itself anyway.
                     if manager.isAgentTurnInProgress { return true }
-                    // Idle: stop refreshing residency and let Ollama reclaim
-                    // the model, so the machine is the user's again.
                     let idleFor = Date().timeIntervalSince(manager.lastInteractionAt)
                     return idleFor > CompanionManager.keepWarmActivityWindow
                 }
-                if shouldSkipThisBeat { continue }
+
+                if shouldSkipThisBeat {
+                    // Idle. Simply not pinging would leave the model resident
+                    // until Ollama's own timer expires, which is minutes of
+                    // holding six gigabytes after the user has plainly stopped
+                    // using it. Ask for it to be dropped now instead — once
+                    // per idle stretch, not every beat.
+                    let releaseDecision = await MainActor.run { () -> (shouldRelease: Bool, afterMinutes: Int) in
+                        let window = CompanionManager.keepWarmActivityWindow
+                        guard let manager = self, isUsingLocalChat else { return (false, 0) }
+                        guard !manager.isAgentTurnInProgress else { return (false, 0) }
+                        let idleFor = Date().timeIntervalSince(manager.lastInteractionAt)
+                        guard idleFor > window, !manager.hasReleasedModelWhileIdle else { return (false, 0) }
+                        manager.hasReleasedModelWhileIdle = true
+                        return (true, Int(window / 60))
+                    }
+                    let shouldRelease = releaseDecision.shouldRelease
+
+                    if shouldRelease {
+                        await Self.sendKeepWarmRequest(
+                            to: "\(ollamaBaseURL)/api/chat",
+                            body: [
+                                "model": ollamaModel,
+                                "stream": false,
+                                // Zero means unload now.
+                                "keep_alive": 0,
+                                "options": ["num_predict": 0],
+                                "messages": [["role": "user", "content": "."]]
+                            ]
+                        )
+                        print("💤 Released the model — idle for over \(releaseDecision.afterMinutes) min")
+                    }
+                    continue
+                }
 
                 if isUsingLocalChat {
                     await Self.sendKeepWarmRequest(

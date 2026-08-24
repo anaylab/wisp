@@ -47,16 +47,45 @@ final class AppleSpeechSynthesisClient: NSObject, BuddyTTSProvider {
         print("🔊 TTS: using Apple speech synthesis — \(description)")
     }
 
+    /// Whether any voice good enough to not sound robotic is installed.
+    ///
+    /// macOS ships only compact voices by default. Enhanced and premium ones
+    /// are a free download and sound close to natural, but nothing tells the
+    /// user they exist — so the app does, rather than letting them conclude it
+    /// simply sounds bad.
+    static var hasHighQualityVoiceInstalled: Bool {
+        AVSpeechSynthesisVoice.speechVoices().contains {
+            $0.language.hasPrefix("en") && ($0.quality == .premium || $0.quality == .enhanced)
+        }
+    }
+
+    /// Voices that are jokes rather than voices.
+    ///
+    /// macOS ships these alongside the real ones at identical quality, so a
+    /// ranking that only considers quality can and does select them. Being
+    /// answered by "Bubbles" is a worse failure than sounding robotic, and it
+    /// is only luck that the current ranking lands on Samantha instead.
+    private static let noveltyVoiceIdentifierFragments = [
+        "bahh", "bells", "boing", "bubbles", "cellos", "wobble", "jester",
+        "organ", "trinoids", "whisper", "zarvox", "albert", "badnews",
+        "goodnews", "bad news", "good news", "grandma", "grandpa", "superstar",
+        "junior", "ralph", "kathy", "princess", "deranged", "hysterical",
+        "bruce", "agnes", "fred",
+    ]
+
     /// Picks the best-sounding installed English voice.
     ///
-    /// Quality varies enormously: the default compact voices are the robotic
-    /// ones people associate with system speech, while the premium and enhanced
-    /// downloads are close to natural. Sorting by quality means the app sounds
-    /// as good as whatever the user happens to have installed, and improves for
-    /// free when they add a better voice in System Settings.
+    /// Quality first, then a curated preference among the compact voices,
+    /// because when everything ties at default quality — the common case — the
+    /// tiebreak is what decides whether the app sounds like a person or a
+    /// cartoon.
     private static func bestAvailableVoice() -> AVSpeechSynthesisVoice? {
-        let englishVoices = AVSpeechSynthesisVoice.speechVoices()
+        let candidates = AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language.hasPrefix("en") }
+            .filter { voice in
+                let haystack = (voice.identifier + " " + voice.name).lowercased()
+                return !noveltyVoiceIdentifierFragments.contains { haystack.contains($0) }
+            }
 
         let rank: (AVSpeechSynthesisVoiceQuality) -> Int = { quality in
             switch quality {
@@ -66,11 +95,17 @@ final class AppleSpeechSynthesisClient: NSObject, BuddyTTSProvider {
             }
         }
 
-        // Prefer en-US among equals, so the voice matches the accent the
-        // prompts are written in.
-        return englishVoices.max { left, right in
-            let leftScore = (rank(left.quality), left.language == "en-US" ? 1 : 0)
-            let rightScore = (rank(right.quality), right.language == "en-US" ? 1 : 0)
+        // The most natural of the compact voices, best first. Only consulted
+        // when quality cannot separate the candidates.
+        let preferredNames = ["Ava", "Zoe", "Allison", "Susan", "Samantha", "Tom", "Alex", "Daniel"]
+        let preference: (AVSpeechSynthesisVoice) -> Int = { voice in
+            preferredNames.firstIndex { voice.name.hasPrefix($0) }
+                .map { preferredNames.count - $0 } ?? 0
+        }
+
+        return candidates.max { left, right in
+            let leftScore = (rank(left.quality), preference(left), left.language == "en-US" ? 1 : 0)
+            let rightScore = (rank(right.quality), preference(right), right.language == "en-US" ? 1 : 0)
             return leftScore < rightScore
         }
     }
@@ -81,13 +116,7 @@ final class AppleSpeechSynthesisClient: NSObject, BuddyTTSProvider {
 
         stopPlayback()
 
-        let utterance = AVSpeechUtterance(string: trimmed)
-        utterance.voice = voice
-        // Slightly above default. The default reads as deliberate to the point
-        // of sounding slow for short conversational replies, which is all this
-        // app produces.
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 1.06
-        utterance.postUtteranceDelay = 0
+        let utterance = makeUtterance(trimmed)
 
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -100,6 +129,38 @@ final class AppleSpeechSynthesisClient: NSObject, BuddyTTSProvider {
             // rather than finishing the sentence.
             Task { @MainActor in self.stopPlayback() }
         }
+    }
+
+    // MARK: - Incremental speech
+
+    /// AVSpeechSynthesizer queues utterances natively, so each sentence can be
+    /// handed over the moment it exists and playback runs continuously while
+    /// the rest of the reply is still being generated.
+    var supportsIncrementalSpeech: Bool { true }
+
+    func speakIncremental(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        synthesizer.speak(makeUtterance(trimmed))
+    }
+
+    func waitForPlaybackToFinish() async {
+        // Polled rather than driven by the delegate: the delegate fires per
+        // utterance, and what matters here is the whole queue draining.
+        while synthesizer.isSpeaking {
+            try? await Task.sleep(for: .milliseconds(100))
+            if Task.isCancelled { return }
+        }
+    }
+
+    private func makeUtterance(_ text: String) -> AVSpeechUtterance {
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = voice
+        // Slightly above default. The default reads as deliberate to the point
+        // of sounding slow for short conversational replies.
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 1.06
+        utterance.postUtteranceDelay = 0
+        return utterance
     }
 
     func stopPlayback() {
