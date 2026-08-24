@@ -186,6 +186,23 @@ struct BlueCursorView: View {
             // Nearly transparent background (helps with compositing)
             Color.black.opacity(0.001)
 
+            // Permission prompt, on the screen the user is looking at. Shown
+            // on the cursor's screen alone — one question needs one answer,
+            // and a copy on every monitor would suggest otherwise.
+            if isCursorOnThisScreen,
+               let confirmation = companionManager.pendingToolConfirmation {
+                ToolConfirmationView(
+                    confirmation: confirmation,
+                    onApprove: { ToolConfirmationCoordinator.shared.approveFromUserInterface() },
+                    onDeny: { ToolConfirmationCoordinator.shared.declineFromUserInterface() }
+                )
+                .position(
+                    x: screenFrame.width / 2,
+                    y: screenFrame.height - 170
+                )
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+
             // Assistant-drawn boxes, arrows and highlights for this screen.
             // Sits below the cursor so the cursor is never hidden behind one.
             if let annotations = companionManager.activeAnnotationsByDisplayFrame[screenFrame],
@@ -792,6 +809,22 @@ private struct BlueCursorSpinnerView: View {
 class OverlayWindowManager {
     private var overlayWindows: [OverlayWindow] = []
     var hasShownOverlayBefore = false
+
+    /// Lets the overlay receive clicks, for as long as something in it needs
+    /// them.
+    ///
+    /// The overlay is normally click-through, and must be: it covers the whole
+    /// screen at a level above nearly everything, so while it accepts mouse
+    /// events nothing behind it can be clicked. That is tolerable only for the
+    /// moment a confirmation is on screen, and only because the card is the
+    /// sole thing inside that hit-tests — every other layer, including the
+    /// near-invisible backdrop, stays transparent to the mouse so clicks
+    /// outside the card still reach whatever is underneath.
+    func setAcceptsMouseEvents(_ acceptsMouseEvents: Bool) {
+        for window in overlayWindows {
+            window.ignoresMouseEvents = !acceptsMouseEvents
+        }
+    }
 
     func showOverlay(onScreens screens: [NSScreen], companionManager: CompanionManager) {
         // Hide any existing overlays

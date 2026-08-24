@@ -145,6 +145,14 @@ final class CompanionManager: ObservableObject {
     /// Watches for monitors being connected, disconnected or rearranged.
     private var screenConfigurationObserver: NSObjectProtocol?
 
+    /// The permission prompt currently on screen, if any.
+    ///
+    /// Mirrored from the coordinator because the overlay observes this object
+    /// and not that one, and because the window has to become clickable
+    /// exactly while a prompt is up.
+    @Published private(set) var pendingToolConfirmation: ToolConfirmationCoordinator.PendingConfirmation?
+    private var toolConfirmationCancellable: AnyCancellable?
+
     /// True when all three required permissions (accessibility, screen recording,
     /// microphone) are granted. Used by the panel to show a single "all good" state.
     var allPermissionsGranted: Bool {
@@ -218,6 +226,7 @@ final class CompanionManager: ObservableObject {
         startPermissionPolling()
         startLocalModelKeepWarmLoopIfNeeded()
         observeScreenConfigurationChanges()
+        observeToolConfirmations()
         registerBackgroundWorkTool()
         connectMCPServersIfAgentModeEnabled()
         bindVoiceStateObservation()
@@ -349,6 +358,7 @@ final class CompanionManager: ObservableObject {
         // reap them when the app goes away.
         MCPManager.shared.disconnectAll()
         ToolConfirmationCoordinator.shared.cancelPending()
+        toolConfirmationCancellable?.cancel()
 
         currentResponseTask?.cancel()
         currentResponseTask = nil
@@ -1024,6 +1034,41 @@ final class CompanionManager: ObservableObject {
         let synthesizer = NSSpeechSynthesizer()
         synthesizer.startSpeaking(utterance)
         voiceState = .responding
+    }
+
+    /// Mirrors permission prompts into this object and makes the overlay
+    /// clickable while one is showing.
+    ///
+    /// The overlay is click-through by default and has to stay that way — it
+    /// covers the screen above almost everything, so any moment it accepts
+    /// mouse events is a moment the desktop underneath does not. Interactivity
+    /// is therefore switched on for exactly as long as there is something to
+    /// click, and off again immediately after.
+    private func observeToolConfirmations() {
+        toolConfirmationCancellable = ToolConfirmationCoordinator.shared
+            .$pendingConfirmation
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] confirmation in
+                guard let self else { return }
+
+                withAnimation(.easeOut(duration: 0.18)) {
+                    self.pendingToolConfirmation = confirmation
+                }
+                self.overlayWindowManager.setAcceptsMouseEvents(confirmation != nil)
+
+                // A prompt is worth seeing even when the cursor is set to stay
+                // hidden, since otherwise there is nothing to click.
+                if confirmation != nil, !self.isOverlayVisible {
+                    self.overlayWindowManager.hasShownOverlayBefore = true
+                    self.overlayWindowManager.showOverlay(
+                        onScreens: NSScreen.screens,
+                        companionManager: self
+                    )
+                    self.isOverlayVisible = true
+                    // The windows were just rebuilt, so re-apply.
+                    self.overlayWindowManager.setAcceptsMouseEvents(true)
+                }
+            }
     }
 
     /// Registers the tool that lets the assistant hand slow work to the
