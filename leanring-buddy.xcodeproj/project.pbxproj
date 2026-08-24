@@ -30,7 +30,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		28F22CBF2F56440300A0FC59 /* Clicky.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = Clicky.app; path = Wisp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		28F22CBF2F56440300A0FC59 /* Wisp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Wisp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		28F22CCC2F56440300A0FC59 /* leanring-buddyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "leanring-buddyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		28F22CD62F56440300A0FC59 /* leanring-buddyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "leanring-buddyUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -94,7 +94,7 @@
 		28F22CC02F56440300A0FC59 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				28F22CBF2F56440300A0FC59 /* Clicky.app */,
+				28F22CBF2F56440300A0FC59 /* Wisp.app */,
 				28F22CCC2F56440300A0FC59 /* leanring-buddyTests.xctest */,
 				28F22CD62F56440300A0FC59 /* leanring-buddyUITests.xctest */,
 			);
@@ -126,7 +126,7 @@
 				6F834C9911106FA065C49108 /* FluidAudio */,
 			);
 			productName = "leanring-buddy";
-			productReference = 28F22CBF2F56440300A0FC59 /* Clicky.app */;
+			productReference = 28F22CBF2F56440300A0FC59 /* Wisp.app */;
 			productType = "com.apple.product-type.application";
 		};
 		28F22CCB2F56440300A0FC59 /* leanring-buddyTests */ = {
@@ -424,9 +424,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "leanring-buddy/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Wisp;
-				INFOPLIST_KEY_CFBundleName = Clicky;
+				INFOPLIST_KEY_CFBundleName = Wisp;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Clicky needs screen recording access to see your screen and help you.";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Wisp looks at your screen to answer questions about what you are seeing. Screenshots are read by a model running on this Mac and are never uploaded.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -462,9 +462,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "leanring-buddy/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Wisp;
-				INFOPLIST_KEY_CFBundleName = Clicky;
+				INFOPLIST_KEY_CFBundleName = Wisp;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Clicky needs screen recording access to see your screen and help you.";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Wisp looks at your screen to answer questions about what you are seeing. Screenshots are read by a model running on this Mac and are never uploaded.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

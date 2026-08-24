@@ -61,35 +61,6 @@ final class MCPManager: ObservableObject {
             .appendingPathComponent(".wisp/mcp.json")
     }
 
-    /// Where the config lived before the app was renamed.
-    private var legacyConfigurationFileURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".clicky/mcp.json")
-    }
-
-    /// Moves a pre-rename config to the new location, once.
-    ///
-    /// Someone who already configured servers should not have to discover that
-    /// the rename quietly orphaned their file. The old copy is left in place
-    /// rather than deleted — this is the user's config, not ours to remove, and
-    /// a stray file costs nothing next to losing hand-written settings.
-    private func migrateLegacyConfigurationIfNeeded() {
-        let manager = FileManager.default
-        guard !manager.fileExists(atPath: configurationFileURL.path),
-              manager.fileExists(atPath: legacyConfigurationFileURL.path) else { return }
-
-        do {
-            try manager.createDirectory(
-                at: configurationFileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try manager.copyItem(at: legacyConfigurationFileURL, to: configurationFileURL)
-            print("📦 MCP: migrated config from ~/.clicky/mcp.json to ~/.wisp/mcp.json")
-        } catch {
-            print("⚠️ MCP: could not migrate old config: \(error.localizedDescription)")
-        }
-    }
-
     /// Connects every enabled server and registers their tools.
     ///
     /// Failures are recorded per server rather than thrown: one broken server
@@ -199,7 +170,6 @@ final class MCPManager: ObservableObject {
     /// No file simply means no MCP servers, which is the normal state for
     /// someone who hasn't set any up.
     private func loadConfigurations() -> [MCPServerConfiguration] {
-        migrateLegacyConfigurationIfNeeded()
         guard let data = try? Data(contentsOf: configurationFileURL) else { return [] }
 
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -227,12 +197,6 @@ final class MCPManager: ObservableObject {
     /// Writes a commented starter file if none exists, so the format is
     /// discoverable without going to find documentation.
     func createExampleConfigurationIfMissing() {
-        // Migrate first. This runs before connectConfiguredServers(), so
-        // without this the starter file below would be written into the empty
-        // new location and the migration — which only acts when the target is
-        // absent — would then find a file already there and skip, silently
-        // shadowing a config the user wrote by hand.
-        migrateLegacyConfigurationIfNeeded()
 
         let fileURL = configurationFileURL
         guard !FileManager.default.fileExists(atPath: fileURL.path) else { return }

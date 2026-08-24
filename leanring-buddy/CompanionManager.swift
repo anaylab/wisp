@@ -174,19 +174,18 @@ final class CompanionManager: ObservableObject {
         visionChatClient.model = model
     }
 
-    /// User preference for whether the Wisp cursor should be shown.
-    /// When toggled off, the overlay is hidden and push-to-talk is disabled.
-    /// Persisted to UserDefaults so the choice survives app restarts.
-    /// Storage key predates the rename and is deliberately left alone: it is
-    /// invisible to the user, and changing it would silently reset the toggle
-    /// for anyone who had already turned the cursor off.
-    @Published var isWispCursorEnabled: Bool = UserDefaults.standard.object(forKey: "isClickyCursorEnabled") == nil
+    /// Whether the blue cursor is shown. Defaults to on.
+    ///
+    /// When toggled off the overlay is hidden and push-to-talk is disabled.
+    /// Persisted so the choice survives restarts.
+    @Published var isWispCursorEnabled: Bool =
+        UserDefaults.standard.object(forKey: "isWispCursorEnabled") == nil
         ? true
-        : UserDefaults.standard.bool(forKey: "isClickyCursorEnabled")
+        : UserDefaults.standard.bool(forKey: "isWispCursorEnabled")
 
     func setWispCursorEnabled(_ enabled: Bool) {
         isWispCursorEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "isClickyCursorEnabled")
+        UserDefaults.standard.set(enabled, forKey: "isWispCursorEnabled")
         transientHideTask?.cancel()
         transientHideTask = nil
 
@@ -784,7 +783,7 @@ final class CompanionManager: ObservableObject {
                     } catch {
                         WispAnalytics.trackTTSError(error: error.localizedDescription)
                         print("⚠️ TTS error: \(error)")
-                        speakCreditsErrorFallback()
+                        speakLocalFailureFallback()
                     }
                 }
 
@@ -802,7 +801,7 @@ final class CompanionManager: ObservableObject {
                 print("⚠️ Companion response error: \(error)")
                 AgentTaskRegistry.shared.finishTask(taskID, status: .failed(error.localizedDescription))
                 PerfMetricsRecorder.shared.completeTurn()
-                speakCreditsErrorFallback()
+                speakLocalFailureFallback()
             }
 
             if !Task.isCancelled {
@@ -948,14 +947,49 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// Speaks a hardcoded error message using macOS system TTS when API
-    /// credits run out. Uses NSSpeechSynthesizer so it works even when
-    /// ElevenLabs is down.
-    private func speakCreditsErrorFallback() {
-        let utterance = "I'm all out of credits. Please DM Farza and tell him to bring me back to life."
-        let synthesizer = NSSpeechSynthesizer()
-        synthesizer.startSpeaking(utterance)
-        voiceState = .responding
+    /// Speaks a spoken diagnostic when a turn fails.
+    ///
+    /// This used to announce that it was out of API credits and ask the user
+    /// to message the original author. There are no credits in a local build,
+    /// so the one time it actually fired — a disk full enough to break audio
+    /// synthesis — it sent the user looking for a billing problem that could
+    /// not exist, and at a person with no connection to this machine.
+    ///
+    /// What is worth saying instead is the thing that is almost always true
+    /// when a local turn fails: one of the two services is not running. This
+    /// checks which, rather than guessing, because "Ollama isn't running" and
+    /// "something went wrong" are very different amounts of help.
+    ///
+    /// Deliberately NSSpeechSynthesizer rather than the configured provider —
+    /// this path exists precisely for when that provider is the thing that
+    /// failed.
+    private func speakLocalFailureFallback() {
+        Task { [weak self] in
+            let isModelReachable = await Self.isLocalServiceReachable(
+                AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
+                    ?? "http://localhost:11434"
+            )
+
+            let utterance = isModelReachable
+                ? "Something went wrong answering that. Check the dashboard for details."
+                : "I can't reach the local model. Make sure Ollama is running."
+
+            await MainActor.run {
+                guard let self else { return }
+                let synthesizer = NSSpeechSynthesizer()
+                synthesizer.startSpeaking(utterance)
+                self.voiceState = .responding
+            }
+        }
+    }
+
+    /// Whether a local service answers at all. Short timeout: this runs while
+    /// the user is already waiting on a turn that failed.
+    private static func isLocalServiceReachable(_ baseURL: String) async -> Bool {
+        guard let url = URL(string: baseURL) else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        return (try? await URLSession.shared.data(for: request)) != nil
     }
 
     /// Mirrors permission prompts into this object and makes the overlay

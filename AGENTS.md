@@ -2,7 +2,7 @@
 
 ## Overview
 
-macOS menu bar companion app, formerly Clicky. Lives entirely in the macOS status bar
+macOS menu bar companion app. Lives entirely in the macOS status bar
 (no dock icon, no main window). Clicking the menu bar icon opens a custom floating panel
 with companion voice controls. Uses push-to-talk (ctrl+option) to capture voice input,
 transcribes it on-device, and sends the transcript + a screenshot to a local model. The
