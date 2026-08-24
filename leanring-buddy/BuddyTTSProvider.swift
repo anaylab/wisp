@@ -28,31 +28,25 @@ protocol BuddyTTSProvider: AnyObject {
 }
 
 enum BuddyTTSProviderFactory {
-    private enum PreferredProvider: String {
-        case elevenLabs = "elevenlabs"
-        case chatterbox = "chatterbox"
-        case apple = "apple"
-    }
-
-    static func makeDefaultProvider(elevenLabsProxyURL: String) -> any BuddyTTSProvider {
-        let preferredProviderRawValue = AppBundleConfiguration
+    /// Chatterbox if the user is running the server, otherwise the system
+    /// synthesizer.
+    ///
+    /// Apple is the default because it costs no resident memory: Chatterbox
+    /// sounds warmer but held several gigabytes and grew with use, which on a
+    /// machine shared with a local model is most of the headroom.
+    static func makeDefaultProvider() -> any BuddyTTSProvider {
+        let preferred = AppBundleConfiguration
             .stringValue(forKey: "VoiceTTSProvider")?
             .lowercased()
-        let preferredProvider = preferredProviderRawValue.flatMap(PreferredProvider.init(rawValue:))
 
-        if preferredProvider == .apple {
-            return AppleSpeechSynthesisClient()
-        }
-
-        if preferredProvider == .chatterbox {
-            let chatterboxBaseURL = AppBundleConfiguration
+        if preferred == "chatterbox" {
+            let baseURL = AppBundleConfiguration
                 .stringValue(forKey: "ChatterboxTTSServerURL")
                 ?? "http://localhost:8004"
-            print("🔊 TTS: using Chatterbox (local) at \(chatterboxBaseURL)")
-            return LocalChatterboxTTSClient(baseURL: chatterboxBaseURL)
+            print("🔊 TTS: using Chatterbox (local) at \(baseURL)")
+            return LocalChatterboxTTSClient(baseURL: baseURL)
         }
 
-        print("🔊 TTS: using ElevenLabs")
-        return ElevenLabsTTSClient(proxyURL: elevenLabsProxyURL)
+        return AppleSpeechSynthesisClient()
     }
 }

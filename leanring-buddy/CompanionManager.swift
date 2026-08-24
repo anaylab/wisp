@@ -63,9 +63,6 @@ final class CompanionManager: ObservableObject {
     // Response text is now displayed inline on the cursor overlay via
     // streamingResponseText, so no separate response overlay manager is needed.
 
-    /// Base URL for the Cloudflare Worker proxy. All API requests route
-    /// through this so keys never ship in the app binary.
-    private static let workerBaseURL = "https://your-worker-name.your-subdomain.workers.dev"
 
     /// Whether a request may run tools across several model calls.
     ///
@@ -78,14 +75,11 @@ final class CompanionManager: ObservableObject {
     }
 
     private lazy var visionChatClient: any BuddyVisionChatClient = {
-        return BuddyVisionChatClientFactory.makeDefaultProvider(
-            claudeProxyURL: "\(Self.workerBaseURL)/chat",
-            claudeModel: selectedModel
-        )
+        BuddyVisionChatClientFactory.makeDefaultProvider()
     }()
 
     private lazy var ttsProvider: any BuddyTTSProvider = {
-        var provider = BuddyTTSProviderFactory.makeDefaultProvider(elevenLabsProxyURL: "\(Self.workerBaseURL)/tts")
+        var provider = BuddyTTSProviderFactory.makeDefaultProvider()
         // Streaming providers keep speaking after speakText() is awaited, so
         // the spinner has to be dismissed on this callback rather than when
         // speakText returns.
@@ -159,33 +153,22 @@ final class CompanionManager: ObservableObject {
     /// Used by the panel to show accurate status text ("Active" vs "Ready").
     @Published private(set) var isOverlayVisible: Bool = false
 
-    /// The Claude model used for voice responses. Persisted to UserDefaults.
-    /// The Claude model id, used only by the cloud chat path that nothing
-    /// currently selects. This is **not** the model in use — ask
-    /// `ActiveStackReadout.shared.chatModelName` for that. Keeping the two
-    /// apart matters because this value was previously what the dashboard
-    /// labelled its timings with, captioning local measurements with the name
-    /// of a model that never ran.
-    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "claude-sonnet-4-6"
-
-    func setSelectedModel(_ model: String) {
-        selectedModel = model
-        UserDefaults.standard.set(model, forKey: "selectedClaudeModel")
-        visionChatClient.model = model
-    }
-
-    /// Whether the blue cursor is shown. Defaults to on.
+    /// Whether the cursor stays on screen when Wisp has nothing to do.
     ///
-    /// When toggled off the overlay is hidden and push-to-talk is disabled.
-    /// Persisted so the choice survives restarts.
-    @Published var isWispCursorEnabled: Bool =
-        UserDefaults.standard.object(forKey: "isWispCursorEnabled") == nil
-        ? true
-        : UserDefaults.standard.bool(forKey: "isWispCursorEnabled")
+    /// Off by default, which means the cursor is invisible at rest, fades in
+    /// when you hold the hotkey, points at whatever it is describing, and
+    /// fades out a second after it finishes speaking.
+    ///
+    /// The always-on behaviour used to be the default. For an app that sits in
+    /// the menu bar all day that is a mark trailing the pointer through every
+    /// unrelated task, which is noise the rest of the time — the cursor should
+    /// earn its place on screen by having something to say.
+    @Published var isCursorAlwaysVisible: Bool =
+        UserDefaults.standard.bool(forKey: "isCursorAlwaysVisible")
 
-    func setWispCursorEnabled(_ enabled: Bool) {
-        isWispCursorEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "isWispCursorEnabled")
+    func setCursorAlwaysVisible(_ enabled: Bool) {
+        isCursorAlwaysVisible = enabled
+        UserDefaults.standard.set(enabled, forKey: "isCursorAlwaysVisible")
         transientHideTask?.cancel()
         transientHideTask = nil
 
@@ -235,7 +218,7 @@ final class CompanionManager: ObservableObject {
             hasEverHadAllPermissions = true
         }
 
-        if allPermissionsGranted && isWispCursorEnabled {
+        if allPermissionsGranted && isCursorAlwaysVisible {
             overlayWindowManager.hasShownOverlayBefore = true
             overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
             isOverlayVisible = true
@@ -359,7 +342,7 @@ final class CompanionManager: ObservableObject {
                         hasEverHadAllPermissions = true
                     }
 
-                    if allPermissionsGranted && !isOverlayVisible && isWispCursorEnabled {
+                    if allPermissionsGranted && !isOverlayVisible && isCursorAlwaysVisible {
                         overlayWindowManager.hasShownOverlayBefore = true
                         overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
                         isOverlayVisible = true
@@ -457,7 +440,7 @@ final class CompanionManager: ObservableObject {
             transientHideTask = nil
 
             // If the cursor is hidden, bring it back transiently for this interaction
-            if !isWispCursorEnabled && !isOverlayVisible {
+            if !isCursorAlwaysVisible && !isOverlayVisible {
                 overlayWindowManager.hasShownOverlayBefore = true
                 overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
                 isOverlayVisible = true
@@ -563,7 +546,7 @@ final class CompanionManager: ObservableObject {
     // MARK: - AI Response Pipeline
 
     /// Captures a screenshot, sends it along with the transcript to Claude,
-    /// and plays the response aloud via ElevenLabs TTS. The cursor stays in
+    /// and plays the response aloud. The cursor stays in
     /// the spinner/processing state until TTS audio begins playing.
     /// Claude's response may include a [POINT:x,y:label] tag which triggers
     /// the buddy to fly to that element on screen.
@@ -922,7 +905,7 @@ final class CompanionManager: ObservableObject {
     /// fades out the overlay after a 1-second pause. Cancelled automatically
     /// if the user starts another push-to-talk interaction.
     private func scheduleTransientHideIfNeeded() {
-        guard !isWispCursorEnabled && isOverlayVisible else { return }
+        guard !isCursorAlwaysVisible && isOverlayVisible else { return }
 
         transientHideTask?.cancel()
         transientHideTask = Task {

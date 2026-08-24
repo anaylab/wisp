@@ -35,27 +35,16 @@ final class ActiveStackReadout: ObservableObject {
     // MARK: - Configured stack
 
     /// The chat model actually in use.
-    ///
-    /// Read from configuration rather than from the old `selectedModel`
-    /// property, which holds a Claude model id used only by the cloud path
-    /// nothing selects.
     var chatModelName: String {
-        if isUsingOllama {
-            return AppBundleConfiguration.stringValue(forKey: "OllamaModel") ?? "unknown"
-        }
-        return AppBundleConfiguration.stringValue(forKey: "ClaudeModel") ?? "claude"
+        AppBundleConfiguration.stringValue(forKey: "OllamaModel") ?? "unknown"
     }
 
-    var chatProviderName: String {
-        isUsingOllama ? "Ollama · local" : "Claude · cloud"
-    }
+    var chatProviderName: String { "Ollama · local" }
 
     var speechProviderName: String {
         switch AppBundleConfiguration.stringValue(forKey: "VoiceTranscriptionProvider")?.lowercased() {
         case "apple": return "Apple Speech · on-device"
         case "fluidaudio", "parakeet": return "Parakeet · on-device"
-        case "openai": return "OpenAI · cloud"
-        case "assemblyai": return "AssemblyAI · cloud"
         case let other?: return other
         case nil: return "unknown"
         }
@@ -65,7 +54,6 @@ final class ActiveStackReadout: ObservableObject {
         switch AppBundleConfiguration.stringValue(forKey: "VoiceTTSProvider")?.lowercased() {
         case "chatterbox": return "Chatterbox · local"
         case "apple": return "Apple voice · on-device"
-        case "elevenlabs": return "ElevenLabs · cloud"
         case let other?: return other
         case nil: return "unknown"
         }
@@ -76,14 +64,12 @@ final class ActiveStackReadout: ObservableObject {
     /// Drives the panel's assurance line, which should reflect what is
     /// configured rather than assert something that a changed Info.plist could
     /// quietly make untrue.
+    /// Every stage runs on this machine. There is no longer a configuration
+    /// that makes this false — the cloud clients were removed — but the panel
+    /// keeps asking rather than hardcoding the claim, so that adding one back
+    /// cannot leave the assurance line quietly lying.
     var isEntirelyLocal: Bool {
-        isUsingOllama
-            && !speechProviderName.contains("cloud")
-            && !voiceProviderName.contains("cloud")
-    }
-
-    private var isUsingOllama: Bool {
-        AppBundleConfiguration.stringValue(forKey: "ChatProvider")?.lowercased() == "ollama"
+        !speechProviderName.contains("cloud") && !voiceProviderName.contains("cloud")
     }
 
     // MARK: - Live residency

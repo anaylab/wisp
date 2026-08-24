@@ -21,27 +21,16 @@ protocol BuddyVisionChatClient: AnyObject {
 }
 
 enum BuddyVisionChatClientFactory {
-    private enum PreferredProvider: String {
-        case claude = "claude"
-        case ollama = "ollama"
-    }
-
-    static func makeDefaultProvider(claudeProxyURL: String, claudeModel: String) -> any BuddyVisionChatClient {
-        let preferredProviderRawValue = AppBundleConfiguration
-            .stringValue(forKey: "ChatProvider")?
-            .lowercased()
-        let preferredProvider = preferredProviderRawValue.flatMap(PreferredProvider.init(rawValue:))
-
-        if preferredProvider == .ollama {
-            let baseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
-                ?? "http://localhost:11434"
-            let model = AppBundleConfiguration.stringValue(forKey: "OllamaModel")
-                ?? "qwen2.5vl:7b"
-            print("🧠 Chat: using Ollama (local) — \(model) at \(baseURL)")
-            return LocalOllamaAPI(baseURL: baseURL, model: model)
-        }
-
-        print("🧠 Chat: using Claude")
-        return ClaudeAPI(proxyURL: claudeProxyURL, model: claudeModel)
+    /// Ollama is the only backend. The cloud clients were removed: they could
+    /// not have worked anyway — the proxy URL they pointed at was still the
+    /// placeholder from the upstream template — and keeping unreachable
+    /// branches around invites the reader to believe there is a choice here.
+    static func makeDefaultProvider() -> any BuddyVisionChatClient {
+        let baseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
+            ?? "http://localhost:11434"
+        let model = AppBundleConfiguration.stringValue(forKey: "OllamaModel")
+            ?? "qwen2.5vl:7b"
+        print("🧠 Chat: using Ollama (local) — \(model) at \(baseURL)")
+        return LocalOllamaAPI(baseURL: baseURL, model: model)
     }
 }

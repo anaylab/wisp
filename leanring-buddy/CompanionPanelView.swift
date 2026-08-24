@@ -50,14 +50,13 @@ struct CompanionPanelView: View {
                     .padding(.horizontal, 16)
             }
 
-            // Show Wisp toggle — hidden for now
-            // if companionManager.allPermissionsGranted {
-            //     Spacer()
-            //         .frame(height: 16)
-            //
-            //     showWispCursorToggleRow
-            //         .padding(.horizontal, 16)
-            // }
+            if companionManager.allPermissionsGranted {
+                Spacer()
+                    .frame(height: 8)
+
+                cursorVisibilityToggleRow
+                    .padding(.horizontal, 16)
+            }
 
             if companionManager.allPermissionsGranted {
                 Spacer()
@@ -476,7 +475,7 @@ struct CompanionPanelView: View {
 
     // MARK: - Show Wisp Cursor Toggle
 
-    private var showWispCursorToggleRow: some View {
+    private var cursorVisibilityToggleRow: some View {
         HStack {
             HStack(spacing: 8) {
                 Image(systemName: "cursorarrow")
@@ -484,16 +483,26 @@ struct CompanionPanelView: View {
                     .foregroundColor(DS.Colors.textTertiary)
                     .frame(width: 16)
 
-                Text("Show Wisp")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Keep cursor on screen")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+                    // Says what the off state does, because that is the
+                    // default and a toggle whose unset state is unexplained
+                    // reads as a feature being withheld.
+                    Text(companionManager.isCursorAlwaysVisible
+                         ? "Always visible, follows your pointer"
+                         : "Appears only while you're talking to it")
+                        .font(.system(size: 10))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
             }
 
             Spacer()
 
             Toggle("", isOn: Binding(
-                get: { companionManager.isWispCursorEnabled },
-                set: { companionManager.setWispCursorEnabled($0) }
+                get: { companionManager.isCursorAlwaysVisible },
+                set: { companionManager.setCursorAlwaysVisible($0) }
             ))
             .toggleStyle(.switch)
             .labelsHidden()
