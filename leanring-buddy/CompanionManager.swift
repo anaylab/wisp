@@ -1096,7 +1096,13 @@ final class CompanionManager: ObservableObject {
                         ])
                     ]),
                     "required": .array([.string("request")])
-                ])
+                ]),
+                // The only tool here that starts work which then runs
+                // unattended: it survives the next utterance, keeps calling the
+                // model on its own, and reports back by notification. The three
+                // read-only tools answer a question and stop, which is why they
+                // do not ask. This one should.
+                requiresConfirmation: true
             )
         ) { [weak self] input in
             guard let self else { return "couldn't start that." }

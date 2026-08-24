@@ -227,6 +227,13 @@ final class MCPManager: ObservableObject {
     /// Writes a commented starter file if none exists, so the format is
     /// discoverable without going to find documentation.
     func createExampleConfigurationIfMissing() {
+        // Migrate first. This runs before connectConfiguredServers(), so
+        // without this the starter file below would be written into the empty
+        // new location and the migration — which only acts when the target is
+        // absent — would then find a file already there and skip, silently
+        // shadowing a config the user wrote by hand.
+        migrateLegacyConfigurationIfNeeded()
+
         let fileURL = configurationFileURL
         guard !FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
