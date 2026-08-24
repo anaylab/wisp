@@ -13,7 +13,7 @@
 	<key>ChatProvider</key>
 	<string>ollama</string>
 	<key>AgentModeEnabled</key>
-	<string>false</string>
+	<string>true</string>
 	<key>OllamaModel</key>
 	<string>qwen2.5vl:7b</string>
 	<key>OllamaBaseURL</key>
