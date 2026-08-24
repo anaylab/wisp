@@ -3,15 +3,22 @@
 //  leanring-buddy
 //
 //  The dashboard's SwiftUI content: activity history, conversation
-//  transcript, and per-turn performance.
+//  transcript, connected tools, and per-turn performance.
 //
 //  The menu bar panel is deliberately small and momentary — it answers
-//  "is Clicky working right now?". This window answers the questions the
+//  "is Wisp working right now?". This window answers the questions the
 //  panel has no room for: what did it just do, how long did each stage
-//  take, and why is it slow at the moment. That last question needs real
-//  numbers, because on a machine running the models locally the honest
-//  answer is usually "a screenshot cost six seconds" or "memory is full",
-//  and neither is guessable from the outside.
+//  take, what can it actually reach, and why is it slow at the moment.
+//  That last question needs real numbers, because on a machine running the
+//  models locally the honest answer is usually "a screenshot cost six
+//  seconds" or "memory is full", and neither is guessable from the outside.
+//
+//  Navigation is a sidebar rather than a row of tabs. Tabs were fine for
+//  three sections and stop being fine as sections accumulate, and the
+//  sidebar's footer gives memory pressure a permanent home — worth doing,
+//  because on 18GB the memory number is the hidden variable behind almost
+//  every "why was that slow" question, and it should not be a page someone
+//  has to think to visit.
 //
 
 import Combine
@@ -23,10 +30,16 @@ struct DashboardView: View {
     @ObservedObject var metricsRecorder: PerfMetricsRecorder
 
     @State private var selectedTab: DashboardTab = .activity
+    @State private var memory = SystemReadouts.memoryBreakdown()
+
+    /// Two seconds: fast enough to catch a model loading, slow enough that the
+    /// sidebar is not redrawing constantly behind whatever the user is reading.
+    private let memoryRefreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     enum DashboardTab: String, CaseIterable, Identifiable {
         case activity = "Activity"
         case conversation = "Conversation"
+        case tools = "Tools & Servers"
         case performance = "Model & Performance"
 
         var id: String { rawValue }
@@ -35,50 +48,197 @@ struct DashboardView: View {
             switch self {
             case .activity: return "list.bullet.rectangle"
             case .conversation: return "bubble.left.and.bubble.right"
+            case .tools: return "wrench.and.screwdriver"
             case .performance: return "speedometer"
             }
         }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            tabBar
+        HStack(spacing: 0) {
+            sidebar
+                .frame(width: 208)
+
             Divider().background(DS.Colors.borderSubtle)
 
-            Group {
-                switch selectedTab {
-                case .activity: ActivityTab(taskRegistry: taskRegistry)
-                case .conversation: ConversationTab(taskRegistry: taskRegistry)
-                case .performance: PerformanceTab(metricsRecorder: metricsRecorder)
+            VStack(spacing: 0) {
+                contentHeader
+                Divider().background(DS.Colors.borderSubtle)
+
+                Group {
+                    switch selectedTab {
+                    case .activity: ActivityTab(taskRegistry: taskRegistry)
+                    case .conversation: ConversationTab(taskRegistry: taskRegistry)
+                    case .tools: ToolsTab()
+                    case .performance: PerformanceTab(metricsRecorder: metricsRecorder)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DS.Colors.background)
     }
 
-    private var tabBar: some View {
-        HStack(spacing: 4) {
-            ForEach(DashboardTab.allCases) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.symbolName)
-                        Text(tab.rawValue)
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(selectedTab == tab ? DS.Colors.textPrimary : DS.Colors.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                            .fill(selectedTab == tab ? DS.Colors.surface3 : .clear)
-                    )
+    // MARK: - Sidebar
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            identityHeader
+
+            VStack(spacing: 2) {
+                ForEach(DashboardTab.allCases) { tab in
+                    sidebarItem(for: tab)
                 }
-                .buttonStyle(.plain)
-                .pointerCursor()
             }
+            .padding(.horizontal, 8)
+
+            Spacer(minLength: 16)
+
+            memoryFooter
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(DS.Colors.surface1)
+    }
+
+    private var identityHeader: some View {
+        HStack(spacing: 9) {
+            // The same triangle the menu bar and overlay cursor use, so the
+            // window reads as the same app rather than a separate tool.
+            Triangle()
+                .fill(DS.Colors.overlayCursorBlue)
+                .frame(width: 13, height: 15)
+                .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.5), radius: 5)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Wisp")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                Text("Running locally")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DS.Colors.textTertiary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 16)
+    }
+
+    private func sidebarItem(for tab: DashboardTab) -> some View {
+        let isSelected = selectedTab == tab
+        let runningCount = tab == .activity ? taskRegistry.runningRecords.count : 0
+
+        return Button {
+            selectedTab = tab
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: tab.symbolName)
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 16)
+                Text(tab.rawValue)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                // A running-task count belongs next to Activity, not in a
+                // corner of the window: it is the reason someone would switch
+                // to that section.
+                if runningCount > 0 {
+                    Text("\(runningCount)")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.Colors.textOnAccent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(DS.Colors.accent))
+                }
+            }
+            .foregroundStyle(isSelected ? DS.Colors.textPrimary : DS.Colors.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .fill(isSelected ? DS.Colors.surface3 : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+    }
+
+    /// Memory pressure, always visible and always current.
+    ///
+    /// Everything about this app's behaviour on an 18GB machine — why a model
+    /// was evicted, why the first screen question after idle is slow, why two
+    /// models will not co-reside — traces back to this number. Burying it in a
+    /// tab means it is only consulted by someone who already suspects it.
+    ///
+    /// The bar carries the reading before the text does. Whether the machine
+    /// is near its ceiling is a glance, not a subtraction.
+    private var memoryFooter: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().background(DS.Colors.borderSubtle)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("MEMORY")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                    .tracking(0.6)
+
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(DS.Colors.surface3)
+                        Capsule()
+                            .fill(memoryBarColor)
+                            .frame(width: max(2, proxy.size.width * memory.usedFraction))
+                    }
+                }
+                .frame(height: 4)
+
+                // Stacked rather than joined by separators: at this width a
+                // single line truncates, and the value it drops is the one
+                // that matters when memory is tight.
+                Text("\(memory.usedText) of \(memory.totalText)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(DS.Colors.textSecondary)
+
+                Text(memory.compressedText.map { "\(memory.freeText) free · \($0) compressed" }
+                     ?? "\(memory.freeText) free")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
+        }
+        .onReceive(memoryRefreshTimer) { _ in
+            memory = SystemReadouts.memoryBreakdown()
+        }
+    }
+
+    private var memoryBarColor: Color {
+        // Thresholds chosen from what actually goes wrong: past ~85% the model
+        // starts getting evicted between turns, and past ~95% synthesis and
+        // inference begin failing outright.
+        switch memory.usedFraction {
+        case ..<0.85: return DS.Colors.success
+        case ..<0.95: return DS.Colors.warning
+        default: return DS.Colors.destructive
+        }
+    }
+
+    // MARK: - Content header
+
+    private var contentHeader: some View {
+        HStack(spacing: 8) {
+            Text(selectedTab.rawValue)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DS.Colors.textPrimary)
 
             Spacer()
 
@@ -89,11 +249,10 @@ struct DashboardView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textSecondary)
                 }
-                .padding(.trailing, 4)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .background(DS.Colors.surface1)
     }
 }
@@ -483,7 +642,7 @@ private struct PerformanceTab: View {
 
 // MARK: - Shared pieces
 
-private struct DashboardCard<Content: View>: View {
+struct DashboardCard<Content: View>: View {
     let title: String
     @ViewBuilder var content: Content
 

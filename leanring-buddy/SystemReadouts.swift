@@ -16,6 +16,59 @@ import Foundation
 
 enum SystemReadouts {
     /// Physical memory summary, e.g. "12.4 GB used of 18 GB · 1.2 GB free".
+    /// Memory as separate values rather than one joined line.
+    ///
+    /// `memorySummary()` is built for a wide row and truncates badly in the
+    /// sidebar, where the number matters most. Returning the parts lets a
+    /// narrow caller stack them and draw a fill bar, which communicates
+    /// pressure faster than any string does.
+    struct MemoryBreakdown {
+        let usedText: String
+        let totalText: String
+        let freeText: String
+        let compressedText: String?
+        /// 0...1, for a fill bar.
+        let usedFraction: Double
+    }
+
+    static func memoryBreakdown() -> MemoryBreakdown {
+        let totalBytes = ProcessInfo.processInfo.physicalMemory
+
+        var statistics = vm_statistics64_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size
+        )
+
+        let result = withUnsafeMutablePointer(to: &statistics) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, rebound, &count)
+            }
+        }
+
+        guard result == KERN_SUCCESS else {
+            return MemoryBreakdown(
+                usedText: "—",
+                totalText: formatted(bytes: totalBytes),
+                freeText: "—",
+                compressedText: nil,
+                usedFraction: 0
+            )
+        }
+
+        let pageSize = UInt64(vm_kernel_page_size)
+        let freeBytes = (UInt64(statistics.free_count) + UInt64(statistics.speculative_count)) * pageSize
+        let usedBytes = totalBytes > freeBytes ? totalBytes - freeBytes : 0
+        let compressedBytes = UInt64(statistics.compressor_page_count) * pageSize
+
+        return MemoryBreakdown(
+            usedText: formatted(bytes: usedBytes),
+            totalText: formatted(bytes: totalBytes),
+            freeText: formatted(bytes: freeBytes),
+            compressedText: compressedBytes > 0 ? formatted(bytes: compressedBytes) : nil,
+            usedFraction: totalBytes > 0 ? Double(usedBytes) / Double(totalBytes) : 0
+        )
+    }
+
     static func memorySummary() -> String {
         let totalBytes = ProcessInfo.processInfo.physicalMemory
 

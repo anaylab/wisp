@@ -53,7 +53,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        dashboardWindow.title = "Clicky"
+        dashboardWindow.title = "Wisp"
         dashboardWindow.titlebarAppearsTransparent = true
         dashboardWindow.backgroundColor = NSColor(DS.Colors.background)
         dashboardWindow.contentView = hostingView
@@ -62,7 +62,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
         dashboardWindow.isReleasedWhenClosed = false
         dashboardWindow.center()
         // Reopens where the user last left it rather than always centered.
-        dashboardWindow.setFrameAutosaveName("ClickyDashboardWindow")
+        dashboardWindow.setFrameAutosaveName("WispDashboardWindow")
 
         window = dashboardWindow
 
@@ -90,7 +90,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
     }
 
     private func returnToMenuBarOnlyMode() {
-        // Back to accessory so Clicky disappears from the dock and app
+        // Back to accessory so Wisp disappears from the dock and app
         // switcher again — the menu bar item remains the only entry point.
         NSApp.setActivationPolicy(.accessory)
     }
