@@ -114,6 +114,22 @@ final class CompanionManager: ObservableObject {
     /// Periodically pokes the local model servers so their GPU graphs stay
     /// resident. See `startLocalModelKeepWarmLoopIfNeeded()`.
     private var localModelKeepWarmTask: Task<Void, Never>?
+
+    /// When the user last spoke to Wisp.
+    ///
+    /// The keep-warm heartbeat is gated on this. Without a gate it pings
+    /// forever, which pins six gigabytes of model in RAM from launch until
+    /// quit no matter how long ago the last conversation was — on a machine
+    /// the user also needs for their own work, that is most of their headroom
+    /// spent on a companion sitting idle.
+    private var lastInteractionAt = Date()
+
+    /// How long after the last utterance the model is kept resident.
+    ///
+    /// Conversations arrive in bursts, so this only has to outlast the gap
+    /// between consecutive questions, not a whole working session. Going idle
+    /// past this returns the memory; the next question pays a single reload.
+    private static let keepWarmActivityWindow: TimeInterval = 5 * 60
     /// Set while an agent turn is running.
     ///
     /// The heartbeat and an agent loop compete for the same thing: the model
@@ -560,6 +576,8 @@ final class CompanionManager: ObservableObject {
         // model call, so it's a one-step task; the shape already matches what
         // multi-step tool calling will need.
         let taskID = AgentTaskRegistry.shared.beginTask(title: transcript)
+        // Marks the conversation live, which is what keeps the model resident.
+        lastInteractionAt = Date()
         PerfMetricsRecorder.shared.beginTurn(transcript: transcript, modelName: ActiveStackReadout.shared.chatModelName)
         // Whether the screenshot gets attached is the single biggest factor in
         // how long a turn takes, so timings are only comparable between turns
@@ -838,7 +856,17 @@ final class CompanionManager: ObservableObject {
                 // mid-conversation evicts that conversation's cached prompt
                 // prefix, and the next step pays to re-encode the screenshot.
                 // A turn is itself the best possible keep-warm anyway.
-                let shouldSkipThisBeat = await MainActor.run { self?.isAgentTurnInProgress ?? false }
+                let shouldSkipThisBeat = await MainActor.run { () -> Bool in
+                    guard let manager = self else { return true }
+                    // Mid-turn: a heartbeat would evict the prompt prefix this
+                    // conversation is relying on, and a turn keeps the model
+                    // warm by itself anyway.
+                    if manager.isAgentTurnInProgress { return true }
+                    // Idle: stop refreshing residency and let Ollama reclaim
+                    // the model, so the machine is the user's again.
+                    let idleFor = Date().timeIntervalSince(manager.lastInteractionAt)
+                    return idleFor > CompanionManager.keepWarmActivityWindow
+                }
                 if shouldSkipThisBeat { continue }
 
                 if isUsingLocalChat {

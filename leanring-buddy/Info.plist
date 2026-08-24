@@ -7,7 +7,7 @@
 	<key>VoiceTranscriptionProvider</key>
 	<string>apple</string>
 	<key>VoiceTTSProvider</key>
-	<string>chatterbox</string>
+	<string>apple</string>
 	<key>ChatterboxTTSServerURL</key>
 	<string>http://localhost:8004</string>
 	<key>ChatProvider</key>

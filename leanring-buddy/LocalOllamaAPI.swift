@@ -67,7 +67,15 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
     /// How long Ollama holds the model after a request. Must match across
     /// callers: the shortest value wins, so a heartbeat asking for less than a
     /// real turn quietly shortens the residency it is meant to extend.
-    static let modelResidencyWindow = "30m"
+    ///
+    /// Deliberately short. The model is six gigabytes on an eighteen gigabyte
+    /// machine that the user also needs for their actual work, so it should be
+    /// resident while they are talking to Wisp and released when they are not.
+    /// The heartbeat refreshes this window for as long as the conversation is
+    /// live, so in practice the model only unloads after a real idle stretch —
+    /// and the cost of being wrong is one reload of a few seconds, paid by the
+    /// person who came back, rather than gigabytes held from everyone else.
+    static let modelResidencyWindow = "5m"
 
     init(baseURL: String, model: String) {
         self.chatURL = URL(string: "\(baseURL)/api/chat")!

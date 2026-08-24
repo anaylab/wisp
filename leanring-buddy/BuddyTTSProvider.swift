@@ -31,6 +31,7 @@ enum BuddyTTSProviderFactory {
     private enum PreferredProvider: String {
         case elevenLabs = "elevenlabs"
         case chatterbox = "chatterbox"
+        case apple = "apple"
     }
 
     static func makeDefaultProvider(elevenLabsProxyURL: String) -> any BuddyTTSProvider {
@@ -38,6 +39,10 @@ enum BuddyTTSProviderFactory {
             .stringValue(forKey: "VoiceTTSProvider")?
             .lowercased()
         let preferredProvider = preferredProviderRawValue.flatMap(PreferredProvider.init(rawValue:))
+
+        if preferredProvider == .apple {
+            return AppleSpeechSynthesisClient()
+        }
 
         if preferredProvider == .chatterbox {
             let chatterboxBaseURL = AppBundleConfiguration
