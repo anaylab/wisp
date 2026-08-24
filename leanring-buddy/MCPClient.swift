@@ -217,7 +217,7 @@ actor MCPServerConnection {
                 "protocolVersion": .string("2024-11-05"),
                 "capabilities": .object(["tools": .object([:])]),
                 "clientInfo": .object([
-                    "name": .string("Clicky"),
+                    "name": .string("Wisp"),
                     "version": .string("1.0")
                 ])
             ])

@@ -1,80 +1,138 @@
-# Clicky - Agent Instructions
-
-<!-- This is the single source of truth for all AI coding agents. CLAUDE.md is a symlink to this file. -->
-<!-- AGENTS.md spec: https://github.com/agentsmd/agents.md — supported by Claude Code, Cursor, Copilot, Gemini CLI, and others. -->
+# Wisp - Agent Instructions
 
 ## Overview
 
-macOS menu bar companion app. Lives entirely in the macOS status bar (no dock icon, no main window). Clicking the menu bar icon opens a custom floating panel with companion voice controls. Uses push-to-talk (ctrl+option) to capture voice input, transcribes it via AssemblyAI streaming, and sends the transcript + a screenshot of the user's screen to Claude. Claude responds with text (streamed via SSE) and voice (ElevenLabs TTS). A blue cursor overlay can fly to and point at UI elements Claude references on any connected monitor.
+macOS menu bar companion app, formerly Clicky. Lives entirely in the macOS status bar
+(no dock icon, no main window). Clicking the menu bar icon opens a custom floating panel
+with companion voice controls. Uses push-to-talk (ctrl+option) to capture voice input,
+transcribes it on-device, and sends the transcript + a screenshot to a local model. The
+model responds with text, which is spoken by a local TTS server. A blue cursor overlay
+can fly to and point at UI elements the model references on any connected monitor, and
+can draw boxes, arrows and highlights on screen.
 
-All API keys live on a Cloudflare Worker proxy — nothing sensitive ships in the app.
+**Everything runs on this machine. There are no API keys, no Cloudflare Worker, and no
+analytics.** The only network traffic is HTTP to `localhost` (Ollama on 11434, Chatterbox
+TTS on 8004). This is the defining constraint of the project — do not introduce a cloud
+dependency without asking.
 
 ## Architecture
 
-- **App Type**: Menu bar-only (`LSUIElement=true`), no dock icon or main window
-- **Framework**: SwiftUI (macOS native) with AppKit bridging for menu bar panel and cursor overlay
+- **App Type**: Menu bar-only (`LSUIElement=true`), no dock icon. The dashboard raises the
+  activation policy to `.regular` while open, and drops back to `.accessory` on close.
+- **Framework**: SwiftUI (macOS native) with AppKit bridging for menu bar panel, cursor
+  overlay, and dashboard window
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
-- **AI Chat**: Claude (Sonnet 4.6 default, Opus 4.6 optional) via Cloudflare Worker proxy with SSE streaming
-- **Speech-to-Text**: AssemblyAI real-time streaming (`u3-rt-pro` model) via websocket, with OpenAI and Apple Speech as fallbacks
-- **Text-to-Speech**: ElevenLabs (`eleven_flash_v2_5` model) via Cloudflare Worker proxy
-- **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor support
-- **Voice Input**: Push-to-talk via `AVAudioEngine` + pluggable transcription-provider layer. System-wide keyboard shortcut via listen-only CGEvent tap.
-- **Element Pointing**: Claude embeds `[POINT:x,y:label:screenN]` tags in responses. The overlay parses these, maps coordinates to the correct monitor, and animates the blue cursor along a bezier arc to the target.
+- **Chat / Vision**: Ollama `qwen2.5vl:7b` at `http://localhost:11434`, NDJSON streaming,
+  selected via `ChatProvider` in Info.plist
+- **Speech-to-Text**: Apple Speech framework, on-device, via `VoiceTranscriptionProvider`
+- **Text-to-Speech**: Chatterbox Nano at `http://localhost:8004`, synthesised and played
+  sentence-by-sentence so playback starts before the whole reply is rendered
+- **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor, downscaled to 896px
+- **Element Pointing**: the model embeds `[POINT:x,y:label:screenN]` tags; the overlay
+  parses them, maps to the correct monitor, and animates the cursor along a bezier arc
+- **Screen Annotation**: `[BOX:left,top,right,bottom:label]` and `[HIGHLIGHT:...]` tags
+  render through a `Canvas` layer in the overlay. Note the corner format — the model emits
+  corners, not origin+size.
+- **Agent loop**: off by default behind `AgentModeEnabled` in Info.plist. When on, tools
+  are called via structured `[TOOL:name:{json}]` tags rather than native tool_calls, since
+  the local model is unreliable at the latter.
+- **MCP**: hand-rolled JSON-RPC 2.0 over stdio subprocess. Config at `~/.wisp/mcp.json`
+  in Claude Desktop's format.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
-- **Analytics**: PostHog via `ClickyAnalytics.swift`
-
-### API Proxy (Cloudflare Worker)
-
-The app never calls external APIs directly. All requests go through a Cloudflare Worker (`worker/src/index.ts`) that holds the real API keys as secrets.
-
-| Route | Upstream | Purpose |
-|-------|----------|---------|
-| `POST /chat` | `api.anthropic.com/v1/messages` | Claude vision + streaming chat |
-| `POST /tts` | `api.elevenlabs.io/v1/text-to-speech/{voiceId}` | ElevenLabs TTS audio |
-| `POST /transcribe-token` | `streaming.assemblyai.com/v3/token` | Fetches a short-lived (480s) AssemblyAI websocket token |
-
-Worker secrets: `ANTHROPIC_API_KEY`, `ASSEMBLYAI_API_KEY`, `ELEVENLABS_API_KEY`
-Worker vars: `ELEVENLABS_VOICE_ID`
+- **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 
 ### Key Architecture Decisions
 
-**Menu Bar Panel Pattern**: The companion panel uses `NSStatusItem` for the menu bar icon and a custom borderless `NSPanel` for the floating control panel. This gives full control over appearance (dark, rounded corners, custom shadow) and avoids the standard macOS menu/popover chrome. The panel is non-activating so it doesn't steal focus. A global event monitor auto-dismisses it on outside clicks.
+**Menu Bar Panel Pattern**: The companion panel uses `NSStatusItem` for the menu bar icon
+and a custom borderless `NSPanel` for the floating control panel. This gives full control
+over appearance and avoids standard macOS menu/popover chrome. The panel is non-activating
+so it doesn't steal focus.
 
-**Cursor Overlay**: A full-screen transparent `NSPanel` hosts the blue cursor companion. It's non-activating, joins all Spaces, and never steals focus. The cursor position, response text, waveform, and pointing animations all render in this overlay via SwiftUI through `NSHostingView`.
+**Cursor Overlay**: A full-screen transparent `NSPanel` hosts the blue cursor companion.
+It's non-activating, joins all Spaces, and never steals focus. Because it covers the whole
+screen at `.screenSaver` level, it must keep `ignoresMouseEvents = true` except while a
+tool confirmation card is up — otherwise the desktop becomes unclickable.
 
-**Global Push-To-Talk Shortcut**: Background push-to-talk uses a listen-only `CGEvent` tap instead of an AppKit global monitor so modifier-based shortcuts like `ctrl + option` are detected more reliably while the app is running in the background.
+**Global Push-To-Talk Shortcut**: Uses a listen-only `CGEvent` tap rather than an AppKit
+global monitor, so modifier-based shortcuts like ctrl+option are detected reliably in the
+background.
 
-**Shared URLSession for AssemblyAI**: A single long-lived `URLSession` is shared across all AssemblyAI streaming sessions (owned by the provider, not the session). Creating and invalidating a URLSession per session corrupts the OS connection pool and causes "Socket is not connected" errors after a few rapid reconnections.
+**Model residency is the binding constraint.** On 18GB, one 7B vision model plus the TTS
+server leaves almost nothing spare. A second concurrently-resident LLM is not feasible at
+that size. `ModelAccessGate` serialises all model calls so background work never evicts
+the prefix cache an interactive turn is depending on, and the keep-warm heartbeat is
+suspended during agent loops for the same reason.
 
-**Transient Cursor Mode**: When "Show Clicky" is off, pressing the hotkey fades in the cursor overlay for the duration of the interaction (recording → response → TTS → optional pointing), then fades it out automatically after 1 second of inactivity.
+**Vision encoding dominates latency.** At 1280px a screenshot costs ~4049 tokens; at 896px
+it costs ~1095. Screenshots are therefore capped at 896px, and are skipped entirely when
+the prompt does not appear to refer to the screen.
 
 ## Key Files
 
+Grouped by what they do. Line counts are approximate.
+
+### Core pipeline
 | File | Lines | Purpose |
 |------|-------|---------|
-| `leanring_buddyApp.swift` | ~89 | Menu bar app entry point. Uses `@NSApplicationDelegateAdaptor` with `CompanionAppDelegate` which creates `MenuBarPanelManager` and starts `CompanionManager`. No main window — the app lives entirely in the status bar. |
-| `CompanionManager.swift` | ~1026 | Central state machine. Owns dictation, shortcut monitoring, screen capture, Claude API, ElevenLabs TTS, and overlay management. Tracks voice state (idle/listening/processing/responding), conversation history, model selection, and cursor visibility. Coordinates the full push-to-talk → screenshot → Claude → TTS → pointing pipeline. |
-| `MenuBarPanelManager.swift` | ~243 | NSStatusItem + custom NSPanel lifecycle. Creates the menu bar icon, manages the floating companion panel (show/hide/position), installs click-outside-to-dismiss monitor. |
-| `CompanionPanelView.swift` | ~761 | SwiftUI panel content for the menu bar dropdown. Shows companion status, push-to-talk instructions, model picker (Sonnet/Opus), permissions UI, DM feedback button, and quit button. Dark aesthetic using `DS` design system. |
-| `OverlayWindow.swift` | ~881 | Full-screen transparent overlay hosting the blue cursor, response text, waveform, and spinner. Handles cursor animation, element pointing with bezier arcs, multi-monitor coordinate mapping, and fade-out transitions. |
-| `CompanionResponseOverlay.swift` | ~217 | SwiftUI view for the response text bubble and waveform displayed next to the cursor in the overlay. |
-| `CompanionScreenCaptureUtility.swift` | ~132 | Multi-monitor screenshot capture using ScreenCaptureKit. Returns labeled image data for each connected display. |
-| `BuddyDictationManager.swift` | ~866 | Push-to-talk voice pipeline. Handles microphone capture via `AVAudioEngine`, provider-aware permission checks, keyboard/button dictation sessions, transcript finalization, shortcut parsing, contextual keyterms, and live audio-level reporting for waveform feedback. |
-| `BuddyTranscriptionProvider.swift` | ~100 | Protocol surface and provider factory for voice transcription backends. Resolves provider based on `VoiceTranscriptionProvider` in Info.plist — AssemblyAI, OpenAI, or Apple Speech. |
-| `AssemblyAIStreamingTranscriptionProvider.swift` | ~478 | Streaming transcription provider. Fetches temp tokens from the Cloudflare Worker, opens an AssemblyAI v3 websocket, streams PCM16 audio, tracks turn-based transcripts, and delivers finalized text on key-up. Shares a single URLSession across all sessions. |
-| `OpenAIAudioTranscriptionProvider.swift` | ~317 | Upload-based transcription provider. Buffers push-to-talk audio locally, uploads as WAV on release, returns finalized transcript. |
-| `AppleSpeechTranscriptionProvider.swift` | ~147 | Local fallback transcription provider backed by Apple's Speech framework. |
-| `BuddyAudioConversionSupport.swift` | ~108 | Audio conversion helpers. Converts live mic buffers to PCM16 mono audio and builds WAV payloads for upload-based providers. |
-| `GlobalPushToTalkShortcutMonitor.swift` | ~132 | System-wide push-to-talk monitor. Owns the listen-only `CGEvent` tap and publishes press/release transitions. |
-| `ClaudeAPI.swift` | ~291 | Claude vision API client with streaming (SSE) and non-streaming modes. TLS warmup optimization, image MIME detection, conversation history support. |
-| `OpenAIAPI.swift` | ~142 | OpenAI GPT vision API client. |
-| `ElevenLabsTTSClient.swift` | ~81 | ElevenLabs TTS client. Sends text to the Worker proxy, plays back audio via `AVAudioPlayer`. Exposes `isPlaying` for transient cursor scheduling. |
-| `ElementLocationDetector.swift` | ~335 | Detects UI element locations in screenshots for cursor pointing. |
-| `DesignSystem.swift` | ~880 | Design system tokens — colors, corner radii, shared styles. All UI references `DS.Colors`, `DS.CornerRadius`, etc. |
-| `ClickyAnalytics.swift` | ~121 | PostHog analytics integration for usage tracking. |
-| `WindowPositionManager.swift` | ~262 | Window placement logic, Screen Recording permission flow, and accessibility permission helpers. |
-| `AppBundleConfiguration.swift` | ~28 | Runtime configuration reader for keys stored in the app bundle Info.plist. |
-| `worker/src/index.ts` | ~142 | Cloudflare Worker proxy. Three routes: `/chat` (Claude), `/tts` (ElevenLabs), `/transcribe-token` (AssemblyAI temp token). |
+| `leanring_buddyApp.swift` | ~105 | Menu bar app entry point. `@NSApplicationDelegateAdaptor` with `CompanionAppDelegate`, which creates `MenuBarPanelManager` and starts `CompanionManager`. |
+| `CompanionManager.swift` | ~1475 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. |
+| `BuddyDictationManager.swift` | ~866 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
+| `GlobalPushToTalkShortcutMonitor.swift` | ~132 | System-wide push-to-talk via a listen-only `CGEvent` tap. |
+| `CompanionScreenCaptureUtility.swift` | ~139 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. |
+
+### Local model stack
+| File | Lines | Purpose |
+|------|-------|---------|
+| `LocalOllamaAPI.swift` | ~235 | Ollama client: NDJSON streaming, `keep_alive`, per-mode context and token limits, and the heuristic that decides whether a prompt needs a screenshot at all. |
+| `BuddyVisionChatClient.swift` | ~47 | Chat-client protocol and factory, keyed off `ChatProvider`. |
+| `LocalChatterboxTTSClient.swift` | ~231 | Sentence-by-sentence local TTS: synthesises sentence N+1 while N is playing. |
+| `BuddyTTSProvider.swift` | ~53 | TTS protocol and factory, keyed off `VoiceTTSProvider`. |
+| `AppleSpeechTranscriptionProvider.swift` | ~147 | On-device STT via the Speech framework. The active provider. |
+| `FluidAudioTranscriptionProvider.swift` | ~212 | Parakeet STT via CoreML. Built and working, currently unused. |
+| `ModelAccessGate.swift` | ~104 | Actor serialising all model calls, with interactive priority, so background work never evicts the prefix cache a live turn depends on. |
+
+### Overlay and annotation
+| File | Lines | Purpose |
+|------|-------|---------|
+| `OverlayWindow.swift` | ~927 | Full-screen transparent overlay: blue cursor, waveform, pointing arcs, multi-monitor mapping. Also owns `ignoresMouseEvents` toggling. |
+| `ScreenAnnotation.swift` | ~217 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. |
+| `ScreenAnnotationLayer.swift` | ~150 | `Canvas` rendering for boxes, arrows and highlights. |
+| `CompanionResponseOverlay.swift` | ~217 | Response bubble and waveform next to the cursor. |
+| `ElementLocationDetector.swift` | ~335 | Locates UI elements in screenshots for pointing. |
+
+### Agent, tools and MCP
+| File | Lines | Purpose |
+|------|-------|---------|
+| `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
+| `AgentToolRegistry.swift` | ~167 | Built-in read-only tools. `requiresConfirmation` defaults to true for unknown names. |
+| `StructuredTextToolProtocol.swift` | ~275 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
+| `MCPClient.swift` | ~447 | JSON-RPC 2.0 over stdio subprocess, login-shell PATH resolution, stderr ring buffer. |
+| `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
+| `ToolConfirmationCoordinator.swift` | ~193 | Permission requests with a 45s timeout and spoken-affirmative parsing. |
+| `ToolConfirmationView.swift` | ~130 | The on-screen approve/deny card. |
+| `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
+| `AgentTaskRegistry.swift` | ~140 | Task and step records backing the dashboard's Activity tab. |
+
+### Dashboard and UI
+| File | Lines | Purpose |
+|------|-------|---------|
+| `DashboardWindowController.swift` | ~109 | Real `NSWindow` host. Raises activation policy to `.regular` while open. |
+| `DashboardView.swift` | ~708 | Sidebar shell plus Activity, Conversation and Model & Performance tabs, and the live memory footer. |
+| `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
+| `MenuBarPanelManager.swift` | ~247 | `NSStatusItem` + floating `NSPanel` lifecycle. |
+| `CompanionPanelView.swift` | ~775 | The menu bar panel's SwiftUI content. |
+| `DesignSystem.swift` | ~880 | `DS.Colors`, `DS.Spacing`, `DS.CornerRadius` tokens. All UI references these. |
+| `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
+| `SystemReadouts.swift` | ~143 | Memory via `host_statistics64`; Ollama residency via `/api/ps`. |
+| `WindowPositionManager.swift` | ~262 | Window placement and permission helpers. |
+| `WispAnalytics.swift` | ~153 | Gated off. Sends nothing. Kept so the call sites still compile. |
+
+### Unused upstream leftovers
+`ClaudeAPI.swift`, `OpenAIAPI.swift`, `ElevenLabsTTSClient.swift`,
+`AssemblyAIStreamingTranscriptionProvider.swift`, `OpenAIAudioTranscriptionProvider.swift`
+and `worker/` all target cloud services this build does not use. They are still compiled
+and still referenced by their provider factories, so they work if a key is supplied — but
+nothing selects them by default.
 
 ## Build & Run
 
@@ -82,7 +140,9 @@ Worker vars: `ELEVENLABS_VOICE_ID`
 # Open in Xcode
 open leanring-buddy.xcodeproj
 
-# Select the leanring-buddy scheme, set signing team, Cmd+R to build and run
+# Select the leanring-buddy scheme, Cmd+R to build and run.
+# Or build headlessly without touching TCC:
+#   osascript -e 'tell application "Xcode" to build (first workspace document)'
 
 # Known non-blocking warnings: Swift 6 concurrency warnings,
 # deprecated onChange warning in OverlayWindow.swift. Do NOT attempt to fix these.
@@ -90,23 +150,20 @@ open leanring-buddy.xcodeproj
 
 **Do NOT run `xcodebuild` from the terminal** — it invalidates TCC (Transparency, Consent, and Control) permissions and the app will need to re-request screen recording, accessibility, etc.
 
-## Cloudflare Worker
+## Local services
+
+Both must be running for the app to work:
 
 ```bash
-cd worker
-npm install
-
-# Add secrets
-npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put ASSEMBLYAI_API_KEY
-npx wrangler secret put ELEVENLABS_API_KEY
-
-# Deploy
-npx wrangler deploy
-
-# Local dev (create worker/.dev.vars with your keys)
-npx wrangler dev
+ollama serve                     # port 11434
 ```
+
+```bash
+curl -s http://localhost:8004/ -o /dev/null -w "%{http_code}\n"   # Chatterbox TTS health
+```
+
+There is no Cloudflare Worker. The `worker/` directory is upstream leftover and is not
+used by this build.
 
 ## Code Style & Conventions
 
@@ -142,7 +199,7 @@ IMPORTANT: Follow these naming rules strictly. Clarity is the top priority.
 - Do not add features, refactor code, or make "improvements" beyond what was asked
 - Do not add docstrings, comments, or type annotations to code you did not change
 - Do not try to fix the known non-blocking warnings (Swift 6 concurrency, deprecated onChange)
-- Do not rename the project directory or scheme (the "leanring" typo is intentional/legacy)
+- Do not rename the project directory or scheme (the "leanring" typo is intentional/legacy). The app is named Wisp; the Xcode target is not.
 - Do not run `xcodebuild` from the terminal — it invalidates TCC permissions
 
 ## Git Workflow

@@ -36,25 +36,25 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private var openDashboardObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("🎯 Clicky: Starting...")
-        print("🎯 Clicky: Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
+        print("🎯 Wisp: Starting...")
+        print("🎯 Wisp: Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
 
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 0])
 
-        ClickyAnalytics.configure()
-        ClickyAnalytics.trackAppOpened()
+        WispAnalytics.configure()
+        WispAnalytics.trackAppOpened()
 
         menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
 
         let dashboardController = DashboardWindowController(companionManager: companionManager)
         dashboardWindowController = dashboardController
         openDashboardObserver = NotificationCenter.default.addObserver(
-            forName: .clickyOpenDashboard,
+            forName: .wispOpenDashboard,
             object: nil,
             queue: .main
         ) { _ in
             Task { @MainActor in
-                NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
+                NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
                 dashboardController.showDashboard()
             }
         }
@@ -81,9 +81,9 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         if loginItemService.status != .enabled {
             do {
                 try loginItemService.register()
-                print("🎯 Clicky: Registered as login item")
+                print("🎯 Wisp: Registered as login item")
             } catch {
-                print("⚠️ Clicky: Failed to register as login item: \(error)")
+                print("⚠️ Wisp: Failed to register as login item: \(error)")
             }
         }
     }
@@ -99,7 +99,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         do {
             try updaterController.updater.start()
         } catch {
-            print("⚠️ Clicky: Sparkle updater failed to start: \(error)")
+            print("⚠️ Wisp: Sparkle updater failed to start: \(error)")
         }
     }
 }

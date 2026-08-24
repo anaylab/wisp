@@ -1,5 +1,5 @@
 //
-//  ClickyAnalytics.swift
+//  WispAnalytics.swift
 //  leanring-buddy
 //
 //  Usage analytics — disabled.
@@ -22,7 +22,7 @@
 import Foundation
 import PostHog
 
-enum ClickyAnalytics {
+enum WispAnalytics {
 
     // MARK: - Configuration
 
@@ -86,7 +86,7 @@ enum ClickyAnalytics {
         capture("onboarding_video_completed")
     }
 
-    /// The 40s onboarding demo interaction where Clicky points at something.
+    /// The 40s onboarding demo interaction where Wisp points at something.
     static func trackOnboardingDemoTriggered() {
         capture("onboarding_demo_triggered")
     }

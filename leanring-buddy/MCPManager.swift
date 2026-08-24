@@ -7,7 +7,7 @@
 //
 //  The config file uses the same shape as Claude Desktop's, so an existing
 //  mcpServers block can be pasted across unchanged. It lives at
-//  ~/.clicky/mcp.json.
+//  ~/.wisp/mcp.json.
 //
 //  Tool names are namespaced as server__tool. Two servers can reasonably both
 //  offer something called "search", and without a prefix the second would
@@ -58,7 +58,36 @@ final class MCPManager: ObservableObject {
 
     private var configurationFileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".wisp/mcp.json")
+    }
+
+    /// Where the config lived before the app was renamed.
+    private var legacyConfigurationFileURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".clicky/mcp.json")
+    }
+
+    /// Moves a pre-rename config to the new location, once.
+    ///
+    /// Someone who already configured servers should not have to discover that
+    /// the rename quietly orphaned their file. The old copy is left in place
+    /// rather than deleted — this is the user's config, not ours to remove, and
+    /// a stray file costs nothing next to losing hand-written settings.
+    private func migrateLegacyConfigurationIfNeeded() {
+        let manager = FileManager.default
+        guard !manager.fileExists(atPath: configurationFileURL.path),
+              manager.fileExists(atPath: legacyConfigurationFileURL.path) else { return }
+
+        do {
+            try manager.createDirectory(
+                at: configurationFileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try manager.copyItem(at: legacyConfigurationFileURL, to: configurationFileURL)
+            print("📦 MCP: migrated config from ~/.clicky/mcp.json to ~/.wisp/mcp.json")
+        } catch {
+            print("⚠️ MCP: could not migrate old config: \(error.localizedDescription)")
+        }
     }
 
     /// Connects every enabled server and registers their tools.
@@ -165,11 +194,12 @@ final class MCPManager: ObservableObject {
 
     // MARK: - Configuration file
 
-    /// Reads ~/.clicky/mcp.json, tolerating its absence.
+    /// Reads ~/.wisp/mcp.json, tolerating its absence.
     ///
     /// No file simply means no MCP servers, which is the normal state for
     /// someone who hasn't set any up.
     private func loadConfigurations() -> [MCPServerConfiguration] {
+        migrateLegacyConfigurationIfNeeded()
         guard let data = try? Data(contentsOf: configurationFileURL) else { return [] }
 
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -202,7 +232,7 @@ final class MCPManager: ObservableObject {
 
         let example = """
         {
-          "_comment": "MCP servers for Clicky. Same format as Claude Desktop, so an existing config can be pasted in. Set enabled to true to switch one on.",
+          "_comment": "MCP servers for Wisp. Same format as Claude Desktop, so an existing config can be pasted in. Set enabled to true to switch one on.",
           "mcpServers": {
             "filesystem": {
               "command": "npx",

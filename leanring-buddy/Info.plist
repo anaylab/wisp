@@ -4,10 +4,6 @@
 <dict>
 	<key>LSUIElement</key>
 	<true/>
-	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/julianjear/makesomething-mac-app/main/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>/l3d2rw5ZZFRU3AadP/w2Zf8FHfhA6bKv16BQOV5OSk=</string>
 	<key>VoiceTranscriptionProvider</key>
 	<string>apple</string>
 	<key>VoiceTTSProvider</key>
@@ -23,10 +19,10 @@
 	<key>OllamaBaseURL</key>
 	<string>http://localhost:11434</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Clicky uses your microphone so you can talk to it</string>
+	<string>Wisp listens while you hold the hotkey so you can talk to it. Your voice is transcribed on this Mac and never leaves it.</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Clicky needs screen recording access to see your screen and help you.</string>
+	<string>Wisp looks at your screen to answer questions about what you are seeing. Screenshots are read by a model running on this Mac and are never uploaded.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Clicky uses speech recognition to transcribe your voice when you talk to it</string>
+	<string>Wisp turns your speech into text using on-device recognition. Nothing you say is sent anywhere.</string>
 </dict>
 </plist>

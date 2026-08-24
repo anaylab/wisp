@@ -15,11 +15,11 @@ import AppKit
 import SwiftUI
 
 extension Notification.Name {
-    static let clickyDismissPanel = Notification.Name("clickyDismissPanel")
+    static let wispDismissPanel = Notification.Name("wispDismissPanel")
     /// Posted by the panel's Dashboard button. The app delegate owns the
     /// dashboard window, so the request travels by notification rather than
     /// threading a controller reference down through the SwiftUI view.
-    static let clickyOpenDashboard = Notification.Name("clickyOpenDashboard")
+    static let wispOpenDashboard = Notification.Name("wispOpenDashboard")
 }
 
 /// Custom NSPanel subclass that can become the key window even with
@@ -45,7 +45,7 @@ final class MenuBarPanelManager: NSObject {
         createStatusItem()
 
         dismissPanelObserver = NotificationCenter.default.addObserver(
-            forName: .clickyDismissPanel,
+            forName: .wispDismissPanel,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -69,15 +69,15 @@ final class MenuBarPanelManager: NSObject {
 
         guard let button = statusItem?.button else { return }
 
-        button.image = makeClickyMenuBarIcon()
+        button.image = makeWispMenuBarIcon()
         button.image?.isTemplate = true
         button.action = #selector(statusItemClicked)
         button.target = self
     }
 
-    /// Draws the clicky triangle as a menu bar icon. Uses the same shape
+    /// Draws the wisp triangle as a menu bar icon. Uses the same shape
     /// and rotation as the in-app cursor so the menu bar icon matches.
-    private func makeClickyMenuBarIcon() -> NSImage {
+    private func makeWispMenuBarIcon() -> NSImage {
         let iconSize: CGFloat = 18
         let image = NSImage(size: NSSize(width: iconSize, height: iconSize))
         image.lockFocus()

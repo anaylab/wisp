@@ -17,10 +17,18 @@
 //
 
 import AppKit
+import Combine
 import Foundation
 
 @MainActor
-final class AgentToolRegistry {
+final class AgentToolRegistry: ObservableObject {
+    /// The app's own name, read from the bundle rather than hardcoded, so
+    /// window listings keep excluding our own windows across any future rename.
+    private static let ownAppName: String =
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+        ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+        ?? "Wisp"
+
     static let shared = AgentToolRegistry()
 
     /// A tool's implementation. Returns the text handed back to the model, so
@@ -33,7 +41,7 @@ final class AgentToolRegistry {
         let implementation: ToolImplementation
     }
 
-    private var toolsByName: [String: RegisteredTool] = [:]
+    @Published private var toolsByName: [String: RegisteredTool] = [:]
 
     private init() {
         registerBuiltInTools()
@@ -130,7 +138,7 @@ final class AgentToolRegistry {
     ///
     /// Filters to layer 0 so menu-bar items, overlays and the desktop don't
     /// crowd out the windows the user is actually looking at — including
-    /// Clicky's own full-screen overlay.
+    /// Wisp's own full-screen overlay.
     private static func listVisibleWindows() -> [String] {
         guard let windowList = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
@@ -145,7 +153,7 @@ final class AgentToolRegistry {
         for window in windowList {
             guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
                   let owner = window[kCGWindowOwnerName as String] as? String,
-                  owner != "Clicky" else { continue }
+                  owner != Self.ownAppName else { continue }
 
             let title = (window[kCGWindowName as String] as? String) ?? ""
             let line = title.isEmpty ? owner : "\(owner) — \(title)"

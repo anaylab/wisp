@@ -110,7 +110,7 @@ enum BackgroundTaskLauncher {
             guard isGranted else { return }
 
             let content = UNMutableNotificationContent()
-            content.title = didSucceed ? "Clicky finished a task" : "A Clicky task failed"
+            content.title = didSucceed ? "Wisp finished a task" : "A Wisp task failed"
             content.subtitle = String(request.prefix(60))
             content.body = String(result.prefix(200))
             content.sound = didSucceed ? .default : nil
