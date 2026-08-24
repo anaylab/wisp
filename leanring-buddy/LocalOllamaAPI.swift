@@ -46,6 +46,29 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
     private static let spokenReplyTokenLimit = 120
     private static let agentReplyTokenLimit = 1024
 
+    /// The context size every request must use — heartbeat included.
+    ///
+    /// Ollama reloads the model whenever `num_ctx` changes between requests,
+    /// which costs about six seconds. The keep-warm heartbeat used to omit the
+    /// option entirely, so it ran at the model default, evicted the model it
+    /// existed to keep resident, and made the user's next turn pay a second
+    /// reload on top. Deriving both from one value is what prevents that, so
+    /// this must stay the single source for every caller.
+    static var activeContextWindowTokens: Int {
+        CompanionManager.isAgentModeEnabled ? agentContextWindowTokens : contextWindowTokens
+    }
+
+    /// Reply ceiling. Unlike `num_ctx`, changing this between requests does not
+    /// reload anything, but it is derived from the same flag for consistency.
+    static var activeReplyTokenLimit: Int {
+        CompanionManager.isAgentModeEnabled ? agentReplyTokenLimit : spokenReplyTokenLimit
+    }
+
+    /// How long Ollama holds the model after a request. Must match across
+    /// callers: the shortest value wins, so a heartbeat asking for less than a
+    /// real turn quietly shortens the residency it is meant to extend.
+    static let modelResidencyWindow = "30m"
+
     init(baseURL: String, model: String) {
         self.chatURL = URL(string: "\(baseURL)/api/chat")!
         self.model = model
@@ -125,12 +148,12 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
             // keep_alive holds the multi-GB model resident between utterances.
             // Without it Ollama evicts after its short default idle window and
             // every request pays a full reload from disk.
-            "keep_alive": "30m",
+            "keep_alive": Self.modelResidencyWindow,
             "options": [
-                "num_ctx": Self.contextWindowTokens,
+                "num_ctx": Self.activeContextWindowTokens,
                 // Hard ceiling on reply length as a backstop to the prompt
                 // instruction above, since TTS time scales with characters.
-                "num_predict": Self.spokenReplyTokenLimit
+                "num_predict": Self.activeReplyTokenLimit
             ]
         ]
 

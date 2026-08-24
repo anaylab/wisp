@@ -847,8 +847,19 @@ final class CompanionManager: ObservableObject {
                         body: [
                             "model": ollamaModel,
                             "stream": false,
-                            "keep_alive": "10m",
-                            "options": ["num_predict": 0],
+                            // Both of these must match what a real turn sends.
+                            // keep_alive because the shortest value wins, and
+                            // num_ctx because Ollama reloads the model — about
+                            // six seconds — whenever it changes. Omitting
+                            // num_ctx here meant the heartbeat ran at the model
+                            // default and evicted the very model it was meant
+                            // to hold resident, so the next turn paid one
+                            // reload for the heartbeat and another for itself.
+                            "keep_alive": LocalOllamaAPI.modelResidencyWindow,
+                            "options": [
+                                "num_ctx": LocalOllamaAPI.activeContextWindowTokens,
+                                "num_predict": 0
+                            ],
                             "messages": [["role": "user", "content": "."]]
                         ]
                     )
