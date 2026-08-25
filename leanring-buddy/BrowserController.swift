@@ -126,12 +126,34 @@ protocol BrowserController: AnyObject {
     func checkAvailability() -> BrowserAvailability
 
     func openURL(_ url: URL) throws
+    /// Points the current tab at `url`, rather than opening a new one.
+    func navigate(to url: URL) throws
+    func goBack() throws
+    func goForward() throws
+
     func currentURL() throws -> String
+    func pageTitle() throws -> String
 
     /// Reads the page as structured text. The replacement for a screenshot.
     func snapshot(maximumTextCharacters: Int) throws -> BrowserPageSnapshot
 
+    /// Finds elements whose label matches `query`, best match first.
+    ///
+    /// Returns candidates rather than one answer: "login" legitimately matches
+    /// a button and a link on many pages, and picking silently would hide that
+    /// from the caller who has to live with the click.
+    func findElements(matching query: String) throws -> [BrowserElement]
+
     func click(elementID: String) throws
     func typeText(_ text: String, intoElementID: String, pressEnter: Bool) throws
     func scroll(_ direction: BrowserScrollDirection) throws
+
+    /// Chooses an option in a `<select>` by visible text.
+    func selectOption(_ optionLabel: String, inElementID elementID: String) throws
+
+    /// A screenshot of the page, for the cases the DOM genuinely cannot answer.
+    ///
+    /// Present so vision remains reachable as a deliberate fallback rather than
+    /// the default. Everything above should be tried first.
+    func captureScreenshot() async throws -> Data
 }

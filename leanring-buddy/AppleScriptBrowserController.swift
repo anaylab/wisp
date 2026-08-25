@@ -134,6 +134,49 @@ final class AppleScriptBrowserController: BrowserController {
         return result
     }
 
+    func navigate(to url: URL) throws {
+        let browser = try requireBrowser()
+        let script: String
+        switch browser {
+        case .chrome:
+            script = "tell application \"Google Chrome\" to set URL of active tab of window 1 to \"\(url.absoluteString)\""
+        case .safari:
+            script = "tell application \"Safari\" to set URL of current tab of window 1 to \"\(url.absoluteString)\""
+        }
+        guard runAppleScript(script) != nil else {
+            throw BrowserControllerError.scriptFailed("Couldn't navigate to \(url.absoluteString).")
+        }
+    }
+
+    func goBack() throws { try navigateHistory(delta: -1) }
+    func goForward() throws { try navigateHistory(delta: 1) }
+
+    /// History movement via JavaScript rather than Chrome's `go back` command.
+    ///
+    /// Chrome and Safari spell their native history commands differently and
+    /// Safari's is unreliable from AppleScript; history.go works identically in
+    /// both and is already on the path this class depends on.
+    private func navigateHistory(delta: Int) throws {
+        let browser = try requireBrowser()
+        guard runJavaScript("(function(){history.go(\(delta));return 'OK';})()", in: browser) == "OK" else {
+            throw BrowserControllerError.scriptFailed(delta < 0 ? "Couldn't go back." : "Couldn't go forward.")
+        }
+    }
+
+    func pageTitle() throws -> String {
+        let browser = try requireBrowser()
+        // A plain property, so this keeps working with JavaScript disabled.
+        let script: String
+        switch browser {
+        case .chrome: script = "tell application \"Google Chrome\" to get title of active tab of window 1"
+        case .safari: script = "tell application \"Safari\" to get name of current tab of window 1"
+        }
+        guard let title = runAppleScript(script) else {
+            throw BrowserControllerError.scriptFailed("Couldn't read the page title.")
+        }
+        return title
+    }
+
     // MARK: - Reading the page
 
     /// How much of the page to include.
@@ -231,6 +274,73 @@ final class AppleScriptBrowserController: BrowserController {
         guard runJavaScript("(function(){\(body);return 'OK';})()", in: browser) == "OK" else {
             throw BrowserControllerError.scriptFailed("Couldn't scroll.")
         }
+    }
+
+    /// Ranks the page's elements against a query.
+    ///
+    /// Deliberately done in Swift over a fresh snapshot rather than in the
+    /// page: the snapshot already stamps ids, and matching here means the
+    /// ranking is testable without a browser attached.
+    func findElements(matching query: String) throws -> [BrowserElement] {
+        let normalizedQuery = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !normalizedQuery.isEmpty else { return [] }
+
+        let elements = try snapshot().elements
+
+        func score(_ element: BrowserElement) -> Int {
+            let label = element.label.lowercased()
+            if label == normalizedQuery { return 4 }
+            if label.hasPrefix(normalizedQuery) { return 3 }
+            if label.contains(normalizedQuery) { return 2 }
+            // Every query word present somewhere, in any order.
+            let words = normalizedQuery.split(separator: " ")
+            if words.count > 1, words.allSatisfy({ label.contains($0) }) { return 1 }
+            return 0
+        }
+
+        return elements
+            .map { (element: $0, score: score($0)) }
+            .filter { $0.score > 0 }
+            .sorted { $0.score > $1.score }
+            .map(\.element)
+    }
+
+    func selectOption(_ optionLabel: String, inElementID elementID: String) throws {
+        let browser = try requireBrowser()
+        let escaped = optionLabel
+            .replacingOccurrences(of: "\\", with: "\\\\\\\\")
+            .replacingOccurrences(of: "'", with: "\\\\'")
+        // Matches on visible text, which is what a person names, then fires
+        // change so frameworks bound to the select actually notice.
+        let script = """
+        (function(){var e=document.querySelector('[data-wisp-id=\\'\(elementID)\\']');
+        if(!e){return 'MISSING';}var t='\(escaped)'.toLowerCase();var hit=null;
+        for(var i=0;i<e.options.length;i++){var o=e.options[i];
+        if(o.text.toLowerCase().indexOf(t)>=0||o.value.toLowerCase()===t){hit=o;break;}}
+        if(!hit){return 'NOOPTION';}e.value=hit.value;
+        e.dispatchEvent(new Event('change',{bubbles:true}));return 'OK';})()
+        """
+        let result = runJavaScript(script, in: browser)
+        if result == "MISSING" { throw BrowserControllerError.elementNotFound(elementID) }
+        if result == "NOOPTION" {
+            throw BrowserControllerError.scriptFailed("No option matching \"\(optionLabel)\".")
+        }
+        guard result == "OK" else {
+            throw BrowserControllerError.scriptFailed("Couldn't select \"\(optionLabel)\".")
+        }
+    }
+
+    /// Screenshots the whole screen, not just the page.
+    ///
+    /// Reuses the app's existing capture path so the 896px cap and the
+    /// unchanged-frame reuse both still apply. This exists so vision stays a
+    /// deliberate fallback; nothing above calls it.
+    func captureScreenshot() async throws -> Data {
+        let captures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+        guard let cursorScreen = captures.first(where: { $0.isCursorScreen }) ?? captures.first else {
+            throw BrowserControllerError.scriptFailed("Couldn't capture the screen.")
+        }
+        return cursorScreen.imageData
     }
 
     // MARK: - The injected snapshot script
