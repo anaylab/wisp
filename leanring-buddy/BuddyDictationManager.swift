@@ -95,8 +95,23 @@ enum BuddyPushToTalkShortcut {
     enum ShortcutTransition: Equatable {
         case none
         case pressed(InvocationMode)
+        /// Shift landed a moment after the chord did.
+        ///
+        /// Nobody presses three modifiers simultaneously. Ctrl+Option is
+        /// satisfied the instant option goes down, which is typically tens of
+        /// milliseconds before shift arrives, so deciding the mode at that
+        /// instant reads every dictation attempt as a question. The mode is
+        /// therefore allowed to settle briefly after the press.
+        case modeChanged(InvocationMode)
         case released(InvocationMode)
     }
+
+    /// How long after the chord is first satisfied the mode may still change.
+    ///
+    /// Long enough to cover human stagger between modifier keys, short enough
+    /// that it cannot flip part-way through a sentence — speech does not begin
+    /// this quickly.
+    static let invocationModeSettlingWindow: TimeInterval = 0.3
 
     private enum ShortcutEventType {
         case flagsChanged

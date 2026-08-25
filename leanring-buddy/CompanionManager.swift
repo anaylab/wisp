@@ -453,14 +453,26 @@ final class CompanionManager: ObservableObject {
     /// Whether the hold in progress is dictation rather than a question.
     ///
     /// Captured at press time so the finished transcript is routed the way the
-    /// user meant when they started speaking.
-    private var isDictatingIntoFocusedField = false
+    /// user meant when they started speaking. Published because the overlay has
+    /// to show which mode is active: the two look identical otherwise, and the
+    /// whole design rests on one extra modifier changing what happens to your
+    /// words — which is exactly the moment feedback matters.
+    @Published private(set) var isDictatingIntoFocusedField = false
+
+    /// Where dictated text will land, captured when the hold starts.
+    ///
+    /// Shown while listening because "I thought I was in Slack" is the other
+    /// way this goes wrong, and it is only recoverable before you speak.
+    @Published private(set) var dictationDestinationName = ""
 
     private func handleShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {
         switch transition {
         case .pressed(let mode):
             guard !buddyDictationManager.isDictationInProgress else { return }
             isDictatingIntoFocusedField = (mode == .dictation)
+            if isDictatingIntoFocusedField {
+                dictationDestinationName = DictatedTextInserter.frontmostApplicationName()
+            }
 
             // Cancel any pending transient hide so the overlay stays visible
             transientHideTask?.cancel()
@@ -519,6 +531,16 @@ final class CompanionManager: ObservableObject {
                     }
                 )
             }
+        case .modeChanged(let mode):
+            // Shift landed just after the chord. Only the routing of the final
+            // transcript depends on this, and that decision has not been made
+            // yet, so updating mid-hold is safe — and it is what makes holding
+            // all three keys work at human speed.
+            isDictatingIntoFocusedField = (mode == .dictation)
+            if isDictatingIntoFocusedField, dictationDestinationName.isEmpty {
+                dictationDestinationName = DictatedTextInserter.frontmostApplicationName()
+            }
+
         case .released:
             // Cancel the pending start task in case the user released the shortcut
             // before the async startPushToTalk had a chance to begin recording.

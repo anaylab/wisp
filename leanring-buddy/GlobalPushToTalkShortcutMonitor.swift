@@ -30,6 +30,9 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// not reliably say what they meant when they started speaking.
     private var activeInvocationMode: BuddyPushToTalkShortcut.InvocationMode = .assistant
 
+    /// When the current hold began, for the mode-settling window.
+    private var shortcutPressedAt = Date.distantPast
+
     deinit {
         stop()
     }
@@ -115,6 +118,18 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
 
+        // Shift arriving a moment after Ctrl+Option is the normal case, not an
+        // edge case: the chord is already satisfied by then, so without this
+        // every dictation attempt is read as a question.
+        if isShortcutCurrentlyPressed,
+           eventType == .flagsChanged,
+           activeInvocationMode == .assistant,
+           Date().timeIntervalSince(shortcutPressedAt) < BuddyPushToTalkShortcut.invocationModeSettlingWindow,
+           NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue)).contains(.shift) {
+            activeInvocationMode = .dictation
+            shortcutTransitionPublisher.send(.modeChanged(.dictation))
+        }
+
         let eventKeyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         let shortcutTransition = BuddyPushToTalkShortcut.shortcutTransition(
             for: eventType,
@@ -129,7 +144,11 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
         case .pressed(let mode):
             isShortcutCurrentlyPressed = true
             activeInvocationMode = mode
+            shortcutPressedAt = Date()
             shortcutTransitionPublisher.send(.pressed(mode))
+        case .modeChanged:
+            // Raised by the settling check above, not by the matcher.
+            break
         case .released:
             isShortcutCurrentlyPressed = false
             shortcutTransitionPublisher.send(.released(activeInvocationMode))

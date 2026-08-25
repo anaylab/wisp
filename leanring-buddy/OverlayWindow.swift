@@ -305,7 +305,11 @@ struct BlueCursorView: View {
                 )
 
             // Blue waveform — replaces the triangle while listening
-            BlueCursorWaveformView(audioPowerLevel: companionManager.currentAudioPowerLevel)
+            BlueCursorWaveformView(
+                audioPowerLevel: companionManager.currentAudioPowerLevel,
+                isDictating: companionManager.isDictatingIntoFocusedField,
+                destinationName: companionManager.dictationDestinationName
+            )
                 .opacity(buddyIsVisibleOnThisScreen && companionManager.voiceState == .listening ? cursorOpacity : 0)
                 .position(cursorPosition)
                 .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
@@ -687,27 +691,64 @@ struct BlueCursorView: View {
 /// the user is holding the push-to-talk shortcut and speaking.
 private struct BlueCursorWaveformView: View {
     let audioPowerLevel: CGFloat
+    /// Dictation types your words into the focused field; the assistant answers
+    /// them aloud. Same chord plus shift, so without a visible difference there
+    /// is no way to tell which one you are about to get until it happens.
+    let isDictating: Bool
+    let destinationName: String
 
     private let barCount = 5
     private let listeningBarProfile: [CGFloat] = [0.4, 0.7, 1.0, 0.7, 0.4]
 
+    /// Green for dictation, the usual blue for the assistant.
+    ///
+    /// Colour alone would be a weak signal at this size — and useless to anyone
+    /// who does not distinguish the two — so it is reinforced by the label
+    /// below rather than carrying the meaning by itself.
+    private var tint: Color {
+        isDictating ? DS.Colors.success : DS.Colors.overlayCursorBlue
+    }
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 36.0)) { timelineContext in
-            HStack(alignment: .center, spacing: 2) {
-                ForEach(0..<barCount, id: \.self) { barIndex in
-                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                        .fill(DS.Colors.overlayCursorBlue)
-                        .frame(
-                            width: 2,
-                            height: barHeight(
-                                for: barIndex,
-                                timelineDate: timelineContext.date
+        VStack(spacing: 3) {
+            TimelineView(.animation(minimumInterval: 1.0 / 36.0)) { timelineContext in
+                HStack(alignment: .center, spacing: 2) {
+                    ForEach(0..<barCount, id: \.self) { barIndex in
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(tint)
+                            .frame(
+                                width: 2,
+                                height: barHeight(
+                                    for: barIndex,
+                                    timelineDate: timelineContext.date
+                                )
                             )
-                        )
+                    }
                 }
+                .shadow(color: tint.opacity(0.6), radius: 6, x: 0, y: 0)
+                .animation(.linear(duration: 0.08), value: audioPowerLevel)
             }
-            .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.6), radius: 6, x: 0, y: 0)
-            .animation(.linear(duration: 0.08), value: audioPowerLevel)
+
+            if isDictating {
+                // Names the destination as well as the mode. Which app the text
+                // lands in is the other thing that goes wrong here, and it is
+                // only fixable before you start talking.
+                HStack(spacing: 3) {
+                    Image(systemName: "character.cursor.ibeam")
+                        .font(.system(size: 7, weight: .semibold))
+                    Text(destinationName.isEmpty ? "typing" : destinationName)
+                        .font(.system(size: 8, weight: .medium))
+                        .lineLimit(1)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule().fill(DS.Colors.success)
+                        .shadow(color: DS.Colors.success.opacity(0.5), radius: 4)
+                )
+                .fixedSize()
+            }
         }
     }
 
