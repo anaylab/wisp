@@ -465,6 +465,31 @@ final class CompanionManager: ObservableObject {
     /// way this goes wrong, and it is only recoverable before you speak.
     @Published private(set) var dictationDestinationName = ""
 
+    /// A screenshot taken while the user was speaking, waiting to be claimed.
+    private var speculativeScreenCaptureTask: Task<[CompanionScreenCapture], Error>?
+
+    /// Begins capturing during speech so the transcript does not have to wait.
+    private func startSpeculativeScreenCapture() {
+        speculativeScreenCaptureTask?.cancel()
+        speculativeScreenCaptureTask = Task {
+            try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+        }
+    }
+
+    /// The speculative capture if one is ready, otherwise a fresh one.
+    ///
+    /// Falls back rather than failing: a cancelled or errored prefetch should
+    /// cost the old latency, never the answer.
+    private func claimScreenCaptures() async throws -> [CompanionScreenCapture] {
+        if let task = speculativeScreenCaptureTask {
+            speculativeScreenCaptureTask = nil
+            if let captures = try? await task.value, !captures.isEmpty {
+                return captures
+            }
+        }
+        return try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+    }
+
     private func handleShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {
         switch transition {
         case .pressed(let mode):
@@ -505,6 +530,17 @@ final class CompanionManager: ObservableObject {
 
             WispAnalytics.trackPushToTalkStarted()
             PerfMetricsRecorder.shared.beginPhase(.transcription)
+
+            // Capture while the user is still talking. A screenshot costs
+            // 170-240ms, and taking it after they finish spends that where
+            // they are waiting; taken now it overlaps speech and is already
+            // sitting there when the transcript lands. Speculative, because
+            // whether the question needs a screenshot is not known until the
+            // words exist — but an unused capture costs nothing the user can
+            // perceive, and the screen it records is the one they were looking
+            // at when they started asking, which is the more faithful moment
+            // anyway.
+            startSpeculativeScreenCapture()
 
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = Task {
@@ -709,7 +745,7 @@ final class CompanionManager: ObservableObject {
             do {
                 // Capture all connected screens so the AI has full context
                 PerfMetricsRecorder.shared.beginPhase(.screenCapture)
-                let screenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+                let screenCaptures = try await claimScreenCaptures()
                 PerfMetricsRecorder.shared.endPhase(.screenCapture)
 
                 guard !Task.isCancelled else { return }
@@ -728,6 +764,7 @@ final class CompanionManager: ObservableObject {
                 }
 
                 PerfMetricsRecorder.shared.beginPhase(.chat)
+                PerfMetricsRecorder.shared.beginPhase(.firstToken)
 
                 let fullResponseText: String
                 if Self.isAgentModeEnabled {
@@ -795,6 +832,9 @@ final class CompanionManager: ObservableObject {
                             conversationHistory: historyForAPI,
                             userPrompt: transcript,
                             onTextChunk: { [weak self] chunk in
+                                // First token ends the wait the user actually
+                                // perceives, whatever generation does after.
+                                PerfMetricsRecorder.shared.endPhaseOnce(.firstToken)
                                 // Speak each sentence the moment it is complete
                                 // rather than waiting for the whole reply. This
                                 // is the difference between the first word

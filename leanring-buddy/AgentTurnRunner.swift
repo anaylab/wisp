@@ -82,7 +82,12 @@ final class AgentTurnRunner {
         onNarration: @MainActor (String) -> Void,
         onStep: @MainActor (AgentStepRecord) -> Void
     ) async throws -> Outcome {
-        let tools = toolRegistry.definitions
+        // Scoped to the request rather than the whole registry. All twelve
+        // tools cost 698 prompt tokens and 2.65s of prompt evaluation per turn
+        // against 262 and 0.36s for the handful that are relevant — and a 7B
+        // model's tool choice degrades as the list grows, so the irrelevant
+        // ones are worse than merely expensive.
+        let tools = toolRegistry.definitions(forRequest: userText)
         let toolNames = toolRegistry.toolNames
         let systemPromptWithTools = systemPrompt + StructuredTextToolProtocol.promptInstructions(for: tools)
 
