@@ -46,7 +46,13 @@ final class AppleScriptBrowserController: BrowserController {
                 .replacingOccurrences(of: "\n", with: " ")
             switch self {
             case .chrome:
-                return "tell application \"Google Chrome\" to execute javascript \"\(escaped)\" in active tab of window 1"
+                // `execute javascript "..." in active tab of window 1` is the
+                // documented form and it fails on current Chrome with -1723,
+                // "Access not allowed" — which reads exactly like a permissions
+                // refusal and sent this investigation to the Apple Events
+                // setting, the profile prefs and TCC before the syntax. Telling
+                // the tab and then executing works.
+                return "tell application \"Google Chrome\" to tell active tab of window 1 to execute javascript \"\(escaped)\""
             case .safari:
                 return "tell application \"Safari\" to do JavaScript \"\(escaped)\" in current tab of window 1"
             }
