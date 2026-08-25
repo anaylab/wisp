@@ -107,6 +107,12 @@ final class MCPManager: ObservableObject {
                     print("🔌 MCP: \(configuration.name) connected with \(toolsToExpose.count) tool(s)")
                 }
             } catch {
+                // The subprocess is already running by the time a handshake
+                // fails, and nothing else holds a reference to it — without
+                // this, every failed connection leaks a node process that
+                // lives until the user logs out.
+                await connection.disconnect()
+
                 let errorOutput = await connection.recentErrorOutput
                 updateStatus(for: configuration.name) { status in
                     status.state = .failed(error.localizedDescription)
