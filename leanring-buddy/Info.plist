@@ -12,6 +12,8 @@
 	<string>http://localhost:8004</string>
 	<key>ChatProvider</key>
 	<string>ollama</string>
+	<key>CodeProjectDirectory</key>
+	<string>~/Downloads/clicky</string>
 	<key>AgentModeEnabled</key>
 	<string>true</string>
 	<key>OllamaModel</key>

@@ -166,8 +166,100 @@ final class AgentToolRegistry: ObservableObject {
         }
     }
 
+    /// Hands a coding task to the Claude Code CLI, in the background.
+    ///
+    /// Background because it is slow — measured at 5-7s for even a trivial
+    /// task, and minutes for a real one — and Wisp must stay answerable while
+    /// it runs. Confirmation because it reads the user's source tree, and
+    /// because it is the one tool here that leaves the machine.
+    private func registerClaudeCodeTool() {
+        register(
+            BuddyToolDefinition(
+                name: "delegate_coding_task",
+                description: "Hand a real programming task — reading a codebase, finding a bug, writing or changing code, running tests — to Claude Code. Slow, runs in the background, reports back when done. Do not use for general questions about programming; answer those yourself.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "task": .object([
+                            "type": .string("string"),
+                            "description": .string("The task, written so it stands alone without the conversation.")
+                        ]),
+                        "allow_editing": .object([
+                            "type": .string("boolean"),
+                            "description": .string("True only if the user asked for files to be changed. Defaults to read-only.")
+                        ])
+                    ]),
+                    "required": .array([.string("task")])
+                ]),
+                requiresConfirmation: true
+            )
+        ) { input in
+            guard case .object(let arguments) = input,
+                  case .string(let task)? = arguments["task"],
+                  !task.trimmingCharacters(in: .whitespaces).isEmpty else {
+                return "i need to know what the task is."
+            }
+
+            var allowEditing = false
+            if case .bool(let flag)? = arguments["allow_editing"] { allowEditing = flag }
+
+            let configuredPath = AppBundleConfiguration.stringValue(forKey: "CodeProjectDirectory")
+                ?? "~/Downloads/clicky"
+            let directory = URL(fileURLWithPath: (configuredPath as NSString).expandingTildeInPath)
+
+            guard FileManager.default.fileExists(atPath: directory.path) else {
+                return "i can't find the project folder at \(directory.path)."
+            }
+
+            let taskID = AgentTaskRegistry.shared.beginTask(
+                title: "Claude Code: \(task.prefix(60))", kind: .background
+            )
+
+            let work = Task { @MainActor in
+                do {
+                    let outcome = try await ClaudeCodeWorker.run(
+                        task: task,
+                        workingDirectory: directory,
+                        allowEditing: allowEditing,
+                        onProgress: { progress in
+                            Task { @MainActor in
+                                AgentTaskRegistry.shared.appendStep(
+                                    AgentStepRecord(kind: .tool(name: "claude-code"), summary: progress.summary),
+                                    to: taskID
+                                )
+                            }
+                        }
+                    )
+
+                    // A task that "succeeded" having been refused every edit it
+                    // wanted is not a success, and the result text usually does
+                    // not say so.
+                    var finalText = outcome.text
+                    if !outcome.permissionDenials.isEmpty {
+                        finalText += "\n\n(Blocked from using: \(Set(outcome.permissionDenials).sorted().joined(separator: ", ")))"
+                    }
+
+                    AgentTaskRegistry.shared.finishTask(
+                        taskID,
+                        status: outcome.didSucceed ? .succeeded : .failed(finalText),
+                        finalText: finalText
+                    )
+                } catch {
+                    AgentTaskRegistry.shared.finishTask(
+                        taskID, status: .failed(error.localizedDescription)
+                    )
+                }
+            }
+            AgentTaskRegistry.shared.attachRunningTask(work, to: taskID)
+
+            let mode = allowEditing ? "and can edit files" : "read-only"
+            return "started that in the background (\(mode)). i'll let you know when it's done."
+        }
+    }
+
     private func registerBuiltInTools() {
         registerBrowserTools()
+        registerClaudeCodeTool()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",
