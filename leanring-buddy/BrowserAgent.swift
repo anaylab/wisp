@@ -62,19 +62,48 @@ enum BrowserAgent {
         chatClient: any BuddyVisionChatClient,
         onStep: (@MainActor (String) -> Void)? = nil
     ) async -> BrowserAgentOutcome {
+        BrowserPlanCache.shared.recordRequest()
+
         // The fast path, unchanged. A recognised request never reaches the
         // model at all — measured at 964ms end to end, and worth protecting.
-        if let deterministicPlan = BrowserTaskPlanner.plan(for: request) {
-            onStep?("recognised the request — no planning call needed")
-            let result = await BrowserTaskRunner.execute(deterministicPlan, using: controller, onStep: onStep)
-            return BrowserAgentOutcome(
-                result: result,
-                planningCallCount: 0,
-                replanCount: 0,
-                planningDuration: 0,
-                planTokenEstimate: 0,
-                authenticationRequiredAt: authenticationPrompt(in: result.finalSnapshot)
-            )
+        if let intent = BrowserTaskPlanner.intent(for: request) {
+            let cache = BrowserPlanCache.shared
+            let steps: [BrowserStep]?
+
+            if let cached = cache.cachedSteps(for: intent) {
+                cache.recordCacheHit()
+                steps = cached.steps
+            } else if let computed = BrowserTaskPlanner.steps(for: intent) {
+                cache.recordDeterministicHit()
+                // Templated, so a later request with a different parameter gets
+                // its own results rather than this one's.
+                if let template = BrowserTaskPlanner.steps(for: intent, templated: true) {
+                    cache.store(steps: template, for: intent, wasModelWritten: false)
+                }
+                steps = computed
+            } else {
+                steps = nil
+            }
+
+            if let steps {
+                let deterministicPlan = BrowserTaskPlan(goal: request, steps: steps)
+                onStep?("recognised as \(intent.description) — no planning call needed")
+                let result = await BrowserTaskRunner.execute(deterministicPlan, using: controller, onStep: onStep)
+                // A plan that stopped working is dropped, so a site redesign
+                // costs one bad run rather than every run.
+                if !result.didSucceed {
+                    BrowserPlanCache.shared.invalidate(intent)
+                    BrowserPlanCache.shared.recordFailure()
+                }
+                return BrowserAgentOutcome(
+                    result: result,
+                    planningCallCount: 0,
+                    replanCount: 0,
+                    planningDuration: 0,
+                    planTokenEstimate: 0,
+                    authenticationRequiredAt: authenticationPrompt(in: result.finalSnapshot)
+                )
+            }
         }
 
         return await runWithModelPlanning(
@@ -119,6 +148,7 @@ enum BrowserAgent {
                                      duration: totalPlanningDuration, tokens: tokenEstimate)
             }
             planningCalls += 1
+            BrowserPlanCache.shared.recordModelPlanningCall()
             totalPlanningDuration += Date().timeIntervalSince(planningStartedAt)
             tokenEstimate += (promptText.count + modelOutput.count) / 4
 
@@ -133,6 +163,7 @@ enum BrowserAgent {
                 // told exactly what was wrong and gets one more attempt.
                 failureContext = "Your previous plan was rejected: \(error.localizedDescription) Return only valid JSON."
                 replans += 1
+                BrowserPlanCache.shared.recordReplan()
                 continue
             }
 

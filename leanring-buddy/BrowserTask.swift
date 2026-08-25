@@ -212,68 +212,164 @@ enum BrowserTaskRunner {
 
 @MainActor
 enum BrowserTaskPlanner {
-    /// Sites people name by word rather than by address.
-    private static let knownSites: [String: String] = [
-        "google": "https://www.google.com/search?q=",
-        "youtube": "https://www.youtube.com/results?search_query=",
-        "wikipedia": "https://en.wikipedia.org/w/index.php?search=",
-        "github": "https://github.com/search?q=",
-        "amazon": "https://www.amazon.com/s?k=",
-        "stack overflow": "https://stackoverflow.com/search?q=",
+    /// Requests that name a site but are not a public search of it.
+    ///
+    /// "Find my open GitHub issues" contains "github" and a plausible query, so
+    /// a naive matcher confidently turns it into a GitHub search for the phrase
+    /// "my open github issues" — a page of nothing, delivered with certainty.
+    /// Whose data is meant is exactly what a deterministic planner cannot know,
+    /// so possessive language sends the request to the model instead.
+    private static let personalDataMarkers = [
+        "my ", "my_", "our ", "mine", "i have", "i've", "assigned to me",
+        "for me", "my account", "logged in", "signed in",
     ]
+
+    /// Verbs that mean "show me this site", with nothing else asked for.
+    private static let navigationPrefixes = ["open ", "go to ", "navigate to ", "launch ", "visit "]
+
+    /// Verbs that mean "search".
+    private static let searchMarkers = ["search ", "look up ", "find ", "google "]
 
     /// Recognises common requests without asking the model.
     ///
-    /// "Search Google for X" has exactly one sensible shape, and planning it
-    /// with a language model costs a round trip to reach a conclusion that was
-    /// never in doubt. Anything not recognised here returns nil and the caller
-    /// falls back to the model, so this is a shortcut rather than a ceiling.
+    /// Returns nil for anything whose workflow is not genuinely predictable.
+    /// A miss costs one planning call; a confident wrong plan costs the user's
+    /// trust, so this refuses far more readily than it guesses.
     static func plan(for request: String) -> BrowserTaskPlan? {
+        intent(for: request).flatMap { steps(for: $0).map { BrowserTaskPlan(goal: request, steps: $0) } }
+    }
+
+    /// Normalises a request to a reusable shape, or nil if it is not one.
+    ///
+    /// Separate from planning so the cache can key on the shape while the
+    /// parameter varies — "nvidia on wikipedia" and "tesla on wikipedia" are one
+    /// cached plan, not two.
+    static func intent(for request: String) -> BrowserIntent? {
         let text = request.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".!?"))
+        guard !text.isEmpty else { return nil }
 
-        // "search <site> for <query>" / "<site> search for <query>"
-        for (siteName, searchPrefix) in knownSites {
-            guard text.contains(siteName) else { continue }
-            guard let query = extractSearchQuery(from: text, siteName: siteName), !query.isEmpty else { continue }
-            guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                  let url = URL(string: searchPrefix + encoded) else { continue }
+        // Anything about the user's own account needs a real page read.
+        guard !personalDataMarkers.contains(where: { text.contains($0) }) else { return nil }
 
-            // Straight to the results URL rather than loading the homepage and
-            // driving its search box: fewer steps, no dependence on that site's
-            // markup, and the same destination.
-            return BrowserTaskPlan(
-                goal: request,
-                steps: [.open(url: url), .read]
-            )
+        // A literal address is unambiguous whatever the phrasing around it.
+        if let url = explicitURL(in: text) {
+            return BrowserIntent(shape: "url.open", parameter: url.absoluteString)
         }
 
-        // "open <url>" / "go to <domain>"
-        if let url = extractURL(from: text) {
-            return BrowserTaskPlan(goal: request, steps: [.open(url: url), .read])
+        guard let site = BrowserSiteRegistry.site(namedIn: text) else { return nil }
+
+        if let query = searchQuery(in: text, site: site), !query.isEmpty {
+            guard site.searchURLTemplate != nil else { return nil }
+            return BrowserIntent(shape: "\(site.name).search", parameter: query)
+        }
+
+        // "open wikipedia" — a site named, nothing else asked.
+        if navigationPrefixes.contains(where: { text.hasPrefix($0) }) {
+            let remainder = text
+                .replacingOccurrences(of: "the ", with: " ")
+                .split(separator: " ")
+                .filter { part in !navigationPrefixes.contains(where: { $0.trimmingCharacters(in: .whitespaces) == part }) }
+            // Only when the site name is essentially the whole request.
+            let words = remainder.filter { word in
+                !site.allNames.contains(where: { $0.contains(word) })
+            }
+            if words.count <= 1 {
+                return BrowserIntent(shape: "\(site.name).open", parameter: nil)
+            }
         }
         return nil
     }
 
-    private static func extractSearchQuery(from text: String, siteName: String) -> String? {
-        // "... for <query>" is the reliable marker; everything before it is
-        // phrasing that varies too much to parse.
+    /// Turns an intent into steps.
+    ///
+    /// - Parameter templated: builds the plan with a literal `{query}` where
+    ///   the parameter goes, for storing in the cache. A cache that stored the
+    ///   concrete URL would return the first caller's results to every later
+    ///   one — silently, since the plan still executes perfectly.
+    static func steps(for intent: BrowserIntent, templated: Bool = false) -> [BrowserStep]? {
+        let parameter = templated ? "{query}" : intent.parameter
+        if intent.shape == "url.open" {
+            // Never templated: a literal address has no reusable shape.
+            guard let raw = intent.parameter, let url = URL(string: raw) else { return nil }
+            return [.open(url: url), .read]
+        }
+
+        let parts = intent.shape.split(separator: ".")
+        guard parts.count == 2,
+              let site = BrowserSiteRegistry.sites.first(where: { $0.name == String(parts[0]) })
+        else { return nil }
+
+        switch parts[1] {
+        case "search":
+            guard let query = parameter else { return nil }
+            // The placeholder must survive percent-encoding to be findable later.
+            let url = templated
+                ? site.searchURLTemplate.flatMap { URL(string: $0.replacingOccurrences(of: "{query}", with: "%7Bquery%7D")) }
+                : site.searchURL(for: query)
+            guard let url else { return nil }
+            // Straight to the results URL rather than driving the site's own
+            // search box: fewer steps, and no dependence on its markup.
+            return [.open(url: url), .read]
+        case "open":
+            guard let url = site.homeURLValue else { return nil }
+            return [.open(url: url), .read]
+        default:
+            return nil
+        }
+    }
+
+    // MARK: - Parsing
+
+    /// The search terms, if this is a search of the named site.
+    private static func searchQuery(in text: String, site: BrowserSiteDefinition) -> String? {
+        guard searchMarkers.contains(where: { text.contains($0) }) || text.hasPrefix(site.name) else {
+            return nil
+        }
+
+        // "... for <query>" and "... <query> on <site>" are the two reliable
+        // shapes. Anything else is phrasing that varies too much to parse
+        // without guessing.
         if let range = text.range(of: " for ") {
-            return String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            return cleaned(String(text[range.upperBound...]), site: site)
         }
-        if let range = text.range(of: "\(siteName) ") {
-            let remainder = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-            return remainder.isEmpty ? nil : remainder
+        if let range = text.range(of: " on ") {
+            let before = String(text[..<range.lowerBound])
+            let after = String(text[range.upperBound...])
+            // "find X on wikipedia" — the site is after, the query before.
+            if site.allNames.contains(where: { after.contains($0) }) {
+                return cleaned(before, site: site)
+            }
+        }
+        // "google the weather in boston"
+        if let range = text.range(of: site.name) {
+            return cleaned(String(text[range.upperBound...]), site: site)
         }
         return nil
     }
 
-    private static func extractURL(from text: String) -> URL? {
+    /// Removes the leading verb and the site's own name from a query.
+    private static func cleaned(_ raw: String, site: BrowserSiteDefinition) -> String {
+        var query = raw.trimmingCharacters(in: .whitespaces)
+        for marker in searchMarkers + navigationPrefixes where query.hasPrefix(marker) {
+            query = String(query.dropFirst(marker.count))
+        }
+        for name in site.allNames {
+            query = query.replacingOccurrences(of: name, with: " ")
+        }
+        for filler in ["the ", "a ", "an "] where query.hasPrefix(filler) {
+            query = String(query.dropFirst(filler.count))
+        }
+        return query.trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func explicitURL(in text: String) -> URL? {
         for word in text.split(separator: " ") {
             let candidate = String(word).trimmingCharacters(in: CharacterSet(charactersIn: ".,!?"))
             if candidate.hasPrefix("http"), let url = URL(string: candidate) { return url }
             if candidate.contains("."), !candidate.hasSuffix("."),
-               let url = URL(string: "https://" + candidate),
-               url.host()?.contains(".") == true {
+               candidate.range(of: "^[a-z0-9.-]+\\.[a-z]{2,}(/.*)?$", options: [.regularExpression]) != nil,
+               let url = URL(string: "https://" + candidate) {
                 return url
             }
         }
