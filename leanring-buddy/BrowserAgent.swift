@@ -161,7 +161,7 @@ enum BrowserAgent {
             } catch {
                 // A malformed plan is itself a recoverable failure: the model is
                 // told exactly what was wrong and gets one more attempt.
-                failureContext = "Your previous plan was rejected: \(error.localizedDescription) Return only valid JSON."
+                failureContext = "rejected: \(error.localizedDescription) reply with plan lines only."
                 replans += 1
                 BrowserPlanCache.shared.recordReplan()
                 continue
@@ -191,14 +191,16 @@ enum BrowserAgent {
 
             // Failed. Give the model the structured state rather than the raw
             // error, so it revises against what the page actually shows.
+            // Only what a correction needs: what broke, where the browser is
+            // now, and what can be clicked. Not the page's text, not the
+            // original plan, not the conversation — a replan that resends the
+            // page body pays for it in prompt evaluation on every attempt.
             let state = stepState(from: result)
             failureContext = """
-            Your previous plan failed.
-            Failed step: \(result.stepLog.last ?? "unknown")
-            Current URL: \(state.url)
-            Current page title: \(state.title)
-            What is on the page now: \(state.pageState)
-            Write a corrected plan that starts from this page.
+            failed: \(result.failureReason ?? "step failed")
+            now at: \(state.url)
+            clickable: \(state.pageState)
+            plan again from this page.
             """
             replans += 1
         }
@@ -214,29 +216,37 @@ enum BrowserAgent {
 
     // MARK: - Prompts
 
-    /// Kept deliberately tight. The model's whole job is the JSON.
+    /// The planner's whole context, and deliberately nothing else.
+    ///
+    /// It gets the goal, the allowed actions, and — when replanning — the page
+    /// it is standing on. It does not get MCP tools, filesystem tools, screen
+    /// tools, conversation history or Wisp's own voice instructions, none of
+    /// which bear on choosing a URL, and all of which would be re-evaluated on
+    /// every planning call.
+    ///
+    /// The line form rather than JSON because generation dominates planning
+    /// cost: measured at 12 output tokens against JSON's 40, which is 1.25s per
+    /// call on this machine. The validator accepts both, so this is a request
+    /// for the cheaper spelling rather than a constraint the model must satisfy.
     private static let planningSystemPrompt = """
-    you turn a browser request into a plan. reply with ONLY a json object, no prose, no code fence.
+    turn a browser request into a plan. one action per line, nothing else. no prose, no json.
 
-    schema:
-    {"goal":"<the request>","steps":[ ... ]}
-
-    allowed actions, and nothing else:
-    {"action":"open_url","url":"https://example.com"}
-    {"action":"read_page"}
-    {"action":"find","target":"<visible text of the thing>"}
-    {"action":"click","target":"<visible text>"}
-    {"action":"type","target":"<field name>","text":"<what to type>","submit":true}
-    {"action":"scroll","direction":"down"}
-    {"action":"back"}
-    {"action":"forward"}
+    lines:
+    open <url>
+    click <visible text>
+    type <field> = <text>
+    scroll <up|down>
+    back
+    read
 
     rules:
-    - the first step must be open_url. you cannot click on a page you have not opened.
-    - refer to things by the visible text a person would read, never by css selector or coordinates.
-    - keep it to the fewest steps that could work. under six is normal.
-    - prefer going straight to a url that already shows what is wanted over clicking through a homepage.
+    - first line must be open.
+    - name things by visible text, never css or coordinates.
+    - fewest lines that work. three is normal.
+    - prefer a url that already shows what is wanted.
     - do not invent urls for sites you are unsure of.
+    - type already submits. never add a line for pressing enter.
+    - use only the lines listed above. any other word is rejected and costs a retry.
     """
 
     private static func planningPrompt(for request: String, failureContext: String?) -> String {
@@ -248,7 +258,7 @@ enum BrowserAgent {
 
     private static func stepState(from result: BrowserTaskResult) -> BrowserStepState {
         let snapshot = result.finalSnapshot
-        let elementSummary = snapshot?.elements.prefix(10)
+        let elementSummary = snapshot?.elements.prefix(8)
             .map { "\($0.label) [\($0.role)]" }
             .joined(separator: ", ") ?? "nothing readable"
 
