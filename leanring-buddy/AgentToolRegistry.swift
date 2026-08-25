@@ -134,15 +134,19 @@ final class AgentToolRegistry: ObservableObject {
                   case .object(let arguments) = input,
                   case .string(let request)? = arguments["request"] else { return "i need to know what to do." }
 
-            // Deterministic plan first. "Search google for X" has one sensible
-            // shape, and asking the model to describe it costs a round trip to
-            // reach a conclusion that was never in doubt.
-            guard let plan = BrowserTaskPlanner.plan(for: request) else {
-                return "i can't work out the steps for that yet — try naming a site and what to search for."
+            // BrowserAgent tries the deterministic planner first and only falls
+            // back to a planning call when the request is not recognised.
+            let outcome = await BrowserAgent.run(
+                request: request,
+                controller: self.browserController,
+                chatClient: BuddyVisionChatClientFactory.makeDefaultProvider()
+            )
+
+            if let authURL = outcome.authenticationRequiredAt {
+                return "that page wants you to sign in first (\(authURL)). log in yourself and ask me again — i won't try to get past it."
             }
 
-            let result = await BrowserTaskRunner.execute(plan, using: self.browserController)
-            return result.promptRepresentation()
+            return outcome.result.promptRepresentation()
         }
 
         register(
