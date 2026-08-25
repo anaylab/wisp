@@ -450,10 +450,17 @@ final class CompanionManager: ObservableObject {
             }
     }
 
+    /// Whether the hold in progress is dictation rather than a question.
+    ///
+    /// Captured at press time so the finished transcript is routed the way the
+    /// user meant when they started speaking.
+    private var isDictatingIntoFocusedField = false
+
     private func handleShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {
         switch transition {
-        case .pressed:
+        case .pressed(let mode):
             guard !buddyDictationManager.isDictationInProgress else { return }
+            isDictatingIntoFocusedField = (mode == .dictation)
 
             // Cancel any pending transient hide so the overlay stays visible
             transientHideTask?.cancel()
@@ -565,6 +572,47 @@ final class CompanionManager: ObservableObject {
 
     // MARK: - AI Response Pipeline
 
+    /// Puts a dictated transcript into whatever field has focus.
+    ///
+    /// Recorded in the dashboard like any other turn, because "where did that
+    /// text go" is a question people ask, and silent insertion into the wrong
+    /// app is otherwise untraceable.
+    private func insertDictatedTranscript(_ transcript: String) {
+        let destination = DictatedTextInserter.frontmostApplicationName()
+        let taskID = AgentTaskRegistry.shared.beginTask(title: "Dictation → \(destination)")
+
+        let method = DictatedTextInserter.insert(transcript)
+
+        switch method {
+        case .accessibility, .paste:
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(
+                    kind: .tool(name: "dictation"),
+                    summary: "Inserted \(transcript.count) characters into \(destination)"
+                ),
+                to: taskID
+            )
+            AgentTaskRegistry.shared.finishTask(taskID, status: .succeeded, finalText: transcript)
+
+        case .failed:
+            // Said aloud rather than only logged: the user is looking at the
+            // field they expected text to appear in, and silence there is
+            // indistinguishable from the app having missed the whole utterance.
+            AgentTaskRegistry.shared.finishTask(
+                taskID, status: .failed("No editable field had focus.")
+            )
+            currentResponseTask = Task { [weak self] in
+                guard let self else { return }
+                try? await self.ttsProvider.speakText("i couldn't find a text field to type into.")
+                if !Task.isCancelled { self.voiceState = .idle }
+            }
+            return
+        }
+
+        voiceState = .idle
+        scheduleTransientHideIfNeeded()
+    }
+
     /// Captures a screenshot, sends it along with the transcript to Claude,
     /// and plays the response aloud. The cursor stays in
     /// the spinner/processing state until TTS audio begins playing.
@@ -573,6 +621,15 @@ final class CompanionManager: ObservableObject {
     private func sendTranscriptToClaudeWithScreenshot(transcript: String) {
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
+
+        // Dictation never reaches the model. The user asked for their words in
+        // a text field, not for an answer, so there is nothing to think about
+        // and nothing to say back — the text appearing is the whole response.
+        if isDictatingIntoFocusedField {
+            isDictatingIntoFocusedField = false
+            insertDictatedTranscript(transcript)
+            return
+        }
 
         // Record this interaction for the dashboard. Today a turn is a single
         // model call, so it's a one-step task; the shape already matches what

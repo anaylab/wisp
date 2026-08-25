@@ -137,7 +137,17 @@ struct CompanionPanelView: View {
     @ViewBuilder
     private var permissionsCopySection: some View {
         if companionManager.allPermissionsGranted {
-            Text("Hold Control+Option to talk.")
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Hold Control+Option to talk.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                // Same chord plus shift, so there is one thing to remember
+                // rather than two unrelated shortcuts.
+                Text("Add Shift to dictate into whatever you're typing in.")
+                    .font(.system(size: 11))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(DS.Colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)

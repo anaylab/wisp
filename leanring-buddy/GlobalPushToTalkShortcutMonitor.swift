@@ -23,6 +23,13 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// waiting for the async dictation state pipeline to catch up.
     @Published private(set) var isShortcutCurrentlyPressed = false
 
+    /// Which mode the current hold started in.
+    ///
+    /// Remembered rather than re-derived on release: the user lifts shift and
+    /// control at slightly different moments, so the flags at release time do
+    /// not reliably say what they meant when they started speaking.
+    private var activeInvocationMode: BuddyPushToTalkShortcut.InvocationMode = .assistant
+
     deinit {
         stop()
     }
@@ -119,12 +126,13 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
         switch shortcutTransition {
         case .none:
             break
-        case .pressed:
+        case .pressed(let mode):
             isShortcutCurrentlyPressed = true
-            shortcutTransitionPublisher.send(.pressed)
+            activeInvocationMode = mode
+            shortcutTransitionPublisher.send(.pressed(mode))
         case .released:
             isShortcutCurrentlyPressed = false
-            shortcutTransitionPublisher.send(.released)
+            shortcutTransitionPublisher.send(.released(activeInvocationMode))
         }
 
         return Unmanaged.passUnretained(event)

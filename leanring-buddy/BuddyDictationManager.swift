@@ -80,10 +80,22 @@ enum BuddyPushToTalkShortcut {
         }
     }
 
-    enum ShortcutTransition {
+    /// What holding the chord means this time.
+    ///
+    /// Adding shift to the existing chord rather than inventing a second one:
+    /// the mental model stays "same keys, shift means type it instead of say
+    /// it", and there is no new combination to learn or collide with.
+    enum InvocationMode: Sendable, Equatable {
+        /// Ctrl+Option — ask a question, hear an answer.
+        case assistant
+        /// Ctrl+Option+Shift — dictate into whatever has focus.
+        case dictation
+    }
+
+    enum ShortcutTransition: Equatable {
         case none
-        case pressed
-        case released
+        case pressed(InvocationMode)
+        case released(InvocationMode)
     }
 
     private enum ShortcutEventType {
@@ -166,11 +178,19 @@ enum BuddyPushToTalkShortcut {
             let isShortcutCurrentlyPressed = modifierFlags.contains(modifierOnlyFlags)
 
             if isShortcutCurrentlyPressed && !wasShortcutPreviouslyPressed {
-                return .pressed
+                // Shift has to be checked explicitly. The base test is
+                // `contains`, so Ctrl+Option+Shift satisfies Ctrl+Option too
+                // and would otherwise silently start the assistant when the
+                // user meant to dictate.
+                let mode: InvocationMode = modifierFlags.contains(.shift) ? .dictation : .assistant
+                return .pressed(mode)
             }
 
             if !isShortcutCurrentlyPressed && wasShortcutPreviouslyPressed {
-                return .released
+                // The mode is decided at press time and carried by the caller,
+                // so adding or dropping shift mid-hold cannot switch modes
+                // halfway through an utterance.
+                return .released(.assistant)
             }
 
             return .none
@@ -186,13 +206,13 @@ enum BuddyPushToTalkShortcut {
             && keyCode == pushToTalkKeyCode
             && matchesModifierFlags
             && !wasShortcutPreviouslyPressed {
-            return .pressed
+            return .pressed(modifierFlags.contains(.shift) ? .dictation : .assistant)
         }
 
         if shortcutEventType == .keyUp
             && keyCode == pushToTalkKeyCode
             && wasShortcutPreviouslyPressed {
-            return .released
+            return .released(.assistant)
         }
 
         return .none
