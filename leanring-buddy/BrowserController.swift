@@ -151,9 +151,32 @@ protocol BrowserController: AnyObject {
     /// Chooses an option in a `<select>` by visible text.
     func selectOption(_ optionLabel: String, inElementID elementID: String) throws
 
+    /// Blocks until the page has finished loading, or the deadline passes.
+    ///
+    /// Every step after a navigation depends on this. Without it a snapshot
+    /// reads the outgoing page and a click lands on an element that is about
+    /// to be replaced — the kind of failure that looks like flakiness rather
+    /// than a missing wait.
+    func waitUntilLoaded(timeout: TimeInterval) async -> Bool
+
     /// A screenshot of the page, for the cases the DOM genuinely cannot answer.
     ///
     /// Present so vision remains reachable as a deliberate fallback rather than
     /// the default. Everything above should be tried first.
     func captureScreenshot() async throws -> Data
+}
+
+extension BrowserController {
+    /// Default page budget for callers that do not care.
+    ///
+    /// Protocol requirements cannot carry default arguments, so this exists to
+    /// keep every call site from having to restate a number whose value is
+    /// argued for in one place — and whose whole point is that it stays small.
+    func snapshot() throws -> BrowserPageSnapshot {
+        try snapshot(maximumTextCharacters: AppleScriptBrowserController.defaultTextCharacterLimit)
+    }
+
+    func waitUntilLoaded() async -> Bool {
+        await waitUntilLoaded(timeout: 10)
+    }
 }

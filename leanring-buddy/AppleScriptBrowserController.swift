@@ -336,6 +336,20 @@ final class AppleScriptBrowserController: BrowserController {
         }
     }
 
+    func waitUntilLoaded(timeout: TimeInterval = 10) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            // readyState is the browser's own answer, so this waits exactly as
+            // long as the page needs rather than a guessed constant.
+            if let state = try? requireBrowser(),
+               runJavaScript("document.readyState", in: state) == "complete" {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(120))
+        }
+        return false
+    }
+
     /// Screenshots the whole screen, not just the page.
     ///
     /// Reuses the app's existing capture path so the 896px cap and the

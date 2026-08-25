@@ -92,7 +92,8 @@ enum AgentToolScope: String, CaseIterable {
 
         switch self {
         case .browser:
-            return name == "read_page" || name == "click_element" || name == "open_url"
+            return name == "browser_task" || name == "read_page"
+                || name == "click_element" || name == "open_url"
         case .filesystem:
             return name.hasPrefix("filesystem__")
         case .coding:

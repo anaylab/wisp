@@ -117,6 +117,36 @@ final class AgentToolRegistry: ObservableObject {
     private func registerBrowserTools() {
         register(
             BuddyToolDefinition(
+                name: "browser_task",
+                description: "Run a whole browser workflow in one go — open a site, search it, and read the result — then report back. Prefer this over open_url plus read_page for anything that takes more than one step.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object(["request": .object([
+                        "type": .string("string"),
+                        "description": .string("What to do, in plain words, e.g. \"search google for nvidia stock\"")
+                    ])]),
+                    "required": .array([.string("request")])
+                ]),
+                requiresConfirmation: true
+            )
+        ) { [weak self] input in
+            guard let self,
+                  case .object(let arguments) = input,
+                  case .string(let request)? = arguments["request"] else { return "i need to know what to do." }
+
+            // Deterministic plan first. "Search google for X" has one sensible
+            // shape, and asking the model to describe it costs a round trip to
+            // reach a conclusion that was never in doubt.
+            guard let plan = BrowserTaskPlanner.plan(for: request) else {
+                return "i can't work out the steps for that yet — try naming a site and what to search for."
+            }
+
+            let result = await BrowserTaskRunner.execute(plan, using: self.browserController)
+            return result.promptRepresentation()
+        }
+
+        register(
+            BuddyToolDefinition(
                 name: "read_page",
                 description: "Read the current browser page as text, including every clickable element with an id. Use this instead of looking at the screen whenever the question is about a web page.",
                 inputSchema: .object(["type": .string("object"), "properties": .object([:])])
