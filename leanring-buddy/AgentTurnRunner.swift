@@ -37,7 +37,21 @@ final class AgentTurnRunner {
 
     /// A tool that hasn't answered in this long is treated as failed, so one
     /// wedged tool can't hold the whole conversation open.
-    private static let perToolTimeoutSeconds: TimeInterval = 20
+    /// How long one tool gets, including any permission prompt.
+    ///
+    /// This has to outlast the confirmation window, not merely the work.
+    /// Permission is now asked inside the registry, so it happens *within* this
+    /// timeout — at the previous flat 20s every prompt would have been
+    /// abandoned after twenty seconds while the card on screen still showed
+    /// forty-five counting down, and the user's approval would have landed on a
+    /// turn that had already given up.
+    private static let toolWorkTimeoutSeconds: TimeInterval = 20
+    private static var perToolTimeoutSeconds: TimeInterval {
+        ToolConfirmationCoordinator.confirmationTimeoutSeconds + toolWorkTimeoutSeconds
+    }
+
+    /// Exposed so a test can assert the ordering that keeps prompts alive.
+    static var perToolTimeoutSecondsForTesting: TimeInterval { perToolTimeoutSeconds }
 
     struct Outcome {
         /// The final reply, with any tool tags removed — this is what's spoken.
@@ -162,40 +176,30 @@ final class AgentTurnRunner {
 
                 let toolStartedAt = Date()
 
-                // Anything that could change something is asked about first.
-                // A refusal is reported to the model as an ordinary result so
-                // it can respond to it, rather than as an error that ends the
-                // turn with nothing said.
-                if toolRegistry.requiresConfirmation(forToolNamed: call.name) {
-                    let decision = await ToolConfirmationCoordinator.shared.requestApproval(
-                        toolName: call.name,
-                        argumentSummary: call.input.compactDescription,
-                        speak: speakConfirmation
-                    )
-
-                    if case .declined(let reason) = decision {
-                        let declinedStep = AgentStepRecord(
-                            kind: .tool(name: call.name),
-                            summary: "Not run — \(reason)",
-                            detail: call.input.compactDescription,
-                            startedAt: toolStartedAt,
-                            durationSeconds: Date().timeIntervalSince(toolStartedAt)
-                        )
-                        steps.append(declinedStep)
-                        onStep(declinedStep)
-
-                        resultsForModel.append(
-                            StructuredTextToolProtocol.resultMessageText(
-                                toolName: call.name,
-                                content: "the user did not approve this (\(reason)). tell them briefly and don't try it again.",
-                                isError: false
-                            )
-                        )
-                        continue
-                    }
-                }
-
+                // No permission check here any more. The registry asks before
+                // it runs anything that needs asking, so a second check would
+                // prompt twice — and more importantly, a check here would only
+                // protect this one caller.
                 let outcome = await runToolWithTimeout(name: call.name, input: call.input)
+
+                if outcome.wasDeclined {
+                    let declinedStep = AgentStepRecord(
+                        kind: .tool(name: call.name),
+                        summary: "Not run — you didn't approve it",
+                        detail: call.input.compactDescription,
+                        startedAt: toolStartedAt,
+                        durationSeconds: Date().timeIntervalSince(toolStartedAt)
+                    )
+                    steps.append(declinedStep)
+                    onStep(declinedStep)
+
+                    resultsForModel.append(
+                        StructuredTextToolProtocol.resultMessageText(
+                            toolName: call.name, content: outcome.content, isError: false
+                        )
+                    )
+                    continue
+                }
 
                 let toolStep = AgentStepRecord(
                     kind: .tool(name: call.name),
@@ -230,8 +234,12 @@ final class AgentTurnRunner {
     }
 
     /// Runs one tool, giving up after `perToolTimeoutSeconds`.
-    private func runToolWithTimeout(name: String, input: JSONValue) async -> (content: String, isError: Bool) {
-        await withTaskGroup(of: (content: String, isError: Bool)?.self) { group in
+    ///
+    /// The timeout deliberately covers the permission prompt as well as the
+    /// work: a question nobody answers should release the turn rather than hold
+    /// it open indefinitely. The broker's own 45s expiry is the inner bound.
+    private func runToolWithTimeout(name: String, input: JSONValue) async -> AgentToolRegistry.Outcome {
+        await withTaskGroup(of: AgentToolRegistry.Outcome?.self) { group in
             group.addTask { @MainActor in
                 await AgentToolRegistry.shared.invoke(name: name, input: input)
             }
@@ -243,7 +251,10 @@ final class AgentTurnRunner {
             let first = await group.next() ?? nil
             group.cancelAll()
 
-            return first ?? ("the \(name) tool took too long and was stopped.", true)
+            return first ?? AgentToolRegistry.Outcome(
+                content: "the \(name) tool took too long and was stopped.",
+                isError: true, wasDeclined: false
+            )
         }
     }
 

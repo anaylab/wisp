@@ -27,10 +27,20 @@
 //
 
 import Combine
+
+/// Whoever decides whether a tool may run.
+///
+/// A protocol so the tool registry depends on the decision rather than on the
+/// spoken-confirmation UI, which is what makes the boundary testable without a
+/// microphone, a user, or a running app.
+@MainActor
+protocol ToolPermissionBroker: AnyObject {
+    func requestApproval(toolName: String, argumentSummary: String) async -> ToolConfirmationCoordinator.Decision
+}
 import Foundation
 
 @MainActor
-final class ToolConfirmationCoordinator: ObservableObject {
+final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker {
     static let shared = ToolConfirmationCoordinator()
 
     struct PendingConfirmation: Identifiable {
@@ -54,9 +64,25 @@ final class ToolConfirmationCoordinator: ObservableObject {
 
     /// Unanswered prompts expire. Long enough to walk back to the keyboard,
     /// short enough that a forgotten prompt doesn't leave a turn hanging.
-    private static let confirmationTimeoutSeconds: TimeInterval = 45
+    static let confirmationTimeoutSeconds: TimeInterval = 45
 
     @Published private(set) var pendingConfirmation: PendingConfirmation?
+
+    /// How questions are asked aloud.
+    ///
+    /// Installed once at startup rather than passed per call, because approval
+    /// now happens inside the tool registry — which has no business knowing
+    /// which text-to-speech provider is configured, and would otherwise have to
+    /// thread a closure through every caller that might ever run a tool.
+    ///
+    /// Nil means nothing can be spoken. That is not treated as permission: an
+    /// unanswerable question is refused rather than assumed, since a user who
+    /// cannot hear the prompt cannot have consented to it.
+    private var speakHandler: (@MainActor (String) async -> Void)?
+
+    func installSpeechHandler(_ handler: @escaping @MainActor (String) async -> Void) {
+        speakHandler = handler
+    }
 
     private var pendingContinuation: CheckedContinuation<Decision, Never>?
     private var timeoutTask: Task<Void, Never>?
@@ -68,6 +94,19 @@ final class ToolConfirmationCoordinator: ObservableObject {
     /// - Parameter speak: Used to ask the question aloud. Injected rather than
     ///   reached for directly so this type stays independent of which
     ///   text-to-speech provider is configured.
+    /// Asks using the installed speech handler.
+    ///
+    /// The entry point for the permission boundary inside the tool registry.
+    func requestApproval(toolName: String, argumentSummary: String) async -> Decision {
+        guard let speakHandler else {
+            // No way to ask means no way to consent.
+            return .declined(reason: "there was no way to ask you about this")
+        }
+        return await requestApproval(
+            toolName: toolName, argumentSummary: argumentSummary, speak: speakHandler
+        )
+    }
+
     func requestApproval(
         toolName: String,
         argumentSummary: String,

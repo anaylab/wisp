@@ -181,21 +181,50 @@ struct BuddyToolDefinition: Sendable {
     let description: String
     /// A JSON Schema object describing the tool's arguments.
     let inputSchema: JSONValue
-    /// Tools that change state (rather than only reading it) must be
-    /// confirmed by the user before they run. Everything ships read-only
-    /// until that confirmation flow exists.
-    let requiresConfirmation: Bool
 
+    /// What this tool does to the world. The permission layer reasons about
+    /// these facts rather than about a pre-computed decision.
+    let metadata: ToolMetadata
+
+    /// Whether the user must approve this before it runs.
+    ///
+    /// Derived from `metadata` rather than stored, so a tool cannot describe
+    /// itself as destructive and separately as not needing approval.
+    var requiresConfirmation: Bool { metadata.requiresConfirmation }
+
+    init(
+        name: String,
+        description: String,
+        inputSchema: JSONValue,
+        metadata: ToolMetadata
+    ) {
+        self.name = name
+        self.description = description
+        self.inputSchema = inputSchema
+        self.metadata = metadata
+    }
+
+    /// Retained so existing registrations keep compiling unchanged.
+    ///
+    /// A bare boolean cannot say *why* a tool needs approval, so this infers
+    /// the most conservative facts consistent with it: anything that asks is
+    /// treated as writing with external effects until it says otherwise. Tools
+    /// are migrated to explicit metadata one at a time rather than in a single
+    /// sweep that would touch every registration at once.
     init(
         name: String,
         description: String,
         inputSchema: JSONValue,
         requiresConfirmation: Bool = false
     ) {
-        self.name = name
-        self.description = description
-        self.inputSchema = inputSchema
-        self.requiresConfirmation = requiresConfirmation
+        self.init(
+            name: name,
+            description: description,
+            inputSchema: inputSchema,
+            metadata: requiresConfirmation
+                ? ToolMetadata(readOnly: false, externalSideEffect: true, dataSource: .localMachine)
+                : ToolMetadata.reading()
+        )
     }
 }
 

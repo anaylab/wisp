@@ -217,6 +217,11 @@ final class CompanionManager: ObservableObject {
         refreshAllPermissions()
         print("🔑 Wisp start — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission)")
         startPermissionPolling()
+        // The registry asks permission itself now, so the broker needs its own
+        // way to speak rather than receiving one per call.
+        ToolConfirmationCoordinator.shared.installSpeechHandler { [weak self] question in
+            try? await self?.ttsProvider.speakText(question)
+        }
         startLocalModelKeepWarmLoopIfNeeded()
         observeScreenConfigurationChanges()
         observeToolConfirmations()

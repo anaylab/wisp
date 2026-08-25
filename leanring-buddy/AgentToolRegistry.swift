@@ -43,6 +43,17 @@ final class AgentToolRegistry: ObservableObject {
 
     @Published private var toolsByName: [String: RegisteredTool] = [:]
 
+    /// Who is asked before a tool that changes anything runs.
+    ///
+    /// Injectable so the boundary can be tested without speech or a user, and
+    /// so a test proving that denial blocks execution is possible at all.
+    private var permissionBroker: ToolPermissionBroker = ToolConfirmationCoordinator.shared
+
+    /// Replaces the broker. Tests only.
+    func setPermissionBroker(_ broker: ToolPermissionBroker) {
+        permissionBroker = broker
+    }
+
     private init() {
         registerBuiltInTools()
     }
@@ -83,22 +94,59 @@ final class AgentToolRegistry: ObservableObject {
         toolsByName[definition.name] = RegisteredTool(definition: definition, implementation: implementation)
     }
 
-    /// Runs a tool by name.
+    /// What happened when a tool was asked to run.
+    ///
+    /// Declining is not an error. The model asked for something reasonable and
+    /// the user said no, and the turn should continue with that as an ordinary
+    /// result rather than ending in a failure the user then has to interpret.
+    struct Outcome: Sendable {
+        let content: String
+        let isError: Bool
+        let wasDeclined: Bool
+    }
+
+    /// Runs a tool by name, asking permission first when the tool needs it.
+    ///
+    /// **This is the only path to a tool's implementation.** The check lives
+    /// here rather than in the caller because callers multiply: an agent turn
+    /// today, a cloud runtime, a Job, a Skill tomorrow. A boundary enforced by
+    /// every caller remembering to enforce it is not a boundary — it is a
+    /// convention, and the first caller that forgets is a model executing
+    /// something nobody approved.
     ///
     /// An unknown name is a normal outcome, not an exception: models
     /// occasionally invent tools, and the useful response is to tell the model
     /// so it can correct itself on the next turn.
-    func invoke(name: String, input: JSONValue) async -> (content: String, isError: Bool) {
+    func invoke(name: String, input: JSONValue) async -> Outcome {
         guard let tool = toolsByName[name] else {
             let available = toolNames.sorted().joined(separator: ", ")
-            return ("there is no tool called \"\(name)\". available tools: \(available)", true)
+            return Outcome(
+                content: "there is no tool called \"\(name)\". available tools: \(available)",
+                isError: true, wasDeclined: false
+            )
+        }
+
+        if tool.definition.metadata.requiresConfirmation {
+            let decision = await permissionBroker.requestApproval(
+                toolName: name,
+                argumentSummary: input.compactDescription
+            )
+            guard decision.isApproved else {
+                let reason: String
+                if case .declined(let declineReason) = decision { reason = declineReason }
+                else { reason = "not approved" }
+                return Outcome(
+                    content: "the user did not approve this (\(reason)). tell them briefly and don't try it again.",
+                    isError: false, wasDeclined: true
+                )
+            }
         }
 
         do {
             let result = try await tool.implementation(input)
-            return (result, false)
+            return Outcome(content: result, isError: false, wasDeclined: false)
         } catch {
-            return (error.localizedDescription, true)
+            return Outcome(content: error.localizedDescription, isError: true, wasDeclined: false)
         }
     }
 
@@ -127,7 +175,8 @@ final class AgentToolRegistry: ObservableObject {
                     ])]),
                     "required": .array([.string("request")])
                 ]),
-                requiresConfirmation: true
+                // Drives the user's real browser and can navigate anywhere.
+                metadata: ToolMetadata(readOnly: false, externalSideEffect: true, dataSource: .network)
             )
         ) { [weak self] input in
             guard let self,
@@ -153,7 +202,8 @@ final class AgentToolRegistry: ObservableObject {
             BuddyToolDefinition(
                 name: "read_page",
                 description: "Read the current browser page as text, including every clickable element with an id. Use this instead of looking at the screen whenever the question is about a web page.",
-                inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                metadata: .reading(.network)
             )
         ) { [weak self] _ in
             guard let self else { return "couldn't read the page." }
@@ -313,7 +363,8 @@ final class AgentToolRegistry: ObservableObject {
             BuddyToolDefinition(
                 name: "read_clipboard",
                 description: "Read what is currently on the user's clipboard. Use when the user refers to something they copied.",
-                inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                metadata: .reading(.localMachine)
             )
         ) { _ in
             guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
@@ -331,7 +382,8 @@ final class AgentToolRegistry: ObservableObject {
             BuddyToolDefinition(
                 name: "list_windows",
                 description: "List the apps and window titles currently open on screen. Use to find out what the user is working in.",
-                inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                metadata: .reading(.localMachine)
             )
         ) { _ in
             let openWindows = Self.listVisibleWindows()
@@ -343,7 +395,8 @@ final class AgentToolRegistry: ObservableObject {
             BuddyToolDefinition(
                 name: "get_current_time",
                 description: "Get the current date and time. Use for anything time-related, since you cannot otherwise know it.",
-                inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                metadata: .reading(.none)
             )
         ) { _ in
             let formatter = DateFormatter()
