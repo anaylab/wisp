@@ -90,6 +90,35 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
         self.session = URLSession(configuration: config)
     }
 
+    /// One streamed reply, with the server's own accounting attached.
+    ///
+    /// Ollama reports `prompt_eval_count` and `eval_count` on the final NDJSON
+    /// line, and this client used to discard both. They are the only honest
+    /// record of what a turn cost — anything upstream would be guessing — so
+    /// they now travel back with the text.
+    struct StreamedChatResult {
+        let text: String
+        let duration: TimeInterval
+        let promptTokens: Int?
+        let outputTokens: Int?
+    }
+
+    /// Collects streamed text so the older cumulative callback can keep its
+    /// contract while the transport underneath emits increments.
+    ///
+    /// A reference type because the closure handed to `streamChat` is
+    /// `@Sendable`, and a `@Sendable` closure cannot capture a mutable local.
+    private final class AccumulatedReplyText: @unchecked Sendable {
+        var value = ""
+    }
+
+    /// The original entry point, unchanged in behaviour.
+    ///
+    /// Note the callback contract: `onTextChunk` receives the whole reply so
+    /// far, not the newest fragment. That is preserved here deliberately —
+    /// this method is still on the live voice path, and altering what it emits
+    /// would change what the app speaks. `streamChat` below emits true
+    /// increments, which is what new callers should use.
     func analyzeImageStreaming(
         images: [(data: Data, label: String)],
         systemPrompt: String,
@@ -97,6 +126,57 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
         userPrompt: String,
         onTextChunk: @MainActor @Sendable (String) -> Void
     ) async throws -> (text: String, duration: TimeInterval) {
+        // Attaching the screenshot is by far the most expensive thing this
+        // request can do. Measured against qwen2.5-vl on an M3 Pro: encoding
+        // one 896px capture costs ~6.3s of prompt evaluation, while generating
+        // the reply itself costs ~1s. Purely conversational turns ("how's it
+        // going?") gain nothing from the screen, so the image is only attached
+        // when the wording suggests the user is actually referring to it.
+        //
+        // This choice belongs to the caller, not to the model: it is about
+        // what is worth sending, not about what the model can see. It stays on
+        // this path only; `streamChat` sends whatever it is given.
+        let shouldAttachScreenshot = Self.promptLikelyRefersToScreen(userPrompt)
+        let attachedImages = shouldAttachScreenshot ? images : []
+        print("👁️ Ollama: screenshot \(shouldAttachScreenshot ? "attached" : "skipped") for \"\(userPrompt.prefix(60))\"")
+
+        let accumulated = AccumulatedReplyText()
+        let result = try await streamChat(
+            images: attachedImages,
+            systemPrompt: systemPrompt,
+            conversationHistory: conversationHistory,
+            userPrompt: userPrompt,
+            onTextDelta: { delta in
+                accumulated.value += delta
+                onTextChunk(accumulated.value)
+            }
+        )
+        return (text: result.text, duration: result.duration)
+    }
+
+    /// Streams one chat completion, emitting **new text only**.
+    ///
+    /// Two differences from `analyzeImageStreaming`, both required by the
+    /// provider layer: every image passed in is sent (deciding what to attach
+    /// is the caller's job, and a provider that quietly dropped one would let
+    /// the model answer confidently about a screen it never saw), and the
+    /// server's token counts come back with the reply.
+    ///
+    /// The transport itself — endpoint, options, `keep_alive`, NDJSON handling
+    /// — is unchanged from what this client has always sent.
+    /// - Parameter maxOutputTokens: Reply ceiling for this request, or `nil`
+    ///   to use this client's own. `nil` is the normal case and keeps
+    ///   `activeReplyTokenLimit` the single owner of that default; a supplied
+    ///   value overrides it for this request only and is never written back,
+    ///   so no caller can change what the next one gets.
+    func streamChat(
+        images: [(data: Data, label: String)],
+        systemPrompt: String,
+        conversationHistory: [(userPlaceholder: String, assistantResponse: String)] = [],
+        userPrompt: String,
+        maxOutputTokens: Int? = nil,
+        onTextDelta: @MainActor @Sendable (String) -> Void
+    ) async throws -> StreamedChatResult {
         let startTime = Date()
 
         var request = URLRequest(url: chatURL)
@@ -105,8 +185,7 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
 
         // Downstream local TTS synthesis costs roughly a third of a second of
         // compute per character, so reply length is the single biggest driver
-        // of how long the user waits to hear anything. Reinforce brevity for
-        // the local provider only — the Claude path keeps the prompt as-is.
+        // of how long the user waits to hear anything.
         let brevityInstructionForLocalModel = """
 
 
@@ -122,20 +201,10 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
             messages.append(["role": "assistant", "content": assistantResponse])
         }
 
-        // Attaching the screenshot is by far the most expensive thing this
-        // request can do. Measured against qwen2.5-vl on an M3 Pro: encoding
-        // one 896px capture costs ~7s, while generating the reply itself
-        // costs ~1s. Purely conversational turns ("how's it going?") gain
-        // nothing from the screen, so the image is only attached when the
-        // wording suggests the user is actually referring to it.
-        let shouldAttachScreenshot = Self.promptLikelyRefersToScreen(userPrompt)
-        let attachedImages = shouldAttachScreenshot ? images : []
-        print("👁️ Ollama: screenshot \(shouldAttachScreenshot ? "attached" : "skipped") for \"\(userPrompt.prefix(60))\"")
-
         // Ollama's chat API takes images as a flat base64 string array on the
         // user message, unlike Anthropic's content-block-with-source wrapper.
-        let base64Images = attachedImages.map { $0.data.base64EncodedString() }
-        let imageLabelsText = attachedImages.map(\.label).joined(separator: "\n")
+        let base64Images = images.map { $0.data.base64EncodedString() }
+        let imageLabelsText = images.map(\.label).joined(separator: "\n")
         let combinedUserContent = imageLabelsText.isEmpty
             ? userPrompt
             : "\(imageLabelsText)\n\n\(userPrompt)"
@@ -158,10 +227,15 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
             // every request pays a full reload from disk.
             "keep_alive": Self.modelResidencyWindow,
             "options": [
+                // Both derived from the one place that owns them. Changing
+                // num_ctx between requests makes Ollama reload the model —
+                // measured at 8.85s with the model already resident — so no
+                // caller gets to supply its own value.
                 "num_ctx": Self.activeContextWindowTokens,
-                // Hard ceiling on reply length as a backstop to the prompt
-                // instruction above, since TTS time scales with characters.
-                "num_predict": Self.activeReplyTokenLimit
+                // The caller's ceiling when it gave one, this client's own
+                // otherwise. num_predict can change between requests without
+                // costing a reload, unlike num_ctx above.
+                "num_predict": maxOutputTokens ?? Self.activeReplyTokenLimit
             ]
         ]
 
@@ -192,6 +266,8 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
 
         // Ollama streams one JSON object per line (NDJSON), not SSE.
         var accumulatedResponseText = ""
+        var promptTokens: Int?
+        var outputTokens: Int?
 
         for try await line in byteStream.lines {
             guard let lineData = line.data(using: .utf8),
@@ -203,20 +279,28 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
                let textChunk = message["content"] as? String,
                !textChunk.isEmpty {
                 accumulatedResponseText += textChunk
-                let currentAccumulatedText = accumulatedResponseText
-                await onTextChunk(currentAccumulatedText)
+                await onTextDelta(textChunk)
             }
 
             if let isDone = eventPayload["done"] as? Bool, isDone {
+                // Only the final line carries the accounting.
+                promptTokens = eventPayload["prompt_eval_count"] as? Int
+                outputTokens = eventPayload["eval_count"] as? Int
                 break
             }
         }
 
         let duration = Date().timeIntervalSince(startTime)
-        // The [POINT:...] tag is left intact for CompanionManager to parse —
+        // The [POINT:...] tag is left intact for the caller to parse —
         // see the file header for the accuracy measurements behind that.
-        return (text: accumulatedResponseText, duration: duration)
+        return StreamedChatResult(
+            text: accumulatedResponseText,
+            duration: duration,
+            promptTokens: promptTokens,
+            outputTokens: outputTokens
+        )
     }
+
 
     /// Whether the user's wording suggests they're asking about something on
     /// screen, and the (expensive) screenshot is therefore worth attaching.

@@ -29,6 +29,15 @@
 
 import Foundation
 
+/// Holds one iteration's deltas until the turn is known to be safe to speak.
+///
+/// A reference type because the provider's delta callback is `@Sendable` and
+/// so cannot capture a mutable local.
+private final class CollectedDeltas: @unchecked Sendable {
+    private(set) var values: [String] = []
+    func append(_ delta: String) { values.append(delta) }
+}
+
 @MainActor
 final class AgentTurnRunner {
     /// Ceiling on model calls per request. Reached only by a model that keeps
@@ -60,7 +69,7 @@ final class AgentTurnRunner {
         let hitIterationCap: Bool
     }
 
-    private let chatClient: any BuddyVisionChatClient
+    private let modelProvider: any ModelProvider
     private let toolRegistry: AgentToolRegistry
     /// Speaks a confirmation question. Supplied by the caller so this type
     /// doesn't need to know which text-to-speech provider is in use.
@@ -70,12 +79,12 @@ final class AgentTurnRunner {
     private let priority: ModelAccessGate.Priority
 
     init(
-        chatClient: any BuddyVisionChatClient,
+        modelProvider: any ModelProvider,
         toolRegistry: AgentToolRegistry = .shared,
         priority: ModelAccessGate.Priority = .interactive,
         speakConfirmation: @escaping @MainActor (String) async -> Void
     ) {
-        self.chatClient = chatClient
+        self.modelProvider = modelProvider
         self.toolRegistry = toolRegistry
         self.priority = priority
         self.speakConfirmation = speakConfirmation
@@ -94,7 +103,9 @@ final class AgentTurnRunner {
         systemPrompt: String,
         conversationHistory: [(userPlaceholder: String, assistantResponse: String)],
         onNarration: @MainActor (String) -> Void,
-        onStep: @MainActor (AgentStepRecord) -> Void
+        onStep: @MainActor (AgentStepRecord) -> Void,
+        onModelTextDelta: @escaping @MainActor @Sendable (String) -> Void = { _ in },
+        onSpeakableTextDelta: @escaping @MainActor @Sendable (String) -> Void = { _ in }
     ) async throws -> Outcome {
         // Scoped to the request rather than the whole registry. All twelve
         // tools cost 698 prompt tokens and 2.65s of prompt evaluation per turn
@@ -102,16 +113,29 @@ final class AgentTurnRunner {
         // model's tool choice degrades as the list grows, so the irrelevant
         // ones are worse than merely expensive.
         let tools = toolRegistry.definitions(forRequest: userText)
-        let toolNames = toolRegistry.toolNames
-        let systemPromptWithTools = systemPrompt + StructuredTextToolProtocol.promptInstructions(for: tools)
 
         var steps: [AgentStepRecord] = []
-        // Tool exchanges are appended here as extra history entries, which is
-        // how the model sees what its tools returned without the message model
-        // needing to change.
-        var workingHistory = conversationHistory
-        var currentUserText = userText
-        var isFirstIteration = true
+
+        // The conversation as typed messages. Prior turns arrive as string
+        // pairs from the caller and are lifted here; tool exchanges are then
+        // appended as real `toolUse` / `toolResult` blocks rather than as
+        // more prose, so what the model is told matches what actually
+        // happened.
+        var messages: [BuddyChatMessage] = []
+        for (userPlaceholder, assistantResponse) in conversationHistory {
+            messages.append(BuddyChatMessage(role: .user, text: userPlaceholder))
+            messages.append(BuddyChatMessage(role: .assistant, text: assistantResponse))
+        }
+
+        // The screenshot rides on the first user message and nowhere else.
+        // Only the final user message's images are put on the wire, so once a
+        // tool result becomes the last message the image stops being sent —
+        // the ~6.3s of prompt evaluation it costs is paid once per turn.
+        var firstUserBlocks: [BuddyContentBlock] = images.map {
+            .image(data: $0.data, label: $0.label)
+        }
+        firstUserBlocks.append(.text(userText))
+        messages.append(BuddyChatMessage(role: .user, blocks: firstUserBlocks))
 
         for iteration in 0..<Self.maximumIterations {
             try Task.checkCancellation()
@@ -127,51 +151,134 @@ final class AgentTurnRunner {
 
             let modelCallStartedAt = Date()
 
-            let (responseText, duration) = try await ModelAccessGate.shared.withAccess(priority: priority) {
-                try await chatClient.analyzeImageStreaming(
-                    images: isFirstIteration ? images : [],
-                    systemPrompt: systemPromptWithTools,
-                    conversationHistory: workingHistory,
-                    userPrompt: currentUserText,
-                    onTextChunk: { _ in }
-                )
+            // No reply ceiling is set. The right one is a property of the
+            // model — a local 7B is capped short because speech synthesis time
+            // scales with characters, a cloud model's limit is a billing
+            // decision — and this loop knows about neither. Leaving it nil
+            // hands the choice to the provider, which is also what keeps this
+            // file free of any particular provider's configuration.
+            let request = ModelRequest(
+                systemPrompt: systemPrompt,
+                messages: messages,
+                tools: tools
+            )
+
+            // Two channels, and the difference between them is the whole
+            // point.
+            //
+            // `onModelTextDelta` is observation: it fires as text arrives, for
+            // metrics and diagnostics, and is never spoken.
+            //
+            // Speech is held back, because nothing can be known about a reply
+            // until it ends. The tool tag is written last, so text arriving
+            // before it is indistinguishable from a finished answer — on this
+            // model it is routinely a half-answer with a gap where the tool
+            // result belongs ("it's  right now."). That is true of every
+            // iteration, including the one after a tool has run, since the
+            // model may ask for another. So deltas are collected here and
+            // released to speech only once the turn has proved to be an
+            // unambiguous final answer.
+            //
+            // Speech therefore starts no earlier than it does today. What this
+            // buys is that it starts *correctly*, and that the terminal answer
+            // is still delivered as increments so sentence-by-sentence
+            // synthesis keeps working.
+            let iterationDeltas = CollectedDeltas()
+            let turn = try await ModelAccessGate.shared.withAccess(priority: priority) {
+                try await modelProvider.streamTurn(request) { delta in
+                    iterationDeltas.append(delta)
+                    onModelTextDelta(delta)
+                }
             }
-            isFirstIteration = false
 
             try Task.checkCancellation()
+
+            // The screenshot has now been sent once. Strip it from the record
+            // so no later pass can resend it — roughly 6.3 seconds of prompt
+            // evaluation each time it goes over the wire. Relying on the
+            // provider to drop it would make the guarantee specific to this
+            // one provider: a model with native image blocks would happily
+            // resend every image in the history, once per iteration.
+            messages = messages.map { message in
+                guard message.blocks.contains(where: {
+                    if case .image = $0 { return true }
+                    return false
+                }) else { return message }
+                var withoutImages = message
+                withoutImages.blocks = message.blocks.filter {
+                    if case .image = $0 { return false }
+                    return true
+                }
+                return withoutImages
+            }
 
             let modelStep = AgentStepRecord(
                 kind: .modelCall,
                 summary: iteration == 0 ? "Thinking" : "Thinking again (step \(iteration + 1))",
                 startedAt: modelCallStartedAt,
-                durationSeconds: duration
+                durationSeconds: turn.duration
             )
             steps.append(modelStep)
             onStep(modelStep)
 
-            let parsed = StructuredTextToolProtocol.parse(responseText, knownToolNames: toolNames)
+            // Tool calls arrive already parsed and already filtered — the
+            // echoed-example guard and the known-name check live in the
+            // provider, alongside the tag syntax they belong to. This loop
+            // never sees a [TOOL:...] tag.
+            let requestedCalls = turn.toolUses
 
-            // Calls that merely echo the prompt's worked example are dropped:
-            // they appear on turns needing no tool at all, and acting on one
-            // would answer a request the user never made.
-            let genuineCalls = parsed.toolCalls.filter { !StructuredTextToolProtocol.isEchoOfPromptExample($0) }
+            // A reply the model mangled a tool call into is not an answer.
+            // Recorded so it is visible, and so the text around it is never
+            // mistaken for something worth speaking.
+            if !turn.malformedToolCallDescriptions.isEmpty {
+                let malformedStep = AgentStepRecord(
+                    kind: .modelCall,
+                    summary: "Ignored a malformed tool call",
+                    detail: turn.malformedToolCallDescriptions.joined(separator: " "),
+                    startedAt: modelCallStartedAt,
+                    durationSeconds: 0,
+                    isError: true
+                )
+                steps.append(malformedStep)
+                onStep(malformedStep)
+            }
 
             // No tools wanted, or none left to give — this is the answer.
-            if genuineCalls.isEmpty || isFinalIteration {
+            if requestedCalls.isEmpty || isFinalIteration {
+                // Released to speech only now, and only if the model neither
+                // asked for a tool nor tried and failed to. Hitting the
+                // iteration cap with calls outstanding is not a clean answer
+                // either, so that text is returned but never handed to speech.
+                if turn.isUnambiguousFinalAnswer {
+                    for delta in iterationDeltas.values { onSpeakableTextDelta(delta) }
+                }
                 return Outcome(
-                    terminalText: parsed.spokenText,
+                    terminalText: turn.text,
                     steps: steps,
-                    hitIterationCap: isFinalIteration && !genuineCalls.isEmpty
+                    hitIterationCap: isFinalIteration && !requestedCalls.isEmpty
                 )
             }
 
             // Anything said before the tool call is progress, not the answer.
-            if !parsed.spokenText.isEmpty {
-                onNarration(parsed.spokenText)
+            if !turn.text.isEmpty {
+                onNarration(turn.text)
             }
 
-            var resultsForModel: [String] = []
-            for call in genuineCalls {
+            // Rebuilt as real message blocks: the assistant's turn records the
+            // calls it made, and the following user turn carries their results.
+            //
+            // This is the canonical shape — assistant text and tool-execution
+            // metadata are kept as separate, structured blocks, and nothing
+            // here encodes how any provider writes a tool call on the wire.
+            // `OllamaProvider` currently renders a `.toolUse` block back into
+            // the `[TOOL:name:{json}]` text this model was trained to read;
+            // that reconstruction is a compatibility detail of that one
+            // transport, not part of the abstraction. A provider with native
+            // tool calls carries these blocks through as structured data and
+            // never materialises the tag at all.
+            var assistantBlocks: [BuddyContentBlock] = turn.text.isEmpty ? [] : [.text(turn.text)]
+            var resultBlocks: [BuddyContentBlock] = []
+            for call in requestedCalls {
                 try Task.checkCancellation()
 
                 let toolStartedAt = Date()
@@ -193,10 +300,10 @@ final class AgentTurnRunner {
                     steps.append(declinedStep)
                     onStep(declinedStep)
 
-                    resultsForModel.append(
-                        StructuredTextToolProtocol.resultMessageText(
-                            toolName: call.name, content: outcome.content, isError: false
-                        )
+                    assistantBlocks.append(.toolUse(id: call.id, name: call.name, input: call.input))
+                    resultBlocks.append(
+                        .toolResult(toolUseID: call.id, toolName: call.name,
+                                    content: outcome.content, isError: false)
                     )
                     continue
                 }
@@ -212,21 +319,18 @@ final class AgentTurnRunner {
                 steps.append(toolStep)
                 onStep(toolStep)
 
-                resultsForModel.append(
-                    StructuredTextToolProtocol.resultMessageText(
-                        toolName: call.name,
-                        content: outcome.content,
-                        isError: outcome.isError
-                    )
+                assistantBlocks.append(.toolUse(id: call.id, name: call.name, input: call.input))
+                resultBlocks.append(
+                    .toolResult(toolUseID: call.id, toolName: call.name,
+                                content: outcome.content, isError: outcome.isError)
                 )
             }
 
-            // Record what was asked and what came back, then let the results
-            // stand as the next thing the model is responding to.
-            workingHistory.append(
-                (userPlaceholder: currentUserText, assistantResponse: responseText)
-            )
-            currentUserText = resultsForModel.joined(separator: "\n\n")
+            // Record what was asked and what came back. The results become the
+            // last user message, so they are what the model answers next — and
+            // because they carry no image, the screenshot is not resent.
+            messages.append(BuddyChatMessage(role: .assistant, blocks: assistantBlocks))
+            messages.append(BuddyChatMessage(role: .user, blocks: resultBlocks))
         }
 
         // Unreachable: the final iteration always returns above.
@@ -239,9 +343,15 @@ final class AgentTurnRunner {
     /// work: a question nobody answers should release the turn rather than hold
     /// it open indefinitely. The broker's own 45s expiry is the inner bound.
     private func runToolWithTimeout(name: String, input: JSONValue) async -> AgentToolRegistry.Outcome {
-        await withTaskGroup(of: AgentToolRegistry.Outcome?.self) { group in
+        // The *injected* registry, not the shared one. These were different
+        // objects: the registry supplied to `init` decided which tools were
+        // offered, while execution always went to the singleton — so a caller
+        // that passed its own registry got its tool list honoured and its
+        // implementations ignored, and no test could observe what actually ran.
+        let registry = toolRegistry
+        return await withTaskGroup(of: AgentToolRegistry.Outcome?.self) { group in
             group.addTask { @MainActor in
-                await AgentToolRegistry.shared.invoke(name: name, input: input)
+                await registry.invoke(name: name, input: input)
             }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(Self.perToolTimeoutSeconds * 1_000_000_000))

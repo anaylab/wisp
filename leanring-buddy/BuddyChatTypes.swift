@@ -242,27 +242,117 @@ struct BuddyChatTurn: Sendable {
     let toolUses: [(id: String, name: String, input: JSONValue)]
     let stopReason: BuddyStopReason
     let duration: TimeInterval
+    /// What the provider reported this turn cost, when it reports anything.
+    ///
+    /// Optional because it is the provider's own accounting, not an estimate:
+    /// `nil` means the number was not supplied, which is different from zero.
+    /// Recomputing it locally would mean re-tokenising the prompt with a
+    /// different tokeniser than the one that actually ran, so a missing value
+    /// is left missing.
+    let promptTokens: Int?
+    let outputTokens: Int?
+    /// Text that looked like a tool call but could not be read.
+    ///
+    /// Surfaced rather than dropped for two reasons. The model can be told its
+    /// call was malformed and correct itself, instead of silently getting
+    /// nothing back. And a reply containing one is *ambiguous* — the model was
+    /// trying to call a tool, so whatever else it said is very likely
+    /// narration rather than an answer, and must not be spoken on the
+    /// assumption that the turn is finished.
+    let malformedToolCallDescriptions: [String]
+
+    /// Whether this turn is unambiguously a finished answer.
+    ///
+    /// A turn qualifies only when the model asked for nothing and mangled
+    /// nothing. This is the single condition under which the text is safe to
+    /// speak; anything else is either a request for a tool or an attempt at
+    /// one, and speaking either reads a half-answer aloud.
+    var isUnambiguousFinalAnswer: Bool {
+        toolUses.isEmpty && malformedToolCallDescriptions.isEmpty
+    }
 
     init(
         text: String,
         toolUses: [(id: String, name: String, input: JSONValue)] = [],
         stopReason: BuddyStopReason = .endTurn,
-        duration: TimeInterval = 0
+        duration: TimeInterval = 0,
+        promptTokens: Int? = nil,
+        outputTokens: Int? = nil,
+        malformedToolCallDescriptions: [String] = []
     ) {
         self.text = text
         self.toolUses = toolUses
         self.stopReason = stopReason
         self.duration = duration
+        self.promptTokens = promptTokens
+        self.outputTokens = outputTokens
+        self.malformedToolCallDescriptions = malformedToolCallDescriptions
     }
 }
 
+/// A failure expressed in terms the caller can act on, whichever provider
+/// produced it.
+///
+/// The point is that routing logic should not have to read HTTP status codes
+/// or match on error strings to answer "should I retry, fall back to another
+/// model, or tell the user?". Cancellation is deliberately absent: it stays a
+/// `CancellationError` all the way up, because the response pipeline treats an
+/// abandoned turn differently from a failed one — it withdraws any pending
+/// permission prompt and reports nothing to the user.
 enum BuddyChatError: LocalizedError {
     case toolsUnsupported(providerName: String)
+    /// The request carried an image the provider cannot see. Raised rather
+    /// than dropping the image, so a model never answers confidently about a
+    /// screen it was never shown.
+    case visionUnsupported(providerName: String)
+    /// The conversation no longer fits. Carries both numbers so a caller can
+    /// decide how much history to shed rather than guessing.
+    case contextWindowExceeded(providerName: String, requestedTokens: Int?, limitTokens: Int)
+    /// Throttled upstream. `retryAfter` is the server's own hint when it gives
+    /// one; `nil` means it did not, not that retrying is free.
+    case rateLimited(providerName: String, retryAfter: TimeInterval?)
+    /// Credentials missing, expired, or rejected. Never retry this one.
+    case authenticationFailed(providerName: String)
+    /// The provider could not be reached or is not running — a local server
+    /// that is down, or a host that will not answer.
+    case providerUnavailable(providerName: String, underlyingDescription: String?)
 
     var errorDescription: String? {
         switch self {
         case .toolsUnsupported(let providerName):
             return "\(providerName) does not support tool calling."
+        case .visionUnsupported(let providerName):
+            return "\(providerName) cannot look at images."
+        case .contextWindowExceeded(let providerName, let requestedTokens, let limitTokens):
+            if let requestedTokens {
+                return "the conversation is too long for \(providerName) (\(requestedTokens) tokens, limit \(limitTokens))."
+            }
+            return "the conversation is too long for \(providerName) (limit \(limitTokens) tokens)."
+        case .rateLimited(let providerName, let retryAfter):
+            if let retryAfter {
+                return "\(providerName) is rate limited — try again in \(Int(retryAfter.rounded()))s."
+            }
+            return "\(providerName) is rate limited."
+        case .authenticationFailed(let providerName):
+            return "\(providerName) rejected the credentials."
+        case .providerUnavailable(let providerName, let underlyingDescription):
+            if let underlyingDescription {
+                return "\(providerName) is unavailable: \(underlyingDescription)"
+            }
+            return "\(providerName) is unavailable."
+        }
+    }
+
+    /// Whether trying the same request again could plausibly succeed.
+    ///
+    /// Exists so callers stop encoding this per-case at each site, which is
+    /// where retry storms against an unauthenticated endpoint come from.
+    var isWorthRetrying: Bool {
+        switch self {
+        case .rateLimited, .providerUnavailable:
+            return true
+        case .toolsUnsupported, .visionUnsupported, .contextWindowExceeded, .authenticationFailed:
+            return false
         }
     }
 }

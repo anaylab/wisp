@@ -1,0 +1,411 @@
+//
+//  main.swift
+//  ModelProviderContract
+//
+//  Contract and regression suite for the ModelProvider layer.
+//
+//  Run with ./Tests/ModelProviderContract/run.sh — it needs nothing installed
+//  and nothing listening. It is deliberately not an XCTest: `leanring-buddy`
+//  is a menu-bar app whose test bundle needs the whole module built, and these
+//  assertions are about a handful of value types and one translator. Keeping
+//  them runnable from a shell means they can be run in a second, on every
+//  edit, without touching the app's TCC permissions.
+//
+
+import Foundation
+
+let results = TestResults()
+
+// A reply split exactly where the test wants it, so "exactly once" is provable.
+let canonicalChunks = ["Hi", " there.", " How are you?"]
+let canonicalReply = "Hi there. How are you?"
+
+let server = FakeOllamaServer(script: .init(chunks: canonicalChunks))
+server.start()
+
+let provider = OllamaProvider(baseURL: server.baseURL, model: "qwen2.5vl:7b")
+
+func request(
+    _ text: String,
+    tools: [BuddyToolDefinition] = [],
+    image: Data? = nil,
+    maxOutputTokens: Int? = nil
+) -> ModelRequest {
+    var blocks: [BuddyContentBlock] = []
+    if let image { blocks.append(.image(data: image, label: "screen 1")) }
+    blocks.append(.text(text))
+    return ModelRequest(
+        systemPrompt: "you are wisp.",
+        messages: [BuddyChatMessage(role: .user, blocks: blocks)],
+        tools: tools,
+        maxOutputTokens: maxOutputTokens
+    )
+}
+
+/// What the provider actually put in `options` on the wire.
+func sentOption(_ server: FakeOllamaServer, _ key: String) -> Int? {
+    guard let options = server.lastRequestJSON?["options"] as? [String: Any] else { return nil }
+    return options[key] as? Int
+}
+
+let browserTool = BuddyToolDefinition(
+    name: "browser_task",
+    description: "Run a browser workflow.",
+    inputSchema: .object([
+        "type": .string("object"),
+        "properties": .object(["site": .object(["type": .string("string")])]),
+        "required": .array([.string("site")]),
+    ]),
+    metadata: .reading()
+)
+let readPageTool = BuddyToolDefinition(
+    name: "read_page", description: "Read the page.",
+    inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+    metadata: .reading()
+)
+let knownTools = [browserTool, readPageTool]
+
+final class DeltaRecorder: @unchecked Sendable {
+    var deltas: [String] = []
+}
+
+@MainActor
+func runSuite() async {
+
+    // ========================================================================
+    results.section("1. accumulated → true deltas (the corruption guard)")
+    // ========================================================================
+    //
+    // LocalOllamaAPI's legacy callback reports the whole reply so far, while
+    // SpokenSentenceStreamer appends whatever it is handed. Wiring one to the
+    // other without diffing produces 'HiHi there.Hi there.' — a real defect
+    // this layer exists to prevent. These are the highest-value assertions in
+    // the suite.
+
+    server.setScript(.init(chunks: canonicalChunks))
+    let recorder = DeltaRecorder()
+    guard let turn = try? await provider.streamTurn(request("hello"), onTextDelta: {
+        recorder.deltas.append($0)
+    }) else {
+        results.check("provider completed a turn", false)
+        exit(results.summarise())
+    }
+
+    results.equal("each fragment delivered exactly once", recorder.deltas, canonicalChunks)
+    results.equal("deltas join to the reply", recorder.deltas.joined(), canonicalReply)
+    results.equal("delta count matches chunk count", recorder.deltas.count, canonicalChunks.count)
+    results.check(
+        "no delta repeats earlier text",
+        !recorder.deltas.enumerated().contains { index, delta in
+            index > 0 && delta.hasPrefix(recorder.deltas[0])
+        },
+        recorder.deltas.description
+    )
+    results.check(
+        "no delta is a cumulative snapshot",
+        !recorder.deltas.contains { $0.count >= canonicalReply.count && canonicalReply.count > 4 },
+        recorder.deltas.description
+    )
+
+    // The end-to-end property, driven through the real SpokenSentenceStreamer.
+    let streamer = SpokenSentenceStreamer(onSentence: { spoken.append($0) })
+    for delta in recorder.deltas { streamer.append(delta) }
+    streamer.finish()
+    results.equal("real streamer speaks clean sentences", spoken, ["Hi there.", "How are you?"])
+    results.check(
+        "NO 'HiHi there.Hi there.' corruption",
+        !spoken.contains { $0.contains("HiHi") || $0.contains("there.Hi") },
+        spoken.description
+    )
+    results.check("nothing spoken twice", Set(spoken).count == spoken.count, spoken.description)
+
+    // ========================================================================
+    results.section("2. legacy path stays cumulative (must NOT be 'fixed')")
+    // ========================================================================
+    //
+    // CompanionManager still calls analyzeImageStreaming. Changing what it
+    // emits would change what the app speaks, so the old contract is pinned
+    // here just as firmly as the new one.
+
+    let legacyClient = LocalOllamaAPI(baseURL: server.baseURL, model: "qwen2.5vl:7b")
+    let legacyRecorder = DeltaRecorder()
+    let (legacyText, legacyDuration) = (try? await legacyClient.analyzeImageStreaming(
+        images: [], systemPrompt: "sys", conversationHistory: [],
+        userPrompt: "hello", onTextChunk: { legacyRecorder.deltas.append($0) }
+    )) ?? ("", 0)
+
+    results.equal("legacy callback is cumulative",
+                  legacyRecorder.deltas, ["Hi", "Hi there.", "Hi there. How are you?"])
+    results.equal("legacy returns the full reply", legacyText, canonicalReply)
+    results.check("legacy reports a duration", legacyDuration > 0)
+    results.check("the two contracts genuinely differ",
+                  legacyRecorder.deltas != recorder.deltas)
+
+    // ========================================================================
+    results.section("3. ordinary terminal turn")
+    // ========================================================================
+    results.equal("text is the reply", turn.text, canonicalReply)
+    results.check("stopReason is .endTurn", turn.stopReason == .endTurn)
+    results.check("no toolUses", turn.toolUses.isEmpty)
+
+    // ========================================================================
+    results.section("4. token accounting and duration")
+    // ========================================================================
+    results.equal("prompt tokens preserved", turn.promptTokens, 1234)
+    results.equal("output tokens preserved", turn.outputTokens, 7)
+    results.check("duration recorded", turn.duration > 0, "\(turn.duration)")
+
+    server.setScript(.init(chunks: ["ok."], promptTokens: nil, outputTokens: nil))
+    let untracked = try? await provider.streamTurn(request("hi"), onTextDelta: { _ in })
+    results.check("absent counts stay nil, not zero",
+                  untracked?.promptTokens == nil && untracked?.outputTokens == nil)
+
+    // ========================================================================
+    results.section("5. tool calls")
+    // ========================================================================
+    server.setScript(.init(chunks: ["checking. ", "[TOOL:browser_task:", "{\"site\":\"a.com\"}]"]))
+    let single = try? await provider.streamTurn(request("look it up", tools: knownTools),
+                                                onTextDelta: { _ in })
+    results.equal("one call surfaced", single?.toolUses.count, 1)
+    results.equal("call name preserved", single?.toolUses.first?.name, "browser_task")
+    results.check("stopReason is .toolUse", single?.stopReason == .toolUse)
+    results.equal("narration kept as text", single?.text, "checking.")
+    results.check("a tag split across deltas still parses",
+                  single?.toolUses.count == 1,
+                  "tags are parsed from the assembled reply, not per-delta")
+
+    server.setScript(.init(chunks: ["one sec. [TOOL:browser_task:{\"site\":\"a.com\"}] [TOOL:read_page:{}]"]))
+    let multiple = try? await provider.streamTurn(request("both", tools: knownTools),
+                                                  onTextDelta: { _ in })
+    results.equal("both calls surfaced", multiple?.toolUses.count, 2)
+    results.equal("order preserved", multiple?.toolUses.map(\.name), ["browser_task", "read_page"])
+
+    // ========================================================================
+    results.section("6. malformed, unknown, echoed")
+    // ========================================================================
+    server.setScript(.init(chunks: ["hold on. [TOOL:browser_task:{not json}]"]))
+    let malformed = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                   onTextDelta: { _ in })
+    results.check("malformed yields no toolUse", malformed?.toolUses.isEmpty == true)
+    results.check("malformed leaves .endTurn", malformed?.stopReason == .endTurn)
+    results.check("malformed tag not spoken", malformed?.text.contains("[TOOL:") == false)
+
+    server.setScript(.init(chunks: ["sure.\nlaunch_missiles: {\"target\":\"x\"}"]))
+    let bareUnknown = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                     onTextDelta: { _ in })
+    results.check("bare unknown name filtered by knownToolNames",
+                  bareUnknown?.toolUses.isEmpty == true)
+
+    server.setScript(.init(chunks: ["sure. [TOOL:launch_missiles:{\"target\":\"x\"}]"]))
+    let bracketedUnknown = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                          onTextDelta: { _ in })
+    // Deliberate: the registry answers an unknown name with "there is no tool
+    // called X", which is how the model corrects itself. Filtering here would
+    // silence that. Pinned so the behaviour is a decision, not an accident.
+    results.equal("bracketed unknown passes through to the registry",
+                  bracketedUnknown?.toolUses.count, 1)
+
+    server.setScript(.init(chunks: ["sure, one moment. [TOOL:browser_task:{\"site\":\"…\"}]"]))
+    let echoed = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                onTextDelta: { _ in })
+    results.check("echoed prompt example rejected", echoed?.toolUses.isEmpty == true)
+    results.check("echo leaves .endTurn", echoed?.stopReason == .endTurn)
+
+    // ========================================================================
+    results.section("7. exact JSON preservation")
+    // ========================================================================
+    server.setScript(.init(chunks: [
+        "[TOOL:browser_task:{\"site\":\"a.com\",\"count\":3,\"deep\":true,\"nested\":{\"k\":[1,2]},\"none\":null}]"
+    ]))
+    let rich = try? await provider.streamTurn(request("x", tools: knownTools), onTextDelta: { _ in })
+    if case .object(let input)? = rich?.toolUses.first?.input {
+        results.check("string survives", { if case .string(let v)? = input["site"] { return v == "a.com" }; return false }())
+        results.check("number survives", { if case .number(let v)? = input["count"] { return v == 3 }; return false }())
+        results.check("bool stays bool, not 1", { if case .bool(let v)? = input["deep"] { return v }; return false }())
+        results.check("nested object and array survive", {
+            if case .object(let n)? = input["nested"], case .array(let a)? = n["k"] { return a.count == 2 }
+            return false }())
+        results.check("null survives", { if case .null? = input["none"] { return true }; return false }())
+        results.equal("round-trips to the same JSON",
+                      input["count"]?.untypedValue as? Int, 3)
+    } else {
+        results.check("tool input parsed as an object", false)
+    }
+
+    // ========================================================================
+    results.section("8. [TOOL:...] never escapes the provider")
+    // ========================================================================
+    for (label, candidate) in [("single", single), ("multiple", multiple),
+                               ("malformed", malformed), ("echoed", echoed), ("rich", rich)] {
+        results.check("no tag residue in \(label) turn",
+                      candidate.map { !$0.text.contains("[TOOL:") } ?? false,
+                      candidate?.text ?? "nil")
+    }
+
+    // ========================================================================
+    results.section("9. image preservation")
+    // ========================================================================
+    server.setScript(.init(chunks: ["a screenshot."]))
+    let pixels = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    _ = try? await provider.streamTurn(request("what is this?", image: pixels),
+                                       onTextDelta: { _ in })
+    let sent = server.lastRequestJSON
+    let sentMessages = sent?["messages"] as? [[String: Any]]
+    let userMessage = sentMessages?.last
+    let sentImages = userMessage?["images"] as? [String]
+    results.equal("exactly one image on the wire", sentImages?.count, 1)
+    results.equal("image bytes survive translation intact",
+                  sentImages?.first, pixels.base64EncodedString())
+    results.check("image label reaches the model",
+                  (userMessage?["content"] as? String)?.contains("screen 1") == true,
+                  (userMessage?["content"] as? String) ?? "nil")
+    results.check("provider does NOT apply the caller's screenshot heuristic",
+                  sentImages?.count == 1,
+                  "a conversational prompt with an image must still send it")
+
+    // A text-only request must not invent an images key.
+    server.setScript(.init(chunks: ["no picture."]))
+    _ = try? await provider.streamTurn(request("just talking"), onTextDelta: { _ in })
+    let textOnly = (server.lastRequestJSON?["messages"] as? [[String: Any]])?.last
+    results.check("no images key when none were supplied", textOnly?["images"] == nil)
+
+    // ========================================================================
+    results.section("10. capabilities and vision refusal")
+    // ========================================================================
+    results.equal("identifier names the model", provider.identifier, "ollama/qwen2.5vl:7b")
+    results.check("declares vision", provider.capabilities.supportsVision)
+    results.check("declares tools", provider.capabilities.supportsTools)
+    results.check("does NOT claim native tool calls", !provider.capabilities.supportsNativeToolCalls)
+    results.check("declares streaming", provider.capabilities.supportsStreaming)
+    results.check("deployment is on this machine", !provider.deployment.sendsDataOffThisMachine)
+    // Deployment is a separate type from ModelCapabilities, so "is this local"
+    // cannot be asked of capabilities at all. That is enforced by the compiler
+    // rather than by an assertion here — a runtime check would only be able to
+    // assert `true`, which proves nothing.
+
+    // A vision-incapable provider must refuse rather than drop the image.
+    struct BlindProvider: ModelProvider {
+        let identifier = "blind"
+        let capabilities = ModelCapabilities(
+            supportsVision: false, supportsTools: false, supportsNativeToolCalls: false,
+            supportsStreaming: true, contextWindowTokens: 8192)
+        let deployment = ModelDeployment(location: .onThisMachine)
+        func streamTurn(_ request: ModelRequest,
+                        onTextDelta: @escaping @MainActor @Sendable (String) -> Void)
+        async throws -> BuddyChatTurn {
+            try validateAgainstCapabilities(request)
+            return BuddyChatTurn(text: "unreachable")
+        }
+    }
+    do {
+        _ = try await BlindProvider().streamTurn(request("see this?", image: pixels),
+                                                 onTextDelta: { _ in })
+        results.check("vision-incapable provider refuses an image", false)
+    } catch BuddyChatError.visionUnsupported {
+        results.check("vision-incapable provider refuses an image", true)
+    } catch {
+        results.check("vision-incapable provider refuses an image", false, "\(error)")
+    }
+
+    // ========================================================================
+    results.section("11. output ceiling: nil defers, explicit is honoured")
+    // ========================================================================
+    //
+    // The generic layer must not need to know Ollama's reply limit, and Ollama
+    // must not lose ownership of its own default. Both are checked against
+    // what actually reached the wire.
+
+    server.setScript(.init(chunks: ["ok."]))
+    _ = try? await provider.streamTurn(request("hi"), onTextDelta: { _ in })
+    results.equal("nil ceiling uses the client's own default",
+                  sentOption(server, "num_predict"), LocalOllamaAPI.activeReplyTokenLimit)
+
+    server.setScript(.init(chunks: ["ok."]))
+    _ = try? await provider.streamTurn(request("hi", maxOutputTokens: 37), onTextDelta: { _ in })
+    results.equal("explicit ceiling reaches the transport verbatim",
+                  sentOption(server, "num_predict"), 37)
+
+    server.setScript(.init(chunks: ["ok."]))
+    _ = try? await provider.streamTurn(request("hi"), onTextDelta: { _ in })
+    results.equal("an explicit ceiling does not persist to the next request",
+                  sentOption(server, "num_predict"), LocalOllamaAPI.activeReplyTokenLimit)
+    results.equal("num_ctx is unaffected by the ceiling",
+                  sentOption(server, "num_ctx"), LocalOllamaAPI.activeContextWindowTokens)
+
+    // ========================================================================
+    results.section("12. malformed tool calls are reported, not swallowed")
+    // ========================================================================
+    server.setScript(.init(chunks: ["hold on. [TOOL:browser_task:{not json}]"]))
+    let mangled = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                 onTextDelta: { _ in })
+    results.equal("malformed tag surfaced to the caller",
+                  mangled?.malformedToolCallDescriptions.count, 1)
+    results.check("malformed text is carried verbatim",
+                  mangled?.malformedToolCallDescriptions.first?.contains("not json") == true,
+                  mangled?.malformedToolCallDescriptions.description ?? "nil")
+    results.check("malformed produces no executable call", mangled?.toolUses.isEmpty == true)
+    results.check("a mangled turn is NOT an unambiguous final answer",
+                  mangled?.isUnambiguousFinalAnswer == false)
+
+    server.setScript(.init(chunks: ["octopuses have three hearts."]))
+    let clean = try? await provider.streamTurn(request("x", tools: knownTools),
+                                               onTextDelta: { _ in })
+    results.check("a clean reply IS an unambiguous final answer",
+                  clean?.isUnambiguousFinalAnswer == true)
+    server.setScript(.init(chunks: ["checking. [TOOL:browser_task:{\"site\":\"a.com\"}]"]))
+    let calling = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                 onTextDelta: { _ in })
+    results.check("a tool-calling reply is NOT an unambiguous final answer",
+                  calling?.isUnambiguousFinalAnswer == false)
+
+    // ========================================================================
+    results.section("13. an unreachable server is providerUnavailable")
+    // ========================================================================
+    // Port 1 on loopback: reserved, and nothing will ever be listening.
+    let deadProvider = OllamaProvider(baseURL: "http://127.0.0.1:1", model: "qwen2.5vl:7b")
+    do {
+        _ = try await deadProvider.streamTurn(request("hello"), onTextDelta: { _ in })
+        results.check("unreachable server throws", false, "returned normally")
+    } catch BuddyChatError.providerUnavailable(let name, _) {
+        results.check("unreachable server maps to providerUnavailable", true)
+        results.equal("error names the provider", name, "ollama/qwen2.5vl:7b")
+        results.check("providerUnavailable is retryable",
+                      BuddyChatError.providerUnavailable(providerName: name,
+                                                         underlyingDescription: nil).isWorthRetrying)
+    } catch {
+        results.check("unreachable server maps to providerUnavailable", false,
+                      "got \(type(of: error)): \(error)")
+    }
+
+    // ========================================================================
+    results.section("14. cancellation stays CancellationError")
+    // ========================================================================
+    //
+    // URLSession reports an interrupted request as URLError.cancelled (-999).
+    // CompanionManager catches CancellationError to abandon a turn quietly, so
+    // an untranslated -999 would surface user interruption as a failure.
+
+    server.setScript(.init(chunks: Array(repeating: "word ", count: 60),
+                           delayBetweenChunks: 0.05))
+    let cancellable = Task { @MainActor in
+        try await provider.streamTurn(request("say a lot"), onTextDelta: { _ in })
+    }
+    try? await Task.sleep(nanoseconds: 300_000_000)
+    cancellable.cancel()
+    do {
+        _ = try await cancellable.value
+        results.check("cancelled turn throws", false, "returned normally")
+    } catch is CancellationError {
+        results.check("cancellation surfaces as CancellationError", true)
+    } catch {
+        let ns = error as NSError
+        results.check("cancellation surfaces as CancellationError", false,
+                      "got \(type(of: error)) domain=\(ns.domain) code=\(ns.code)")
+    }
+
+    server.stop()
+    exit(results.summarise())
+}
+
+var spoken: [String] = []
+await runSuite()

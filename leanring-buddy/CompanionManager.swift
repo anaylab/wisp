@@ -78,6 +78,23 @@ final class CompanionManager: ObservableObject {
         BuddyVisionChatClientFactory.makeDefaultProvider()
     }()
 
+    /// The agent loop's model, behind the provider abstraction.
+    ///
+    /// Wraps the *same* `LocalOllamaAPI` the voice path uses rather than
+    /// building a second one, so both share one long-lived `URLSession` and one
+    /// view of how warm the model is. A separate client would open its own
+    /// connection pool and, more importantly, make it possible for the two to
+    /// disagree about `num_ctx` — which costs a full model reload.
+    private lazy var agentModelProvider: any ModelProvider = {
+        if let ollamaClient = visionChatClient as? LocalOllamaAPI {
+            return OllamaProvider(client: ollamaClient, modelName: ollamaClient.model)
+        }
+        let baseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
+            ?? "http://localhost:11434"
+        let model = AppBundleConfiguration.stringValue(forKey: "OllamaModel") ?? "qwen2.5vl:7b"
+        return OllamaProvider(baseURL: baseURL, model: model)
+    }()
+
     private lazy var ttsProvider: any BuddyTTSProvider = {
         var provider = BuddyTTSProviderFactory.makeDefaultProvider()
         // Streaming providers keep speaking after speakText() is awaited, so
@@ -780,7 +797,7 @@ final class CompanionManager: ObservableObject {
                     defer { isAgentTurnInProgress = false }
 
                     let runner = AgentTurnRunner(
-                        chatClient: visionChatClient,
+                        modelProvider: agentModelProvider,
                         speakConfirmation: { [weak self] question in
                             guard let self else { return }
                             try? await self.ttsProvider.speakText(question)
@@ -1294,7 +1311,7 @@ final class CompanionManager: ObservableObject {
 
             BackgroundTaskLauncher.start(
                 request: request,
-                chatClient: self.visionChatClient,
+                modelProvider: self.agentModelProvider,
                 systemPrompt: Self.companionVoiceResponseSystemPrompt,
                 speakConfirmation: { [weak self] question in
                     guard let self else { return }

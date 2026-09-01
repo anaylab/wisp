@@ -54,8 +54,19 @@ final class AgentToolRegistry: ObservableObject {
         permissionBroker = broker
     }
 
-    private init() {
-        registerBuiltInTools()
+    private init(registeringBuiltInTools: Bool = true) {
+        if registeringBuiltInTools { registerBuiltInTools() }
+    }
+
+    /// A registry with nothing registered, so a test can install its own tool
+    /// and observe which instance actually ran it.
+    ///
+    /// Needed because the runner takes an injected registry but used to
+    /// execute against the singleton regardless; proving that is fixed
+    /// requires two distinguishable registries. Matches the `...ForTesting`
+    /// convention already used by `AgentTurnRunner`.
+    static func makeEmptyForTesting() -> AgentToolRegistry {
+        AgentToolRegistry(registeringBuiltInTools: false)
     }
 
     /// The tools to actually show the model for this request.

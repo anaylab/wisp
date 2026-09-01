@@ -38,7 +38,7 @@ enum BackgroundTaskLauncher {
     @discardableResult
     static func start(
         request: String,
-        chatClient: any BuddyVisionChatClient,
+        modelProvider: any ModelProvider,
         systemPrompt: String,
         speakConfirmation: @escaping @MainActor (String) async -> Void
     ) -> UUID? {
@@ -51,7 +51,7 @@ enum BackgroundTaskLauncher {
 
         let work = Task { @MainActor in
             let runner = AgentTurnRunner(
-                chatClient: chatClient,
+                modelProvider: modelProvider,
                 priority: .background,
                 speakConfirmation: speakConfirmation
             )
