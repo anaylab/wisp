@@ -42,6 +42,15 @@ enum StructuredTextToolProtocol {
         /// rather than dropped so a malformed call can be reported back to
         /// the model instead of silently doing nothing.
         let malformedTags: [String]
+        /// The reply as ordered blocks: each run of prose and each call, in
+        /// the position the model wrote it.
+        ///
+        /// This is the lossless view. `spokenText` and `toolCalls` are the two
+        /// halves of the same reply pulled apart, and once apart there is no
+        /// way back — "checking. [TOOL:x] here it is." and "checking. here it
+        /// is. [TOOL:x]" flatten to the same pair. A model told what it said
+        /// last turn should be told what it actually said.
+        let contentBlocks: [BuddyContentBlock]
     }
 
     struct ParsedToolCall {
@@ -199,22 +208,33 @@ enum StructuredTextToolProtocol {
         let hasBracketedTag = responseText.range(of: bracketedPattern, options: .regularExpression) != nil
         let pattern = hasBracketedTag ? bracketedPattern : barePattern
 
+        // No tag anywhere: the whole reply is one run of prose.
+        func plainTextResult() -> ParseResult {
+            var blocks: [BuddyContentBlock] = []
+            appendTextSegment(responseText, to: &blocks)
+            return ParseResult(spokenText: responseText, toolCalls: [],
+                               malformedTags: [], contentBlocks: blocks)
+        }
+
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
-            return ParseResult(spokenText: responseText, toolCalls: [], malformedTags: [])
+            return plainTextResult()
         }
 
         let fullRange = NSRange(responseText.startIndex..., in: responseText)
         let matches = regex.matches(in: responseText, range: fullRange)
         guard !matches.isEmpty else {
-            return ParseResult(spokenText: responseText, toolCalls: [], malformedTags: [])
+            return plainTextResult()
         }
 
         var toolCalls: [ParsedToolCall] = []
         var malformedTags: [String] = []
-        // Ranges actually recognised as calls. Only these are removed from the
-        // spoken text — a lenient pattern can also match ordinary prose, and
-        // deleting that would silently mangle the reply.
-        var rangesToRemove: [Range<String.Index>] = []
+        // Every range actually recognised as a call, in the order it appears,
+        // paired with the call it produced — `nil` when the tag was malformed.
+        // Only these ranges are removed from the spoken text: a lenient
+        // pattern can also match ordinary prose, and deleting that would
+        // silently mangle the reply. Recording the positions rather than just
+        // the calls is what lets the ordered blocks be rebuilt below.
+        var recognisedTags: [(range: Range<String.Index>, call: ParsedToolCall?)] = []
 
         for match in matches {
             guard let nameRange = Range(match.range(at: 1), in: responseText),
@@ -233,33 +253,66 @@ enum StructuredTextToolProtocol {
             if let jsonData = jsonText.data(using: .utf8),
                let parsed = try? JSONSerialization.jsonObject(with: jsonData),
                parsed is [String: Any] {
-                toolCalls.append(
-                    ParsedToolCall(
-                        id: UUID().uuidString,
-                        name: name,
-                        input: JSONValue(untypedValue: parsed)
-                    )
+                let call = ParsedToolCall(
+                    id: UUID().uuidString,
+                    name: name,
+                    input: JSONValue(untypedValue: parsed)
                 )
-                rangesToRemove.append(tagRange)
+                toolCalls.append(call)
+                recognisedTags.append((range: tagRange, call: call))
             } else {
                 malformedTags.append(String(responseText[tagRange]))
-                rangesToRemove.append(tagRange)
+                recognisedTags.append((range: tagRange, call: nil))
             }
         }
+
+        // Rebuild the reply as ordered blocks: the prose between recognised
+        // tags, and the calls themselves, each where the model put it. Matches
+        // arrive in ascending order and never overlap, so one forward pass is
+        // enough. A malformed tag contributes no block — there is no call to
+        // record — but its text is still skipped, so nothing tag-shaped
+        // survives into the prose.
+        var contentBlocks: [BuddyContentBlock] = []
+        var segmentStart = responseText.startIndex
+        for tag in recognisedTags {
+            appendTextSegment(String(responseText[segmentStart..<tag.range.lowerBound]),
+                              to: &contentBlocks)
+            if let call = tag.call {
+                contentBlocks.append(.toolUse(id: call.id, name: call.name, input: call.input))
+            }
+            segmentStart = tag.range.upperBound
+        }
+        appendTextSegment(String(responseText[segmentStart...]), to: &contentBlocks)
 
         // Remove recognised tags — valid or malformed — so nothing tag-shaped
         // is ever read aloud. Removing back-to-front keeps earlier indices
         // valid as the string shrinks.
         var spokenText = responseText
-        for range in rangesToRemove.sorted(by: { $0.lowerBound > $1.lowerBound }) {
+        for range in recognisedTags.map(\.range).sorted(by: { $0.lowerBound > $1.lowerBound }) {
             spokenText.removeSubrange(range)
         }
 
         return ParseResult(
             spokenText: spokenText.trimmingCharacters(in: .whitespacesAndNewlines),
             toolCalls: toolCalls,
-            malformedTags: malformedTags
+            malformedTags: malformedTags,
+            contentBlocks: contentBlocks
         )
+    }
+
+    /// Appends one run of prose, unless it is blank once trimmed.
+    ///
+    /// A tag at the very end of a reply — which is where the prompt tells the
+    /// model to put it — leaves an empty tail segment behind, and an empty
+    /// text block would then travel into the conversation history as a message
+    /// that says nothing.
+    private static func appendTextSegment(
+        _ segment: String,
+        to blocks: inout [BuddyContentBlock]
+    ) {
+        let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        blocks.append(.text(trimmed))
     }
 
     /// Formats a tool's result as the user-role message fed back to the model.

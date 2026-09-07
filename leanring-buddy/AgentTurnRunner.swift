@@ -67,6 +67,17 @@ final class AgentTurnRunner {
         let terminalText: String
         let steps: [AgentStepRecord]
         let hitIterationCap: Bool
+        /// Everything this turn added to the conversation, in order: the user's
+        /// message, then each assistant message and the tool results that
+        /// answered it, through to the final reply.
+        ///
+        /// Returned rather than kept private because the caller is what owns
+        /// the conversation across turns, and a runner that reports only its
+        /// last sentence forces the caller to reconstruct the rest from
+        /// nothing — which is how a transcript ends up recording an answer
+        /// that seems to arrive from thin air. Images are still here; dropping
+        /// them is the caller's decision to make, not this loop's.
+        let messages: [BuddyChatMessage]
     }
 
     private let modelProvider: any ModelProvider
@@ -101,7 +112,7 @@ final class AgentTurnRunner {
         userText: String,
         images: [(data: Data, label: String)],
         systemPrompt: String,
-        conversationHistory: [(userPlaceholder: String, assistantResponse: String)],
+        conversationHistory: [BuddyChatMessage],
         onNarration: @MainActor (String) -> Void,
         onStep: @MainActor (AgentStepRecord) -> Void,
         onModelTextDelta: @escaping @MainActor @Sendable (String) -> Void = { _ in },
@@ -116,21 +127,19 @@ final class AgentTurnRunner {
 
         var steps: [AgentStepRecord] = []
 
-        // The conversation as typed messages. Prior turns arrive as string
-        // pairs from the caller and are lifted here; tool exchanges are then
-        // appended as real `toolUse` / `toolResult` blocks rather than as
-        // more prose, so what the model is told matches what actually
-        // happened.
-        var messages: [BuddyChatMessage] = []
-        for (userPlaceholder, assistantResponse) in conversationHistory {
-            messages.append(BuddyChatMessage(role: .user, text: userPlaceholder))
-            messages.append(BuddyChatMessage(role: .assistant, text: assistantResponse))
-        }
+        // The conversation as typed messages, prior turns included. History
+        // arrives already in this shape — the caller holds the canonical
+        // transcript — so nothing is lifted out of strings here, and tool
+        // exchanges are appended below as real `toolUse` / `toolResult` blocks
+        // rather than as more prose. What the model is told matches what
+        // actually happened.
+        var messages: [BuddyChatMessage] = conversationHistory
+
+        // Where this turn's own record begins, so `Outcome.messages` can hand
+        // back what this run added without the history it was given.
+        let indexOfFirstMessageInThisTurn = messages.count
 
         // The screenshot rides on the first user message and nowhere else.
-        // Only the final user message's images are put on the wire, so once a
-        // tool result becomes the last message the image stops being sent —
-        // the ~6.3s of prompt evaluation it costs is paid once per turn.
         var firstUserBlocks: [BuddyContentBlock] = images.map {
             .image(data: $0.data, label: $0.label)
         }
@@ -157,9 +166,19 @@ final class AgentTurnRunner {
             // decision — and this loop knows about neither. Leaving it nil
             // hands the choice to the provider, which is also what keeps this
             // file free of any particular provider's configuration.
+            // The screenshot goes out on the first pass and no other. Later
+            // passes send a projection of the same conversation with the
+            // images dropped — roughly 6.3 seconds of prompt evaluation each
+            // time one goes over the wire, and the model has already looked at
+            // it. Editing `messages` in place would be cheaper still, but then
+            // the record this turn returns would claim no screenshot was ever
+            // attached; a request is allowed to carry less than the
+            // conversation holds, and this is where that gets decided rather
+            // than inside a provider, where the guarantee would only ever be
+            // as good as that one provider.
             let request = ModelRequest(
                 systemPrompt: systemPrompt,
-                messages: messages,
+                messages: iteration == 0 ? messages : messages.map(\.withoutImages),
                 tools: tools
             )
 
@@ -192,25 +211,6 @@ final class AgentTurnRunner {
             }
 
             try Task.checkCancellation()
-
-            // The screenshot has now been sent once. Strip it from the record
-            // so no later pass can resend it — roughly 6.3 seconds of prompt
-            // evaluation each time it goes over the wire. Relying on the
-            // provider to drop it would make the guarantee specific to this
-            // one provider: a model with native image blocks would happily
-            // resend every image in the history, once per iteration.
-            messages = messages.map { message in
-                guard message.blocks.contains(where: {
-                    if case .image = $0 { return true }
-                    return false
-                }) else { return message }
-                var withoutImages = message
-                withoutImages.blocks = message.blocks.filter {
-                    if case .image = $0 { return false }
-                    return true
-                }
-                return withoutImages
-            }
 
             let modelStep = AgentStepRecord(
                 kind: .modelCall,
@@ -252,10 +252,17 @@ final class AgentTurnRunner {
                 if turn.isUnambiguousFinalAnswer {
                     for delta in iterationDeltas.values { onSpeakableTextDelta(delta) }
                 }
+                // The closing message is recorded as the model produced it,
+                // calls and all. Hitting the iteration cap with calls still
+                // outstanding is exactly the case where that matters: the
+                // transcript should show that the model was still asking, not
+                // that it stopped and answered.
+                messages.append(BuddyChatMessage(role: .assistant, blocks: turn.content))
                 return Outcome(
                     terminalText: turn.text,
                     steps: steps,
-                    hitIterationCap: isFinalIteration && !requestedCalls.isEmpty
+                    hitIterationCap: isFinalIteration && !requestedCalls.isEmpty,
+                    messages: Array(messages[indexOfFirstMessageInThisTurn...])
                 )
             }
 
@@ -264,19 +271,20 @@ final class AgentTurnRunner {
                 onNarration(turn.text)
             }
 
-            // Rebuilt as real message blocks: the assistant's turn records the
-            // calls it made, and the following user turn carries their results.
+            // The assistant's message is the turn's own content, verbatim —
+            // its prose and its calls, each still where the model put them.
+            // Rebuilding it as "all the text, then all the calls" was the old
+            // shape, and it quietly rewrote history: a model that narrates
+            // between two calls was replayed as if it had narrated before
+            // both.
             //
-            // This is the canonical shape — assistant text and tool-execution
-            // metadata are kept as separate, structured blocks, and nothing
-            // here encodes how any provider writes a tool call on the wire.
-            // `OllamaProvider` currently renders a `.toolUse` block back into
-            // the `[TOOL:name:{json}]` text this model was trained to read;
-            // that reconstruction is a compatibility detail of that one
-            // transport, not part of the abstraction. A provider with native
-            // tool calls carries these blocks through as structured data and
-            // never materialises the tag at all.
-            var assistantBlocks: [BuddyContentBlock] = turn.text.isEmpty ? [] : [.text(turn.text)]
+            // Nothing here encodes how any provider writes a tool call on the
+            // wire. `OllamaProvider` renders a `.toolUse` block back into the
+            // `[TOOL:name:{json}]` text this model was trained to read; that
+            // reconstruction is a compatibility detail of that one transport.
+            // A provider with native tool calls carries these blocks through
+            // as structured data and never materialises the tag at all.
+            let assistantBlocks = turn.content
             var resultBlocks: [BuddyContentBlock] = []
             for call in requestedCalls {
                 try Task.checkCancellation()
@@ -300,7 +308,6 @@ final class AgentTurnRunner {
                     steps.append(declinedStep)
                     onStep(declinedStep)
 
-                    assistantBlocks.append(.toolUse(id: call.id, name: call.name, input: call.input))
                     resultBlocks.append(
                         .toolResult(toolUseID: call.id, toolName: call.name,
                                     content: outcome.content, isError: false)
@@ -319,7 +326,6 @@ final class AgentTurnRunner {
                 steps.append(toolStep)
                 onStep(toolStep)
 
-                assistantBlocks.append(.toolUse(id: call.id, name: call.name, input: call.input))
                 resultBlocks.append(
                     .toolResult(toolUseID: call.id, toolName: call.name,
                                 content: outcome.content, isError: outcome.isError)
@@ -334,7 +340,12 @@ final class AgentTurnRunner {
         }
 
         // Unreachable: the final iteration always returns above.
-        return Outcome(terminalText: "", steps: steps, hitIterationCap: true)
+        return Outcome(
+            terminalText: "",
+            steps: steps,
+            hitIterationCap: true,
+            messages: Array(messages[indexOfFirstMessageInThisTurn...])
+        )
     }
 
     /// Runs one tool, giving up after `perToolTimeoutSeconds`.

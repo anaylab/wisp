@@ -255,18 +255,24 @@ final class OllamaProvider: ModelProvider, @unchecked Sendable {
         // Calls that merely echo the prompt's worked example are dropped: they
         // appear on turns needing no tool at all, and acting on one would
         // answer a request the user never made.
-        let genuineCalls = parsed.toolCalls.filter {
-            !StructuredTextToolProtocol.isEchoOfPromptExample($0)
-        }
+        let echoedCallIDs = Set(
+            parsed.toolCalls
+                .filter(StructuredTextToolProtocol.isEchoOfPromptExample)
+                .map(\.id)
+        )
 
-        let toolUses = genuineCalls.map { call in
-            (id: call.id, name: call.name, input: call.input)
+        // Filtered out of the ordered blocks rather than assembled from a
+        // separate list of survivors, because the ordering is the thing worth
+        // keeping: an echoed example vanishes and everything around it stays
+        // exactly where the model wrote it.
+        let content = parsed.contentBlocks.filter { block in
+            if case .toolUse(let id, _, _) = block { return !echoedCallIDs.contains(id) }
+            return true
         }
 
         return BuddyChatTurn(
-            text: parsed.spokenText,
-            toolUses: toolUses,
-            stopReason: toolUses.isEmpty ? .endTurn : .toolUse,
+            content: content,
+            stopReason: content.toolUses.isEmpty ? .endTurn : .toolUse,
             duration: result.duration,
             promptTokens: result.promptTokens,
             outputTokens: result.outputTokens,

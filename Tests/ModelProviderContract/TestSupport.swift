@@ -136,6 +136,17 @@ final class FakeOllamaServer: @unchecked Sendable {
             while let self {
                 let connection = accept(self.listeningSocket, nil, nil)
                 guard connection >= 0 else { return }
+                // Writing to a socket the client has already closed raises
+                // SIGPIPE, whose default action is to kill the process — and
+                // it kills it before stdio flushes, so the suite dies having
+                // printed nothing at all. The cancellation test closes its
+                // connection mid-stream by design, leaving this thread partway
+                // through a reply nobody is reading, so that is not a hazard
+                // but the expected case. SO_NOSIGPIPE turns the doomed write
+                // into the EPIPE that `send` already ignores.
+                var suppressSigpipe: Int32 = 1
+                setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &suppressSigpipe,
+                           socklen_t(MemoryLayout<Int32>.size))
                 self.serve(connection)
             }
         }

@@ -67,6 +67,16 @@ suspended during agent loops for the same reason.
 it costs ~1095. Screenshots are therefore capped at 896px, and are skipped entirely when
 the prompt does not appear to refer to the screen.
 
+**The conversation is stored as ordered content blocks, not strings.** `BuddyChatTurn`
+holds a `content: [BuddyContentBlock]` — each run of prose and each tool call in the
+position the model produced it — and `text` / `toolUses` are views onto it. A joined
+string plus a separate call list cannot say which sentence came before a call, so
+replaying it invents a turn that never happened. `CompanionManager` owns the full record
+in a `ConversationTranscript`; what any one request carries is a *projection* of that
+record, never an edit to it. That is why the screenshot is dropped in
+`AgentTurnRunner` on the way to the provider rather than stripped out of the stored
+history: a request is allowed to carry less than the conversation holds.
+
 ## Key Files
 
 Grouped by what they do. Line counts are approximate.
@@ -105,7 +115,7 @@ Grouped by what they do. Line counts are approximate.
 |------|-------|---------|
 | `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
 | `AgentToolRegistry.swift` | ~167 | Built-in read-only tools. `requiresConfirmation` defaults to true for unknown names. |
-| `StructuredTextToolProtocol.swift` | ~275 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
+| `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~447 | JSON-RPC 2.0 over stdio subprocess, login-shell PATH resolution, stderr ring buffer. |
 | `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
 | `ToolConfirmationCoordinator.swift` | ~193 | Permission requests with a 45s timeout and spoken-affirmative parsing. |

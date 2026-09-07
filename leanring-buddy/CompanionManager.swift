@@ -106,9 +106,16 @@ final class CompanionManager: ObservableObject {
         return provider
     }()
 
-    /// Conversation history so Claude remembers prior exchanges within a session.
-    /// Each entry is the user's transcript and Claude's response.
-    private var conversationHistory: [(userTranscript: String, assistantResponse: String)] = []
+    /// The conversation so far, so the model remembers prior exchanges within
+    /// a session.
+    ///
+    /// A transcript of typed messages rather than a list of string pairs. The
+    /// pairs could only ever say what was asked and what came back; a turn
+    /// that called three tools looked, on the next turn, exactly like one that
+    /// answered from memory. What goes to the model is still a projection of
+    /// this — see `messagesForFollowUpRequest` — but the projecting now happens
+    /// where the request is built, not where the history is stored.
+    private var conversationTranscript = ConversationTranscript()
 
     /// The currently running AI response task, if any. Cancelled when the user
     /// speaks again so a new response can begin immediately.
@@ -734,8 +741,10 @@ final class CompanionManager: ObservableObject {
             )
             PerfMetricsRecorder.shared.abandonTurn()
 
-            conversationHistory.append((userTranscript: transcript,
-                                        assistantResponse: fastOutcome.spokenConfirmation))
+            conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                BuddyChatMessage(role: .user, text: transcript),
+                BuddyChatMessage(role: .assistant, text: fastOutcome.spokenConfirmation),
+            ]))
             voiceState = .responding
             currentResponseTask = Task { [weak self] in
                 guard let self else { return }
@@ -780,15 +789,19 @@ final class CompanionManager: ObservableObject {
                     return (data: capture.imageData, label: capture.label + dimensionInfo)
                 }
 
-                // Pass conversation history so Claude remembers prior exchanges
-                let historyForAPI = conversationHistory.map { entry in
-                    (userPlaceholder: entry.userTranscript, assistantResponse: entry.assistantResponse)
-                }
+                // Prior exchanges, projected down to what this request should
+                // carry: the questions and the answers, without the tool
+                // traffic that produced them.
+                let historyMessages = conversationTranscript.messagesForFollowUpRequest()
 
                 PerfMetricsRecorder.shared.beginPhase(.chat)
                 PerfMetricsRecorder.shared.beginPhase(.firstToken)
 
                 let fullResponseText: String
+                // What this turn adds to the transcript. Both paths fill it in
+                // — the agent loop reports the messages it actually built, and
+                // the single-call path has only the question and the answer.
+                var messagesFromThisTurn: [BuddyChatMessage]
                 if Self.isAgentModeEnabled {
                     // Tools are in play, so the reply may take several model
                     // calls. Hold off the keep-warm heartbeat for the duration
@@ -808,7 +821,7 @@ final class CompanionManager: ObservableObject {
                         images: labeledImages,
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
                             + ScreenAnnotationParser.promptInstructions,
-                        conversationHistory: historyForAPI,
+                        conversationHistory: historyMessages,
                         onNarration: { narration in
                             print("💭 \(narration)")
                         },
@@ -817,6 +830,7 @@ final class CompanionManager: ObservableObject {
                         }
                     )
                     fullResponseText = outcome.terminalText
+                    messagesFromThisTurn = outcome.messages
                 } else {
                     AgentTaskRegistry.shared.appendStep(
                         AgentStepRecord(kind: .modelCall, summary: "Asking \(ActiveStackReadout.shared.chatModelName)"),
@@ -851,7 +865,8 @@ final class CompanionManager: ObservableObject {
                             images: labeledImages,
                             systemPrompt: Self.companionVoiceResponseSystemPrompt
                                 + ScreenAnnotationParser.promptInstructions,
-                            conversationHistory: historyForAPI,
+                            conversationHistory: ConversationTranscript
+                                .legacyStringPairs(from: historyMessages),
                             userPrompt: transcript,
                             onTextChunk: { [weak self] chunk in
                                 // First token ends the wait the user actually
@@ -870,6 +885,10 @@ final class CompanionManager: ObservableObject {
                         step.durationSeconds = chatDuration
                     }
                     fullResponseText = responseText
+                    messagesFromThisTurn = [
+                        BuddyChatMessage(role: .user, text: transcript),
+                        BuddyChatMessage(role: .assistant, text: responseText),
+                    ]
                 }
 
                 PerfMetricsRecorder.shared.endPhase(.chat)
@@ -942,19 +961,33 @@ final class CompanionManager: ObservableObject {
                     print("🎯 Element pointing: \(parseResult.elementLabel ?? "no element")")
                 }
 
-                // Save this exchange to conversation history (with the point tag
-                // stripped so it doesn't confuse future context)
-                conversationHistory.append((
-                    userTranscript: transcript,
-                    assistantResponse: spokenText
-                ))
+                // Save this exchange to the transcript.
+                //
+                // Two things are dropped on the way in, both deliberately.
+                //
+                // The screenshots go, because a capture is context for exactly
+                // one request — it is stale by the next turn — and holding ten
+                // of them costs megabytes to say nothing.
+                //
+                // The final reply is recorded as `spokenText`, which is the
+                // model's answer with the pointing and annotation tags removed.
+                // Those tags are a rendering channel, not speech: by the time
+                // this runs the cursor has already flown and the boxes are
+                // already drawn, and feeding coordinates back would teach the
+                // model to answer with numbers about a screen it can no longer
+                // see. Every other message is kept exactly as it happened.
+                var recordedMessages = messagesFromThisTurn.map(\.withoutImages)
+                if let finalReplyIndex = recordedMessages.lastIndex(where: { $0.role == .assistant }) {
+                    recordedMessages[finalReplyIndex].blocks = [.text(spokenText)]
+                }
+                conversationTranscript.append(
+                    ConversationTranscript.Turn(messages: recordedMessages)
+                )
 
                 // Keep only the last 10 exchanges to avoid unbounded context growth
-                if conversationHistory.count > 10 {
-                    conversationHistory.removeFirst(conversationHistory.count - 10)
-                }
+                conversationTranscript.trimToRecentTurns(10)
 
-                print("🧠 Conversation history: \(conversationHistory.count) exchanges")
+                print("🧠 Conversation history: \(conversationTranscript.turns.count) exchanges")
 
                 WispAnalytics.trackAIResponseReceived(response: spokenText)
 

@@ -403,6 +403,153 @@ func runSuite() async {
                       "got \(type(of: error)) domain=\(ns.domain) code=\(ns.code)")
     }
 
+    // ========================================================================
+    results.section("15. canonical content preserves the model's own ordering")
+    // ========================================================================
+    //
+    // The turn's `content` is the record the conversation is built from. Text
+    // and calls pulled into two separate fields cannot say which came first,
+    // and a history rebuilt from them replays a turn the model never took.
+
+    func blockShape(_ blocks: [BuddyContentBlock]) -> [String] {
+        blocks.map { block in
+            switch block {
+            case .text(let value): return "text(\(value))"
+            case .toolUse(_, let name, _): return "toolUse(\(name))"
+            case .toolResult(_, let name, _, _): return "toolResult(\(name))"
+            case .image(_, let label): return "image(\(label))"
+            }
+        }
+    }
+
+    server.setScript(.init(chunks: [
+        "checking that now. [TOOL:read_page:{}] here is what it says."
+    ]))
+    let interleaved = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                     onTextDelta: { _ in })
+    results.equal("prose before and after a call stay on their own sides",
+                  blockShape(interleaved?.content ?? []),
+                  ["text(checking that now.)", "toolUse(read_page)", "text(here is what it says.)"])
+    results.equal("text still reads as the whole reply",
+                  interleaved?.text, "checking that now. here is what it says.")
+    results.equal("toolUses still reads as the calls",
+                  interleaved?.toolUses.map(\.name), ["read_page"])
+
+    server.setScript(.init(chunks: [
+        "one. [TOOL:browser_task:{\"site\":\"a.com\"}] two. [TOOL:read_page:{}] three."
+    ]))
+    let twoCalls = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                  onTextDelta: { _ in })
+    results.equal("narration between two calls keeps its position",
+                  blockShape(twoCalls?.content ?? []),
+                  ["text(one.)", "toolUse(browser_task)", "text(two.)",
+                   "toolUse(read_page)", "text(three.)"])
+
+    // A tag at the end — where the prompt tells the model to put it — must not
+    // leave a blank text block behind for the history to carry.
+    server.setScript(.init(chunks: ["on it. [TOOL:read_page:{}]"]))
+    let trailingTag = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                     onTextDelta: { _ in })
+    results.equal("a trailing tag leaves no empty text block",
+                  blockShape(trailingTag?.content ?? []),
+                  ["text(on it.)", "toolUse(read_page)"])
+
+    // A bare tool call carries no prose at all, so nothing empty reaches the
+    // assistant message the runner builds from this.
+    server.setScript(.init(chunks: ["[TOOL:read_page:{}]"]))
+    let bareCall = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                  onTextDelta: { _ in })
+    results.equal("a call with no narration produces only the call",
+                  blockShape(bareCall?.content ?? []), ["toolUse(read_page)"])
+
+    // The echo guard drops the call and nothing else: the words around it are
+    // an ordinary reply and must survive where the model wrote them.
+    server.setScript(.init(chunks: [
+        "sure, one moment. [TOOL:browser_task:{\"site\":\"\(StructuredTextToolProtocol.examplePlaceholderText)\"}] all set."
+    ]))
+    let echoedInPlace = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                       onTextDelta: { _ in })
+    results.check("echoed example produces no call", echoedInPlace?.toolUses.isEmpty == true)
+    results.equal("text around an echoed example survives in place",
+                  blockShape(echoedInPlace?.content ?? []),
+                  ["text(sure, one moment.)", "text(all set.)"])
+
+    // A plain reply is one block, not an empty list and not a blank one.
+    server.setScript(.init(chunks: ["  just an answer.  "]))
+    let plain = try? await provider.streamTurn(request("x"), onTextDelta: { _ in })
+    results.equal("a plain reply is a single text block",
+                  blockShape(plain?.content ?? []), ["text(just an answer.)"])
+
+    // The convenience initialiser must land on the same canonical shape a
+    // structured provider builds by hand, or two providers would disagree
+    // about what a turn is.
+    let assembled = BuddyChatTurn(text: "hold on.",
+                                  toolUses: [(id: "c1", name: "read_page", input: .object([:]))])
+    results.equal("text+toolUses initialiser produces canonical blocks",
+                  blockShape(assembled.content), ["text(hold on.)", "toolUse(read_page)"])
+    let callOnly = BuddyChatTurn(text: "",
+                                 toolUses: [(id: "c1", name: "read_page", input: .object([:]))])
+    results.equal("empty text contributes no block",
+                  blockShape(callOnly.content), ["toolUse(read_page)"])
+
+    // ========================================================================
+    results.section("16. the transcript stores more than it sends")
+    // ========================================================================
+
+    var transcript = ConversationTranscript()
+    transcript.append(ConversationTranscript.Turn(messages: [
+        BuddyChatMessage(role: .user, text: "what is on my screen?"),
+        BuddyChatMessage(role: .assistant, blocks: [
+            .text("checking."),
+            .toolUse(id: "c1", name: "read_page", input: .object([:])),
+        ]),
+        BuddyChatMessage(role: .user, blocks: [
+            .toolResult(toolUseID: "c1", toolName: "read_page",
+                        content: String(repeating: "long page text. ", count: 200),
+                        isError: false),
+        ]),
+        BuddyChatMessage(role: .assistant, text: "a settings window."),
+    ]))
+
+    results.equal("the record keeps every message", transcript.messages.count, 4)
+    results.check("the record keeps the tool call",
+                  transcript.messages.flatMap(\.blocks).contains {
+                      if case .toolUse = $0 { return true }
+                      return false
+                  })
+
+    let follow = transcript.messagesForFollowUpRequest()
+    results.equal("the request carries one exchange per turn", follow.count, 2)
+    results.equal("the request carries the question", follow.first?.combinedText,
+                  "what is on my screen?")
+    results.equal("the request carries the answer", follow.last?.combinedText,
+                  "a settings window.")
+    results.check("the request leaves the tool traffic behind",
+                  !follow.flatMap(\.blocks).contains {
+                      if case .toolResult = $0 { return true }
+                      return false
+                  })
+    results.check("projecting did not edit the record", transcript.messages.count == 4)
+
+    let pairs = ConversationTranscript.legacyStringPairs(from: follow)
+    results.equal("legacy pairs are one per turn", pairs.count, 1)
+    results.equal("legacy pair keeps the question", pairs.first?.userPlaceholder,
+                  "what is on my screen?")
+    results.equal("legacy pair keeps the answer", pairs.first?.assistantResponse,
+                  "a settings window.")
+
+    // A turn still in flight has no reply yet. Dropping its question would
+    // hide from the model that it was ever asked.
+    let unanswered = ConversationTranscript.legacyStringPairs(from: [
+        BuddyChatMessage(role: .user, text: "first"),
+        BuddyChatMessage(role: .user, text: "second"),
+    ])
+    results.equal("an unanswered question is not dropped",
+                  unanswered.map(\.userPlaceholder), ["first", "second"])
+
+    transcript.trimToRecentTurns(0)
+    results.equal("trimming removes whole turns", transcript.turns.count, 0)
+
     server.stop()
     exit(results.summarise())
 }

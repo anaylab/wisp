@@ -135,6 +135,54 @@ enum BuddyContentBlock: Sendable {
     case toolResult(toolUseID: String, toolName: String, content: String, isError: Bool)
 }
 
+/// Views onto a run of blocks.
+///
+/// These live on the array rather than on any one owner because a message and
+/// a model turn ask exactly the same questions of their content, and two
+/// copies of "join the text blocks" is how the two would drift apart.
+extension Array where Element == BuddyContentBlock {
+    /// Every text block joined — what gets spoken or stored as the reply.
+    var combinedText: String {
+        compactMap { block in
+            if case .text(let value) = block { return value }
+            return nil
+        }
+        .joined(separator: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The tool calls, in the order they appear.
+    var toolUses: [(id: String, name: String, input: JSONValue)] {
+        compactMap { block in
+            if case .toolUse(let id, let name, let input) = block {
+                return (id: id, name: name, input: input)
+            }
+            return nil
+        }
+    }
+
+    var containsImage: Bool {
+        contains { block in
+            if case .image = block { return true }
+            return false
+        }
+    }
+
+    /// The same blocks with every image removed.
+    ///
+    /// A projection rather than an edit in place: a screenshot is worth about
+    /// 1095 prompt tokens and roughly six seconds of evaluation, so it is sent
+    /// on exactly one pass — but the conversation still needs to record that
+    /// it was sent, so the dropping happens on the way to a provider and never
+    /// to the stored history.
+    var withoutImages: [BuddyContentBlock] {
+        filter { block in
+            if case .image = block { return false }
+            return true
+        }
+    }
+}
+
 struct BuddyChatMessage: Sendable {
     enum Role: Sendable {
         case user
@@ -155,22 +203,13 @@ struct BuddyChatMessage: Sendable {
     }
 
     /// All text blocks joined — what gets spoken or stored as the reply.
-    var combinedText: String {
-        blocks.compactMap { block in
-            if case .text(let value) = block { return value }
-            return nil
-        }
-        .joined(separator: " ")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    var combinedText: String { blocks.combinedText }
 
-    var toolUses: [(id: String, name: String, input: JSONValue)] {
-        blocks.compactMap { block in
-            if case .toolUse(let id, let name, let input) = block {
-                return (id: id, name: name, input: input)
-            }
-            return nil
-        }
+    var toolUses: [(id: String, name: String, input: JSONValue)] { blocks.toolUses }
+
+    /// The same message with every image dropped.
+    var withoutImages: BuddyChatMessage {
+        BuddyChatMessage(role: role, blocks: blocks.withoutImages)
     }
 }
 
@@ -237,9 +276,19 @@ enum BuddyStopReason: Sendable, Equatable {
 
 /// The result of one assistant turn — possibly a final answer, possibly a
 /// request to run tools and come back.
+///
+/// `content` is the canonical record: every block the model produced, in the
+/// order it produced them. It is stored rather than derived because that order
+/// is information no other field carries. A model that says something, calls a
+/// tool, and then says something else produced three blocks; the shape this
+/// type used to have — a joined string plus a separate list of calls — cannot
+/// say which sentence came before the call and which after, so replaying the
+/// turn to a provider that cares about interleaving reconstructs a
+/// conversation that never happened. `text` and `toolUses` remain available as
+/// views onto `content`, so a caller wanting only the prose or only the calls
+/// still reads the same single source.
 struct BuddyChatTurn: Sendable {
-    let text: String
-    let toolUses: [(id: String, name: String, input: JSONValue)]
+    let content: [BuddyContentBlock]
     let stopReason: BuddyStopReason
     let duration: TimeInterval
     /// What the provider reported this turn cost, when it reports anything.
@@ -261,6 +310,12 @@ struct BuddyChatTurn: Sendable {
     /// assumption that the turn is finished.
     let malformedToolCallDescriptions: [String]
 
+    /// Every text block joined — what is spoken when the turn is final.
+    var text: String { content.combinedText }
+
+    /// The calls the model asked for, in the order it wrote them.
+    var toolUses: [(id: String, name: String, input: JSONValue)] { content.toolUses }
+
     /// Whether this turn is unambiguously a finished answer.
     ///
     /// A turn qualifies only when the model asked for nothing and mangled
@@ -272,6 +327,30 @@ struct BuddyChatTurn: Sendable {
     }
 
     init(
+        content: [BuddyContentBlock],
+        stopReason: BuddyStopReason = .endTurn,
+        duration: TimeInterval = 0,
+        promptTokens: Int? = nil,
+        outputTokens: Int? = nil,
+        malformedToolCallDescriptions: [String] = []
+    ) {
+        self.content = content
+        self.stopReason = stopReason
+        self.duration = duration
+        self.promptTokens = promptTokens
+        self.outputTokens = outputTokens
+        self.malformedToolCallDescriptions = malformedToolCallDescriptions
+    }
+
+    /// Convenience for the common shape: some prose, then any tool calls.
+    ///
+    /// Kept because that is genuinely all some providers can report — a wire
+    /// format that returns a `content` string and a `tool_calls` array has no
+    /// interleaving to preserve, and forcing every one of them to assemble a
+    /// block list by hand would invite them to assemble it differently. Empty
+    /// text produces no text block at all rather than a blank one, so a turn
+    /// that is nothing but a tool call carries no empty prose into the history.
+    init(
         text: String,
         toolUses: [(id: String, name: String, input: JSONValue)] = [],
         stopReason: BuddyStopReason = .endTurn,
@@ -280,13 +359,18 @@ struct BuddyChatTurn: Sendable {
         outputTokens: Int? = nil,
         malformedToolCallDescriptions: [String] = []
     ) {
-        self.text = text
-        self.toolUses = toolUses
-        self.stopReason = stopReason
-        self.duration = duration
-        self.promptTokens = promptTokens
-        self.outputTokens = outputTokens
-        self.malformedToolCallDescriptions = malformedToolCallDescriptions
+        var content: [BuddyContentBlock] = text.isEmpty ? [] : [.text(text)]
+        content.append(contentsOf: toolUses.map {
+            .toolUse(id: $0.id, name: $0.name, input: $0.input)
+        })
+        self.init(
+            content: content,
+            stopReason: stopReason,
+            duration: duration,
+            promptTokens: promptTokens,
+            outputTokens: outputTokens,
+            malformedToolCallDescriptions: malformedToolCallDescriptions
+        )
     }
 }
 
@@ -390,9 +474,67 @@ struct ConversationTranscript: Sendable {
 
     private(set) var turns: [Turn] = []
 
-    /// Flattened messages, for sending to a model.
+    /// Flattened messages — the whole record, exactly as it was appended.
     var messages: [BuddyChatMessage] {
         turns.flatMap(\.messages)
+    }
+
+    /// The history to put in front of the model on the *next* request.
+    ///
+    /// One user message and one assistant message per past turn: what the user
+    /// asked, and the answer they got. Intra-turn tool traffic is deliberately
+    /// left behind. A tool result is written for a model that is mid-turn and
+    /// routinely runs to thousands of characters, and replaying ten turns of it
+    /// into a context window that also carries a screenshot buys context the
+    /// model has already acted on at a price paid on every subsequent turn.
+    ///
+    /// This is a projection, not a trim: the full record stays in `turns`, so
+    /// a provider with room to spare — or a dashboard, or a bug report — can
+    /// still see every call that was made. Deciding what a particular request
+    /// can afford is the caller's business, and it is why the transcript is
+    /// never edited to fit one.
+    func messagesForFollowUpRequest() -> [BuddyChatMessage] {
+        turns.flatMap { turn in
+            [
+                BuddyChatMessage(role: .user, text: turn.userText),
+                BuddyChatMessage(role: .assistant, text: turn.assistantText),
+            ]
+        }
+    }
+
+    /// The alternating string pairs the pre-agent chat client still takes.
+    ///
+    /// Lossy, and deliberately the only place that loss happens: the legacy
+    /// `analyzeImageStreaming` parameter cannot express a tool call or an
+    /// image, so the flattening is written once here rather than open-coded at
+    /// each call site where it would quietly acquire variations.
+    static func legacyStringPairs(
+        from messages: [BuddyChatMessage]
+    ) -> [(userPlaceholder: String, assistantResponse: String)] {
+        var pairs: [(userPlaceholder: String, assistantResponse: String)] = []
+        var pendingUserText: String?
+
+        for message in messages {
+            switch message.role {
+            case .user:
+                // Two user messages in a row would otherwise drop the first.
+                if let unanswered = pendingUserText {
+                    pairs.append((userPlaceholder: unanswered, assistantResponse: ""))
+                }
+                pendingUserText = message.combinedText
+            case .assistant:
+                pairs.append((
+                    userPlaceholder: pendingUserText ?? "",
+                    assistantResponse: message.combinedText
+                ))
+                pendingUserText = nil
+            }
+        }
+
+        if let trailing = pendingUserText, !trailing.isEmpty {
+            pairs.append((userPlaceholder: trailing, assistantResponse: ""))
+        }
+        return pairs
     }
 
     mutating func append(_ turn: Turn) {

@@ -188,11 +188,34 @@ func definition(_ name: String, _ metadata: ToolMetadata) -> BuddyToolDefinition
 
 @MainActor func run(_ runner: AgentTurnRunner, images: [(data: Data, label: String)] = [],
                     text: String = "do the thing",
+                    history: [BuddyChatMessage] = [],
                     onDelta: @escaping @MainActor @Sendable (String) -> Void = { _ in })
 async throws -> AgentTurnRunner.Outcome {
     try await runner.run(userText: text, images: images, systemPrompt: "sys",
-                         conversationHistory: [], onNarration: { _ in }, onStep: { _ in },
+                         conversationHistory: history, onNarration: { _ in }, onStep: { _ in },
                          onModelTextDelta: onDelta)
+}
+
+/// A readable one-line rendering of a run of messages: the role, then the kind
+/// of each block in the order it appears.
+///
+/// Ordering is the whole point of these tests, so the assertions compare
+/// shapes rather than probing for the presence of a block — a check that only
+/// asks "is there a tool call in here somewhere" passes just as happily on a
+/// history that put it in the wrong place.
+func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
+    messages.map { message in
+        let role = message.role == .user ? "user" : "assistant"
+        let blocks = message.blocks.map { block -> String in
+            switch block {
+            case .text(let value): return "text(\(value))"
+            case .toolUse(_, let name, _): return "toolUse(\(name))"
+            case .toolResult(_, let name, _, _): return "toolResult(\(name))"
+            case .image(_, let label): return "image(\(label))"
+            }
+        }
+        return "\(role)[\(blocks.joined(separator: " "))]"
+    }
 }
 
 // MARK: - Suite
@@ -566,6 +589,165 @@ async throws -> AgentTurnRunner.Outcome {
           AgentTurnRunner.perToolTimeoutSecondsForTesting
             == ToolConfirmationCoordinator.confirmationTimeoutSeconds + 20,
           "\(AgentTurnRunner.perToolTimeoutSecondsForTesting)")
+
+    section("10. the canonical record of a turn")
+    //
+    // The runner is the only thing that watches a whole turn happen, so it is
+    // the only thing that can say what the turn was. These tests are about
+    // that record being faithful — the same blocks, in the same order the
+    // model produced them, including the ones the requests themselves
+    // deliberately left out.
+
+    do {
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        registry.setPermissionBroker(StubBroker(decision: .approved))
+        registry.register(definition("lookup", .reading())) { _ in "the answer is 42" }
+
+        // Prose, then a call, then more prose. This is precisely the shape the
+        // old representation could not describe: joined text plus a separate
+        // list of calls flattens it to the same thing as a model that said
+        // both sentences first and called the tool afterwards.
+        let provider = ScriptedProvider(turns: [
+            BuddyChatTurn(content: [
+                .text("checking that now."),
+                .toolUse(id: "t1", name: "lookup", input: .object([:])),
+                .text("one second."),
+            ], stopReason: .toolUse),
+            BuddyChatTurn(text: "it is 42.", stopReason: .endTurn),
+        ])
+        let outcome = try? await run(AgentTurnRunner(modelProvider: provider, toolRegistry: registry,
+                                                     speakConfirmation: { _ in }))
+
+        check("the outcome records the whole turn, not just its last sentence",
+              messageShape(outcome?.messages ?? []) == [
+                  "user[text(do the thing)]",
+                  "assistant[text(checking that now.) toolUse(lookup) text(one second.)]",
+                  "user[toolResult(lookup)]",
+                  "assistant[text(it is 42.)]",
+              ],
+              messageShape(outcome?.messages ?? []).description)
+
+        // The record is only worth keeping if the next request is built from
+        // it unaltered. The assistant message replayed on iteration 1 must be
+        // the one the model actually produced.
+        let secondRequest = provider.receivedRequests.last
+        check("the replayed assistant turn keeps the model's own ordering",
+              messageShape(secondRequest?.messages ?? []) == [
+                  "user[text(do the thing)]",
+                  "assistant[text(checking that now.) toolUse(lookup) text(one second.)]",
+                  "user[toolResult(lookup)]",
+              ],
+              messageShape(secondRequest?.messages ?? []).description)
+    }
+
+    do {
+        // A turn that produced no prose at all still has to record its call.
+        // An assistant message with an empty text block would tell the model
+        // it once answered with silence.
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        registry.setPermissionBroker(StubBroker(decision: .approved))
+        registry.register(definition("lookup", .reading())) { _ in "result" }
+        let provider = ScriptedProvider(turns: [
+            BuddyChatTurn(content: [.toolUse(id: "t1", name: "lookup", input: .object([:]))],
+                          stopReason: .toolUse),
+            BuddyChatTurn(text: "done.", stopReason: .endTurn),
+        ])
+        let outcome = try? await run(AgentTurnRunner(modelProvider: provider, toolRegistry: registry,
+                                                     speakConfirmation: { _ in }))
+        check("a wordless tool call carries no empty text block",
+              messageShape(outcome?.messages ?? []) == [
+                  "user[text(do the thing)]",
+                  "assistant[toolUse(lookup)]",
+                  "user[toolResult(lookup)]",
+                  "assistant[text(done.)]",
+              ],
+              messageShape(outcome?.messages ?? []).description)
+    }
+
+    do {
+        // Section 4 pins that the image is sent once. This pins the other half
+        // of that decision: the request carries less than the conversation
+        // holds. Stripping the image from `messages` in place would satisfy
+        // section 4 just as well and quietly leave the record claiming no
+        // screenshot was ever attached.
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        registry.setPermissionBroker(StubBroker(decision: .approved))
+        registry.register(definition("lookup", .reading())) { _ in "result" }
+        let provider = ScriptedProvider(turns: [
+            BuddyChatTurn(text: "looking.", toolUses: [toolCall("t1", "lookup")], stopReason: .toolUse),
+            BuddyChatTurn(text: "done.", stopReason: .endTurn),
+        ])
+        let outcome = try? await run(AgentTurnRunner(modelProvider: provider, toolRegistry: registry,
+                                                     speakConfirmation: { _ in }),
+                                     images: [(data: Data([0x01, 0x02]), label: "screen 1")])
+        check("the record keeps the screenshot the second request dropped",
+              messageShape(outcome?.messages ?? []).first == "user[image(screen 1) text(do the thing)]",
+              messageShape(outcome?.messages ?? []).first ?? "nothing")
+
+        let imagesInSecondRequest = provider.receivedRequests.last?.messages
+            .flatMap(\.blocks).filter { if case .image = $0 { return true }; return false }.count
+        check("and the second request still does not resend it", imagesInSecondRequest == 0,
+              "\(imagesInSecondRequest ?? -1)")
+    }
+
+    do {
+        // History now arrives as typed messages rather than string pairs, so a
+        // past turn can say more than "this was asked, that came back". What
+        // the caller hands over must reach the provider unedited, and must not
+        // be reported back as though this turn had produced it.
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        let priorTurn: [BuddyChatMessage] = [
+            BuddyChatMessage(role: .user, text: "what is on my screen?"),
+            BuddyChatMessage(role: .assistant, blocks: [
+                .text("let me look."),
+                .toolUse(id: "old", name: "read_page", input: .object([:])),
+            ]),
+            BuddyChatMessage(role: .user, blocks: [
+                .toolResult(toolUseID: "old", toolName: "read_page",
+                            content: "a settings window", isError: false),
+            ]),
+            BuddyChatMessage(role: .assistant, text: "a settings window."),
+        ]
+        let provider = ScriptedProvider(turns: [BuddyChatTurn(text: "understood.")])
+        let outcome = try? await run(AgentTurnRunner(modelProvider: provider, toolRegistry: registry,
+                                                     speakConfirmation: { _ in }),
+                                     text: "and now?", history: priorTurn)
+
+        check("history reaches the provider exactly as it was given",
+              Array((messageShape(provider.receivedRequests.first?.messages ?? [])).prefix(4))
+                == messageShape(priorTurn),
+              messageShape(provider.receivedRequests.first?.messages ?? []).description)
+        check("this turn's question follows the history",
+              messageShape(provider.receivedRequests.first?.messages ?? []).last
+                == "user[text(and now?)]")
+        check("the outcome reports only what this turn added",
+              messageShape(outcome?.messages ?? []) == [
+                  "user[text(and now?)]",
+                  "assistant[text(understood.)]",
+              ],
+              messageShape(outcome?.messages ?? []).description)
+    }
+
+    do {
+        // Running out of iterations with calls still outstanding is the case
+        // where an honest record matters most: the transcript should show that
+        // the model was still asking, not that it stopped and answered.
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        registry.setPermissionBroker(StubBroker(decision: .approved))
+        registry.register(definition("lookup", .reading())) { _ in "result" }
+        let stillCalling = BuddyChatTurn(content: [
+            .text("still working."),
+            .toolUse(id: "t", name: "lookup", input: .object([:])),
+        ], stopReason: .toolUse)
+        let provider = ScriptedProvider(turns: Array(repeating: stillCalling, count: 8))
+        let outcome = try? await run(AgentTurnRunner(modelProvider: provider, toolRegistry: registry,
+                                                     speakConfirmation: { _ in }))
+        check("hitting the cap is reported", outcome?.hitIterationCap == true)
+        check("the closing message still shows the call that was never answered",
+              messageShape(outcome?.messages ?? []).last
+                == "assistant[text(still working.) toolUse(lookup)]",
+              messageShape(outcome?.messages ?? []).last ?? "nothing")
+    }
 
     print("\n\(String(repeating: "─", count: 52))")
     print("  \(tally.passed) passed, \(tally.failed) failed, \(tally.passed + tally.failed) total")
