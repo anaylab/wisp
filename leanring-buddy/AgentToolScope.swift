@@ -56,11 +56,16 @@ enum AgentToolScope: String, CaseIterable {
 
     /// Tools always worth offering, whatever the request looks like.
     ///
-    /// Kept to two. Every addition here is paid for on every turn in every
-    /// scope, which is the cost this whole type exists to avoid.
+    /// Every addition here is paid for on every turn in every scope, which is
+    /// the cost this whole type exists to avoid. `load_skill` earns its place
+    /// as the exception: skill topics are open-ended and user-defined, so
+    /// there is no fixed vocabulary that could route to one the way "page" or
+    /// "url" routes to browser tools, and it is not mutually exclusive with
+    /// any scope — a coding request might still need a skill.
     private static let alwaysAvailableToolNames: Set<String> = [
         "get_current_time",
         "do_in_background",
+        "load_skill",
     ]
 
     /// Picks a scope from the user's words.

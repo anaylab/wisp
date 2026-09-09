@@ -38,6 +38,10 @@ dependency without asking.
   the local model is unreliable at the latter.
 - **MCP**: hand-rolled JSON-RPC 2.0 over stdio subprocess. Config at `~/.wisp/mcp.json`
   in Claude Desktop's format.
+- **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
+  `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
+  prompt; the full body is loaded on demand via the read-only `load_skill` tool —
+  progressive disclosure, so an arbitrarily large skill library costs nothing until used.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 
@@ -114,10 +118,12 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
-| `AgentToolRegistry.swift` | ~167 | Built-in read-only tools. `requiresConfirmation` defaults to true for unknown names. |
+| `AgentToolRegistry.swift` | ~490 | Built-in read-only tools. `requiresConfirmation` defaults to true for unknown names. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~447 | JSON-RPC 2.0 over stdio subprocess, login-shell PATH resolution, stderr ring buffer. |
 | `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
+| `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
+| `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
 | `ToolConfirmationCoordinator.swift` | ~193 | Permission requests with a 45s timeout and spoken-affirmative parsing. |
 | `ToolConfirmationView.swift` | ~130 | The on-screen approve/deny card. |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |

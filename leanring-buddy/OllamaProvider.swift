@@ -85,8 +85,16 @@ final class OllamaProvider: ModelProvider, @unchecked Sendable {
         // Tool instructions are prompt text for this model, so they belong in
         // the system prompt rather than in a wire-level `tools` field. Built
         // here so the caller never has to know which convention is in play.
+        //
+        // The skill index rides along only when `load_skill` actually made it
+        // past scoping — otherwise the model would see skill names with no
+        // tool to load them by.
+        let skills = request.tools.contains(where: { $0.name == "load_skill" })
+            ? await SkillManager.shared.skills
+            : []
         let systemPromptWithTools = request.systemPrompt
             + StructuredTextToolProtocol.promptInstructions(for: request.tools)
+            + SkillIndex.promptInstructions(for: skills)
 
         let result: LocalOllamaAPI.StreamedChatResult
         do {

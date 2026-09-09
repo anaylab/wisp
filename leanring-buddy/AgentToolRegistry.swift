@@ -367,9 +367,48 @@ final class AgentToolRegistry: ObservableObject {
         }
     }
 
+    /// Lets the model pull the full body of a user-authored skill into
+    /// context by name. Only the name and one-line description ever sit in
+    /// the prompt unconditionally — see `SkillIndex` — so this is the one
+    /// call that actually spends tokens on a skill's content, and only when
+    /// asked for.
+    private func registerSkillTools() {
+        SkillManager.shared.loadSkills()
+
+        register(
+            BuddyToolDefinition(
+                name: "load_skill",
+                description: "Reads the full instructions for one of your available skills, listed below, by name.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object(["name": .object([
+                        "type": .string("string"),
+                        "description": .string("The skill's name, exactly as listed.")
+                    ])]),
+                    "required": .array([.string("name")])
+                ]),
+                metadata: .reading(.localMachine)
+            )
+        ) { input in
+            guard case .object(let arguments) = input,
+                  case .string(let name)? = arguments["name"] else {
+                return "i need to know which skill to load."
+            }
+
+            guard let body = SkillManager.shared.body(forSkillNamed: name) else {
+                let available = SkillManager.shared.skills.map(\.name).sorted().joined(separator: ", ")
+                return available.isEmpty
+                    ? "there are no skills installed."
+                    : "no skill named \"\(name)\". available skills: \(available)"
+            }
+            return body
+        }
+    }
+
     private func registerBuiltInTools() {
         registerBrowserTools()
         registerClaudeCodeTool()
+        registerSkillTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",
