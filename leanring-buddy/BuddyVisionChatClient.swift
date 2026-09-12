@@ -29,7 +29,7 @@ enum BuddyVisionChatClientFactory {
         let baseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
             ?? "http://localhost:11434"
         let model = AppBundleConfiguration.stringValue(forKey: "OllamaModel")
-            ?? "qwen2.5vl:7b"
+            ?? "qwen2.5vl:3b"
         print("🧠 Chat: using Ollama (local) — \(model) at \(baseURL)")
         return LocalOllamaAPI(baseURL: baseURL, model: model)
     }

@@ -17,7 +17,7 @@
 	<key>AgentModeEnabled</key>
 	<string>true</string>
 	<key>OllamaModel</key>
-	<string>qwen2.5vl:7b</string>
+	<string>qwen2.5vl:3b</string>
 	<key>OllamaBaseURL</key>
 	<string>http://localhost:11434</string>
 	<key>NSMicrophoneUsageDescription</key>
