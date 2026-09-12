@@ -87,11 +87,25 @@ final class CompanionManager: ObservableObject {
     /// Rebuilds the provider after the user changes their selection or API key,
     /// so a new choice takes effect immediately.
     ///
-    /// Gating of the local-only machinery — the keep-warm heartbeat and the
-    /// push-to-talk preload — on the newly selected provider is handled where
-    /// that machinery lives, not here.
+    /// The keep-warm heartbeat is restarted so its top-level guard re-evaluates
+    /// against the new provider; the per-beat and per-call gates below read the
+    /// live provider anyway, so a switch takes effect without waiting for it.
     func rebuildSelectedModelProvider() {
         selectedModelProvider = ModelProviderFactory.make()
+        startLocalModelKeepWarmLoopIfNeeded()
+    }
+
+    /// Whether the selected model runs on this machine — and therefore whether
+    /// the local-only machinery applies at all.
+    ///
+    /// The keep-warm heartbeat and the push-to-talk preload exist to hold a
+    /// local model resident and hide its cold load. For a cloud provider they
+    /// are pointless (there is no local model to keep warm) and actively wrong:
+    /// their warming pings target a localhost Ollama server that is not the
+    /// backend. Read from the provider's own declared deployment rather than an
+    /// Info.plist string, so the answer follows the live selection.
+    private var isSelectedModelProviderLocal: Bool {
+        !selectedModelProvider.deployment.sendsDataOffThisMachine
     }
 
     private lazy var ttsProvider: any BuddyTTSProvider = {
@@ -767,11 +781,11 @@ final class CompanionManager: ObservableObject {
         // Whether the screenshot gets attached is the single biggest factor in
         // how long a turn takes, so timings are only comparable between turns
         // that made the same choice. Reuses the client's own predicate rather
-        // than restating the rule.
-        let isUsingLocalChat = AppBundleConfiguration
-            .stringValue(forKey: "ChatProvider")?.lowercased() == "ollama"
+        // than restating the rule. The screen-relevance heuristic only gates
+        // the local model, whose vision encoding is the costly part; a cloud
+        // provider is sent the screenshot regardless.
         PerfMetricsRecorder.shared.recordScreenshotDecision(
-            didAttach: !isUsingLocalChat || LocalOllamaAPI.promptLikelyRefersToScreen(transcript)
+            didAttach: !isSelectedModelProviderLocal || LocalOllamaAPI.promptLikelyRefersToScreen(transcript)
         )
 
         currentResponseTask = Task {
@@ -1091,11 +1105,14 @@ final class CompanionManager: ObservableObject {
     /// Chatterbox synthesizes a single word. Failures are ignored — a
     /// server that isn't running simply gets warmed once it is.
     private func startLocalModelKeepWarmLoopIfNeeded() {
-        let isUsingLocalChat = AppBundleConfiguration
-            .stringValue(forKey: "ChatProvider")?.lowercased() == "ollama"
+        // The chat side of the heartbeat follows the live provider, not a
+        // fixed plist string, so selecting a cloud model stops it warming a
+        // localhost server that is no longer the backend. TTS is independent —
+        // Chatterbox is always local regardless of the chat provider.
+        let isUsingLocalChatAtStart = isSelectedModelProviderLocal
         let isUsingLocalTTS = AppBundleConfiguration
             .stringValue(forKey: "VoiceTTSProvider")?.lowercased() == "chatterbox"
-        guard isUsingLocalChat || isUsingLocalTTS else { return }
+        guard isUsingLocalChatAtStart || isUsingLocalTTS else { return }
 
         let ollamaBaseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
             ?? "http://localhost:11434"
@@ -1137,7 +1154,7 @@ final class CompanionManager: ObservableObject {
                     // per idle stretch, not every beat.
                     let releaseDecision = await MainActor.run { () -> (shouldRelease: Bool, afterMinutes: Int) in
                         let window = CompanionManager.keepWarmActivityWindow
-                        guard let manager = self, isUsingLocalChat else { return (false, 0) }
+                        guard let manager = self, manager.isSelectedModelProviderLocal else { return (false, 0) }
                         guard !manager.isAgentTurnInProgress else { return (false, 0) }
                         let idleFor = Date().timeIntervalSince(manager.lastInteractionAt)
                         guard idleFor > window, !manager.hasReleasedModelWhileIdle else { return (false, 0) }
@@ -1163,7 +1180,13 @@ final class CompanionManager: ObservableObject {
                     continue
                 }
 
-                if isUsingLocalChat {
+                // Re-checked each beat against the live provider: a switch to a
+                // cloud model must stop the chat warming immediately, without
+                // waiting for the loop to be restarted.
+                let shouldWarmLocalChatThisBeat = await MainActor.run {
+                    self?.isSelectedModelProviderLocal ?? false
+                }
+                if shouldWarmLocalChatThisBeat {
                     await Self.sendKeepWarmRequest(
                         to: "\(ollamaBaseURL)/api/chat",
                         body: Self.ollamaModelWarmingRequestBody(model: ollamaModel)
@@ -1228,9 +1251,7 @@ final class CompanionManager: ObservableObject {
     /// backend is a cloud model, and points at a localhost server that may not
     /// be there.
     private func preloadLocalModelForImminentPushToTalkTurn() {
-        let isUsingLocalChat = AppBundleConfiguration
-            .stringValue(forKey: "ChatProvider")?.lowercased() == "ollama"
-        guard isUsingLocalChat else { return }
+        guard isSelectedModelProviderLocal else { return }
 
         let ollamaBaseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
             ?? "http://localhost:11434"
