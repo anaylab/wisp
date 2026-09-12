@@ -10,10 +10,15 @@ model responds with text, which is spoken by a local TTS server. A blue cursor o
 can fly to and point at UI elements the model references on any connected monitor, and
 can draw boxes, arrows and highlights on screen.
 
-**Everything runs on this machine. There are no API keys, no Cloudflare Worker, and no
-analytics.** The only network traffic is HTTP to `localhost` (Ollama on 11434, Chatterbox
-TTS on 8004). This is the defining constraint of the project — do not introduce a cloud
-dependency without asking.
+**Local-first and private by default.** Out of the box everything runs on this machine: the
+local Ollama model, on-device speech, and the local TTS server, with the only network
+traffic being HTTP to `localhost` (Ollama on 11434, Chatterbox TTS on 8004) — no Cloudflare
+Worker and no analytics. The model backend is now *selectable*: a user can opt in, in the
+dashboard, to a bring-your-own-key cloud provider (`ModelProviderFactory` /
+`BuddyChatProviderSelection`, key in the Keychain via `ProviderKeychainStore`), which sends
+screenshots and the transcript off this machine and is labelled as such. Local remains the
+default and the private path — do not make a cloud provider the default, and do not add a
+cloud dependency to the local path, without asking.
 
 ## Architecture
 
@@ -22,8 +27,11 @@ dependency without asking.
 - **Framework**: SwiftUI (macOS native) with AppKit bridging for menu bar panel, cursor
   overlay, and dashboard window
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
-- **Chat / Vision**: Ollama `qwen2.5vl:7b` at `http://localhost:11434`, NDJSON streaming,
-  selected via `ChatProvider` in Info.plist
+- **Chat / Vision**: a pluggable `ModelProvider`, chosen at runtime via
+  `BuddyChatProviderSelection` and built by `ModelProviderFactory`. Default is local Ollama
+  `qwen2.5vl:7b` at `http://localhost:11434` (NDJSON streaming); cloud providers such as
+  `GeminiProvider` are bring-your-own-key. The Info.plist `ChatProvider` key is now only a
+  shipped-default hint — the live selection lives in `BuddyChatProviderSelection`.
 - **Speech-to-Text**: Apple Speech framework, on-device, via `VoiceTranscriptionProvider`
 - **Text-to-Speech**: Chatterbox Nano at `http://localhost:8004`, synthesised and played
   sentence-by-sentence so playback starts before the whole reply is rendered
@@ -56,6 +64,20 @@ so it doesn't steal focus.
 It's non-activating, joins all Spaces, and never steals focus. Because it covers the whole
 screen at `.screenSaver` level, it must keep `ignoresMouseEvents = true` except while a
 tool confirmation card is up — otherwise the desktop becomes unclickable.
+
+**Notch HUD**: The resident primary surface (Phase 1 of the HeyClicky-style build).
+A borderless `.nonactivatingPanel` (`NotchWindowController` / `NotchPanel`) sits one level
+above the cursor overlay so it is never occluded. The window is a **fixed size** (the expanded
+panel's bounds) and never moves or resizes — an earlier resize-on-hover version fed back on
+itself (resizing moved the tracking area that detected the hover, so it oscillated at the
+edges) and reflowed content mid-animation. Instead: expand/collapse is decided by polling
+`NSEvent.mouseLocation` on a light timer against two fixed hot-zones (a small one around the
+pill, a larger one around the panel, with hysteresis), and the pill→panel morph is animated
+entirely inside SwiftUI on the GPU. Click-through is preserved by toggling `ignoresMouseEvents`
+— the transparent window is click-through while collapsed and only intercepts events while the
+panel is open. Geometry (`NotchGeometry`) comes from `safeAreaInsets` +
+`auxiliaryTopLeftArea/auxiliaryTopRightArea`, falling back to a floating pill under the menu
+bar on non-notch Macs. The menu bar `NSStatusItem` remains, now as the settings entry point.
 
 **Global Push-To-Talk Shortcut**: Uses a listen-only `CGEvent` tap rather than an AppKit
 global monitor, so modifier-based shortcuts like ctrl+option are detected reliably in the
@@ -98,7 +120,14 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `LocalOllamaAPI.swift` | ~235 | Ollama client: NDJSON streaming, `keep_alive`, per-mode context and token limits, and the heuristic that decides whether a prompt needs a screenshot at all. |
-| `BuddyVisionChatClient.swift` | ~47 | Chat-client protocol and factory, keyed off `ChatProvider`. |
+| `ModelProvider.swift` | ~248 | Provider-agnostic runtime: the `ModelProvider` protocol (`streamTurn`), plus `ModelRequest`, `ModelCapabilities`, and `ModelDeployment` (`sendsDataOffThisMachine`, which drives the local-only-machinery gates). |
+| `OllamaProvider.swift` | ~294 | Presents `LocalOllamaAPI` as a `ModelProvider`; owns the `[TOOL:...]` text convention that fakes tool calls for the local model. |
+| `GeminiProvider.swift` | ~300 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. The first bring-your-own-key cloud backend. |
+| `ModelProviderFactory.swift` | ~75 | Builds the `ModelProvider` for the current `BuddyChatProviderSelection`, reading a cloud provider's key from `ProviderKeychainStore`. Used by CompanionManager's turn path. |
+| `BuddyChatProviderKind.swift` | ~65 | The provider enum (local Ollama / Anthropic / OpenAI / Gemini) with `displayName`, `sendsScreenshotsOffThisMachine`, `requiresAPIKey`. |
+| `BuddyChatProviderSelection.swift` | ~50 | The `UserDefaults`-backed live provider selection. Source of truth, defaulting to local. |
+| `ProviderKeychainStore.swift` | ~90 | Per-provider API keys in the login Keychain — never in UserDefaults, Info.plist, or logs. |
+| `BuddyVisionChatClient.swift` | ~47 | Legacy chat-client protocol + factory. Superseded by `ModelProvider` on the main path; still used by `BrowserAgent` for its own local vision. |
 | `LocalChatterboxTTSClient.swift` | ~231 | Sentence-by-sentence local TTS: synthesises sentence N+1 while N is playing. |
 | `BuddyTTSProvider.swift` | ~53 | TTS protocol and factory, keyed off `VoiceTTSProvider`. |
 | `AppleSpeechTranscriptionProvider.swift` | ~147 | On-device STT via the Speech framework. The active provider. |
@@ -136,6 +165,9 @@ Grouped by what they do. Line counts are approximate.
 | `DashboardView.swift` | ~708 | Sidebar shell plus Activity, Conversation and Model & Performance tabs, and the live memory footer. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
 | `MenuBarPanelManager.swift` | ~247 | `NSStatusItem` + floating `NSPanel` lifecycle. |
+| `NotchWindowController.swift` | ~200 | Hosts the notch HUD in a fixed-size borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Owns `NotchViewModel`. |
+| `NotchHUDView.swift` | ~330 | The notch HUD's SwiftUI content: collapsed black pill (wisp glyph + live state dot) and the hover-expanded quick-panel (shortcuts cheat-sheet, skills, active integrations, dock-cursor toggle). `DS.*` throughout. |
+| `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `CompanionPanelView.swift` | ~775 | The menu bar panel's SwiftUI content. |
 | `DesignSystem.swift` | ~880 | `DS.Colors`, `DS.Spacing`, `DS.CornerRadius` tokens. All UI references these. |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
@@ -144,11 +176,11 @@ Grouped by what they do. Line counts are approximate.
 | `WispAnalytics.swift` | ~153 | Gated off. Sends nothing. Kept so the call sites still compile. |
 
 ### Unused upstream leftovers
-`ClaudeAPI.swift`, `OpenAIAPI.swift`, `ElevenLabsTTSClient.swift`,
-`AssemblyAIStreamingTranscriptionProvider.swift`, `OpenAIAudioTranscriptionProvider.swift`
-and `worker/` all target cloud services this build does not use. They are still compiled
-and still referenced by their provider factories, so they work if a key is supplied — but
-nothing selects them by default.
+The old cloud client files (`ClaudeAPI.swift`, `OpenAIAPI.swift`, `ElevenLabsTTSClient.swift`,
+`AssemblyAIStreamingTranscriptionProvider.swift`, `OpenAIAudioTranscriptionProvider.swift`)
+have been deleted. Cloud chat is now the bring-your-own-key `ModelProvider` path above, not
+these. Only the `worker/` directory remains as upstream leftover, and it is not used by this
+build — there is no Cloudflare Worker.
 
 ## Build & Run
 

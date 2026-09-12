@@ -29,6 +29,7 @@ struct leanring_buddyApp: App {
 @MainActor
 final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarPanelManager: MenuBarPanelManager?
+    private var notchWindowController: NotchWindowController?
     private let companionManager = CompanionManager()
     private var dashboardWindowController: DashboardWindowController?
     private var openDashboardObserver: NSObjectProtocol?
@@ -43,6 +44,11 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         WispAnalytics.trackAppOpened()
 
         menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
+
+        // The notch HUD is the resident primary surface. It shows on launch and
+        // stays put; the menu bar item remains as the settings entry point.
+        notchWindowController = NotchWindowController(companionManager: companionManager)
+        notchWindowController?.show()
 
         let dashboardController = DashboardWindowController(companionManager: companionManager)
         dashboardWindowController = dashboardController
