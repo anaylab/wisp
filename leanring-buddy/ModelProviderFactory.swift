@@ -35,45 +35,11 @@ enum ModelProviderFactory {
         case .gemini:
             return GeminiProvider(apiKey: ProviderKeychainStore.apiKey(for: .gemini))
 
-        case .anthropic, .openAI:
-            // These providers are planned but not yet written. Returning a stub
-            // keeps this switch total and fails honestly at call time, rather
-            // than the app trapping on an unhandled case. Each stub is replaced
-            // by its real provider as that provider lands.
-            return UnimplementedModelProvider(providerKind: providerKind)
+        case .anthropic:
+            return AnthropicProvider(apiKey: ProviderKeychainStore.apiKey(for: .anthropic))
+
+        case .openAI:
+            return OpenAIProvider(apiKey: ProviderKeychainStore.apiKey(for: .openAI))
         }
-    }
-}
-
-/// Stands in for a selected-but-unimplemented provider. It never produces a
-/// turn; it exists so the factory is total and the failure is a clear,
-/// reportable error instead of a crash.
-private struct UnimplementedModelProvider: ModelProvider {
-    let providerKind: BuddyChatProviderKind
-
-    var identifier: String { "unimplemented/\(providerKind.rawValue)" }
-
-    var capabilities: ModelCapabilities {
-        ModelCapabilities(
-            supportsVision: false,
-            supportsTools: false,
-            supportsNativeToolCalls: false,
-            supportsStreaming: false,
-            contextWindowTokens: 0
-        )
-    }
-
-    var deployment: ModelDeployment {
-        ModelDeployment(location: .remote(serviceName: providerKind.displayName))
-    }
-
-    func streamTurn(
-        _ request: ModelRequest,
-        onTextDelta: @escaping @MainActor @Sendable (String) -> Void
-    ) async throws -> BuddyChatTurn {
-        throw BuddyChatError.providerUnavailable(
-            providerName: providerKind.displayName,
-            underlyingDescription: "this provider is not available yet"
-        )
     }
 }
