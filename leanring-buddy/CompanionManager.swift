@@ -74,26 +74,25 @@ final class CompanionManager: ObservableObject {
         AppBundleConfiguration.stringValue(forKey: "AgentModeEnabled")?.lowercased() == "true"
     }
 
-    private lazy var visionChatClient: any BuddyVisionChatClient = {
-        BuddyVisionChatClientFactory.makeDefaultProvider()
-    }()
-
-    /// The agent loop's model, behind the provider abstraction.
+    /// The model backing every turn — spoken replies and the agent loop alike.
     ///
-    /// Wraps the *same* `LocalOllamaAPI` the voice path uses rather than
-    /// building a second one, so both share one long-lived `URLSession` and one
-    /// view of how warm the model is. A separate client would open its own
-    /// connection pool and, more importantly, make it possible for the two to
-    /// disagree about `num_ctx` — which costs a full model reload.
-    private lazy var agentModelProvider: any ModelProvider = {
-        if let ollamaClient = visionChatClient as? LocalOllamaAPI {
-            return OllamaProvider(client: ollamaClient, modelName: ollamaClient.model)
-        }
-        let baseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
-            ?? "http://localhost:11434"
-        let model = AppBundleConfiguration.stringValue(forKey: "OllamaModel") ?? "qwen2.5vl:7b"
-        return OllamaProvider(baseURL: baseURL, model: model)
-    }()
+    /// One provider, not two. The spoken path and the agent loop share it, so a
+    /// single user selection — local Ollama, or a bring-your-own-key cloud
+    /// model — governs both, and there is no way for the two to disagree about
+    /// which model or context window is in play. Rebuilt via
+    /// `rebuildSelectedModelProvider()` when the user changes provider or key in
+    /// the dashboard, so the switch takes effect without a relaunch.
+    private var selectedModelProvider: any ModelProvider = ModelProviderFactory.make()
+
+    /// Rebuilds the provider after the user changes their selection or API key,
+    /// so a new choice takes effect immediately.
+    ///
+    /// Gating of the local-only machinery — the keep-warm heartbeat and the
+    /// push-to-talk preload — on the newly selected provider is handled where
+    /// that machinery lives, not here.
+    func rebuildSelectedModelProvider() {
+        selectedModelProvider = ModelProviderFactory.make()
+    }
 
     private lazy var ttsProvider: any BuddyTTSProvider = {
         var provider = BuddyTTSProviderFactory.makeDefaultProvider()
@@ -254,10 +253,10 @@ final class CompanionManager: ObservableObject {
         bindVoiceStateObservation()
         bindAudioPowerLevel()
         bindShortcutTransitions()
-        // Eagerly touch the vision chat client so Claude's TLS warmup
+        // Eagerly touch the selected model provider so any TLS warmup
         // handshake (if applicable) completes well before the first
         // demo fires at ~40s into the video.
-        _ = visionChatClient
+        _ = selectedModelProvider
 
         // If all permissions are
         // still granted, show the cursor overlay immediately. If permissions
@@ -571,6 +570,12 @@ final class CompanionManager: ObservableObject {
             // anyway.
             startSpeculativeScreenCapture()
 
+            // Warm the local model on the same key-down signal, for the same
+            // reason: its cold load is the largest first-response cost, and
+            // starting it now overlaps it with the seconds the user spends
+            // speaking instead of the wait after they finish.
+            preloadLocalModelForImminentPushToTalkTurn()
+
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = Task {
                 await buddyDictationManager.startPushToTalkFromKeyboardShortcut(
@@ -810,7 +815,7 @@ final class CompanionManager: ObservableObject {
                     defer { isAgentTurnInProgress = false }
 
                     let runner = AgentTurnRunner(
-                        modelProvider: agentModelProvider,
+                        modelProvider: selectedModelProvider,
                         speakConfirmation: { [weak self] question in
                             guard let self else { return }
                             try? await self.ttsProvider.speakText(question)
@@ -855,20 +860,37 @@ final class CompanionManager: ObservableObject {
                         }
                     }
 
+                    // The current question as a typed message: the transcript
+                    // followed by this turn's screenshots. History is the prior
+                    // exchanges, already projected down to questions and
+                    // answers.
+                    let currentUserMessage = BuddyChatMessage(
+                        role: .user,
+                        blocks: [.text(transcript)]
+                            + labeledImages.map { .image(data: $0.data, label: $0.label) }
+                    )
+                    let singleCallRequest = ModelRequest(
+                        systemPrompt: Self.companionVoiceResponseSystemPrompt
+                            + ScreenAnnotationParser.promptInstructions,
+                        messages: historyMessages + [currentUserMessage],
+                        // No tools on the single-call path — this branch runs
+                        // only when agent mode is off.
+                        tools: [],
+                        // nil lets each provider apply its own spoken ceiling:
+                        // the local model keeps its short synthesis-bound cap,
+                        // a cloud model its own default.
+                        maxOutputTokens: nil
+                    )
+
                     // Through the gate even for a single call, so background
                     // work can never land between this request and the reply
                     // the user is waiting for.
-                    let (responseText, chatDuration) = try await ModelAccessGate.shared.withAccess(
+                    let singleCallTurn = try await ModelAccessGate.shared.withAccess(
                         priority: .interactive
                     ) {
-                        try await visionChatClient.analyzeImageStreaming(
-                            images: labeledImages,
-                            systemPrompt: Self.companionVoiceResponseSystemPrompt
-                                + ScreenAnnotationParser.promptInstructions,
-                            conversationHistory: ConversationTranscript
-                                .legacyStringPairs(from: historyMessages),
-                            userPrompt: transcript,
-                            onTextChunk: { [weak self] chunk in
+                        try await selectedModelProvider.streamTurn(
+                            singleCallRequest,
+                            onTextDelta: { [weak self] chunk in
                                 // First token ends the wait the user actually
                                 // perceives, whatever generation does after.
                                 PerfMetricsRecorder.shared.endPhaseOnce(.firstToken)
@@ -882,12 +904,12 @@ final class CompanionManager: ObservableObject {
                         )
                     }
                     AgentTaskRegistry.shared.updateLastStep(of: taskID) { step in
-                        step.durationSeconds = chatDuration
+                        step.durationSeconds = singleCallTurn.duration
                     }
-                    fullResponseText = responseText
+                    fullResponseText = singleCallTurn.text
                     messagesFromThisTurn = [
                         BuddyChatMessage(role: .user, text: transcript),
-                        BuddyChatMessage(role: .assistant, text: responseText),
+                        BuddyChatMessage(role: .assistant, text: singleCallTurn.text),
                     ]
                 }
 
@@ -1078,7 +1100,7 @@ final class CompanionManager: ObservableObject {
         let ollamaBaseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
             ?? "http://localhost:11434"
         let ollamaModel = AppBundleConfiguration.stringValue(forKey: "OllamaModel")
-            ?? "qwen2.5vl:7b"
+            ?? "qwen2.5vl:3b"
         let chatterboxBaseURL = AppBundleConfiguration.stringValue(forKey: "ChatterboxTTSServerURL")
             ?? "http://localhost:8004"
         let chatterboxVoiceID = AppBundleConfiguration.stringValue(forKey: "ChatterboxVoiceID")
@@ -1144,24 +1166,7 @@ final class CompanionManager: ObservableObject {
                 if isUsingLocalChat {
                     await Self.sendKeepWarmRequest(
                         to: "\(ollamaBaseURL)/api/chat",
-                        body: [
-                            "model": ollamaModel,
-                            "stream": false,
-                            // Both of these must match what a real turn sends.
-                            // keep_alive because the shortest value wins, and
-                            // num_ctx because Ollama reloads the model — about
-                            // six seconds — whenever it changes. Omitting
-                            // num_ctx here meant the heartbeat ran at the model
-                            // default and evicted the very model it was meant
-                            // to hold resident, so the next turn paid one
-                            // reload for the heartbeat and another for itself.
-                            "keep_alive": LocalOllamaAPI.modelResidencyWindow,
-                            "options": [
-                                "num_ctx": LocalOllamaAPI.activeContextWindowTokens,
-                                "num_predict": 0
-                            ],
-                            "messages": [["role": "user", "content": "."]]
-                        ]
+                        body: Self.ollamaModelWarmingRequestBody(model: ollamaModel)
                     )
                 }
 
@@ -1177,6 +1182,66 @@ final class CompanionManager: ObservableObject {
                     )
                 }
             }
+        }
+    }
+
+    /// The request body every local-model warming path must send: the periodic
+    /// heartbeat and the push-to-talk preload alike.
+    ///
+    /// Both `keep_alive` and `num_ctx` must match what a real turn sends.
+    /// `keep_alive` because the shortest value wins, so a warming ping asking
+    /// for less than a real turn quietly shortens the residency it means to
+    /// extend. `num_ctx` because Ollama reloads the model — about six seconds —
+    /// whenever it changes between requests; a ping at the model default would
+    /// evict the very model it exists to hold resident, making the next turn pay
+    /// one reload for the ping and another for itself. Centralising the body is
+    /// what guarantees the two callers cannot drift out of that agreement.
+    /// `num_predict: 0` makes it a zero-token residency touch, not a generation.
+    private static func ollamaModelWarmingRequestBody(model: String) -> [String: Any] {
+        [
+            "model": model,
+            "stream": false,
+            "keep_alive": LocalOllamaAPI.modelResidencyWindow,
+            "options": [
+                "num_ctx": LocalOllamaAPI.activeContextWindowTokens,
+                "num_predict": 0
+            ],
+            "messages": [["role": "user", "content": "."]]
+        ]
+    }
+
+    /// Warms the local Ollama model the instant push-to-talk begins, so its
+    /// cold load overlaps the second or two the user spends speaking rather than
+    /// landing on the wait after they finish.
+    ///
+    /// This is the mirror of `startSpeculativeScreenCapture()`: key-down is a
+    /// reliable one-to-three-second warning that a request is coming, and the
+    /// single largest cold-start cost — reading six gigabytes of weights into
+    /// memory and rebuilding the GPU graph — is exactly what can be started
+    /// early and hidden behind speech. Fire-and-forget and speculative: if the
+    /// model is already resident this only refreshes its keep-alive timer, and
+    /// if the utterance turns out to be dictation into a text field rather than
+    /// a model request, the ping is wasted — which costs nothing the user can
+    /// perceive, the same trade the speculative screenshot already accepts.
+    ///
+    /// Gated to the local chat provider: a preload ping is meaningless when the
+    /// backend is a cloud model, and points at a localhost server that may not
+    /// be there.
+    private func preloadLocalModelForImminentPushToTalkTurn() {
+        let isUsingLocalChat = AppBundleConfiguration
+            .stringValue(forKey: "ChatProvider")?.lowercased() == "ollama"
+        guard isUsingLocalChat else { return }
+
+        let ollamaBaseURL = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL")
+            ?? "http://localhost:11434"
+        let ollamaModel = AppBundleConfiguration.stringValue(forKey: "OllamaModel")
+            ?? "qwen2.5vl:3b"
+
+        Task.detached(priority: .userInitiated) {
+            await Self.sendKeepWarmRequest(
+                to: "\(ollamaBaseURL)/api/chat",
+                body: Self.ollamaModelWarmingRequestBody(model: ollamaModel)
+            )
         }
     }
 
@@ -1344,7 +1409,7 @@ final class CompanionManager: ObservableObject {
 
             BackgroundTaskLauncher.start(
                 request: request,
-                modelProvider: self.agentModelProvider,
+                modelProvider: self.selectedModelProvider,
                 systemPrompt: Self.companionVoiceResponseSystemPrompt,
                 speakConfirmation: { [weak self] question in
                     guard let self else { return }
