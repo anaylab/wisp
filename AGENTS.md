@@ -29,21 +29,34 @@ cloud dependency to the local path, without asking.
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
 - **Chat / Vision**: a pluggable `ModelProvider`, chosen at runtime via
   `BuddyChatProviderSelection` and built by `ModelProviderFactory`. Default is local Ollama
-  `qwen2.5vl:7b` at `http://localhost:11434` (NDJSON streaming); cloud providers such as
+  `qwen2.5vl:3b` at `http://localhost:11434` (NDJSON streaming); cloud providers such as
   `GeminiProvider` are bring-your-own-key. The Info.plist `ChatProvider` key is now only a
   shipped-default hint — the live selection lives in `BuddyChatProviderSelection`.
-- **Speech-to-Text**: Apple Speech framework, on-device, via `VoiceTranscriptionProvider`
+- **Speech-to-Text**: Apple Speech framework, on-device. Recognition **language** and a
+  **custom dictionary** are user-configurable via `DictationSettingsStore` (Dictation tab):
+  the language chooses the recogniser's locale, and the dictionary words are passed as
+  `SFSpeechAudioBufferRecognitionRequest.contextualStrings` to bias spelling (this was a
+  no-op before — the provider accepted keyterms and dropped them). Both are read on the main
+  actor by `BuddyDictationManager` and threaded into `startStreamingSession`.
 - **Text-to-Speech**: Chatterbox Nano at `http://localhost:8004`, synthesised and played
   sentence-by-sentence so playback starts before the whole reply is rendered
 - **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor, downscaled to 896px
 - **Element Pointing**: the model embeds `[POINT:x,y:label:screenN]` tags; the overlay
   parses them, maps to the correct monitor, and animates the cursor along a bezier arc
-- **Screen Annotation**: `[BOX:left,top,right,bottom:label]` and `[HIGHLIGHT:...]` tags
-  render through a `Canvas` layer in the overlay. Note the corner format — the model emits
-  corners, not origin+size.
+- **Screen Annotation**: `[BOX:left,top,right,bottom:label]`, `[HIGHLIGHT:...]` and
+  `[ARROW:x,y:label]` tags render through a `Canvas` layer in the overlay. Note the corner
+  format — the model emits corners, not origin+size. When several tags appear in one reply
+  they are kept in document order and **auto-numbered** into a step-by-step walkthrough (badges
+  drawn per step, cap 8). The cursor and all annotations draw in the user-chosen colour from
+  `CursorAppearanceStore` (Cursor tab: blue/red/yellow/green).
 - **Agent loop**: off by default behind `AgentModeEnabled` in Info.plist. When on, tools
   are called via structured `[TOOL:name:{json}]` tags rather than native tool_calls, since
-  the local model is unreliable at the latter.
+  the local model is unreliable at the latter. Surfaced in the dashboard's Agent tab: the
+  **working folder** (`AgentSettingsStore`, read by the tool registry; defaults to
+  `CodeProjectDirectory`), a **session auto-approve** toggle (`ToolConfirmationCoordinator.autoApproveThisSession`
+  — short-circuits the confirmation prompt, reset every launch), and **permission** rows with
+  deep-links to System Settings. Note: session auto-approve is currently blanket — it approves
+  every tool while on, including MCP writes; a per-tool destructive floor is a follow-up.
 - **MCP**: hand-rolled JSON-RPC 2.0 over stdio subprocess. Config at `~/.wisp/mcp.json`
   in Claude Desktop's format.
 - **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
@@ -81,7 +94,19 @@ bar on non-notch Macs. The menu bar `NSStatusItem` remains, now as the settings 
 
 **Global Push-To-Talk Shortcut**: Uses a listen-only `CGEvent` tap rather than an AppKit
 global monitor, so modifier-based shortcuts like ctrl+option are detected reliably in the
-background.
+background. Bindings are data-driven via `ShortcutBindingStore` (the source of truth for the
+notch cheat-sheet and the dashboard's Shortcuts tab), which pushes live values into the plain
+statics the tap reads on the main thread (`BuddyPushToTalkShortcut.currentShortcutOption` /
+`.handsFreeDoubleTapModifier`). The tap recognises three gestures: **hold** the chord
+(Talk; Dictate = hold + Shift; action on release), **tap** the chord (a release shorter than
+`tapMaxDuration` → open the text composer), and **double-tap** a bare modifier (default:
+double-tap Control → hands-free dictation). Recording still starts instantly on press for the
+hold case; a tap simply `cancelCurrentDictation`s the just-started session and opens the
+composer instead, so hold-to-talk latency is untouched. The double-tap detector is independent
+of the hold path — the hold chord always needs a second modifier, so a bare-modifier tap can
+never be confused with it. The text composer (`TextComposerWindowController`) is a keyable
+panel that activates the app for typing and routes the typed question through the same
+screenshot turn as voice (spoken answer + on-screen pointing).
 
 **Model residency is the binding constraint.** On 18GB, one 7B vision model plus the TTS
 server leaves almost nothing spare. A second concurrently-resident LLM is not feasible at
@@ -111,9 +136,17 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `leanring_buddyApp.swift` | ~105 | Menu bar app entry point. `@NSApplicationDelegateAdaptor` with `CompanionAppDelegate`, which creates `MenuBarPanelManager` and starts `CompanionManager`. |
-| `CompanionManager.swift` | ~1475 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. |
+| `CompanionManager.swift` | ~1520 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher — it injects a skill's body as the instruction and runs a normal screenshot turn. |
 | `BuddyDictationManager.swift` | ~866 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
-| `GlobalPushToTalkShortcutMonitor.swift` | ~132 | System-wide push-to-talk via a listen-only `CGEvent` tap. |
+| `GlobalPushToTalkShortcutMonitor.swift` | ~210 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
+| `ShortcutBindingStore.swift` | ~150 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier. Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
+| `TextComposerWindowController.swift` | ~230 | The tap-to-type text composer: a keyable floating panel (activates the app for typing, Return to send, Esc to dismiss) whose typed question runs through the normal screenshot turn. |
+| `DictationSettingsStore.swift` | ~110 | Source of truth for dictation language + custom dictionary. Persists to UserDefaults; read by `BuddyDictationManager` when starting a session. |
+| `DictationTab.swift` | ~200 | Dashboard Dictation tab: language picker (Automatic + on-device locales) and a removable-chip custom dictionary editor. |
+| `CursorAppearanceStore.swift` | ~90 | Source of truth for the cursor/annotation colour (blue/red/yellow/green). Observed by the overlay, annotation layer, and brand glyphs so a change applies live. |
+| `CursorTab.swift` | ~110 | Dashboard Cursor tab: dock-cursor toggle (shared with the notch) and the colour swatches. |
+| `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
+| `AgentTab.swift` | ~250 | Dashboard Agent tab: agent folder (folder picker + reset), session auto-approve toggle, and permission rows with System Settings deep-links. |
 | `CompanionScreenCaptureUtility.swift` | ~139 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. |
 
 ### Local model stack
@@ -164,9 +197,10 @@ Grouped by what they do. Line counts are approximate.
 | `DashboardWindowController.swift` | ~109 | Real `NSWindow` host. Raises activation policy to `.regular` while open. |
 | `DashboardView.swift` | ~708 | Sidebar shell plus Activity, Conversation and Model & Performance tabs, and the live memory footer. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
+| `ShortcutsTab.swift` | ~250 | Dashboard Shortcuts tab: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
 | `MenuBarPanelManager.swift` | ~247 | `NSStatusItem` + floating `NSPanel` lifecycle. |
-| `NotchWindowController.swift` | ~200 | Hosts the notch HUD in a fixed-size borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Owns `NotchViewModel`. |
-| `NotchHUDView.swift` | ~330 | The notch HUD's SwiftUI content: collapsed black pill (wisp glyph + live state dot) and the hover-expanded quick-panel (shortcuts cheat-sheet, skills, active integrations, dock-cursor toggle). `DS.*` throughout. |
+| `NotchWindowController.swift` | ~230 | Hosts the notch HUD in a fixed-size borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) and reloads skills when the panel opens. Owns `NotchViewModel`. |
+| `NotchHUDView.swift` | ~380 | The notch HUD's SwiftUI content: collapsed black pill (wisp glyph + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. `DS.*` throughout. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `CompanionPanelView.swift` | ~775 | The menu bar panel's SwiftUI content. |
 | `DesignSystem.swift` | ~880 | `DS.Colors`, `DS.Spacing`, `DS.CornerRadius` tokens. All UI references these. |
