@@ -70,7 +70,7 @@ struct DashboardView: View {
                     case .activity: ActivityTab(taskRegistry: taskRegistry)
                     case .conversation: ConversationTab(taskRegistry: taskRegistry)
                     case .tools: ToolsTab()
-                    case .performance: PerformanceTab(metricsRecorder: metricsRecorder)
+                    case .performance: PerformanceTab(metricsRecorder: metricsRecorder, companionManager: companionManager)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -489,6 +489,7 @@ private struct ConversationTab: View {
 
 private struct PerformanceTab: View {
     @ObservedObject var metricsRecorder: PerfMetricsRecorder
+    @ObservedObject var companionManager: CompanionManager
     @State private var memoryReadout: String = "—"
     @State private var modelResidency: String = "checking…"
 
@@ -497,6 +498,8 @@ private struct PerformanceTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                ModelProviderCard(companionManager: companionManager)
+
                 systemSection
 
                 if metricsRecorder.recentTurns.isEmpty {
@@ -637,6 +640,155 @@ private struct PerformanceTab: View {
             let residency = await SystemReadouts.ollamaResidencySummary()
             await MainActor.run { modelResidency = residency }
         }
+    }
+}
+
+// MARK: - Model provider selection
+
+/// Lets the user choose which model backs Wisp — the local Ollama model, or a
+/// bring-your-own-key cloud provider — and enter that provider's API key.
+///
+/// The privacy trade is the whole point of showing it plainly: the local model
+/// keeps everything on this machine, and any cloud choice sends screenshots and
+/// the voice transcript off it. The warning is not fine print; it is stated as
+/// prominently as the choice that triggers it.
+private struct ModelProviderCard: View {
+    @ObservedObject var companionManager: CompanionManager
+
+    /// Mirrors the persisted selection. This card is the only place it changes,
+    /// so a one-way initial read is enough.
+    @State private var selectedProviderKind: BuddyChatProviderKind = BuddyChatProviderSelection.current
+    /// The key being entered. Cleared as soon as it is saved so plaintext does
+    /// not linger in view state.
+    @State private var apiKeyDraft: String = ""
+    /// Whether a key is already stored for the selected provider.
+    @State private var hasStoredAPIKey: Bool = false
+
+    var body: some View {
+        DashboardCard(title: "Model provider") {
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("", selection: $selectedProviderKind) {
+                    ForEach(BuddyChatProviderKind.allCases) { providerKind in
+                        Text(providerKind.displayName).tag(providerKind)
+                    }
+                }
+                .labelsHidden()
+                .pointerCursor()
+                .onChange(of: selectedProviderKind) { _, newProviderKind in
+                    BuddyChatProviderSelection.set(newProviderKind)
+                    companionManager.rebuildSelectedModelProvider()
+                    // Reset the entry to whatever the newly selected provider
+                    // already has stored, and never carry one provider's typed
+                    // key over to another.
+                    apiKeyDraft = ""
+                    hasStoredAPIKey = ProviderKeychainStore.hasAPIKey(for: newProviderKind)
+                }
+
+                if selectedProviderKind.sendsScreenshotsOffThisMachine {
+                    cloudPrivacyNotice
+                } else {
+                    localPrivacyNote
+                }
+
+                if selectedProviderKind.requiresAPIKey {
+                    apiKeyField
+                }
+            }
+        }
+        .onAppear {
+            hasStoredAPIKey = ProviderKeychainStore.hasAPIKey(for: selectedProviderKind)
+        }
+    }
+
+    private var cloudPrivacyNotice: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(DS.Colors.warning)
+                .padding(.top, 1)
+            Text("Screenshots and your voice transcript are sent to \(selectedProviderKind.displayName) over the network. Paid API tiers generally don't train on your data; free tiers often do. Local keeps everything on this machine.")
+                .font(.system(size: 10))
+                .foregroundStyle(DS.Colors.warningText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var localPrivacyNote: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(DS.Colors.success)
+                .padding(.top, 1)
+            Text("Runs on this machine. Screenshots and your voice never leave your Mac.")
+                .font(.system(size: 10))
+                .foregroundStyle(DS.Colors.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var apiKeyField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                SecureField("Paste \(selectedProviderKind.displayName) API key", text: $apiKeyDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                            .fill(DS.Colors.surface2)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                            .stroke(DS.Colors.borderSubtle, lineWidth: 1)
+                    )
+
+                Button("Save") {
+                    saveTypedAPIKey()
+                }
+                .buttonStyle(DSSecondaryButtonStyle())
+                .pointerCursor()
+                .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: hasStoredAPIKey ? "checkmark.circle.fill" : "circle.dashed")
+                    .font(.system(size: 10))
+                    .foregroundStyle(hasStoredAPIKey ? DS.Colors.success : DS.Colors.textTertiary)
+                Text(hasStoredAPIKey ? "Key saved" : "No key set — this provider can't run until you add one")
+                    .font(.system(size: 10))
+                    .foregroundStyle(hasStoredAPIKey ? DS.Colors.textSecondary : DS.Colors.textTertiary)
+
+                Spacer()
+
+                if hasStoredAPIKey {
+                    Button("Clear key") {
+                        clearStoredAPIKey()
+                    }
+                    .buttonStyle(DSTextButtonStyle())
+                    .pointerCursor()
+                }
+            }
+        }
+    }
+
+    private func saveTypedAPIKey() {
+        let trimmedKey = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { return }
+        ProviderKeychainStore.save(trimmedKey, for: selectedProviderKind)
+        apiKeyDraft = ""
+        hasStoredAPIKey = true
+        // Rebuild so a provider that was constructed without a key picks the new
+        // one up immediately.
+        companionManager.rebuildSelectedModelProvider()
+    }
+
+    private func clearStoredAPIKey() {
+        ProviderKeychainStore.deleteAPIKey(for: selectedProviderKind)
+        apiKeyDraft = ""
+        hasStoredAPIKey = false
+        companionManager.rebuildSelectedModelProvider()
     }
 }
 
