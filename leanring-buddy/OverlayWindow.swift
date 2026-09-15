@@ -103,6 +103,7 @@ enum BuddyNavigationMode {
 // replaced by a waveform (listening), spinner (processing), or
 // streaming text bubble (responding).
 struct BlueCursorView: View {
+    @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
     let screenFrame: CGRect
     let isFirstAppearance: Bool
     @ObservedObject var companionManager: CompanionManager
@@ -220,8 +221,8 @@ struct BlueCursorView: View {
                     .padding(.vertical, 4)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(DS.Colors.overlayCursorBlue)
-                            .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.5), radius: 6, x: 0, y: 0)
+                            .fill(cursorAppearance.color)
+                            .shadow(color: cursorAppearance.color.opacity(0.5), radius: 6, x: 0, y: 0)
                     )
                     .fixedSize()
                     .overlay(
@@ -251,9 +252,9 @@ struct BlueCursorView: View {
                     .padding(.vertical, 4)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(DS.Colors.overlayCursorBlue)
+                            .fill(cursorAppearance.color)
                             .shadow(
-                                color: DS.Colors.overlayCursorBlue.opacity(0.5 + (1.0 - navigationBubbleScale) * 1.0),
+                                color: cursorAppearance.color.opacity(0.5 + (1.0 - navigationBubbleScale) * 1.0),
                                 radius: 6 + (1.0 - navigationBubbleScale) * 16,
                                 x: 0, y: 0
                             )
@@ -285,10 +286,10 @@ struct BlueCursorView: View {
             // During navigation: NO implicit animation — the frame-by-frame bezier
             // timer controls position directly at 60fps for a smooth arc flight.
             Triangle()
-                .fill(DS.Colors.overlayCursorBlue)
+                .fill(cursorAppearance.color)
                 .frame(width: 16, height: 16)
                 .rotationEffect(.degrees(triangleRotationDegrees))
-                .shadow(color: DS.Colors.overlayCursorBlue, radius: 8 + (buddyFlightScale - 1.0) * 20, x: 0, y: 0)
+                .shadow(color: cursorAppearance.color, radius: 8 + (buddyFlightScale - 1.0) * 20, x: 0, y: 0)
                 .scaleEffect(buddyFlightScale)
                 .opacity(buddyIsVisibleOnThisScreen && (companionManager.voiceState == .idle || companionManager.voiceState == .responding) ? cursorOpacity : 0)
                 .position(cursorPosition)
@@ -690,6 +691,7 @@ struct BlueCursorView: View {
 /// A small blue waveform that replaces the triangle cursor while
 /// the user is holding the push-to-talk shortcut and speaking.
 private struct BlueCursorWaveformView: View {
+    @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
     let audioPowerLevel: CGFloat
     /// Dictation types your words into the focused field; the assistant answers
     /// them aloud. Same chord plus shift, so without a visible difference there
@@ -706,7 +708,7 @@ private struct BlueCursorWaveformView: View {
     /// who does not distinguish the two — so it is reinforced by the label
     /// below rather than carrying the meaning by itself.
     private var tint: Color {
-        isDictating ? DS.Colors.success : DS.Colors.overlayCursorBlue
+        isDictating ? DS.Colors.success : cursorAppearance.color
     }
 
     var body: some View {
@@ -767,6 +769,7 @@ private struct BlueCursorWaveformView: View {
 /// A small blue spinning indicator that replaces the triangle cursor
 /// while the AI is processing a voice input.
 private struct BlueCursorSpinnerView: View {
+    @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
     @State private var isSpinning = false
 
     var body: some View {
@@ -775,8 +778,8 @@ private struct BlueCursorSpinnerView: View {
             .stroke(
                 AngularGradient(
                     colors: [
-                        DS.Colors.overlayCursorBlue.opacity(0.0),
-                        DS.Colors.overlayCursorBlue
+                        cursorAppearance.color.opacity(0.0),
+                        cursorAppearance.color
                     ],
                     center: .center
                 ),
@@ -784,7 +787,7 @@ private struct BlueCursorSpinnerView: View {
             )
             .frame(width: 14, height: 14)
             .rotationEffect(.degrees(isSpinning ? 360 : 0))
-            .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.6), radius: 6, x: 0, y: 0)
+            .shadow(color: cursorAppearance.color.opacity(0.6), radius: 6, x: 0, y: 0)
             .onAppear {
                 withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
                     isSpinning = true

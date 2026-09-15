@@ -25,27 +25,33 @@ final class AppleSpeechTranscriptionProvider: BuddyTranscriptionProvider {
 
     func startStreamingSession(
         keyterms: [String],
+        localeIdentifier: String?,
         onTranscriptUpdate: @escaping (String) -> Void,
         onFinalTranscriptReady: @escaping (String) -> Void,
         onError: @escaping (Error) -> Void
     ) async throws -> any BuddyStreamingTranscriptionSession {
-        guard let speechRecognizer = Self.makeBestAvailableSpeechRecognizer() else {
+        guard let speechRecognizer = Self.makeBestAvailableSpeechRecognizer(localeIdentifier: localeIdentifier) else {
             throw AppleSpeechTranscriptionProviderError(message: "dictation is not available on this mac.")
         }
 
         return try AppleSpeechTranscriptionSession(
             speechRecognizer: speechRecognizer,
+            keyterms: keyterms,
             onTranscriptUpdate: onTranscriptUpdate,
             onFinalTranscriptReady: onFinalTranscriptReady,
             onError: onError
         )
     }
 
-    private static func makeBestAvailableSpeechRecognizer() -> SFSpeechRecognizer? {
-        let preferredLocales = [
-            Locale.autoupdatingCurrent,
-            Locale(identifier: "en-US")
-        ]
+    /// Prefers the user-chosen language when one is set, then the system
+    /// language, then US English, then any available recogniser.
+    private static func makeBestAvailableSpeechRecognizer(localeIdentifier: String?) -> SFSpeechRecognizer? {
+        var preferredLocales: [Locale] = []
+        if let localeIdentifier {
+            preferredLocales.append(Locale(identifier: localeIdentifier))
+        }
+        preferredLocales.append(Locale.autoupdatingCurrent)
+        preferredLocales.append(Locale(identifier: "en-US"))
 
         for preferredLocale in preferredLocales {
             if let speechRecognizer = SFSpeechRecognizer(locale: preferredLocale) {
@@ -72,6 +78,7 @@ private final class AppleSpeechTranscriptionSession: NSObject, BuddyStreamingTra
 
     init(
         speechRecognizer: SFSpeechRecognizer,
+        keyterms: [String],
         onTranscriptUpdate: @escaping (String) -> Void,
         onFinalTranscriptReady: @escaping (String) -> Void,
         onError: @escaping (Error) -> Void
@@ -86,6 +93,13 @@ private final class AppleSpeechTranscriptionSession: NSObject, BuddyStreamingTra
         recognitionRequest.shouldReportPartialResults = true
         recognitionRequest.taskHint = .dictation
         recognitionRequest.addsPunctuation = true
+
+        // Bias recognition toward the user's custom dictionary and the app's
+        // built-in keyterms. Previously these were accepted and dropped, so the
+        // dictionary had no effect until now.
+        if !keyterms.isEmpty {
+            recognitionRequest.contextualStrings = keyterms
+        }
 
         if speechRecognizer.supportsOnDeviceRecognition {
             recognitionRequest.requiresOnDeviceRecognition = true

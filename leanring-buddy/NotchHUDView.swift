@@ -26,18 +26,24 @@ struct NotchHUDView: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var skillManager = SkillManager.shared
     @ObservedObject private var mcpManager = MCPManager.shared
+    @ObservedObject private var bindingStore = ShortcutBindingStore.shared
+    @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Color.clear
-            hudSurface
+        // The glass container lets the pill and panel render as one Liquid Glass
+        // element and morph fluidly between the collapsed and expanded frames.
+        GlassEffectContainer {
+            ZStack(alignment: .top) {
+                Color.clear
+                hudSurface
+            }
+            .frame(
+                width: viewModel.expandedSize.width,
+                height: viewModel.expandedSize.height,
+                alignment: .top
+            )
+            .animation(.spring(response: 0.34, dampingFraction: 0.86), value: viewModel.isExpanded)
         }
-        .frame(
-            width: viewModel.expandedSize.width,
-            height: viewModel.expandedSize.height,
-            alignment: .top
-        )
-        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: viewModel.isExpanded)
     }
 
     // MARK: - Morphing surface
@@ -60,9 +66,13 @@ struct NotchHUDView: View {
             height: viewModel.isExpanded ? viewModel.expandedSize.height : viewModel.collapsedSize.height,
             alignment: .top
         )
-        .background(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.extraLarge, style: .continuous)
-                .fill(viewModel.isExpanded ? DS.Colors.surface1 : Color.black)
+        // Liquid Glass is the notch surface. Its own tinted material replaces
+        // the flat surface1 / black fills, so the pill and panel refract the
+        // desktop behind them and read as one dynamic-island element. The
+        // subtle stroke is kept on the expanded panel to define its edge
+        // against a busy background.
+        .wispNotchGlassSurface(
+            in: RoundedRectangle(cornerRadius: DS.CornerRadius.extraLarge, style: .continuous)
         )
         .overlay(
             RoundedRectangle(cornerRadius: DS.CornerRadius.extraLarge, style: .continuous)
@@ -93,7 +103,7 @@ struct NotchHUDView: View {
         case .idle:
             return DS.Colors.textTertiary
         default:
-            return DS.Colors.overlayCursorBlue
+            return CursorAppearanceStore.shared.color
         }
     }
 
@@ -102,9 +112,34 @@ struct NotchHUDView: View {
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            // The latest reply as text, so silent mode has somewhere to show the
+            // answer and voice mode shows it too. Capped in height and scrollable
+            // so a long reply stays inside the fixed expanded bounds — the window
+            // never resizes to fit it.
+            replyTextRegion
+            // A visual answer card, when the latest turn produced one, sits at the
+            // top of the panel above the resident controls so the answer is what
+            // the user sees first. It renders inside the fixed expanded bounds —
+            // the window never resizes to fit it. Each card kind picks its own
+            // template.
+            if let resolvedCard = companionManager.resolvedGlanceCard {
+                switch resolvedCard {
+                case let .generic(glanceCard):
+                    GlanceCardView(card: glanceCard)
+                case let .weather(weatherCardState):
+                    WeatherCardView(state: weatherCardState)
+                case let .calendar(calendarCardState):
+                    CalendarCardView(state: calendarCardState)
+                case let .nowPlaying(nowPlayingCardState):
+                    NowPlayingCardView(state: nowPlayingCardState)
+                case let .source(sourceCardState):
+                    SourceCardView(state: sourceCardState)
+                }
+            }
             shortcutsCheatSheet
             Divider().overlay(DS.Colors.borderSubtle)
-            skillsAndCursorRow
+            skillsSection
+            Divider().overlay(DS.Colors.borderSubtle)
             activeIntegrations
             Spacer(minLength: 0)
         }
@@ -119,6 +154,8 @@ struct NotchHUDView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(DS.Colors.textPrimary)
             Spacer()
+            voiceOutputToggle
+            dockCursorToggle
             Button {
                 NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
             } label: {
@@ -134,37 +171,127 @@ struct NotchHUDView: View {
         }
     }
 
+    /// Compact cursor-dock toggle in the header. The stored flag is "cursor
+    /// always visible"; docking is its inverse.
+    private var dockCursorToggle: some View {
+        let isDocked = !companionManager.isCursorAlwaysVisible
+        return Button {
+            companionManager.setCursorAlwaysVisible(isDocked)
+        } label: {
+            Image(systemName: isDocked ? "cursorarrow.slash" : "cursorarrow")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(isDocked ? DS.Colors.textTertiary : DS.Colors.accentText)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .nativeTooltip(isDocked
+            ? "Cursor docked — click to let it follow you"
+            : "Dock the cursor (hide it and stop it following you)")
+    }
+
+    /// Voice / silent mode toggle in the header. When voice is off (silent
+    /// mode), replies are never spoken and appear only here in the notch.
+    private var voiceOutputToggle: some View {
+        let isVoiceOn = voiceOutputPreference.isReplySpeechEnabled
+        return Button {
+            voiceOutputPreference.isReplySpeechEnabled.toggle()
+        } label: {
+            Image(systemName: isVoiceOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(isVoiceOn ? DS.Colors.accentText : DS.Colors.textTertiary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .nativeTooltip(isVoiceOn
+            ? "Voice mode — replies are spoken. Click for silent mode."
+            : "Silent mode — replies show here only. Click to enable voice.")
+    }
+
+    // MARK: Reply text
+
+    /// The current turn's reply rendered as text. Empty between turns, so it
+    /// simply takes no space until an answer arrives. Height-capped and
+    /// scrollable so a long answer never grows the fixed-size panel.
+    @ViewBuilder
+    private var replyTextRegion: some View {
+        let replyText = companionManager.currentReplyText
+        if !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                sectionLabel("REPLY")
+                ScrollView {
+                    Text(replyText)
+                        .font(.system(size: 12))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 140)
+            }
+        }
+    }
+
     // MARK: Shortcuts cheat-sheet
 
-    /// Only the shortcuts that actually exist today are shown. Text mode and
-    /// hands-free dictation arrive in later phases and will be added here then,
-    /// rather than advertising bindings the engine does not yet honor.
+    /// Rendered live from the binding store, so rebinding a chord or toggling
+    /// hands-free in the Shortcuts settings is reflected here immediately. The
+    /// gesture chip distinguishes Talk (hold the chord) from Text (tap it).
     private var shortcutsCheatSheet: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("SHORTCUTS")
             shortcutRow(
                 name: "Talk",
-                keys: BuddyPushToTalkShortcut.ShortcutOption.controlOption.keyCapsuleLabels
+                gesture: "hold",
+                keys: bindingStore.primaryHoldChord.keyCapsuleLabels
+            )
+            shortcutRow(
+                name: "Text",
+                gesture: "tap",
+                keys: bindingStore.primaryHoldChord.keyCapsuleLabels
             )
             shortcutRow(
                 name: "Dictate",
-                keys: ["ctrl", "option", "shift"]
+                gesture: "hold",
+                keys: bindingStore.primaryHoldChord.keyCapsuleLabels + ["shift"]
             )
+            if bindingStore.handsFreeDictationEnabled {
+                shortcutRow(
+                    name: "Hands-free",
+                    gesture: "2×",
+                    keys: [bindingStore.handsFreeDictationModifier.capsuleLabel]
+                )
+            }
         }
     }
 
-    private func shortcutRow(name: String, keys: [String]) -> some View {
+    private func shortcutRow(name: String, gesture: String, keys: [String]) -> some View {
         HStack(spacing: 8) {
             Text(name)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(DS.Colors.textSecondary)
             Spacer()
             HStack(spacing: 4) {
+                gestureCapsule(gesture)
                 ForEach(keys, id: \.self) { key in
                     keyCap(key)
                 }
             }
         }
+    }
+
+    private func gestureCapsule(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(DS.Colors.accentText)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
+                    .fill(DS.Colors.accentSubtle)
+            )
     }
 
     private func keyCap(_ label: String) -> some View {
@@ -183,61 +310,52 @@ struct NotchHUDView: View {
             )
     }
 
-    // MARK: Skills + dock cursor
+    // MARK: Skills — one-click launchers
 
-    private var skillsAndCursorRow: some View {
-        HStack(spacing: 8) {
-            Button {
-                NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .bold))
-                    Text(skillsButtonTitle)
-                        .font(.system(size: 12, weight: .medium))
+    /// Each skill in ~/.wisp/skills becomes a chip that runs the skill on the
+    /// current screen when clicked (screenshot → model → spoken answer → on-screen
+    /// pointing), rather than a link into a settings screen.
+    private var skillsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("SKILLS")
+            if skillManager.skills.isEmpty {
+                Text("No skills yet — drop markdown files into ~/.wisp/skills")
+                    .font(.system(size: 11))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150), spacing: 6, alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 6
+                ) {
+                    ForEach(skillManager.skills) { skill in
+                        skillChip(skill)
+                    }
                 }
-                .foregroundColor(DS.Colors.textPrimary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                        .fill(DS.Colors.surface2)
-                )
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .pointerCursor()
-            .nativeTooltip("Manage skills")
-
-            Spacer()
-
-            dockCursorButton
         }
     }
 
-    private var skillsButtonTitle: String {
-        let count = skillManager.skills.count
-        return count == 0 ? "Skills" : "Skills · \(count)"
-    }
-
-    private var dockCursorButton: some View {
-        // The stored flag is "cursor always visible"; docking is its inverse.
-        let isDocked = !companionManager.isCursorAlwaysVisible
-        return Button {
-            companionManager.setCursorAlwaysVisible(isDocked) // toggle
+    private func skillChip(_ skill: SkillManager.SkillSummary) -> some View {
+        Button {
+            companionManager.runSkill(named: skill.name)
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: isDocked ? "cursorarrow.slash" : "cursorarrow")
+            HStack(spacing: 5) {
+                Image(systemName: iconName(forSkillNamed: skill.name))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(DS.Colors.accentText)
+                Text(prettifiedName(fromSkillName: skill.name))
                     .font(.system(size: 11, weight: .medium))
-                Text(isDocked ? "Cursor docked" : "Dock cursor")
-                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
             }
-            .foregroundColor(isDocked ? DS.Colors.textSecondary : DS.Colors.textPrimary)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 9)
             .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                    .fill(isDocked ? DS.Colors.surface1 : DS.Colors.surface2)
+                    .fill(DS.Colors.surface2)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
@@ -247,9 +365,39 @@ struct NotchHUDView: View {
         }
         .buttonStyle(.plain)
         .pointerCursor()
-        .nativeTooltip(isDocked
-            ? "Cursor is docked and won't follow you"
-            : "Hide the cursor and stop it following you")
+        .nativeTooltip(skill.description)
+    }
+
+    /// Turns a kebab/snake skill filename into a readable label, e.g.
+    /// "summarize-screen" → "Summarize screen".
+    private func prettifiedName(fromSkillName skillName: String) -> String {
+        let spaced = skillName
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+        guard let firstCharacter = spaced.first else { return skillName }
+        return firstCharacter.uppercased() + spaced.dropFirst()
+    }
+
+    /// A best-effort icon for a skill, matched on keywords in its name. Falls
+    /// back to a generic bolt so any user-authored skill still gets a glyph.
+    private func iconName(forSkillNamed skillName: String) -> String {
+        let lowercasedName = skillName.lowercased()
+        if lowercasedName.contains("error") || lowercasedName.contains("debug") {
+            return "exclamationmark.triangle"
+        }
+        if lowercasedName.contains("summar") {
+            return "doc.text"
+        }
+        if lowercasedName.contains("task") || lowercasedName.contains("todo") {
+            return "checklist"
+        }
+        if lowercasedName.contains("proof") || lowercasedName.contains("grammar") || lowercasedName.contains("write") {
+            return "text.magnifyingglass"
+        }
+        if lowercasedName.contains("standup") || lowercasedName.contains("update") || lowercasedName.contains("meeting") {
+            return "person.2"
+        }
+        return "bolt.fill"
     }
 
     // MARK: Active integrations
@@ -321,13 +469,15 @@ struct NotchHUDView: View {
 }
 
 /// The wisp triangle, matching the rotation of the menu bar icon and the in-app
-/// cursor. Reuses the shared `Triangle` shape so all three stay in sync.
+/// cursor. Reuses the shared `Triangle` shape and the cursor colour so the brand
+/// mark always matches the pointer the user chose.
 private struct WispGlyph: View {
     let size: CGFloat
+    @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
 
     var body: some View {
         Triangle()
-            .fill(DS.Colors.overlayCursorBlue)
+            .fill(cursorAppearance.color)
             .frame(width: size, height: size)
             .rotationEffect(.degrees(35))
     }

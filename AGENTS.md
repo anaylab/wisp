@@ -38,8 +38,31 @@ cloud dependency to the local path, without asking.
   `SFSpeechAudioBufferRecognitionRequest.contextualStrings` to bias spelling (this was a
   no-op before — the provider accepted keyterms and dropped them). Both are read on the main
   actor by `BuddyDictationManager` and threaded into `startStreamingSession`.
-- **Text-to-Speech**: Chatterbox Nano at `http://localhost:8004`, synthesised and played
-  sentence-by-sentence so playback starts before the whole reply is rendered
+- **Text-to-Speech**: Chatterbox Nano at `http://localhost:8004`. Reply speech is now
+  **opt-in per reply and gated by a voice/silent mode** (`VoiceOutputPreference`, default on).
+  The notch is the primary answer surface: every reply renders there as text
+  (`CompanionManager.currentReplyText`) plus an optional glance card. In **silent mode** no
+  reply is spoken. In **voice mode** the model chooses whether/what to speak via a `[SAY: …]`
+  tag (`SpokenLineParser`) — only that short line is synthesised, at the end of the turn; a
+  reply with no tag stays silent. The old incremental sentence-streaming of the whole reply
+  is retired. Confirmation/failure speech is unaffected.
+- **Deployment target**: macOS 26 (raised from 14.2) so the notch HUD can use real SwiftUI
+  **Liquid Glass** (`.glassEffect` / `GlassEffectContainer`), dark-tinted for legibility
+  (`DS.Colors.notchGlassTint`, `View.wispNotchGlassSurface(in:)`).
+- **Glance cards**: a visual answer surface in the notch's expanded panel, parsed from one
+  `[CARD:{...json...}]` tag at the end of the reply (same structured-text mechanism as
+  `[POINT:]`/`[BOX:]`/`[TOOL:]` — the local model can't do native structured output; the tag is
+  stripped from spoken text). The model emits a small payload naming a card *kind*, and Wisp
+  owns the look and data (`GlanceCardParser` → `GlanceCardRequest` → `ResolvedGlanceCard`,
+  drawn by a per-kind template). Kinds: `generic` (model-supplied `header`/`list`/`keyValue`/
+  `stats` blocks, tone `good`/`bad`/`neutral` → `DS.Colors`, 3-block cap, SF Symbol allowlist,
+  network-free), `weather` (the model sends only a place name → Open-Meteo, no API key, Apple
+  Weather layout), `calendar` (EventKit, on-device), `music`/now-playing (AppleScript to
+  Music/Spotify, on-device, best-effort), and `source` (user-configured HTTPS endpoints in
+  `~/.wisp/sources.json`, mapped to generic blocks). Network kinds are gated by
+  `GlanceCardDataPreference` (default on) and labelled "Live · source"; on-device kinds are
+  gated only by their macOS permission. Managed in the dashboard's **Sources tab**. Adding an
+  app = one data provider + one template.
 - **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor, downscaled to 896px
 - **Element Pointing**: the model embeds `[POINT:x,y:label:screenN]` tags; the overlay
   parses them, maps to the correct monitor, and animates the cursor along a bezier arc
@@ -190,6 +213,20 @@ Grouped by what they do. Line counts are approximate.
 | `ToolConfirmationView.swift` | ~130 | The on-screen approve/deny card. |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
 | `AgentTaskRegistry.swift` | ~140 | Task and step records backing the dashboard's Activity tab. |
+
+### Voice modes, glance cards & sources
+| File | Lines | Purpose |
+|------|-------|---------|
+| `VoiceOutputPreference.swift` | ~50 | Source of truth for voice/silent mode (reply speech on/off). Persists; defaults on. |
+| `SpokenLineParser.swift` | ~90 | Parses/strips the `[SAY: …]` tag — the model's per-reply "speak this" line. |
+| `GlanceCard.swift` | ~500 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`) and the generic block card. |
+| `GlanceCardView.swift` | ~180 | Renderer for the generic block card (header/list/keyValue/stats). |
+| `GlanceCardDataPreference.swift` | ~40 | The single gate for **network** card data (weather, sources). Default on. |
+| `WeatherSnapshot.swift` / `WeatherDataProvider.swift` / `WeatherCardView.swift` | ~330/~200/~260 | Weather kind: Open-Meteo fetch → snapshot → Apple-Weather-style card. |
+| `CalendarSnapshot.swift` / `CalendarDataProvider.swift` / `CalendarCardView.swift` | ~50/~110/~160 | Calendar kind: EventKit on-device read → next events card. Needs Calendar permission. |
+| `NowPlayingDataProvider.swift` / `NowPlayingCardView.swift` | ~150/~110 | Now-playing kind: AppleScript to Music/Spotify (best-effort, on-device). Needs Automation permission. |
+| `ConfiguredSourceStore.swift` / `RESTSourceDataProvider.swift` / `SourceCardView.swift` | ~90/~140/~90 | `source` kind: user endpoints in `~/.wisp/sources.json`, fetched over HTTPS and mapped to generic blocks. |
+| `SourcesTab.swift` | ~150 | Dashboard Sources tab: the live-card-data master toggle + the configured-source list. |
 
 ### Dashboard and UI
 | File | Lines | Purpose |

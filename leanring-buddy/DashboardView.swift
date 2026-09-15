@@ -39,7 +39,12 @@ struct DashboardView: View {
     enum DashboardTab: String, CaseIterable, Identifiable {
         case activity = "Activity"
         case conversation = "Conversation"
+        case shortcuts = "Shortcuts"
+        case dictation = "Dictation"
+        case cursor = "Cursor"
+        case agent = "Agent"
         case tools = "Tools & Servers"
+        case sources = "Sources"
         case performance = "Model & Performance"
 
         var id: String { rawValue }
@@ -48,7 +53,12 @@ struct DashboardView: View {
             switch self {
             case .activity: return "list.bullet.rectangle"
             case .conversation: return "bubble.left.and.bubble.right"
+            case .shortcuts: return "keyboard"
+            case .dictation: return "mic"
+            case .cursor: return "cursorarrow"
+            case .agent: return "cpu"
             case .tools: return "wrench.and.screwdriver"
+            case .sources: return "antenna.radiowaves.left.and.right"
             case .performance: return "speedometer"
             }
         }
@@ -69,7 +79,12 @@ struct DashboardView: View {
                     switch selectedTab {
                     case .activity: ActivityTab(taskRegistry: taskRegistry)
                     case .conversation: ConversationTab(taskRegistry: taskRegistry)
+                    case .shortcuts: ShortcutsTab()
+                    case .dictation: DictationTab()
+                    case .cursor: CursorTab(companionManager: companionManager)
+                    case .agent: AgentTab(companionManager: companionManager)
                     case .tools: ToolsTab()
+                    case .sources: SourcesTab()
                     case .performance: PerformanceTab(metricsRecorder: metricsRecorder, companionManager: companionManager)
                     }
                 }

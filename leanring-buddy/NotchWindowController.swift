@@ -34,7 +34,7 @@ final class NotchViewModel: ObservableObject {
     /// The collapsed pill's size — matches the physical notch when there is one.
     @Published var collapsedSize: CGSize = CGSize(width: 180, height: 32)
     /// The expanded panel's size, and therefore the fixed window size.
-    @Published var expandedSize: CGSize = CGSize(width: 360, height: 272)
+    @Published var expandedSize: CGSize = CGSize(width: 380, height: 446)
 }
 
 @MainActor
@@ -45,9 +45,15 @@ final class NotchWindowController {
     private var clickThroughObserver: AnyCancellable?
     private var hoverPollTimer: Timer?
     private var screenParametersObserver: NSObjectProtocol?
+    private var dismissObserver: NSObjectProtocol?
+
+    /// Hover is ignored until this moment. Set when the HUD is force-collapsed
+    /// (e.g. a skill was launched) so the click that triggered it — or the
+    /// screenshot about to be taken — does not immediately reopen the panel.
+    private var hoverSuspendedUntil: Date = .distantPast
 
     /// The expanded panel's fixed size.
-    private let panelSize = CGSize(width: 360, height: 272)
+    private let panelSize = CGSize(width: 380, height: 446)
 
     /// Extra slack added around the panel so a small overshoot at the edge does
     /// not immediately collapse it — the hysteresis that keeps the hover stable.
@@ -60,6 +66,9 @@ final class NotchWindowController {
     deinit {
         if let screenParametersObserver {
             NotificationCenter.default.removeObserver(screenParametersObserver)
+        }
+        if let dismissObserver {
+            NotificationCenter.default.removeObserver(dismissObserver)
         }
         hoverPollTimer?.invalidate()
     }
@@ -120,12 +129,36 @@ final class NotchWindowController {
         self.panel = notchPanel
 
         // The window itself never resizes; it only stops being click-through
-        // while the panel is open so its buttons can be used.
+        // while the panel is open so its buttons can be used. Opening the panel
+        // also refreshes the skill list, so a skill the user just dropped into
+        // ~/.wisp/skills shows up without relaunching.
         clickThroughObserver = viewModel.$isExpanded
             .removeDuplicates()
             .sink { [weak self] isExpanded in
                 self?.panel?.ignoresMouseEvents = !isExpanded
+                if isExpanded {
+                    _ = SkillManager.shared.loadSkills()
+                }
             }
+
+        // When the app clears its surfaces off the screen (a skill launching, a
+        // push-to-talk turn starting), collapse the HUD too and ignore hover
+        // briefly so the click that launched it does not immediately reopen it
+        // and so the notch is out of the way of the screenshot being captured.
+        dismissObserver = NotificationCenter.default.addObserver(
+            forName: .wispDismissPanel,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.viewModel.isExpanded = false
+                // A dismiss means the current answer surface is being cleared off
+                // the screen, so the glance card goes with it.
+                self.companionManager.resolvedGlanceCard = nil
+                self.hoverSuspendedUntil = Date().addingTimeInterval(1.0)
+            }
+        }
 
         // Re-place and re-measure the HUD when the display arrangement changes.
         screenParametersObserver = NotificationCenter.default.addObserver(
@@ -177,6 +210,10 @@ final class NotchWindowController {
     /// around the pill to open and a larger zone around the panel to stay open,
     /// so the state does not flicker at the boundary.
     private func updateHoverFromMousePosition() {
+        // Respect a brief suspension after a force-collapse so the panel does not
+        // snap back open under a cursor that is still sitting over it.
+        if Date() < hoverSuspendedUntil { return }
+
         guard let geometry = currentGeometry() else { return }
         let mouseLocation = NSEvent.mouseLocation
 

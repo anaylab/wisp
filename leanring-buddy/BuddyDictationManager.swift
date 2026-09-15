@@ -14,12 +14,14 @@ import Foundation
 import Speech
 
 enum BuddyPushToTalkShortcut {
-    enum ShortcutOption {
+    enum ShortcutOption: String, CaseIterable, Identifiable {
         case shiftFunction
         case controlOption
         case shiftControl
         case controlOptionSpace
         case shiftControlSpace
+
+        var id: String { rawValue }
 
         var displayText: String {
             switch self {
@@ -92,9 +94,30 @@ enum BuddyPushToTalkShortcut {
         case dictation
     }
 
+    /// A double-tap gesture other than a hold — currently only the double-tap
+    /// that toggles hands-free dictation.
+    enum DoubleTapAction: Sendable, Equatable {
+        case handsFreeDictate
+    }
+
+    /// A quick tap (press and release) of the hold chord, as opposed to holding
+    /// it. Currently only opens the text composer.
+    enum TapAction: Sendable, Equatable {
+        case textComposer
+    }
+
+    /// A hold shorter than this is treated as a tap, not a held press. Short
+    /// enough that a real "hold to talk" is never mistaken for a tap (speech does
+    /// not start this fast), long enough to catch a deliberate quick tap.
+    static let tapMaxDuration: TimeInterval = 0.22
+
     enum ShortcutTransition: Equatable {
         case none
         case pressed(InvocationMode)
+        /// A quick tap of the hold chord (e.g. tap Ctrl+Option to type).
+        case tapped(TapAction)
+        /// A recognised double-tap of a bare modifier (e.g. Control twice).
+        case doubleTapped(DoubleTapAction)
         /// Shift landed a moment after the chord did.
         ///
         /// Nobody presses three modifiers simultaneously. Ctrl+Option is
@@ -119,10 +142,24 @@ enum BuddyPushToTalkShortcut {
         case keyUp
     }
 
-    static let currentShortcutOption: ShortcutOption = .controlOption
+    /// The hold chord for Talk (and, with Shift added, Dictate). Now a `var` so
+    /// `ShortcutBindingStore` can rebind it at runtime; only ever read/written on
+    /// the main thread (the CGEvent tap callback runs on the main run loop), so
+    /// `nonisolated(unsafe)` is accurate rather than a hazard.
+    nonisolated(unsafe) static var currentShortcutOption: ShortcutOption = .controlOption
+
+    /// The bare modifier whose double-tap toggles hands-free dictation, or nil
+    /// when hands-free is disabled. Same main-thread-only contract as above.
+    nonisolated(unsafe) static var handsFreeDoubleTapModifier: NSEvent.ModifierFlags? = .control
+
+    /// A tap in a double-tap must be at least this quick; a slower press is a hold.
+    static let doubleTapMaxTapDuration: TimeInterval = 0.30
+    /// The two taps of a double-tap must fall within this window of each other.
+    static let doubleTapBetweenTapsInterval: TimeInterval = 0.40
+
     static let pushToTalkKeyCode: UInt16 = 49 // Space
-    static let pushToTalkDisplayText = currentShortcutOption.displayText
-    static let pushToTalkTooltipText = "push to talk (\(pushToTalkDisplayText))"
+    static var pushToTalkDisplayText: String { currentShortcutOption.displayText }
+    static var pushToTalkTooltipText: String { "push to talk (\(pushToTalkDisplayText))" }
 
     static func shortcutTransition(
         for event: NSEvent,
@@ -554,6 +591,7 @@ final class BuddyDictationManager: NSObject, ObservableObject {
 
         let activeTranscriptionSession = try await transcriptionProvider.startStreamingSession(
             keyterms: buildTranscriptionKeyterms(),
+            localeIdentifier: DictationSettingsStore.shared.selectedLanguageLocaleIdentifier,
             onTranscriptUpdate: { [weak self] transcriptText in
                 Task { @MainActor in
                     self?.latestRecognizedText = transcriptText
@@ -699,7 +737,7 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             "localhost"
         ]
 
-        let combinedKeyterms = baseKeyterms + contextualKeyterms
+        let combinedKeyterms = baseKeyterms + contextualKeyterms + DictationSettingsStore.shared.customDictionaryWords
         var uniqueNormalizedKeyterms = Set<String>()
         var orderedKeyterms: [String] = []
 

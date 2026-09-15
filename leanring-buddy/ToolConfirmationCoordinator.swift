@@ -68,6 +68,12 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
 
     @Published private(set) var pendingConfirmation: PendingConfirmation?
 
+    /// When on, tool calls are approved without asking, until the app restarts.
+    /// Deliberately session-scoped and not persisted: a blanket "always approve"
+    /// that survived relaunches would be too easy to forget you left on. Reset
+    /// every launch so the safe default (ask each time) is what you come back to.
+    @Published var autoApproveThisSession = false
+
     /// How questions are asked aloud.
     ///
     /// Installed once at startup rather than passed per call, because approval
@@ -112,6 +118,12 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         argumentSummary: String,
         speak: @MainActor (String) async -> Void
     ) async -> Decision {
+        // Session auto-approve short-circuits the whole prompt so long tasks can
+        // run without stopping to ask on every step.
+        if autoApproveThisSession {
+            return .approved
+        }
+
         // A second request while one is outstanding is refused rather than
         // queued: two spoken questions at once cannot be answered separately.
         if pendingConfirmation != nil {

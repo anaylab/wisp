@@ -26,5 +26,11 @@
 	<string>Wisp looks at your screen to answer questions about what you are seeing. Screenshots are read by a model running on this Mac and are never uploaded.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Wisp turns your speech into text using on-device recognition. Nothing you say is sent anywhere.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Wisp reads your upcoming events on this Mac to show them in the notch. Your calendar is read on-device and never uploaded.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Wisp reads your upcoming events on this Mac to show them in the notch. Your calendar is read on-device and never uploaded.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Wisp asks Music or Spotify what is currently playing so it can show it in the notch. It reads only the current track and controls nothing.</string>
 </dict>
 </plist>

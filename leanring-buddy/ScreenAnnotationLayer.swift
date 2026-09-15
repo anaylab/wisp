@@ -24,6 +24,8 @@ struct ScreenAnnotationLayer: View {
     /// Point dimensions of the screen being drawn on.
     let displaySize: CGSize
 
+    @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
+
     /// Drives the gentle pulse. A static outline is easy to miss on a busy
     /// screen; a moving one draws the eye without demanding attention.
     @State private var isPulsing = false
@@ -39,6 +41,12 @@ struct ScreenAnnotationLayer: View {
             ForEach(annotations) { annotation in
                 if let label = annotation.label, !label.isEmpty {
                     labelView(for: annotation, text: label)
+                }
+            }
+
+            ForEach(annotations) { annotation in
+                if let stepNumber = annotation.stepNumber {
+                    stepBadge(for: annotation, stepNumber: stepNumber)
                 }
             }
         }
@@ -59,7 +67,7 @@ struct ScreenAnnotationLayer: View {
 
     private func draw(_ annotation: ScreenAnnotation, in context: inout GraphicsContext) {
         let rect = overlayRect(for: annotation)
-        let accent = DS.Colors.overlayCursorBlue
+        let accent = cursorAppearance.color
 
         switch annotation.style {
         case .box:
@@ -125,6 +133,25 @@ struct ScreenAnnotationLayer: View {
         context.fill(head, with: .color(color))
     }
 
+    /// A numbered badge marking this step's place in a walkthrough. Sits at the
+    /// region's top-left corner so the order reads top-to-bottom, left-to-right.
+    private func stepBadge(for annotation: ScreenAnnotation, stepNumber: Int) -> some View {
+        let rect = overlayRect(for: annotation)
+        let badgeDiameter: CGFloat = 20
+        return Text("\(stepNumber)")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundColor(.white)
+            .frame(width: badgeDiameter, height: badgeDiameter)
+            .background(
+                Circle()
+                    .fill(cursorAppearance.color)
+                    .shadow(color: cursorAppearance.color.opacity(0.5), radius: 4)
+            )
+            .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
+            .position(x: rect.minX, y: rect.minY)
+            .opacity(isPulsing ? 1.0 : 0.8)
+    }
+
     private func labelView(for annotation: ScreenAnnotation, text: String) -> some View {
         let rect = overlayRect(for: annotation)
         let estimatedLabelHeight: CGFloat = 20
@@ -140,8 +167,8 @@ struct ScreenAnnotationLayer: View {
             .padding(.vertical, 3)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(DS.Colors.overlayCursorBlue)
-                    .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.45), radius: 5)
+                    .fill(cursorAppearance.color)
+                    .shadow(color: cursorAppearance.color.opacity(0.45), radius: 5)
             )
             .fixedSize()
             .position(x: rect.midX, y: labelY)

@@ -313,8 +313,7 @@ final class AgentToolRegistry: ObservableObject {
             var allowEditing = false
             if case .bool(let flag)? = arguments["allow_editing"] { allowEditing = flag }
 
-            let configuredPath = AppBundleConfiguration.stringValue(forKey: "CodeProjectDirectory")
-                ?? "~/Downloads/clicky"
+            let configuredPath = AgentSettingsStore.resolvedWorkingDirectoryPath()
             let directory = URL(fileURLWithPath: (configuredPath as NSString).expandingTildeInPath)
 
             guard FileManager.default.fileExists(atPath: directory.path) else {

@@ -44,19 +44,24 @@ struct ScreenAnnotation: Identifiable, Equatable {
     /// Which screen this belongs to, 1-based, matching the image labels sent
     /// to the model. Nil means the screen the cursor is on.
     let screenNumber: Int?
+    /// Position in a numbered walkthrough (1-based), or nil for a lone
+    /// annotation. Assigned by the parser in the order the tags appear.
+    var stepNumber: Int?
 
     init(
         id: UUID = UUID(),
         style: Style,
         regionInScreenshotPixels: CGRect,
         label: String?,
-        screenNumber: Int?
+        screenNumber: Int?,
+        stepNumber: Int? = nil
     ) {
         self.id = id
         self.style = style
         self.regionInScreenshotPixels = regionInScreenshotPixels
         self.label = label
         self.screenNumber = screenNumber
+        self.stepNumber = stepNumber
     }
 
     /// Converts to the overlay's coordinate space.
@@ -118,12 +123,18 @@ enum ScreenAnnotationParser {
     - [ARROW:x,y:label] — point at a spot without covering it.
     - [HIGHLIGHT:left,top,right,bottom:label] — wash over a whole area, same two corners.
 
-    keep labels to one to three words. use at most three tags. if drawing wouldn't help, don't use any.
+    keep labels to one to three words. if drawing wouldn't help, don't use any.
+
+    step-by-step walkthroughs: when the user asks how to do something with several steps, mark each step in order — one tag per step, listed in the order they should do them. they are numbered automatically on screen, so keep each label to the action ("click export", "then choose pdf"). use one tag per step for a single flow, up to about eight; for a simple pointer, one tag is fine.
     """
 
     /// Extracts annotation tags and strips them from the spoken text.
     static func parse(_ responseText: String) -> ParseResult {
-        var annotations: [ScreenAnnotation] = []
+        // Paired with the tag's start offset so the final list can be restored to
+        // the order the steps appear in the reply — the two regex passes below
+        // would otherwise group all regions before all arrows, scrambling a
+        // walkthrough's order.
+        var annotationsWithOffset: [(offset: Int, annotation: ScreenAnnotation)] = []
         var rangesToRemove: [Range<String.Index>] = []
 
         // Region tags carry four numbers; arrows carry two. The optional
@@ -189,14 +200,16 @@ enum ScreenAnnotationParser {
                     screenNumber = Int(responseText[screenRange])
                 }
 
-                annotations.append(
-                    ScreenAnnotation(
+                let tagStartOffset = responseText.distance(from: responseText.startIndex, to: tagRange.lowerBound)
+                annotationsWithOffset.append((
+                    offset: tagStartOffset,
+                    annotation: ScreenAnnotation(
                         style: style,
                         regionInScreenshotPixels: region,
                         label: label,
                         screenNumber: screenNumber
                     )
-                )
+                ))
                 rangesToRemove.append(tagRange)
             }
         }
@@ -207,11 +220,27 @@ enum ScreenAnnotationParser {
             spokenText.removeSubrange(range)
         }
 
-        // More than a few shapes stops clarifying and starts obscuring.
-        let maximumAnnotations = 3
+        // Restore the order the steps appeared in the reply.
+        let orderedAnnotations = annotationsWithOffset
+            .sorted { $0.offset < $1.offset }
+            .map(\.annotation)
+
+        // Enough for a real walkthrough, but past this shapes stop clarifying
+        // and start obscuring.
+        let maximumAnnotations = 8
+        var cappedAnnotations = Array(orderedAnnotations.prefix(maximumAnnotations))
+
+        // Number the steps only when there are several — a lone pointer needs no
+        // "1" badge.
+        if cappedAnnotations.count >= 2 {
+            for stepIndex in cappedAnnotations.indices {
+                cappedAnnotations[stepIndex].stepNumber = stepIndex + 1
+            }
+        }
+
         return ParseResult(
             spokenText: spokenText.trimmingCharacters(in: .whitespacesAndNewlines),
-            annotations: Array(annotations.prefix(maximumAnnotations))
+            annotations: cappedAnnotations
         )
     }
 }

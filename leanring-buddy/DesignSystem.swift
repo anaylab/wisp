@@ -39,6 +39,13 @@ enum DS {
         /// Fourth elevation layer — used for active/pressed states on interactive elements.
         static let surface4 = Color(hex: "#2E3130")
 
+        /// Dark tint applied to the notch HUD's Liquid Glass surface. Wisp's
+        /// HUD uses a dark palette with near-white text; a plain clear glass
+        /// would leave that text unreadable over a light desktop, so the glass
+        /// is tinted dark. It still refracts and reflects what's behind it —
+        /// just kept dark enough to stay legible in both light and dark themes.
+        static let notchGlassTint = Color.black.opacity(0.55)
+
         // ── Borders ──────────────────────────────────────────────────
 
         /// Subtle border — used for card outlines, dividers, input field borders.
@@ -876,5 +883,16 @@ extension Color {
         let blue = nsColor.blueComponent + (1.0 - nsColor.blueComponent) * fraction
 
         return Color(red: red, green: green, blue: blue)
+    }
+}
+
+extension View {
+    /// Wisp's Liquid Glass surface, used for the notch HUD's morphing pill and
+    /// panel. Applies macOS 26 Liquid Glass, clipped to `shape` and tinted dark
+    /// (`DS.Colors.notchGlassTint`) so the HUD's near-white text stays legible
+    /// even when the glass sits over a bright desktop. Interactive so it reacts
+    /// to the pointer, matching the dynamic-island feel.
+    func wispNotchGlassSurface<GlassShape: Shape>(in shape: GlassShape) -> some View {
+        glassEffect(.regular.tint(DS.Colors.notchGlassTint).interactive(), in: shape)
     }
 }

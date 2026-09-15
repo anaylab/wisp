@@ -33,6 +33,17 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// When the current hold began, for the mode-settling window.
     private var shortcutPressedAt = Date.distantPast
 
+    // MARK: - Hands-free double-tap detection
+    //
+    // A separate, additive recogniser for double-tapping a bare modifier (e.g.
+    // Control twice). It is deliberately independent of the hold path above: the
+    // hold chord requires a second modifier, so a bare-modifier tap can never be
+    // confused with it, and vice-versa.
+    private var handsFreeModifierWasDown = false
+    private var handsFreeTapCandidateActive = false
+    private var handsFreeTapCandidateStartedAt = Date.distantPast
+    private var handsFreeLastTapAt = Date.distantPast
+
     deinit {
         stop()
     }
@@ -151,9 +162,76 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
             break
         case .released:
             isShortcutCurrentlyPressed = false
-            shortcutTransitionPublisher.send(.released(activeInvocationMode))
+            // A quick tap of the Talk chord opens the text composer instead of
+            // submitting a (near-empty) spoken turn. Only the assistant chord
+            // taps to type; a short Dictate press falls through to release.
+            let holdDuration = Date().timeIntervalSince(shortcutPressedAt)
+            if activeInvocationMode == .assistant && holdDuration < BuddyPushToTalkShortcut.tapMaxDuration {
+                shortcutTransitionPublisher.send(.tapped(.textComposer))
+            } else {
+                shortcutTransitionPublisher.send(.released(activeInvocationMode))
+            }
+        case .tapped, .doubleTapped:
+            // The hold matcher never produces these; the tap-duration check above
+            // and the double-tap recogniser below do. Nothing to do here.
+            break
         }
 
+        detectHandsFreeDoubleTap(eventType: eventType, event: event)
+
         return Unmanaged.passUnretained(event)
+    }
+
+    /// Recognises a double-tap of the configured bare modifier and publishes a
+    /// `.doubleTapped(.handsFreeDictate)` transition. A "tap" is the modifier
+    /// pressed and released on its own, quickly; two taps within the interval are
+    /// a double-tap. If any other modifier joins while ours is held, the tap is
+    /// cancelled — which is exactly what keeps this from firing during a hold
+    /// chord (that chord always includes a second modifier).
+    private func detectHandsFreeDoubleTap(eventType: CGEventType, event: CGEvent) {
+        guard eventType == .flagsChanged,
+              let handsFreeModifier = BuddyPushToTalkShortcut.handsFreeDoubleTapModifier else {
+            return
+        }
+
+        let relevantModifiers: NSEvent.ModifierFlags = [.control, .option, .command, .shift, .function]
+        let currentFlags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
+            .intersection(relevantModifiers)
+        let modifierIsDown = currentFlags.contains(handsFreeModifier)
+        let onlyThatModifierIsDown = (currentFlags == handsFreeModifier)
+
+        // A second modifier joined while ours was held — no longer a bare tap.
+        if modifierIsDown && handsFreeModifierWasDown && !onlyThatModifierIsDown {
+            handsFreeTapCandidateActive = false
+        }
+
+        // Modifier just pressed.
+        if modifierIsDown && !handsFreeModifierWasDown {
+            if onlyThatModifierIsDown {
+                handsFreeTapCandidateActive = true
+                handsFreeTapCandidateStartedAt = Date()
+            } else {
+                handsFreeTapCandidateActive = false
+            }
+        }
+
+        // Modifier just released — a tap completes here.
+        if !modifierIsDown && handsFreeModifierWasDown && handsFreeTapCandidateActive {
+            let now = Date()
+            let tapDuration = now.timeIntervalSince(handsFreeTapCandidateStartedAt)
+            if tapDuration <= BuddyPushToTalkShortcut.doubleTapMaxTapDuration {
+                if now.timeIntervalSince(handsFreeLastTapAt) <= BuddyPushToTalkShortcut.doubleTapBetweenTapsInterval {
+                    // Second quick tap — this is the double-tap.
+                    handsFreeLastTapAt = .distantPast
+                    shortcutTransitionPublisher.send(.doubleTapped(.handsFreeDictate))
+                } else {
+                    // First tap; wait to see if a second one follows.
+                    handsFreeLastTapAt = now
+                }
+            }
+            handsFreeTapCandidateActive = false
+        }
+
+        handsFreeModifierWasDown = modifierIsDown
     }
 }

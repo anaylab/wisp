@@ -42,6 +42,24 @@ final class CompanionManager: ObservableObject {
     /// BlueCursorView uses this instead of a random pointer phrase.
     @Published var detectedElementBubbleText: String?
 
+    /// The visual answer card for the current turn, shown in the notch's
+    /// expanded panel. Parsed from the model reply and observed by
+    /// `NotchHUDView`. A weather card is published in a loading state first and
+    /// updated to loaded/failed when its data provider returns.
+    @Published var resolvedGlanceCard: ResolvedGlanceCard?
+
+    /// The current turn's reply, as displayed text, shown in the notch's
+    /// expanded panel above any glance card. This is the answer with all
+    /// rendering tags (`[POINT:]`, `[BOX:]`, `[CARD:]`, `[SAY:]`) already
+    /// stripped. It is the load-bearing surface in silent mode: with reply
+    /// speech off, this is the only place the answer appears. Cleared at the
+    /// start of the next turn and on `.wispDismissPanel`, like the card.
+    @Published var currentReplyText: String = ""
+
+    /// The in-flight weather fetch for the current card, held so a new turn can
+    /// cancel it before starting its own (cancel-on-replace).
+    private var cardDataFetchTask: Task<Void, Never>?
+
     /// Boxes, arrows and highlights the assistant has drawn, keyed by the
     /// frame of the display they belong to.
     ///
@@ -615,6 +633,24 @@ final class CompanionManager: ObservableObject {
                     }
                 )
             }
+        case .tapped(let tapAction):
+            switch tapAction {
+            case .textComposer:
+                // The press already started a recording (for the hold-to-talk
+                // case); this turned out to be a tap, so discard it and type.
+                pendingKeyboardShortcutStartTask?.cancel()
+                pendingKeyboardShortcutStartTask = nil
+                buddyDictationManager.cancelCurrentDictation(preserveDraftText: false)
+                voiceState = .idle
+                openTextComposer()
+            }
+
+        case .doubleTapped(let doubleTapAction):
+            switch doubleTapAction {
+            case .handsFreeDictate:
+                toggleHandsFreeDictation()
+            }
+
         case .modeChanged(let mode):
             // Shift landed just after the chord. Only the routing of the final
             // transcript depends on this, and that decision has not been made
@@ -636,6 +672,112 @@ final class CompanionManager: ObservableObject {
             buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
         case .none:
             break
+        }
+    }
+
+    // MARK: - Hands-free dictation (double-tap)
+
+    /// True while a non-held dictation session is recording. Drives the notch
+    /// state dot so the user can see it is listening without a key held down.
+    @Published private(set) var isHandsFreeDictating = false
+
+    /// Double-tap once to start, double-tap again to stop and insert. Reuses the
+    /// exact recording pipeline as hold-to-dictate; the only difference is the
+    /// session is not tied to a held key.
+    private func toggleHandsFreeDictation() {
+        if isHandsFreeDictating {
+            stopHandsFreeDictation()
+        } else {
+            startHandsFreeDictation()
+        }
+    }
+
+    private func startHandsFreeDictation() {
+        // Without permissions nothing can record; surface the panel where the
+        // Grant buttons live rather than appearing to do nothing.
+        guard allPermissionsGranted else {
+            NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+            return
+        }
+        guard !buddyDictationManager.isDictationInProgress else { return }
+
+        isHandsFreeDictating = true
+        // Route the final transcript into the focused field, just like hold-to-dictate.
+        isDictatingIntoFocusedField = true
+        dictationDestinationName = DictatedTextInserter.frontmostApplicationName()
+
+        transientHideTask?.cancel()
+        transientHideTask = nil
+        if !isCursorAlwaysVisible && !isOverlayVisible {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+        currentResponseTask?.cancel()
+        ttsProvider.stopPlayback()
+
+        pendingKeyboardShortcutStartTask?.cancel()
+        pendingKeyboardShortcutStartTask = Task {
+            await buddyDictationManager.startPushToTalkFromKeyboardShortcut(
+                currentDraftText: "",
+                updateDraftText: { _ in
+                    // Partial transcripts are hidden (waveform-only UI).
+                },
+                submitDraftText: { [weak self] finalTranscript in
+                    guard let self else { return }
+                    self.isHandsFreeDictating = false
+                    self.sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
+                }
+            )
+        }
+    }
+
+    private func stopHandsFreeDictation() {
+        isHandsFreeDictating = false
+        pendingKeyboardShortcutStartTask?.cancel()
+        pendingKeyboardShortcutStartTask = nil
+        buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
+    }
+
+    // MARK: - Text composer (tap)
+
+    private var textComposerWindowController: TextComposerWindowController?
+
+    /// Opens the floating text composer. Created lazily so the window only exists
+    /// once the user actually taps to type.
+    private func openTextComposer() {
+        if textComposerWindowController == nil {
+            textComposerWindowController = TextComposerWindowController(
+                onSubmit: { [weak self] typedQuery in
+                    self?.submitTextComposerQuery(typedQuery)
+                }
+            )
+        }
+        // Get the notch and menu bar panel out of the way while composing.
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+        textComposerWindowController?.show()
+    }
+
+    /// Runs a typed question through the same pipeline as a spoken one: the answer
+    /// is spoken and, when it helps, pointed at on screen.
+    private func submitTextComposerQuery(_ typedQuery: String) {
+        let trimmedQuery = typedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return }
+
+        // A typed question is a question, never dictation into a field.
+        isDictatingIntoFocusedField = false
+
+        if !isCursorAlwaysVisible && !isOverlayVisible {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+
+        // Let the composer window finish closing before the screenshot is taken,
+        // so it is not captured in the frame the model sees.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.sendTranscriptToClaudeWithScreenshot(transcript: trimmedQuery)
         }
     }
 
@@ -719,6 +861,49 @@ final class CompanionManager: ObservableObject {
         scheduleTransientHideIfNeeded()
     }
 
+    // MARK: - Notch skill launcher
+
+    /// Runs one of the user's skills as a one-click action from the notch HUD.
+    ///
+    /// The notch already knows exactly which skill the user chose, so there is no
+    /// discovery step: the skill's markdown body is handed to the model directly
+    /// as the instruction for whatever is on screen right now, and the answer is
+    /// spoken and pointed at just like an ordinary voice turn. (The voice turn
+    /// has no skill tooling of its own — that lives on the agent path — which is
+    /// why the body is injected here rather than left for the model to `load_skill`.)
+    func runSkill(named skillName: String) {
+        // Without permissions nothing can capture the screen or answer, so send
+        // the user to the panel where the Grant buttons live rather than
+        // appearing to do nothing.
+        guard allPermissionsGranted else {
+            NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+            return
+        }
+
+        guard let skillBody = SkillManager.shared.body(forSkillNamed: skillName) else { return }
+
+        // Get Wisp's own surfaces off the screen before the screenshot is taken,
+        // so the skill sees the user's actual work and not our panels. The notch
+        // HUD collapses on this same notification.
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+
+        // Bring the cursor companion back for this interaction if it's docked, so
+        // the skill can point at things on screen.
+        if !isCursorAlwaysVisible && !isOverlayVisible {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+
+        let skillInstruction = "Follow these instructions for what's on my screen right now:\n\n\(skillBody)"
+
+        // A short delay lets the panels finish animating out so they are not
+        // captured in the screenshot the turn is about to take.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.sendTranscriptToClaudeWithScreenshot(transcript: skillInstruction)
+        }
+    }
+
     /// Captures a screenshot, sends it along with the transcript to Claude,
     /// and plays the response aloud. The cursor stays in
     /// the spinner/processing state until TTS audio begins playing.
@@ -792,6 +977,14 @@ final class CompanionManager: ObservableObject {
             // Stay in processing (spinner) state — no streaming text displayed
             voiceState = .processing
 
+            // Clear last turn's reply text from the notch so a new question
+            // never shows a stale answer while this one is still generating.
+            currentReplyText = ""
+
+            // Read once for this turn. In silent mode (voice output off) no
+            // reply is ever synthesized — the notch is the only answer surface.
+            let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
+
             do {
                 // Capture all connected screens so the AI has full context
                 PerfMetricsRecorder.shared.beginPhase(.screenCapture)
@@ -839,7 +1032,10 @@ final class CompanionManager: ObservableObject {
                         userText: transcript,
                         images: labeledImages,
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
-                            + ScreenAnnotationParser.promptInstructions,
+                            + ScreenAnnotationParser.promptInstructions
+                            + GlanceCardParser.promptInstructions
+                            + SpokenLineParser.promptInstructions
+                            + glanceCardSourcesPromptAddendum,
                         conversationHistory: historyMessages,
                         onNarration: { narration in
                             print("💭 \(narration)")
@@ -856,23 +1052,13 @@ final class CompanionManager: ObservableObject {
                         to: taskID
                     )
 
-                    // Speech begins mid-generation when the provider can
-                    // queue fragments. Pointing and annotation tags are still
-                    // parsed from the complete reply afterwards — the streamer
-                    // only decides what is spoken, never what is understood.
-                    let isSpeakingIncrementally = ttsProvider.supportsIncrementalSpeech
-                    if isSpeakingIncrementally {
-                        var hasStartedSpeaking = false
-                        sentenceStreamer = SpokenSentenceStreamer { [weak self] sentence in
-                            guard let self else { return }
-                            if !hasStartedSpeaking {
-                                hasStartedSpeaking = true
-                                self.voiceState = .responding
-                                PerfMetricsRecorder.shared.endPhase(.textToSpeechFirstSentence)
-                            }
-                            self.ttsProvider.speakIncremental(sentence)
-                        }
-                    }
+                    // Wisp no longer speaks the reply as it streams. What is
+                    // spoken is now the model's own short [SAY:] line (when voice
+                    // mode is on and it supplied one), synthesized once at the end
+                    // of the turn — see the TTS block below. Incremental
+                    // sentence-streaming of the whole reply is intentionally not
+                    // used: with the answer shown visually in the notch, speaking
+                    // it in full would duplicate what the user is already reading.
 
                     // The current question as a typed message: the transcript
                     // followed by this turn's screenshots. History is the prior
@@ -885,7 +1071,10 @@ final class CompanionManager: ObservableObject {
                     )
                     let singleCallRequest = ModelRequest(
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
-                            + ScreenAnnotationParser.promptInstructions,
+                            + ScreenAnnotationParser.promptInstructions
+                            + GlanceCardParser.promptInstructions
+                            + SpokenLineParser.promptInstructions
+                            + glanceCardSourcesPromptAddendum,
                         messages: historyMessages + [currentUserMessage],
                         // No tools on the single-call path — this branch runs
                         // only when agent mode is off.
@@ -931,16 +1120,35 @@ final class CompanionManager: ObservableObject {
 
                 guard !Task.isCancelled else { return }
 
+                // Pull the [SAY:...] tag out first of all, so the line the model
+                // wants spoken is captured and the tag is gone before any other
+                // parser — or the displayed text and transcript — ever sees it.
+                // In silent mode the line is discarded: voice off never speaks.
+                let spokenLineParseResult = SpokenLineParser.parse(fullResponseText)
+                let lineToSpeak = isReplySpeechEnabled ? spokenLineParseResult.spokenLine : nil
+
+                // Pull the [CARD:...] tag out next, so its JSON is gone before
+                // the annotation and pointing parsers (and the transcript and
+                // TTS) ever see it, then resolve it into a card for the notch.
+                let cardParseResult = GlanceCardParser.parse(spokenLineParseResult.displayText)
+                resolveAndPublishGlanceCard(cardParseResult.request)
+
                 // Parse the [POINT:...] tag from Claude's response
                 // Annotations are pulled out first so their tags are gone
                 // before the pointing parser looks for a trailing tag.
-                let annotationResult = ScreenAnnotationParser.parse(fullResponseText)
+                let annotationResult = ScreenAnnotationParser.parse(cardParseResult.spokenText)
                 if !annotationResult.annotations.isEmpty {
                     applyAnnotations(annotationResult.annotations, from: screenCaptures)
                 }
 
                 let parseResult = Self.parsePointingCoordinates(from: annotationResult.spokenText)
                 let spokenText = parseResult.spokenText
+
+                // Publish the reply to the notch as text. This is the answer with
+                // every rendering tag already stripped, so it reads cleanly. In
+                // silent mode it is the only place the answer shows; in voice mode
+                // it still shows, and speech is layered on top below.
+                currentReplyText = spokenText
 
                 // Handle element pointing if Claude returned coordinates.
                 // Switch to idle BEFORE setting the location so the triangle
@@ -1027,12 +1235,16 @@ final class CompanionManager: ObservableObject {
 
                 WispAnalytics.trackAIResponseReceived(response: spokenText)
 
-                // Play the response via TTS. Keep the spinner (processing state)
-                // until the audio actually starts playing, then switch to responding.
-                if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Speak the model's short [SAY:] line, if voice mode is on and it
+                // supplied one. `lineToSpeak` is already nil in silent mode and
+                // nil when the model chose not to speak, so this whole block is
+                // simply skipped in both cases — the answer still shows in the
+                // notch. Keep the spinner (processing state) until the audio
+                // actually starts, then switch to responding.
+                if let lineToSpeak, !lineToSpeak.isEmpty {
                     do {
-                        // Measures time to the FIRST audible sentence, not the
-                        // whole reply — that's the latency the user feels.
+                        // Measures time to the first audible audio — the latency
+                        // the user feels.
                         PerfMetricsRecorder.shared.beginPhase(.textToSpeechFirstSentence)
                         var hasRecordedFirstAudio = false
                         ttsProvider.onPlaybackStarted = { [weak self] in
@@ -1043,19 +1255,10 @@ final class CompanionManager: ObservableObject {
                             }
                         }
 
-                        if let streamer = sentenceStreamer {
-                            // Already speaking. Flush the trailing fragment and
-                            // wait for the queue rather than re-speaking a reply
-                            // the user has mostly heard.
-                            streamer.finish()
-                            sentenceStreamer = nil
-                            await ttsProvider.waitForPlaybackToFinish()
-                        } else {
-                            // voiceState flips to .responding via
-                            // onPlaybackStarted as soon as the first audio is
-                            // audible; this await covers the full reply.
-                            try await ttsProvider.speakText(spokenText)
-                        }
+                        // voiceState flips to .responding via onPlaybackStarted as
+                        // soon as the first audio is audible; this await covers the
+                        // whole spoken line.
+                        try await ttsProvider.speakText(lineToSpeak)
                     } catch {
                         WispAnalytics.trackTTSError(error: error.localizedDescription)
                         print("⚠️ TTS error: \(error)")
@@ -1500,6 +1703,135 @@ final class CompanionManager: ObservableObject {
     /// The model refers to screens the same way it does for pointing — by the
     /// 1-based number in each image's label — and omits the number when it
     /// means the screen the cursor is on.
+    /// Turns a parsed card request into a card shown in the notch.
+    ///
+    /// A generic card is complete the moment it is parsed, so it is published
+    /// immediately. A weather card carries only a place name: it is published in
+    /// a loading state right away, then a background fetch fills it in (or marks
+    /// it failed). Any previous fetch is cancelled first, so a new turn's card
+    /// always supersedes the last. A nil request clears the card.
+    /// A short, runtime line naming the user's enabled sources from
+    /// `~/.wisp/sources.json`, so the model knows which `source` cards it may
+    /// ask for. Empty when the user has configured none, so it costs nothing.
+    private var glanceCardSourcesPromptAddendum: String {
+        let enabledSourceNames = ConfiguredSourceStore.shared.enabledSourceNames
+        guard !enabledSourceNames.isEmpty else { return "" }
+        let nameList = enabledSourceNames.joined(separator: ", ")
+        return """
+
+
+        your saved sources: \(nameList). to show one, end your reply with \
+        [CARD:{"kind":"source","name":"<one of these>"}] using the exact name.
+        """
+    }
+
+    private func resolveAndPublishGlanceCard(_ request: GlanceCardRequest?) {
+        // Cancel any card fetch still running for the previous card, so a new
+        // turn's card always supersedes the last (cancel-on-replace).
+        cardDataFetchTask?.cancel()
+        cardDataFetchTask = nil
+
+        guard let request else {
+            resolvedGlanceCard = nil
+            return
+        }
+
+        switch request {
+        case let .generic(glanceCard):
+            resolvedGlanceCard = .generic(glanceCard)
+
+        case let .weather(weatherRequest):
+            // The gate is read here, on the main actor, and passed into the
+            // provider so the fetch actor never reaches into main-actor state.
+            let isLiveCardDataEnabled = GlanceCardDataPreference.shared.isLiveCardDataEnabled
+            guard isLiveCardDataEnabled else {
+                // Live card data is off — keep the card system fully local by
+                // showing no weather card at all.
+                resolvedGlanceCard = nil
+                return
+            }
+
+            resolvedGlanceCard = .weather(.loading(placeName: weatherRequest.locationName))
+            cardDataFetchTask = Task { [weak self] in
+                do {
+                    let snapshot = try await WeatherDataProvider.shared.snapshot(
+                        forLocationName: weatherRequest.locationName,
+                        isLiveCardDataEnabled: isLiveCardDataEnabled
+                    )
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .weather(.loaded(snapshot))
+                } catch {
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .weather(.failed(placeName: weatherRequest.locationName))
+                }
+            }
+
+        case .calendar:
+            // On-device read — no network gate. Show a loading card immediately
+            // and fill it in (or mark it access-denied / failed) when EventKit
+            // returns.
+            resolvedGlanceCard = .calendar(.loading)
+            cardDataFetchTask = Task { [weak self] in
+                do {
+                    let snapshot = try await CalendarDataProvider.shared.snapshot()
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .calendar(.loaded(snapshot))
+                } catch CalendarDataProvider.CalendarDataError.accessDenied {
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .calendar(.accessDenied)
+                } catch {
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .calendar(.failed)
+                }
+            }
+
+        case .nowPlaying:
+            // On-device read — no network gate. The provider is @MainActor
+            // (it runs a short AppleScript), so this resolves synchronously.
+            if let snapshot = NowPlayingDataProvider.snapshot() {
+                resolvedGlanceCard = .nowPlaying(.loaded(snapshot))
+            } else {
+                resolvedGlanceCard = .nowPlaying(.nothingPlaying)
+            }
+
+        case let .source(sourceRequest):
+            resolveSourceCard(sourceRequest)
+        }
+    }
+
+    /// Resolves a user-configured source card: look the source up in
+    /// `~/.wisp/sources.json`, then fetch it over HTTPS and map it to generic
+    /// blocks. Network, so gated by the live-card-data setting and labelled.
+    private func resolveSourceCard(_ sourceRequest: SourceCardRequest) {
+        let sourceName = sourceRequest.sourceName
+
+        guard let configuredSource = ConfiguredSourceStore.shared.enabledSource(named: sourceName) else {
+            resolvedGlanceCard = .source(.notConfigured(sourceName: sourceName))
+            return
+        }
+
+        let isLiveCardDataEnabled = GlanceCardDataPreference.shared.isLiveCardDataEnabled
+        guard isLiveCardDataEnabled else {
+            resolvedGlanceCard = .source(.disabled(sourceName: configuredSource.name))
+            return
+        }
+
+        resolvedGlanceCard = .source(.loading(sourceName: configuredSource.name))
+        cardDataFetchTask = Task { [weak self] in
+            do {
+                let card = try await RESTSourceDataProvider.shared.card(
+                    for: configuredSource,
+                    isLiveCardDataEnabled: isLiveCardDataEnabled
+                )
+                guard let self, !Task.isCancelled else { return }
+                self.resolvedGlanceCard = .source(.loaded(sourceName: configuredSource.name, card: card))
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.resolvedGlanceCard = .source(.failed(sourceName: configuredSource.name))
+            }
+        }
+    }
+
     private func applyAnnotations(
         _ annotations: [ScreenAnnotation],
         from screenCaptures: [CompanionScreenCapture]
