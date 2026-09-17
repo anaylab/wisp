@@ -29,7 +29,7 @@ struct DashboardView: View {
     @ObservedObject var taskRegistry: AgentTaskRegistry
     @ObservedObject var metricsRecorder: PerfMetricsRecorder
 
-    @State private var selectedTab: DashboardTab = .activity
+    @State private var selectedTab: DashboardTab = .home
     @State private var memory = SystemReadouts.memoryBreakdown()
 
     /// Two seconds: fast enough to catch a model loading, slow enough that the
@@ -37,6 +37,7 @@ struct DashboardView: View {
     private let memoryRefreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     enum DashboardTab: String, CaseIterable, Identifiable {
+        case home = "Home"
         case activity = "Activity"
         case conversation = "Conversation"
         case shortcuts = "Shortcuts"
@@ -51,6 +52,7 @@ struct DashboardView: View {
 
         var symbolName: String {
             switch self {
+            case .home: return "house"
             case .activity: return "list.bullet.rectangle"
             case .conversation: return "bubble.left.and.bubble.right"
             case .shortcuts: return "keyboard"
@@ -77,6 +79,12 @@ struct DashboardView: View {
 
                 Group {
                     switch selectedTab {
+                    case .home:
+                        HomeTab(
+                            taskRegistry: taskRegistry,
+                            companionManager: companionManager,
+                            onSelectTab: { selectedTab = $0 }
+                        )
                     case .activity: ActivityTab(taskRegistry: taskRegistry)
                     case .conversation: ConversationTab(taskRegistry: taskRegistry)
                     case .shortcuts: ShortcutsTab()
@@ -90,8 +98,10 @@ struct DashboardView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            // The content area keeps a solid dark fill so its dense text and
+            // controls stay crisp; only the sidebar is vibrant glass.
+            .background(DS.Colors.background)
         }
-        .background(DS.Colors.background)
     }
 
     // MARK: - Sidebar
@@ -112,7 +122,9 @@ struct DashboardView: View {
             memoryFooter
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(DS.Colors.surface1)
+        // Vibrant Liquid Glass sidebar so the window reads as the same material
+        // as the notch HUD and the menu bar panel, rather than a flat fill.
+        .wispGlassSurface(cornerRadius: 0)
     }
 
     private var identityHeader: some View {
@@ -175,12 +187,17 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                    .fill(isSelected ? DS.Colors.surface3 : .clear)
+                    .fill(isSelected ? Color.white.opacity(0.10) : .clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                            .strokeBorder(DS.Colors.borderSubtle.opacity(isSelected ? 0.7 : 0), lineWidth: 0.75)
+                    )
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .pointerCursor()
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 
     /// Memory pressure, always visible and always current.

@@ -49,6 +49,38 @@ cloud dependency to the local path, without asking.
 - **Deployment target**: macOS 26 (raised from 14.2) so the notch HUD can use real SwiftUI
   **Liquid Glass** (`.glassEffect` / `GlassEffectContainer`), dark-tinted for legibility
   (`DS.Colors.notchGlassTint`, `View.wispNotchGlassSurface(in:)`).
+- **Design system**: the Wisp visual identity ("quiet intelligence × organic × native macOS")
+  lives in `DesignSystem/` — `WispColor` (sage/ink/cloud palette; a **sage** brand accent, a
+  **lavender** AI-activity accent, muted-terracotta errors), `WispFont`, `WispSpacing`,
+  `WispRadius`, `WispShadow`, `WispGradient` (the single signature sage→mist→lavender gradient,
+  used sparingly) and `WispMotion` (named curves + reduce-motion). Colours come in three layers:
+  raw brand (fixed), **adaptive** semantic tokens (`WispColor.background` etc., resolve light/dark
+  live via a dynamic `NSColor`), and a fixed **on-glass** set (`WispColor.OnGlass.*`) for the
+  always-dark surfaces. The legacy `DS.*` API is a thin facade that **forwards to these tokens**,
+  so `DS.Colors.background` etc. are now adaptive and the whole app reskins from one place.
+  Reusable components live in `Components/` (`WispGlassPanel`/`WispGlassButtonStyle`/`WispGlassIcon`,
+  `WispGlassInput`, `WispMark`, `WispIcon`). **Do not reintroduce hardcoded hex** — reference the
+  tokens.
+- **Light/dark**: the **dashboard follows the system appearance** (its `WispColor` tokens resolve
+  light or dark). The **notch HUD, on-screen overlay, and menu-bar panel stay a dark glass
+  material in every appearance** — they pin `.environment(\.colorScheme, .dark)` so their adaptive
+  tokens resolve dark, keeping near-white text legible over any wallpaper. `wispGlassSurface` /
+  `wispGlassCard` use an **adaptive** glass tint (`WispColor.glassTint` / `glassCardTint`);
+  `wispNotchGlassSurface` stays fixed dark.
+- **The Wisp mark**: a flowing liquid-ribbon logo (`Components/WispMark.swift`), filled with the
+  signature gradient, with subtle per-state motion (idle/listening/thinking/acting/success/error),
+  a static mode, and a paused `TimelineView` clock while at rest. It replaced the old rotated
+  `Triangle` glyph in the notch. Icons are the single-stroke **Liquid Icon System**
+  (`Components/WispIcon.swift`): bespoke glyphs for the high-value actions (message, search, mic,
+  send, voice, files, calendar, gear-free settings) with an SF-Symbol fallback for the long tail.
+- **Dynamic Island state**: `DynamicIsland/WispIslandState.swift` is a 9-state vocabulary
+  (idle/listening/thinking/processing/preview/confirmation/executing/responding/success/error)
+  **derived**, not a replacement, from existing signals. `CompanionManager.islandState` projects
+  it from `voiceState` + `pendingToolConfirmation` + whether an answer is lingering, plus a
+  transient `islandFlash` (`flashIsland(_:)`) for success/error moments. It drives the notch
+  mark's motion, the state dot, and the label. The tool-confirmation card
+  (`ToolConfirmationView`) is the island's glass confirmation panel, still presented via the
+  existing overlay plumbing (so the prompt is seen even when the cursor is hidden).
 - **Glance cards**: a visual answer surface in the notch's expanded panel, parsed from one
   `[CARD:{...json...}]` tag at the end of the reply (same structured-text mechanism as
   `[POINT:]`/`[BOX:]`/`[TOOL:]` — the local model can't do native structured output; the tag is
@@ -159,7 +191,7 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `leanring_buddyApp.swift` | ~105 | Menu bar app entry point. `@NSApplicationDelegateAdaptor` with `CompanionAppDelegate`, which creates `MenuBarPanelManager` and starts `CompanionManager`. |
-| `CompanionManager.swift` | ~1520 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher — it injects a skill's body as the instruction and runs a normal screenshot turn. |
+| `CompanionManager.swift` | ~2000 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
 | `BuddyDictationManager.swift` | ~866 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
 | `GlobalPushToTalkShortcutMonitor.swift` | ~210 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
 | `ShortcutBindingStore.swift` | ~150 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier. Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
@@ -210,7 +242,7 @@ Grouped by what they do. Line counts are approximate.
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
 | `ToolConfirmationCoordinator.swift` | ~193 | Permission requests with a 45s timeout and spoken-affirmative parsing. |
-| `ToolConfirmationView.swift` | ~130 | The on-screen approve/deny card. |
+| `ToolConfirmationView.swift` | ~130 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, exact call in a chip, Cancel / Allow→, "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
 | `AgentTaskRegistry.swift` | ~140 | Task and step records backing the dashboard's Activity tab. |
 
@@ -218,6 +250,7 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `VoiceOutputPreference.swift` | ~50 | Source of truth for voice/silent mode (reply speech on/off). Persists; defaults on. |
+| `WispVoiceAffordance.swift` | ~200 | Shared VoiceOS-style voice affordance: a Liquid Glass waveform reflecting `voiceState` and the live mic level (`currentAudioPowerLevel`). Used as the notch HUD's centerpiece and in the menu bar panel so both surfaces show one living voice element. Self-animates via a `TimelineView` clock that pauses while idle (no redraws on a resident app). |
 | `SpokenLineParser.swift` | ~90 | Parses/strips the `[SAY: …]` tag — the model's per-reply "speak this" line. |
 | `GlanceCard.swift` | ~500 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`) and the generic block card. |
 | `GlanceCardView.swift` | ~180 | Renderer for the generic block card (header/list/keyValue/stats). |
@@ -232,19 +265,38 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `DashboardWindowController.swift` | ~109 | Real `NSWindow` host. Raises activation policy to `.regular` while open. |
-| `DashboardView.swift` | ~708 | Sidebar shell plus Activity, Conversation and Model & Performance tabs, and the live memory footer. |
+| `DashboardView.swift` | ~708 | Sidebar shell plus the tabs (Home is the default) and the live memory footer. The content area follows the system appearance (adaptive light/dark). |
+| `HomeTab.swift` | ~250 | The dashboard's **Home command centre**: a hero (Wisp mark + `wisp` wordmark + "What can I help with?"), a summon card showing the talk/type/dictate gestures, a quick-actions grid that navigates the other tabs, and a recent-activity list from `AgentTaskRegistry`. Adaptive. The conversational hero itself lives in the Dynamic Island, not here. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
 | `ShortcutsTab.swift` | ~250 | Dashboard Shortcuts tab: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
 | `MenuBarPanelManager.swift` | ~247 | `NSStatusItem` + floating `NSPanel` lifecycle. |
 | `NotchWindowController.swift` | ~230 | Hosts the notch HUD in a fixed-size borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) and reloads skills when the panel opens. Owns `NotchViewModel`. |
-| `NotchHUDView.swift` | ~380 | The notch HUD's SwiftUI content: collapsed black pill (wisp glyph + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. `DS.*` throughout. |
+| `NotchHUDView.swift` | ~380 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `CompanionPanelView.swift` | ~775 | The menu bar panel's SwiftUI content. |
-| `DesignSystem.swift` | ~880 | `DS.Colors`, `DS.Spacing`, `DS.CornerRadius` tokens. All UI references these. |
+| `DesignSystem.swift` | ~940 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
 | `SystemReadouts.swift` | ~143 | Memory via `host_statistics64`; Ollama residency via `/api/ps`. |
 | `WindowPositionManager.swift` | ~262 | Window placement and permission helpers. |
 | `WispAnalytics.swift` | ~153 | Gated off. Sends nothing. Kept so the call sites still compile. |
+
+### Design system & components
+The Wisp visual identity. Prefer these tokens/components over ad-hoc styling; the legacy `DS.*`
+names forward here.
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `DesignSystem/WispColors.swift` | ~180 | The palette: raw brand hexes (`WispColor.Brand.*` — sage/lavender/moss/ink/cloud/bone), **adaptive** semantic tokens (`.background`/`.textPrimary`/`.accent`/… resolve light/dark via a dynamic `NSColor`), a fixed **on-glass** set (`OnGlass.*`) for always-dark surfaces, and adaptive glass tints. `adaptive(light:dark:)` is the helper. |
+| `DesignSystem/WispTypography.swift` | ~60 | `WispFont` scale (SF Pro/rounded + SF Mono), the lowercase `wisp` wordmark, and `wispSectionLabel()`. |
+| `DesignSystem/WispMetrics.swift` | ~50 | `WispSpacing` + `WispRadius` scales (softer/rounder; hero input = 22). |
+| `DesignSystem/WispShadows.swift` | ~35 | `WispShadow` (`.ambient`/`.floating`/`.island`) + `wispShadow(_:)`. Soft, low-opacity only. |
+| `DesignSystem/WispGradients.swift` | ~55 | The single signature gradient (sage→mist→lavender) and its animated variants. Use sparingly. |
+| `DesignSystem/WispMotion.swift` | ~55 | Named animation curves (`quick`/`smooth`/`gentle`/`island`/`springSoft`/`breath`) + reduce-motion helpers. |
+| `Components/WispGlassComponents.swift` | ~200 | `WispGlassPanel` container, `WispGlassButtonStyle` (subtle/prominent), `WispGlassIcon`, and `PressableScaleButtonStyle`. |
+| `Components/WispGlassInput.swift` | ~90 | The floating "Ask Wisp anything…" field; the signature gradient blooms into the border on focus. |
+| `Components/WispMark.swift` | ~180 | The liquid-ribbon logo. `WispMarkState` drives per-state motion; static mode; clock paused at rest. `CompanionVoiceState.markState` maps to it. |
+| `Components/WispIcon.swift` | ~200 | The Liquid Icon System: `WispIconSymbol` (bespoke single-stroke glyphs + `.system` SF-Symbol fallback), `WispIconState`, rendered by `WispIcon`. |
+| `DynamicIsland/WispIslandState.swift` | ~120 | The 9-state island vocabulary + its mark/label/accent mapping. Derived, not stored — see `CompanionManager.islandState`. |
 
 ### Unused upstream leftovers
 The old cloud client files (`ClaudeAPI.swift`, `OpenAIAPI.swift`, `ElevenLabsTTSClient.swift`,

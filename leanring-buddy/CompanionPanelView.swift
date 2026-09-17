@@ -22,6 +22,12 @@ struct CompanionPanelView: View {
                 .background(DS.Colors.borderSubtle)
                 .padding(.horizontal, 16)
 
+            if companionManager.allPermissionsGranted {
+                voiceAffordanceSection
+                    .padding(.top, 14)
+                    .padding(.horizontal, 16)
+            }
+
             permissionsCopySection
                 .padding(.top, 16)
                 .padding(.horizontal, 16)
@@ -88,7 +94,14 @@ struct CompanionPanelView: View {
         .frame(width: 320)
         .onAppear { stackReadout.startPolling() }
         .onDisappear { stackReadout.stopPolling() }
-        .background(panelBackground)
+        // Liquid Glass surface so the panel refracts the desktop behind it and
+        // reads as the same material as the notch HUD, instead of a flat dark
+        // fill. The window itself is already clear/non-opaque, so the glass shows
+        // through; the shadow keeps it lifted off the desktop.
+        .wispGlassSurface(cornerRadius: 14)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
+        .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Header
@@ -560,6 +573,19 @@ struct CompanionPanelView: View {
     /// model is warm is the difference between a reply in about a second and
     /// one that pays several seconds to load first — the thing a user is
     /// actually trying to predict when they open this panel mid-conversation.
+    // MARK: - Voice affordance
+
+    /// The same living waveform used in the notch HUD, so the menu bar panel and
+    /// the dynamic island show one shared voice element rather than each having
+    /// its own status readout.
+    private var voiceAffordanceSection: some View {
+        WispVoiceAffordance(
+            voiceState: companionManager.voiceState,
+            audioPowerLevel: companionManager.currentAudioPowerLevel,
+            accentColor: CursorAppearanceStore.shared.color
+        )
+    }
+
     private var activeStackSection: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
@@ -591,14 +617,7 @@ struct CompanionPanelView: View {
             stackRow(label: "Speech", value: stackReadout.speechProviderName)
             stackRow(label: "Voice", value: stackReadout.voiceProviderName)
         }
-        .background(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
-        )
+        .wispGlassCard(cornerRadius: DS.CornerRadius.medium)
     }
 
     private func stackRow(label: String, value: String) -> some View {
@@ -796,13 +815,6 @@ struct CompanionPanelView: View {
     }
 
     // MARK: - Visual Helpers
-
-    private var panelBackground: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(DS.Colors.background)
-            .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
-            .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
-    }
 
     private var statusDotColor: Color {
         if !companionManager.isOverlayVisible {

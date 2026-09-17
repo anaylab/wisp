@@ -24,6 +24,13 @@ enum CompanionVoiceState {
 @MainActor
 final class CompanionManager: ObservableObject {
     @Published private(set) var voiceState: CompanionVoiceState = .idle
+
+    /// A short-lived Dynamic Island moment (success/error) that briefly overrides
+    /// the derived state so the island can resolve or flinch after something
+    /// completed. Set via `flashIsland(_:)`; auto-clears itself.
+    @Published private(set) var islandFlash: WispIslandState?
+    private var islandFlashClearWorkItem: DispatchWorkItem?
+
     @Published private(set) var lastTranscript: String?
     @Published private(set) var currentAudioPowerLevel: CGFloat = 0
     @Published private(set) var hasAccessibilityPermission = false
@@ -1942,5 +1949,46 @@ final class CompanionManager: ObservableObject {
                 player.volume = targetVolume
             }
         }
+    }
+}
+
+// MARK: - Dynamic Island state
+
+extension CompanionManager {
+    /// The Dynamic Island's current state, projected from the app's existing
+    /// signals. A pending confirmation and a transient success/error flash take
+    /// priority over the ongoing voice state, and a finished answer that is no
+    /// longer being spoken reads as a lingering "preview".
+    var islandState: WispIslandState {
+        if let islandFlash { return islandFlash }
+        if pendingToolConfirmation != nil { return .confirmation }
+
+        switch voiceState {
+        case .listening:  return .listening
+        case .processing: return .thinking
+        case .responding: return .responding
+        case .idle:
+            let hasReply = !currentReplyText
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return (hasReply || resolvedGlanceCard != nil) ? .preview : .idle
+        }
+    }
+
+    /// Briefly shows a success/error (or any) island moment, then clears it so
+    /// the island returns to its derived state. Used by the confirmation card to
+    /// resolve after the user allows or declines an action.
+    func flashIsland(_ state: WispIslandState, for duration: TimeInterval = 1.6) {
+        islandFlashClearWorkItem?.cancel()
+        withAnimation(WispMotion.smooth) {
+            islandFlash = state
+        }
+        let clearWorkItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            withAnimation(WispMotion.smooth) {
+                self.islandFlash = nil
+            }
+        }
+        islandFlashClearWorkItem = clearWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: clearWorkItem)
     }
 }

@@ -26,8 +26,11 @@ struct NotchHUDView: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var skillManager = SkillManager.shared
     @ObservedObject private var mcpManager = MCPManager.shared
-    @ObservedObject private var bindingStore = ShortcutBindingStore.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
+
+    /// The measured natural height of the answer content, so the answer region
+    /// sizes to fit a short reply and the whole island shrinks when idle.
+    @State private var answerContentHeight: CGFloat = 0
 
     var body: some View {
         // The glass container lets the pill and panel render as one Liquid Glass
@@ -44,33 +47,43 @@ struct NotchHUDView: View {
             )
             .animation(.spring(response: 0.34, dampingFraction: 0.86), value: viewModel.isExpanded)
         }
+        // The dynamic island is always dark, regardless of the system's light or
+        // dark appearance, so the Liquid Glass renders its dark variant and the
+        // near-white text stays legible instead of flipping to a washed-out
+        // light frost.
+        .environment(\.colorScheme, .dark)
     }
 
     // MARK: - Morphing surface
 
     private var hudSurface: some View {
         ZStack(alignment: .top) {
-            // Both states are always present and laid out at their own fixed
-            // size; only opacity and the surface frame animate, so nothing
-            // reflows mid-animation.
+            // Both states are always present; only opacity and the surface frame
+            // animate. The expanded content is given a fixed width but a NATURAL
+            // height, so the glass surface wraps however much content there is —
+            // small when idle (just the affordance, skills and footer) and taller
+            // when an answer is showing. The window itself never resizes; the
+            // unused area below simply stays transparent.
             expandedContent
-                .frame(width: viewModel.expandedSize.width, height: viewModel.expandedSize.height, alignment: .top)
+                .frame(width: viewModel.expandedSize.width, alignment: .top)
                 .opacity(viewModel.isExpanded ? 1 : 0)
 
             collapsedContent
                 .frame(width: viewModel.collapsedSize.width, height: viewModel.collapsedSize.height)
                 .opacity(viewModel.isExpanded ? 0 : 1)
         }
+        // Expanded: fix the width but let the height wrap the content (nil). The
+        // content is capped/scrolled internally so it never exceeds the window.
+        // Collapsed: pin to the collapsed pill size, clipping the faded-out
+        // expanded content.
         .frame(
             width: viewModel.isExpanded ? viewModel.expandedSize.width : viewModel.collapsedSize.width,
-            height: viewModel.isExpanded ? viewModel.expandedSize.height : viewModel.collapsedSize.height,
+            height: viewModel.isExpanded ? nil : viewModel.collapsedSize.height,
             alignment: .top
         )
-        // Liquid Glass is the notch surface. Its own tinted material replaces
-        // the flat surface1 / black fills, so the pill and panel refract the
-        // desktop behind them and read as one dynamic-island element. The
-        // subtle stroke is kept on the expanded panel to define its edge
-        // against a busy background.
+        // Apple Liquid Glass, tinted dark (see `wispNotchGlassSurface`), so the
+        // island refracts the desktop while staying legible. The subtle stroke
+        // defines the expanded panel's edge against a busy background.
         .wispNotchGlassSurface(
             in: RoundedRectangle(cornerRadius: DS.CornerRadius.extraLarge, style: .continuous)
         )
@@ -85,9 +98,62 @@ struct NotchHUDView: View {
 
     private var collapsedContent: some View {
         HStack(spacing: 6) {
-            WispGlyph(size: 11)
+            WispMark(state: companionManager.islandState.markState, size: 13)
+            // A one-line preview of the latest answer, so after the panel
+            // auto-collapses the reply lingers in the pill as a compact live
+            // activity rather than the pill going back to dead chrome. It takes
+            // the space between the glyph and the dot and truncates to fit.
+            if let collapsedReplySnippet {
+                Text(collapsedReplySnippet)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            collapsedIndicator
+        }
+        .padding(.horizontal, collapsedReplySnippet == nil ? 0 : 10)
+    }
+
+    /// The right-hand indicator in the collapsed pill: a live micro-waveform
+    /// while the companion is active, or a single status dot when idle — so the
+    /// pill reads as alive at a glance without expanding.
+    @ViewBuilder
+    private var collapsedIndicator: some View {
+        if companionManager.voiceState.isActiveForAffordance {
+            collapsedMicroWaveform
+        } else {
             stateDot
         }
+    }
+
+    /// Three tiny bars that ripple while active, tinted with the cursor colour.
+    private var collapsedMicroWaveform: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
+            let elapsedSeconds = timeline.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 2) {
+                ForEach(0..<3, id: \.self) { barIndex in
+                    Capsule()
+                        .fill(CursorAppearanceStore.shared.color)
+                        .frame(
+                            width: 2,
+                            height: 4 + 6 * CGFloat((sin(elapsedSeconds * 7 + Double(barIndex) * 1.4) + 1) / 2)
+                        )
+                }
+            }
+        }
+        .frame(height: 12)
+    }
+
+    /// The first line of the latest reply, or nil when there is none. Drives the
+    /// compact preview in the collapsed pill.
+    private var collapsedReplySnippet: String? {
+        let reply = companionManager.currentReplyText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return nil }
+        let firstLine = reply.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? reply
+        return firstLine
     }
 
     /// A small dot that reflects the current voice state, so the collapsed pill
@@ -99,57 +165,128 @@ struct NotchHUDView: View {
     }
 
     private var stateDotColor: Color {
-        switch companionManager.voiceState {
-        case .idle:
-            return DS.Colors.textTertiary
-        default:
-            return CursorAppearanceStore.shared.color
-        }
+        let state = companionManager.islandState
+        return state.isActive ? state.accent : DS.Colors.textTertiary
     }
 
     // MARK: - Expanded quick-panel
 
     private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             header
-            // The latest reply as text, so silent mode has somewhere to show the
-            // answer and voice mode shows it too. Capped in height and scrollable
-            // so a long reply stays inside the fixed expanded bounds — the window
-            // never resizes to fit it.
-            replyTextRegion
-            // A visual answer card, when the latest turn produced one, sits at the
-            // top of the panel above the resident controls so the answer is what
-            // the user sees first. It renders inside the fixed expanded bounds —
-            // the window never resizes to fit it. Each card kind picks its own
-            // template.
-            if let resolvedCard = companionManager.resolvedGlanceCard {
-                switch resolvedCard {
-                case let .generic(glanceCard):
-                    GlanceCardView(card: glanceCard)
-                case let .weather(weatherCardState):
-                    WeatherCardView(state: weatherCardState)
-                case let .calendar(calendarCardState):
-                    CalendarCardView(state: calendarCardState)
-                case let .nowPlaying(nowPlayingCardState):
-                    NowPlayingCardView(state: nowPlayingCardState)
-                case let .source(sourceCardState):
-                    SourceCardView(state: sourceCardState)
-                }
+
+            // The living centerpiece: a voice waveform that reflects the current
+            // state and, while listening, the real microphone level. This is the
+            // first thing the eye lands on, VoiceOS-style.
+            voiceAffordanceSection
+
+            // Only present when there is an answer, so an idle panel collapses
+            // down to just the affordance, skills and footer instead of leaving
+            // a gap where an answer would go.
+            if hasAnswer {
+                answerSurface
             }
-            shortcutsCheatSheet
-            Divider().overlay(DS.Colors.borderSubtle)
-            skillsSection
-            Divider().overlay(DS.Colors.borderSubtle)
-            activeIntegrations
-            Spacer(minLength: 0)
+
+            // Skills stay one click away as a compact sideways-scrolling strip.
+            skillsStrip
+
+            footer
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
+
+    /// Whether the current turn has anything to show — reply text or a glance
+    /// card. Drives the panel's two layouts.
+    private var hasAnswer: Bool {
+        let hasReply = !companionManager.currentReplyText
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasReply || companionManager.resolvedGlanceCard != nil
+    }
+
+    // MARK: Voice affordance
+
+    private var voiceAffordanceSection: some View {
+        VStack(spacing: 6) {
+            WispVoiceAffordance(
+                voiceState: companionManager.voiceState,
+                audioPowerLevel: companionManager.currentAudioPowerLevel,
+                accentColor: CursorAppearanceStore.shared.color
+            )
+            Text(companionManager.islandState.label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(DS.Colors.textTertiary)
+                .tracking(0.4)
+                .animation(.easeInOut(duration: 0.2), value: companionManager.islandState.label)
+        }
+    }
+
+    // MARK: Answer surface (reply + glance card)
+
+    /// The tallest the answer region may grow before it starts scrolling
+    /// internally, keeping the whole panel inside the fixed window.
+    private let answerMaxHeight: CGFloat = 206
+
+    private var answerSurface: some View {
+        let hasReply = !companionManager.currentReplyText
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if hasReply {
+                    VStack(alignment: .leading, spacing: 6) {
+                        sectionLabel("REPLY")
+                        Text(companionManager.currentReplyText)
+                            .font(.system(size: 12.5))
+                            .foregroundColor(DS.Colors.textPrimary)
+                            .lineSpacing(2)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                glanceCardView
+            }
+            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Measure the natural content height so the scroll view is sized to
+            // exactly fit a short answer and only starts scrolling once the
+            // content exceeds `answerMaxHeight`.
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: AnswerContentHeightKey.self, value: proxy.size.height)
+                }
+            )
+        }
+        .frame(height: min(max(answerContentHeight, 1), answerMaxHeight))
+        .onPreferenceChange(AnswerContentHeightKey.self) { measuredHeight in
+            answerContentHeight = measuredHeight
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: answerContentHeight)
+    }
+
+    @ViewBuilder
+    private var glanceCardView: some View {
+        if let resolvedCard = companionManager.resolvedGlanceCard {
+            switch resolvedCard {
+            case let .generic(glanceCard):
+                GlanceCardView(card: glanceCard)
+            case let .weather(weatherCardState):
+                WeatherCardView(state: weatherCardState)
+            case let .calendar(calendarCardState):
+                CalendarCardView(state: calendarCardState)
+            case let .nowPlaying(nowPlayingCardState):
+                NowPlayingCardView(state: nowPlayingCardState)
+            case let .source(sourceCardState):
+                SourceCardView(state: sourceCardState)
+            }
+        }
+    }
+
 
     private var header: some View {
         HStack(spacing: 8) {
-            WispGlyph(size: 13)
+            WispMark(state: companionManager.islandState.markState, size: 16)
             Text("Wisp")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(DS.Colors.textPrimary)
@@ -211,127 +348,24 @@ struct NotchHUDView: View {
             : "Silent mode — replies show here only. Click to enable voice.")
     }
 
-    // MARK: Reply text
-
-    /// The current turn's reply rendered as text. Empty between turns, so it
-    /// simply takes no space until an answer arrives. Height-capped and
-    /// scrollable so a long answer never grows the fixed-size panel.
-    @ViewBuilder
-    private var replyTextRegion: some View {
-        let replyText = companionManager.currentReplyText
-        if !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                sectionLabel("REPLY")
-                ScrollView {
-                    Text(replyText)
-                        .font(.system(size: 12))
-                        .foregroundColor(DS.Colors.textPrimary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 140)
-            }
-        }
-    }
-
-    // MARK: Shortcuts cheat-sheet
-
-    /// Rendered live from the binding store, so rebinding a chord or toggling
-    /// hands-free in the Shortcuts settings is reflected here immediately. The
-    /// gesture chip distinguishes Talk (hold the chord) from Text (tap it).
-    private var shortcutsCheatSheet: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("SHORTCUTS")
-            shortcutRow(
-                name: "Talk",
-                gesture: "hold",
-                keys: bindingStore.primaryHoldChord.keyCapsuleLabels
-            )
-            shortcutRow(
-                name: "Text",
-                gesture: "tap",
-                keys: bindingStore.primaryHoldChord.keyCapsuleLabels
-            )
-            shortcutRow(
-                name: "Dictate",
-                gesture: "hold",
-                keys: bindingStore.primaryHoldChord.keyCapsuleLabels + ["shift"]
-            )
-            if bindingStore.handsFreeDictationEnabled {
-                shortcutRow(
-                    name: "Hands-free",
-                    gesture: "2×",
-                    keys: [bindingStore.handsFreeDictationModifier.capsuleLabel]
-                )
-            }
-        }
-    }
-
-    private func shortcutRow(name: String, gesture: String, keys: [String]) -> some View {
-        HStack(spacing: 8) {
-            Text(name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(DS.Colors.textSecondary)
-            Spacer()
-            HStack(spacing: 4) {
-                gestureCapsule(gesture)
-                ForEach(keys, id: \.self) { key in
-                    keyCap(key)
-                }
-            }
-        }
-    }
-
-    private func gestureCapsule(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundColor(DS.Colors.accentText)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                    .fill(DS.Colors.accentSubtle)
-            )
-    }
-
-    private func keyCap(_ label: String) -> some View {
-        Text(label)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
-            .foregroundColor(DS.Colors.textSecondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                    .fill(DS.Colors.surface2)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                    .stroke(DS.Colors.borderSubtle, lineWidth: 1)
-            )
-    }
-
-    // MARK: Skills — one-click launchers
+    // MARK: Skills — one-click launcher strip
 
     /// Each skill in ~/.wisp/skills becomes a chip that runs the skill on the
     /// current screen when clicked (screenshot → model → spoken answer → on-screen
-    /// pointing), rather than a link into a settings screen.
-    private var skillsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("SKILLS")
-            if skillManager.skills.isEmpty {
-                Text("No skills yet — drop markdown files into ~/.wisp/skills")
-                    .font(.system(size: 11))
-                    .foregroundColor(DS.Colors.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 150), spacing: 6, alignment: .leading)],
-                    alignment: .leading,
-                    spacing: 6
-                ) {
-                    ForEach(skillManager.skills) { skill in
-                        skillChip(skill)
+    /// pointing). Demoted to a compact horizontal strip so the voice affordance
+    /// and answer own the panel, but every skill stays one click away.
+    @ViewBuilder
+    private var skillsStrip: some View {
+        if !skillManager.skills.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                sectionLabel("SKILLS")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(skillManager.skills) { skill in
+                            skillChip(skill)
+                        }
                     }
+                    .padding(.vertical, 1)
                 }
             }
         }
@@ -344,24 +378,23 @@ struct NotchHUDView: View {
             HStack(spacing: 5) {
                 Image(systemName: iconName(forSkillNamed: skill.name))
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(DS.Colors.accentText)
+                    .foregroundColor(WispColor.Brand.sage)
                 Text(prettifiedName(fromSkillName: skill.name))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(DS.Colors.textPrimary)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                    .fill(DS.Colors.surface2)
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.06))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                    .stroke(DS.Colors.borderSubtle, lineWidth: 1)
+                Capsule(style: .continuous)
+                    .strokeBorder(DS.Colors.borderSubtle.opacity(0.7), lineWidth: 0.75)
             )
-            .contentShape(Rectangle())
+            .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
         .pointerCursor()
@@ -400,39 +433,49 @@ struct NotchHUDView: View {
         return "bolt.fill"
     }
 
-    // MARK: Active integrations
+    // MARK: Footer — integrations at a glance
 
-    private var activeIntegrations: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("ACTIVE INTEGRATIONS")
-            HStack(spacing: 6) {
-                if connectedServerNames.isEmpty {
-                    Text("None connected")
-                        .font(.system(size: 12))
-                        .foregroundColor(DS.Colors.textTertiary)
-                } else {
-                    ForEach(connectedServerNames, id: \.self) { serverName in
-                        integrationChip(serverName)
-                    }
-                }
-                Spacer(minLength: 0)
-                Button {
-                    NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(DS.Colors.textSecondary)
-                        .frame(width: 24, height: 24)
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                                .fill(DS.Colors.surface2)
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-                .nativeTooltip("Manage integrations")
+    /// A single quiet row: the count of connected integrations on the left and a
+    /// "manage" affordance on the right that opens the dashboard. Folded down
+    /// from the old full-height integrations section so it never competes with
+    /// the answer surface.
+    private var footer: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "puzzlepiece.extension.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(DS.Colors.textTertiary)
+            Text(integrationsSummary)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Button {
+                NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
+            } label: {
+                Text("Manage")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.06))
+                    )
+                    .contentShape(Capsule(style: .continuous))
             }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .nativeTooltip("Manage integrations & settings")
+        }
+    }
+
+    /// A compact summary like "3 integrations" / "1 integration" / "No integrations".
+    private var integrationsSummary: String {
+        let count = connectedServerNames.count
+        switch count {
+        case 0: return "No integrations connected"
+        case 1: return "1 integration · \(connectedServerNames[0])"
+        default: return "\(count) integrations connected"
         }
     }
 
@@ -445,19 +488,6 @@ struct NotchHUDView: View {
         }
     }
 
-    private func integrationChip(_ name: String) -> some View {
-        Text(name)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundColor(DS.Colors.textSecondary)
-            .lineLimit(1)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                    .fill(DS.Colors.surface2)
-            )
-    }
-
     // MARK: Shared bits
 
     private func sectionLabel(_ text: String) -> some View {
@@ -468,17 +498,13 @@ struct NotchHUDView: View {
     }
 }
 
-/// The wisp triangle, matching the rotation of the menu bar icon and the in-app
-/// cursor. Reuses the shared `Triangle` shape and the cursor colour so the brand
-/// mark always matches the pointer the user chose.
-private struct WispGlyph: View {
-    let size: CGFloat
-    @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
-
-    var body: some View {
-        Triangle()
-            .fill(cursorAppearance.color)
-            .frame(width: size, height: size)
-            .rotationEffect(.degrees(35))
+/// Carries the answer content's measured natural height up to `NotchHUDView`, so
+/// the answer region can size itself to the content (and the island shrink when
+/// idle) rather than occupy a fixed block.
+private struct AnswerContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
+

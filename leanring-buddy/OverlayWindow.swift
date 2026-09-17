@@ -189,14 +189,23 @@ struct BlueCursorView: View {
                let confirmation = companionManager.pendingToolConfirmation {
                 ToolConfirmationView(
                     confirmation: confirmation,
-                    onApprove: { ToolConfirmationCoordinator.shared.approveFromUserInterface() },
-                    onDeny: { ToolConfirmationCoordinator.shared.declineFromUserInterface() }
+                    onApprove: {
+                        companionManager.flashIsland(.success)
+                        ToolConfirmationCoordinator.shared.approveFromUserInterface()
+                    },
+                    onDeny: {
+                        companionManager.flashIsland(.error)
+                        ToolConfirmationCoordinator.shared.declineFromUserInterface()
+                    }
                 )
+                // Sits just under the notch, so the request reads as the Dynamic
+                // Island expanding into a confirmation rather than a card in the
+                // corner of the screen.
                 .position(
                     x: screenFrame.width / 2,
-                    y: screenFrame.height - 170
+                    y: 150
                 )
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             // Assistant-drawn boxes, arrows and highlights for this screen.
@@ -837,7 +846,10 @@ class OverlayWindowManager {
                 companionManager: companionManager
             )
 
-            let hostingView = NSHostingView(rootView: contentView)
+            // The overlay's cards (e.g. the tool-confirmation panel) are dark
+            // glass surfaces like the notch, so pin a dark colour scheme so their
+            // adaptive tokens resolve dark regardless of the system appearance.
+            let hostingView = NSHostingView(rootView: contentView.environment(\.colorScheme, .dark))
             hostingView.frame = screen.frame
             window.contentView = hostingView
 

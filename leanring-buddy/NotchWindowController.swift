@@ -34,7 +34,7 @@ final class NotchViewModel: ObservableObject {
     /// The collapsed pill's size — matches the physical notch when there is one.
     @Published var collapsedSize: CGSize = CGSize(width: 180, height: 32)
     /// The expanded panel's size, and therefore the fixed window size.
-    @Published var expandedSize: CGSize = CGSize(width: 380, height: 446)
+    @Published var expandedSize: CGSize = CGSize(width: 360, height: 404)
 }
 
 @MainActor
@@ -47,13 +47,28 @@ final class NotchWindowController {
     private var screenParametersObserver: NSObjectProtocol?
     private var dismissObserver: NSObjectProtocol?
 
+    /// Combine subscriptions that auto-present the panel the moment an answer
+    /// lands — the reply text (silent mode's only surface) and any glance card.
+    /// Without these the answer is generated but stays invisible until the user
+    /// happens to hover the notch, which is why silent mode looked broken.
+    private var replyPresentationObserver: AnyCancellable?
+    private var cardPresentationObserver: AnyCancellable?
+
     /// Hover is ignored until this moment. Set when the HUD is force-collapsed
     /// (e.g. a skill was launched) so the click that triggered it — or the
     /// screenshot about to be taken — does not immediately reopen the panel.
     private var hoverSuspendedUntil: Date = .distantPast
 
-    /// The expanded panel's fixed size.
-    private let panelSize = CGSize(width: 380, height: 446)
+    /// While `Date() < presentationHoldUntil` the panel is held open on its own,
+    /// independent of hover, so a freshly arrived answer is shown long enough to
+    /// read. Hovering the panel keeps it open past the hold through the normal
+    /// hover logic; moving away after the hold expires collapses it as usual.
+    private var presentationHoldUntil: Date = .distantPast
+
+    /// The expanded panel's fixed size. Kept compact — it holds the voice
+    /// affordance, the scrollable answer surface, the sideways skills strip and
+    /// the footer, and the answer surface scrolls rather than growing the window.
+    private let panelSize = CGSize(width: 360, height: 404)
 
     /// Extra slack added around the panel so a small overshoot at the edge does
     /// not immediately collapse it — the hysteresis that keeps the hover stable.
@@ -102,7 +117,13 @@ final class NotchWindowController {
             companionManager: companionManager
         )
 
-        let hostingView = NSHostingView(rootView: notchHUDView)
+        // A first-mouse-accepting hosting view is what makes the panel's buttons
+        // and skill chips actually usable. Wisp is a menu-bar-only app, so it is
+        // almost never the frontmost application; without accepting the first
+        // mouse, the initial click on any control in this non-activating panel is
+        // swallowed just to focus the window and the button never fires, which is
+        // why the skills and toggles felt dead — you had to click twice.
+        let hostingView = FirstMouseHostingView(rootView: notchHUDView)
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = .clear
 
@@ -141,6 +162,28 @@ final class NotchWindowController {
                 }
             }
 
+        // Auto-present the panel when a new answer arrives. The reply text is
+        // cleared to "" at the start of every turn, so a non-empty value is a
+        // freshly generated answer; that is the moment to open the notch. The
+        // hold is scaled by the answer's length so a longer reply stays up
+        // longer. This is what makes silent mode usable — the answer opens on
+        // its own instead of waiting for a hover.
+        replyPresentationObserver = companionManager.$currentReplyText
+            .removeDuplicates()
+            .sink { [weak self] replyText in
+                let trimmed = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                self?.autoPresentAnswer(readingLength: trimmed.count)
+            }
+
+        // A glance card is also an answer surface, so open the panel for one even
+        // when the turn produced no reply text (e.g. a card-only reply).
+        cardPresentationObserver = companionManager.$resolvedGlanceCard
+            .sink { [weak self] resolvedGlanceCard in
+                guard resolvedGlanceCard != nil else { return }
+                self?.autoPresentAnswer(readingLength: 0)
+            }
+
         // When the app clears its surfaces off the screen (a skill launching, a
         // push-to-talk turn starting), collapse the HUD too and ignore hover
         // briefly so the click that launched it does not immediately reopen it
@@ -156,6 +199,10 @@ final class NotchWindowController {
                 // A dismiss means the current answer surface is being cleared off
                 // the screen, so the glance card goes with it.
                 self.companionManager.resolvedGlanceCard = nil
+                // Drop any lingering auto-present hold from the previous turn's
+                // answer; otherwise the hover poll would re-open the panel the
+                // dismiss just closed (e.g. over the screenshot being captured).
+                self.presentationHoldUntil = .distantPast
                 self.hoverSuspendedUntil = Date().addingTimeInterval(1.0)
             }
         }
@@ -217,16 +264,47 @@ final class NotchWindowController {
         guard let geometry = currentGeometry() else { return }
         let mouseLocation = NSEvent.mouseLocation
 
+        // While an answer is being auto-presented, the panel stays open on its
+        // own regardless of hover. Once the hold expires the normal hover logic
+        // resumes, so if the cursor is over the panel it stays open and
+        // otherwise it collapses.
+        let isWithinPresentationHold = Date() < presentationHoldUntil
+
         if viewModel.isExpanded {
+            if isWithinPresentationHold { return }
             if !expandedHotZone(geometry).contains(mouseLocation) {
                 viewModel.isExpanded = false
                 performHUDHaptic()
             }
         } else {
+            // A collapsed panel during an active hold means something closed it
+            // (e.g. a display change) — re-open it so the answer stays visible.
+            if isWithinPresentationHold {
+                viewModel.isExpanded = true
+                return
+            }
             if collapsedHotZone(geometry).contains(mouseLocation) {
                 viewModel.isExpanded = true
                 performHUDHaptic()
             }
+        }
+    }
+
+    /// Opens the panel on its own and holds it open long enough to read the
+    /// answer, scaled by its length. Called from the reply/card observers the
+    /// moment a new answer lands, so the notch presents results without the user
+    /// having to hover it — the behaviour a dynamic island is expected to have.
+    private func autoPresentAnswer(readingLength: Int) {
+        // Floor of 6s so even a one-word answer is seen; ~22 characters/second
+        // of reading time on top of that; capped at 20s so it never lingers.
+        let holdSeconds = min(max(6.0, Double(readingLength) / 22.0), 20.0)
+        presentationHoldUntil = Date().addingTimeInterval(holdSeconds)
+        // The turn that produced this answer began with a force-collapse that
+        // briefly suspends hover; clear that so the answer can open immediately.
+        hoverSuspendedUntil = .distantPast
+        if !viewModel.isExpanded {
+            viewModel.isExpanded = true
+            performHUDHaptic()
         }
     }
 
@@ -272,4 +350,14 @@ final class NotchWindowController {
 final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+}
+
+/// An `NSHostingView` that accepts the first mouse click. On a menu-bar-only app
+/// the notch panel is hosted by a background (non-frontmost) application, so by
+/// default the first click on any SwiftUI control is consumed just to bring the
+/// window forward and the control never receives it. Returning `true` here
+/// delivers that first click straight to the control, so a single click on a
+/// skill chip or a toggle works — no throwaway click required.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

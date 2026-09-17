@@ -55,7 +55,11 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
         )
         dashboardWindow.title = "Wisp"
         dashboardWindow.titlebarAppearsTransparent = true
-        dashboardWindow.backgroundColor = NSColor(DS.Colors.background)
+        // Non-opaque so the SwiftUI root can render a vibrant Liquid Glass
+        // sidebar that refracts the desktop, while the content area keeps its own
+        // solid dark fill for crisp, legible text.
+        dashboardWindow.isOpaque = false
+        dashboardWindow.backgroundColor = .clear
         dashboardWindow.contentView = hostingView
         dashboardWindow.minSize = NSSize(width: 720, height: 460)
         dashboardWindow.delegate = self

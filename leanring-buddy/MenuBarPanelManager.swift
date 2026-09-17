@@ -148,8 +148,14 @@ final class MenuBarPanelManager: NSObject {
     }
 
     private func createPanel() {
+        // The menu-bar panel is a dark glass HUD surface like the notch, so it
+        // pins a dark colour scheme regardless of the system appearance — its
+        // adaptive tokens then resolve to their dark values and its near-white
+        // text stays legible over any desktop (the dashboard is the surface that
+        // follows light/dark).
         let companionPanelView = CompanionPanelView(companionManager: companionManager)
             .frame(width: panelWidth)
+            .environment(\.colorScheme, .dark)
 
         let hostingView = NSHostingView(rootView: companionPanelView)
         hostingView.frame = NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight)

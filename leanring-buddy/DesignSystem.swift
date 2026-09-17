@@ -2,9 +2,18 @@
 //  DesignSystem.swift
 //  leanring-buddy
 //
-//  Centralized design system using a blue accent palette on dark surfaces,
-//  with a unified button style system. All colors, button styles, and
-//  interaction states are defined here as the single source of truth.
+//  The legacy `DS.*` design-token facade. As of the Wisp visual refresh the
+//  actual brand values live in the `DesignSystem/` folder (`WispColor`,
+//  `WispFont`, `WispSpacing`, `WispRadius`, `WispShadow`, `WispGradient`,
+//  `WispMotion`). This file keeps the widely-used `DS.Colors.*` /
+//  `DS.CornerRadius.*` / … names alive by forwarding them to those tokens, so
+//  the whole app reskins from one place without every call site changing.
+//
+//  These forwards resolve to the *fixed dark* Wisp palette: the notch HUD and
+//  the on-screen overlay stay a dark glass material in every appearance so
+//  their near-white text is legible over any wallpaper. Adaptive light/dark
+//  colour (for the dashboard) lives on `WispColor` directly and is adopted
+//  there.
 //
 
 import SwiftUI
@@ -24,50 +33,53 @@ enum DS {
         // Layered surfaces from deepest to most elevated.
         // Higher surfaces are lighter, creating a sense of depth.
 
+        // These forward to the *adaptive* Wisp palette, so surfaces that follow
+        // the system appearance (the dashboard, the menu-bar panel) reskin
+        // light/dark for free. The always-dark surfaces (notch, overlay, menu-bar
+        // panel) pin their hosting window to `.darkAqua`, so these same tokens
+        // resolve to the dark values there and stay legible over any wallpaper.
+
         /// The deepest background — used for the main app window fill.
-        static let background = Color(hex: "#101211")
+        static let background = WispColor.background
 
         /// First elevation layer — used for cards, sidebar, top bar backgrounds.
-        static let surface1 = Color(hex: "#171918")
+        static let surface1 = WispColor.surface1
 
         /// Second elevation layer — used for input fields, elevated cards, chat bubbles.
-        static let surface2 = Color(hex: "#202221")
+        static let surface2 = WispColor.surface2
 
         /// Third elevation layer — used for hover backgrounds on interactive elements.
-        static let surface3 = Color(hex: "#272A29")
+        static let surface3 = WispColor.surface3
 
         /// Fourth elevation layer — used for active/pressed states on interactive elements.
-        static let surface4 = Color(hex: "#2E3130")
+        static let surface4 = WispColor.surface4
 
-        /// Dark tint applied to the notch HUD's Liquid Glass surface. Wisp's
-        /// HUD uses a dark palette with near-white text; a plain clear glass
-        /// would leave that text unreadable over a light desktop, so the glass
-        /// is tinted dark. It still refracts and reflects what's behind it —
-        /// just kept dark enough to stay legible in both light and dark themes.
-        static let notchGlassTint = Color.black.opacity(0.55)
+        /// Dark tint applied to the notch HUD's Liquid Glass surface. Always the
+        /// fixed dark tint (the notch is a dark glass material in every
+        /// appearance), so its near-white text stays legible over any desktop.
+        static let notchGlassTint = WispColor.OnGlass.tint
 
         // ── Borders ──────────────────────────────────────────────────
 
         /// Subtle border — used for card outlines, dividers, input field borders.
-        static let borderSubtle = Color(hex: "#373B39")
+        static let borderSubtle = WispColor.borderSubtle
 
         /// Strong border — used for focused inputs, hovered card outlines.
-        static let borderStrong = Color(hex: "#444947")
+        static let borderStrong = WispColor.borderStrong
 
         // ── Text ─────────────────────────────────────────────────────
 
         /// Primary text — main body text, titles, headings.
-        static let textPrimary = Color(hex: "#ECEEED")
+        static let textPrimary = WispColor.textPrimary
 
         /// Secondary text — descriptions, hints, muted labels.
-        static let textSecondary = Color(hex: "#ADB5B2")
+        static let textSecondary = WispColor.textSecondary
 
         /// Tertiary text — very muted, used for section labels, timestamps, disabled text.
-        static let textTertiary = Color(hex: "#6B736F")
+        static let textTertiary = WispColor.textTertiary
 
-        /// Text used on top of the accent fill (#2563eb blue), like the primary button label.
-        /// White on #2563eb achieves ~5.1:1 contrast — WCAG AA compliant.
-        /// White on #1d4ed8 hover achieves ~6.5:1 — also WCAG AA compliant.
+        /// Text used on top of the accent fill, like the primary button label.
+        /// White on the moss accent reads at WCAG AA in both appearances.
         static let textOnAccent: Color = .white
 
         // ── Tailwind Blue Scale ─────────────────────────────────────
@@ -95,53 +107,54 @@ enum DS {
         static let blue900 = Color(hex: "#1e3a8a")
         static let blue950 = Color(hex: "#172554")
 
-        // ── Accent (derived from blue scale) ───────────────────────
-        // The primary fill is Blue 600; hover darkens to Blue 700.
+        // ── Accent (Wisp moss / sage) ──────────────────────────────
+        // The primary fill is dark moss; accent text is the brighter sage.
 
-        /// Accent fill — used for solid button backgrounds.
-        /// #2563eb → ~5.1:1 contrast with white text (WCAG AA).
-        static let accent = blue600
+        /// Accent fill — used for solid button backgrounds. White text on dark
+        /// moss (#596653) reads ~6.5:1 (WCAG AA+).
+        static let accent = WispColor.accent
 
-        /// Accent hover — slightly darker blue for hover state.
-        /// #1d4ed8 → ~6.5:1 contrast with white text (WCAG AA+).
-        static let accentHover = blue700
+        /// Accent hover — a lifted moss for hover/pressed.
+        static let accentHover = WispColor.accentHover
 
-        /// Accent text — bright blue used for accent-colored text and icons
-        /// on dark backgrounds (links, active nav items, highlighted labels).
-        static let accentText = blue400
+        /// Accent text — the sage brand accent for accent-coloured text and icons
+        /// (deep moss on light, brighter sage on dark).
+        static let accentText = WispColor.accentText
 
         /// Very subtle accent tint — used for selected item backgrounds (e.g. current step
         /// in the sidebar). Low opacity so it doesn't overpower.
-        static let accentSubtle = blue500.opacity(0.10)
+        static let accentSubtle = WispColor.accentSubtle
 
         // ── Semantic Colors ──────────────────────────────────────────
+        // Re-toned to fit the organic palette: an error reads as a muted
+        // terracotta interruption rather than an aggressive neon red.
 
         /// Destructive/error actions — delete buttons, error messages, close button hover.
-        static let destructive = Color(hex: "#E5484D")        // Radix Red 9
+        static let destructive = WispColor.destructive
 
         /// Destructive hover state.
-        static let destructiveHover = Color(hex: "#F2555A")   // Radix Red 10
+        static let destructiveHover = WispColor.destructiveHover
 
         /// Destructive used for text on dark backgrounds (brighter for readability).
-        static let destructiveText = Color(hex: "#FF6369")    // Radix Red 11
+        static let destructiveText = WispColor.destructiveText
 
         /// Success — checkmarks, granted status, completion indicators.
-        /// Independent green so success states are visually distinct from the blue accent.
-        static let success = Color(hex: "#34D399")      // Tailwind Emerald 400
+        /// A sage-family green so success sits inside the brand rather than beside it.
+        static let success = WispColor.success
 
         /// Warning — caution messages, manual verification failure explanations.
-        static let warning = Color(hex: "#FFB224")            // Radix Amber 9
+        static let warning = WispColor.warning
 
         /// Warning text — brighter variant for text on dark backgrounds.
-        static let warningText = Color(hex: "#F1A10D")        // Radix Amber 11
+        static let warningText = WispColor.warningText
 
         /// Info/feature highlight — used for prompt card headers, code highlights.
-        /// Lighter than accentText so informational elements are visually distinct
-        /// from interactive accent-colored elements.
-        static let info = Color(hex: "#70B8FF")               // Radix Blue 9
+        /// The lavender intelligence accent, so informational elements read
+        /// as "Wisp is telling you something" rather than a generic blue link.
+        static let info = WispColor.intelligence
 
-        /// Inline code text color — slightly brighter blue for monospace code snippets.
-        static let codeText = Color(hex: "#9DC2FF")           // Radix Blue 11 variant
+        /// Inline code text color — a soft lavender for monospace code snippets.
+        static let codeText = Color(hex: "#B9B6DE")
 
         // ── Overlay Cursor ───────────────────────────────────────────
 
@@ -204,15 +217,17 @@ enum DS {
 
     // MARK: - Corner Radii
 
+    // These forward to `WispRadius` so the whole app shares one softer,
+    // rounder-rather-than-geometric scale.
     enum CornerRadius {
         /// Small elements like tags, badges.
-        static let small: CGFloat = 6
+        static let small: CGFloat = WispRadius.small        // 6
         /// Buttons, input fields, small cards.
-        static let medium: CGFloat = 8
+        static let medium: CGFloat = WispRadius.medium      // 10
         /// Cards, dialogs, chat bubbles.
-        static let large: CGFloat = 10
+        static let large: CGFloat = WispRadius.large        // 14
         /// Large panels, permission cards.
-        static let extraLarge: CGFloat = 12
+        static let extraLarge: CGFloat = WispRadius.panel   // 18
         /// Pill-shaped buttons (the continue button).
         static let pill: CGFloat = .infinity
     }
@@ -887,12 +902,40 @@ extension Color {
 }
 
 extension View {
-    /// Wisp's Liquid Glass surface, used for the notch HUD's morphing pill and
-    /// panel. Applies macOS 26 Liquid Glass, clipped to `shape` and tinted dark
-    /// (`DS.Colors.notchGlassTint`) so the HUD's near-white text stays legible
-    /// even when the glass sits over a bright desktop. Interactive so it reacts
-    /// to the pointer, matching the dynamic-island feel.
+    /// Wisp's notch HUD surface: Apple Liquid Glass, tinted dark.
+    ///
+    /// It uses the real macOS 26 `.regular` glass material so the island
+    /// refracts and reflects the desktop like a proper dynamic island. The trick
+    /// to keeping it legible rather than a washed-out white is twofold: the HUD
+    /// forces a dark colour scheme (see `NotchHUDView`), so the glass renders its
+    /// dark variant, and it carries a fairly heavy dark tint here. Together that
+    /// lands between "flat black box" and "bright white frost" — a translucent
+    /// dark glass the near-white text stays readable on.
     func wispNotchGlassSurface<GlassShape: Shape>(in shape: GlassShape) -> some View {
-        glassEffect(.regular.tint(DS.Colors.notchGlassTint).interactive(), in: shape)
+        glassEffect(.regular.tint(Color.black.opacity(0.68)).interactive(), in: shape)
+    }
+
+    /// A general Liquid Glass surface for the menu bar panel and dashboard, so
+    /// every Wisp surface reads as the same material rather than a mix of flat
+    /// fills. Its tint is *adaptive* (`WispColor.glassTint`): frosted-light in a
+    /// light-appearance surface (the dashboard sidebar) and dark in a
+    /// dark-appearance surface (the menu-bar panel, which forces a dark scheme).
+    func wispGlassSurface(cornerRadius: CGFloat, interactive: Bool = false) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let base = Glass.regular.tint(WispColor.glassTint)
+        return glassEffect(interactive ? base.interactive() : base, in: shape)
+    }
+
+    /// A lighter Liquid Glass "card" for content blocks that sit *inside* a
+    /// darker surface (settings rows, list cards, chat bubbles). Uses a fainter
+    /// tint so nested cards stay distinct from their container, with a hairline
+    /// border to define the edge.
+    func wispGlassCard(cornerRadius: CGFloat = DS.CornerRadius.large) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .glassEffect(Glass.regular.tint(WispColor.glassCardTint), in: shape)
+            .overlay(
+                shape.strokeBorder(DS.Colors.borderSubtle.opacity(0.6), lineWidth: 0.75)
+            )
     }
 }
