@@ -105,6 +105,15 @@ final class AgentToolRegistry: ObservableObject {
         toolsByName[definition.name] = RegisteredTool(definition: definition, implementation: implementation)
     }
 
+    /// Removes a previously registered tool, if present.
+    ///
+    /// Needed so a server that is disabled or uninstalled from the marketplace
+    /// stops offering its tools without restarting the app — and so reconnecting
+    /// a server doesn't leave a stale copy of every tool behind.
+    func unregister(toolNamed name: String) {
+        toolsByName.removeValue(forKey: name)
+    }
+
     /// What happened when a tool was asked to run.
     ///
     /// Declining is not an error. The model asked for something reasonable and

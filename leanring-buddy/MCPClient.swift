@@ -241,11 +241,10 @@ actor MCPServerConnection {
                 "properties": .object([:])
             ])
 
-            if !configuration.allowedToolNames.isEmpty,
-               !configuration.allowedToolNames.contains(name) {
-                return nil
-            }
-
+            // Every tool the server offers is discovered here; the per-server
+            // allow-list and the global budget are applied by MCPManager when it
+            // decides which to expose, so the dashboard can still show the full
+            // list for per-tool enabling.
             return DiscoveredTool(name: name, description: description, inputSchema: schema)
         }
     }

@@ -47,14 +47,30 @@ final class MCPManager: ObservableObject {
         let name: String
         var state: State
         var recentErrorOutput: [String] = []
+        /// Every tool this server offers, before the allow-list and budget.
+        /// The marketplace shows these so individual tools can be toggled.
+        var offeredTools: [String] = []
+        /// The tools actually registered with the model for this server.
+        var exposedTools: [String] = []
     }
 
     /// Ceiling on tools offered to the model at once.
-    private static let maximumExposedTools = 8
+    static let maximumExposedTools = 8
 
     @Published private(set) var serverStatuses: [ServerStatus] = []
 
+    /// Total tools currently exposed to the model across all servers, against
+    /// the `maximumExposedTools` budget. Drives the marketplace's budget meter.
+    var exposedToolCount: Int {
+        serverStatuses.reduce(0) { $0 + $1.exposedTools.count }
+    }
+
     private var connections: [String: MCPServerConnection] = [:]
+
+    /// Namespaced names of every tool this manager has registered, so they can
+    /// be unregistered on disconnect or reload rather than lingering as stale
+    /// entries the model could still call.
+    private var registeredToolNames: Set<String> = []
 
     private var configurationFileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -87,10 +103,15 @@ final class MCPManager: ObservableObject {
 
             do {
                 try await connection.connect()
-                let tools = await connection.discoveredTools
+                let offeredTools = await connection.discoveredTools
                 connections[configuration.name] = connection
 
-                let toolsToExpose = Array(tools.prefix(max(0, remainingToolBudget)))
+                // Apply the per-server allow-list (empty means "all"), then the
+                // global budget shared across every server.
+                let allowedTools = configuration.allowedToolNames.isEmpty
+                    ? offeredTools
+                    : offeredTools.filter { configuration.allowedToolNames.contains($0.name) }
+                let toolsToExpose = Array(allowedTools.prefix(max(0, remainingToolBudget)))
                 remainingToolBudget -= toolsToExpose.count
 
                 for tool in toolsToExpose {
@@ -99,10 +120,12 @@ final class MCPManager: ObservableObject {
 
                 updateStatus(for: configuration.name) { status in
                     status.state = .connected(toolCount: toolsToExpose.count)
+                    status.offeredTools = offeredTools.map(\.name)
+                    status.exposedTools = toolsToExpose.map(\.name)
                 }
 
-                if toolsToExpose.count < tools.count {
-                    print("🔌 MCP: \(configuration.name) offers \(tools.count) tools; exposing \(toolsToExpose.count) to stay within the model's limit")
+                if toolsToExpose.count < offeredTools.count {
+                    print("🔌 MCP: \(configuration.name) offers \(offeredTools.count) tools; exposing \(toolsToExpose.count) to stay within the model's limit")
                 } else {
                     print("🔌 MCP: \(configuration.name) connected with \(toolsToExpose.count) tool(s)")
                 }
@@ -131,7 +154,25 @@ final class MCPManager: ObservableObject {
             Task { await connection.disconnect() }
         }
         connections.removeAll()
+
+        // Tools outlive the connection in the registry, so they must be removed
+        // explicitly — otherwise a disabled or uninstalled server's tools stay
+        // callable until the app restarts.
+        for toolName in registeredToolNames {
+            AgentToolRegistry.shared.unregister(toolNamed: toolName)
+        }
+        registeredToolNames.removeAll()
+
         serverStatuses.removeAll()
+    }
+
+    /// Disconnects everything and reconnects from the current `~/.wisp/mcp.json`.
+    ///
+    /// Called after the marketplace installs, removes, enables, or re-scopes a
+    /// server so the change takes effect without an app restart.
+    func reload() async {
+        disconnectAll()
+        await connectConfiguredServers()
     }
 
     /// Registers one MCP tool with the assistant's registry.
@@ -156,6 +197,8 @@ final class MCPManager: ObservableObject {
         ) { input in
             try await connection.callTool(name: tool.name, arguments: input)
         }
+
+        registeredToolNames.insert(namespacedName)
     }
 
     /// Trims a server name to what tool names allow.

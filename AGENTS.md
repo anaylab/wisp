@@ -120,7 +120,13 @@ cloud dependency to the local path, without asking.
   HTTP transport + Composio managed-OAuth toolkits + a curated registry) — see
   `docs/mcp-marketplace-architecture.md`. Remote servers now work: a `~/.wisp/mcp.json` entry
   with a `url` (and optional `headers` for auth) connects over `MCPStreamableHTTPTransport`
-  (`MCPStreamableHTTPTransport.swift`); an entry with a `command` is stdio as before.
+  (`MCPStreamableHTTPTransport.swift`); an entry with a `command` is stdio as before. The
+  dashboard's **Marketplace tab** (`MarketplaceTab.swift`) browses a bundled curated registry
+  (`curated-mcp-registry.json`) and installs/removes/enables servers via `InstalledMCPServerStore`,
+  which owns `~/.wisp/mcp.json` (preserving unknown keys) and reloads the manager live. Installing
+  is separate from exposing: only `MCPManager.maximumExposedTools` (8) tools are registered at
+  once, the allow-list + budget are applied by `MCPManager` at registration (the connection no
+  longer filters), and the tab shows a budget meter + per-tool toggles.
 - **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
   `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
   prompt; the full body is loaded on demand via the read-only `load_skill` tool —
@@ -248,6 +254,10 @@ Grouped by what they do. Line counts are approximate.
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
 | `MCPStdioTransport.swift` | ~230 | Stdio transport: child process over stdin/stdout as NDJSON, login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
 | `MCPStreamableHTTPTransport.swift` | ~230 | Remote transport: JSON-RPC over MCP Streamable HTTP (one POST per message; parses JSON + SSE replies; `Mcp-Session-Id`, auth headers). |
+| `MCPCatalog.swift` | ~90 | Marketplace catalog model: `MCPCatalogEntry` (stdio/remote install template) + `ConfigField` (user-supplied env/header, secret flag) + the bundled-registry file shape. |
+| `MCPCatalogProvider.swift` | ~55 | `MCPCatalogProvider` protocol + `CuratedRegistryCatalogProvider` (loads the bundled `curated-mcp-registry.json`). Composio's provider will conform here in Phase 3. |
+| `curated-mcp-registry.json` | ~180 | Bundled curated MCP registry (resource): 8 official stdio servers + the hosted GitHub remote server. |
+| `InstalledMCPServerStore.swift` | ~230 | Source of truth over `~/.wisp/mcp.json` (preserves unknown keys). Install/uninstall/enable/allow-list; reloads MCPManager on every change. |
 | `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
@@ -278,6 +288,7 @@ Grouped by what they do. Line counts are approximate.
 | `DashboardView.swift` | ~708 | Sidebar shell plus the tabs (Home is the default) and the live memory footer. The content area follows the system appearance (adaptive light/dark). |
 | `HomeTab.swift` | ~250 | The dashboard's **Home command centre**: a hero (Wisp mark + `wisp` wordmark + "What can I help with?"), a summon card showing the talk/type/dictate gestures, a quick-actions grid that navigates the other tabs, and a recent-activity list from `AgentTaskRegistry`. Adaptive. The conversational hero itself lives in the Dynamic Island, not here. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
+| `MarketplaceTab.swift` | ~470 | Dashboard Marketplace tab: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, and the model tool-budget meter. Reads `InstalledMCPServerStore` + `MCPManager`. |
 | `ShortcutsTab.swift` | ~250 | Dashboard Shortcuts tab: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
 | `MenuBarPanelManager.swift` | ~247 | `NSStatusItem` + floating `NSPanel` lifecycle. |
 | `NotchWindowController.swift` | ~230 | Hosts the notch HUD in a fixed-size borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) and reloads skills when the panel opens. Owns `NotchViewModel`. |

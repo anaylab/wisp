@@ -44,6 +44,7 @@ struct DashboardView: View {
         case dictation = "Dictation"
         case cursor = "Cursor"
         case agent = "Agent"
+        case marketplace = "Marketplace"
         case tools = "Tools & Servers"
         case sources = "Sources"
         case performance = "Model & Performance"
@@ -59,6 +60,7 @@ struct DashboardView: View {
             case .dictation: return "mic"
             case .cursor: return "cursorarrow"
             case .agent: return "cpu"
+            case .marketplace: return "bag"
             case .tools: return "wrench.and.screwdriver"
             case .sources: return "antenna.radiowaves.left.and.right"
             case .performance: return "speedometer"
@@ -91,6 +93,7 @@ struct DashboardView: View {
                     case .dictation: DictationTab()
                     case .cursor: CursorTab(companionManager: companionManager)
                     case .agent: AgentTab(companionManager: companionManager)
+                    case .marketplace: MarketplaceTab()
                     case .tools: ToolsTab()
                     case .sources: SourcesTab()
                     case .performance: PerformanceTab(metricsRecorder: metricsRecorder, companionManager: companionManager)

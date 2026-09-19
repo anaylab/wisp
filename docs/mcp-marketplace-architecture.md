@@ -1,7 +1,7 @@
 # Wisp MCP Marketplace — Architecture
 
-Status: **Phase 1 complete** (remote Streamable HTTP transport + `mcp.json` superset landed &
-building). Next: Phase 2 (marketplace UI + curated registry). See [Phasing](#7-phasing) and
+Status: **Phase 2 complete** (marketplace UI + curated registry + install flow + budget meter
+landed & building). Next: Phase 3 (Composio). See [Phasing](#7-phasing) and
 [Change log](#10-change-log).
 
 A browse-install-connect marketplace for MCP servers inside Wisp's dashboard, spanning a
@@ -164,8 +164,11 @@ Each phase is independently shippable and verifiable.
   example. Manual install path = adding a `url` entry to `~/.wisp/mcp.json`; the dashboard
   form lands with the Marketplace UI in Phase 2. *Verify against a public remote MCP server
   before Composio.*
-- **Phase 2 — Marketplace UI + curated registry + budget meter.** Browse/install stdio &
-  remote; installed ≠ exposed.
+- **Phase 2 — Marketplace UI + curated registry + budget meter. (done, building)** Dashboard
+  Marketplace tab: browse/search/filter the bundled curated registry, install (with a
+  config-field sheet for keys), enable/disable, remove, and per-tool enabling with a live
+  budget meter. `InstalledMCPServerStore` owns `mcp.json` (preserving unknown keys) and reloads
+  MCPManager on every change. Installed ≠ exposed.
 - **Phase 3 — Composio.** API key, toolkit catalog, managed-OAuth connect flow, user-scoped
   URL, off-machine labeling.
 - **Phase 4 — Tool router.** Per-turn relevance selection so a big library fits the budget.
@@ -195,6 +198,16 @@ protocol MCPTransport: Sendable {
 
 ## 10. Change log
 
+- **Phase 2 (done, verified building):** Added the marketplace: `MCPCatalog.swift` (entry +
+  config-field model), `curated-mcp-registry.json` (bundled; 8 stdio servers + the hosted GitHub
+  remote server), `MCPCatalogProvider.swift` (`CuratedRegistryCatalogProvider`),
+  `InstalledMCPServerStore.swift` (source of truth over `mcp.json`, preserves unknown keys,
+  install/uninstall/enable/allow-list, reloads MCPManager), and `MarketplaceTab.swift` (browse +
+  install sheet + installed list + per-tool toggles + budget meter). Wired into `DashboardView`.
+  Runtime support: `AgentToolRegistry.unregister(toolNamed:)`; `MCPManager` now applies the
+  allow-list + budget at registration, publishes each server's `offeredTools`/`exposedTools` and
+  `exposedToolCount`, tracks registered names, and has `reload()`; the connection no longer
+  filters (so the UI sees all offered tools). Behavior for existing configs unchanged.
 - **Phase 1 (done, verified building):** Added `MCPStreamableHTTPTransport.swift` — remote MCP
   over Streamable HTTP (one JSON-RPC message per POST; parses both `application/json` and
   `text/event-stream` replies into the shared message stream; carries `Mcp-Session-Id`,
