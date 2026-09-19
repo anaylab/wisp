@@ -1,9 +1,10 @@
 # Wisp MCP Marketplace — Architecture
 
-Status: **Phase 3 complete, pivoted to Composio's connect product** (verified against the live
-connect server: `x-consumer-api-key` → `https://connect.composio.dev/mcp` returns the universal
-meta-tools). Composio now installs as one remote MCP server over the Phase 1 transport. Next:
-Phase 4 (tool router). See [Phasing](#7-phasing) and [Change log](#10-change-log).
+Status: **All phases complete.** Phase 3 pivoted to Composio's connect product (verified live:
+`x-consumer-api-key` → `https://connect.composio.dev/mcp`). Phase 4 landed the per-turn tool
+router (`AgentToolRouter`) and lifted the registration cap, so a large installed library is
+selected down to the per-turn budget by relevance. See [Phasing](#7-phasing) and
+[Change log](#10-change-log).
 
 A browse-install-connect marketplace for MCP servers inside Wisp's dashboard, spanning a
 curated public MCP registry **and** Composio's hosted, managed-OAuth toolkits — built on top
@@ -178,7 +179,16 @@ Each phase is independently shippable and verifiable.
   `POST /api/v3/mcp/servers/custom`, `POST /api/v3/mcp/servers/generate`, `GET /api/v3/toolkits`,
   auth `x-api-key`, base `https://backend.composio.dev`. Needs a valid key to verify the
   toolkit-list JSON shape and the first-use OAuth prompt.
-- **Phase 4 — Tool router.** Per-turn relevance selection so a big library fits the budget.
+- **Phase 4 — Tool router. (done, building; scoring unit-checked)** `AgentToolRouter` ranks
+  every registered tool by lexical relevance to the request (name split into words, weighted
+  over description) and shows the model only the top few within the per-turn budget
+  (`AgentToolScope.maximumExposedTools` = 6). Built-in scope membership adds a bonus so the tuned
+  browser/filesystem/coding routing is preserved, while arbitrary marketplace tools
+  (`github__*`, `slack__*`, Composio meta-tools) can now surface — previously they matched no
+  scope and were never shown. `MCPManager` no longer caps registration, so all allowed tools are
+  candidates. Deterministic and model-free (no extra model call — model residency is the binding
+  constraint). Known limit: generic gateway tools (e.g. `COMPOSIO_SEARCH_TOOLS`) surface via
+  their description enumerating apps; a server-declared "gateway" flag is a possible follow-up.
 
 ## 8. Transport protocol (Phase 0 contract)
 
@@ -205,6 +215,15 @@ protocol MCPTransport: Sendable {
 
 ## 10. Change log
 
+- **Phase 4 (done, building; scoring unit-checked):** Added `AgentToolRouter.swift` — a
+  deterministic lexical relevance ranker over all registered tools, used by
+  `AgentToolRegistry.definitions(forRequest:)` (replacing the scope-only filter). Built-in scope
+  membership (`AgentToolScope`) adds a `+6` bonus so tuned routing is preserved; marketplace
+  tools now rank in by relevance. `MCPManager` dropped its 8-tool registration cap (registers all
+  allowed tools; `exposedToolCount` → `registeredToolCount`), and the marketplace's meter was
+  reframed from "N of 8 slots" to "N available · ~6 shown per turn by relevance" (per-tool
+  toggles remain the allow-list; the "over budget" per-tool note was removed). Scoring verified
+  with a standalone test (filesystem/github/slack/composio queries rank as expected).
 - **Phase 3b (pivot, live-verified endpoint):** The test account uses Composio's **connect**
   universal server, not the platform managed-server API. Discovery: the key authenticates via
   the `x-consumer-api-key` header against `https://connect.composio.dev/mcp` (an MCP Streamable

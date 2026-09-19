@@ -124,9 +124,12 @@ cloud dependency to the local path, without asking.
   dashboard's **Marketplace tab** (`MarketplaceTab.swift`) browses a bundled curated registry
   (`curated-mcp-registry.json`) and installs/removes/enables servers via `InstalledMCPServerStore`,
   which owns `~/.wisp/mcp.json` (preserving unknown keys) and reloads the manager live. Installing
-  is separate from exposing: only `MCPManager.maximumExposedTools` (8) tools are registered at
-  once, the allow-list + budget are applied by `MCPManager` at registration (the connection no
-  longer filters), and the tab shows a budget meter + per-tool toggles. A **Composio** section
+  is separate from exposing: `MCPManager` registers **all** allowed tools (the per-server
+  allow-list is applied at registration; the connection no longer filters), and the **per-turn
+  tool router** (`AgentToolRouter.swift`) shows the model only the ~6 most relevant to the request
+  (`AgentToolScope.maximumExposedTools`), ranked by lexical relevance with a bonus for built-in
+  scope membership. So a large installed library costs nothing until a request is about it. The
+  tab shows how many tools are available + per-tool toggles (the allow-list). A **Composio** section
   (opt-in, off-machine, labelled) lets a user paste a Composio API key (`ComposioKeychainStore`),
   browse toolkits (`ComposioClient`/`ComposioAccountStore`), and install one as a managed remote
   MCP server; the key is injected into the transport from the Keychain at connect time, never
@@ -255,7 +258,9 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
-| `AgentToolRegistry.swift` | ~490 | Built-in read-only tools. `requiresConfirmation` defaults to true for unknown names. |
+| `AgentToolRegistry.swift` | ~500 | Built-in read-only tools + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |
+| `AgentToolScope.swift` | ~120 | Deterministic built-in scope vocabulary (browser/filesystem/coding/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
+| `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~330 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
@@ -268,7 +273,7 @@ Grouped by what they do. Line counts are approximate.
 | `ComposioKeychainStore.swift` | ~75 | The Composio `x-api-key` in the login Keychain (mirrors `ProviderKeychainStore`). Never in the config file or logs. |
 | `ComposioClient.swift` | ~110 | Validates the Composio **connect** key by an MCP `initialize` against `https://connect.composio.dev/mcp` (auth header `x-consumer-api-key`). No provisioning — the connect server is a fixed universal endpoint. |
 | `ComposioAccountStore.swift` | ~110 | Composio marketplace state: `connect(apiKey:)` validates the key then installs one remote server (`composio-connect`) over the Phase 1 transport; `disconnect()` removes it. Off-machine/opt-in. |
-| `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
+| `MCPManager.swift` | ~270 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
 | `ToolConfirmationCoordinator.swift` | ~193 | Permission requests with a 45s timeout and spoken-affirmative parsing. |

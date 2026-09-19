@@ -54,14 +54,12 @@ final class MCPManager: ObservableObject {
         var exposedTools: [String] = []
     }
 
-    /// Ceiling on tools offered to the model at once.
-    static let maximumExposedTools = 8
-
     @Published private(set) var serverStatuses: [ServerStatus] = []
 
-    /// Total tools currently exposed to the model across all servers, against
-    /// the `maximumExposedTools` budget. Drives the marketplace's budget meter.
-    var exposedToolCount: Int {
+    /// Total MCP tools registered across all servers. Every one is a candidate
+    /// for the per-turn router (AgentToolRouter), which shows the model only the
+    /// most relevant handful each turn. Drives the marketplace's tool summary.
+    var registeredToolCount: Int {
         serverStatuses.reduce(0) { $0 + $1.exposedTools.count }
     }
 
@@ -96,8 +94,6 @@ final class MCPManager: ObservableObject {
             )
         }
 
-        var remainingToolBudget = Self.maximumExposedTools
-
         for configuration in configurations where configuration.isEnabled {
             let connection = MCPServerConnection(configuration: configuration)
 
@@ -106,29 +102,25 @@ final class MCPManager: ObservableObject {
                 let offeredTools = await connection.discoveredTools
                 connections[configuration.name] = connection
 
-                // Apply the per-server allow-list (empty means "all"), then the
-                // global budget shared across every server.
+                // Register every allowed tool (empty allow-list means all).
+                // There is no registration cap: the per-turn router decides which
+                // registered tools the model actually sees, so a large installed
+                // library costs nothing until a request is relevant to it.
                 let allowedTools = configuration.allowedToolNames.isEmpty
                     ? offeredTools
                     : offeredTools.filter { configuration.allowedToolNames.contains($0.name) }
-                let toolsToExpose = Array(allowedTools.prefix(max(0, remainingToolBudget)))
-                remainingToolBudget -= toolsToExpose.count
 
-                for tool in toolsToExpose {
+                for tool in allowedTools {
                     registerTool(tool, from: configuration.name, connection: connection)
                 }
 
                 updateStatus(for: configuration.name) { status in
-                    status.state = .connected(toolCount: toolsToExpose.count)
+                    status.state = .connected(toolCount: allowedTools.count)
                     status.offeredTools = offeredTools.map(\.name)
-                    status.exposedTools = toolsToExpose.map(\.name)
+                    status.exposedTools = allowedTools.map(\.name)
                 }
 
-                if toolsToExpose.count < offeredTools.count {
-                    print("🔌 MCP: \(configuration.name) offers \(offeredTools.count) tools; exposing \(toolsToExpose.count) to stay within the model's limit")
-                } else {
-                    print("🔌 MCP: \(configuration.name) connected with \(toolsToExpose.count) tool(s)")
-                }
+                print("🔌 MCP: \(configuration.name) connected with \(allowedTools.count) tool(s)")
             } catch {
                 // The subprocess is already running by the time a handshake
                 // fails, and nothing else holds a reference to it — without

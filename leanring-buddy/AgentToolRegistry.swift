@@ -75,13 +75,11 @@ final class AgentToolRegistry: ObservableObject {
     /// callable, but only what is exposed appears in the prompt and therefore
     /// costs tokens and competes for the model's attention.
     func definitions(forRequest transcript: String) -> [BuddyToolDefinition] {
-        let scope = AgentToolScope.forRequest(transcript)
-        let scoped = definitions
-            .filter { scope.includes(toolNamed: $0.name) }
-            .sorted { $0.name < $1.name }
-
-        if scoped.isEmpty { return definitions }
-        return Array(scoped.prefix(AgentToolScope.maximumExposedTools))
+        AgentToolRouter.select(
+            from: definitions,
+            for: transcript,
+            limit: AgentToolScope.maximumExposedTools
+        )
     }
 
     var definitions: [BuddyToolDefinition] {

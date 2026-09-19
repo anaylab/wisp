@@ -62,7 +62,7 @@ enum AgentToolScope: String, CaseIterable {
     /// there is no fixed vocabulary that could route to one the way "page" or
     /// "url" routes to browser tools, and it is not mutually exclusive with
     /// any scope — a coding request might still need a skill.
-    private static let alwaysAvailableToolNames: Set<String> = [
+    static let alwaysAvailableToolNames: Set<String> = [
         "get_current_time",
         "do_in_background",
         "load_skill",

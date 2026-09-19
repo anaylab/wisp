@@ -56,47 +56,20 @@ struct MarketplaceTab: View {
     // MARK: - Budget
 
     private var budgetSection: some View {
-        DashboardCard(title: "Model tool budget") {
-            let used = mcpManager.exposedToolCount
-            let total = MCPManager.maximumExposedTools
-            let fraction = total > 0 ? min(1, Double(used) / Double(total)) : 0
+        DashboardCard(title: "Model tools") {
+            let available = mcpManager.registeredToolCount
+            let perTurn = AgentToolScope.maximumExposedTools
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("\(used) of \(total) tool slots in use")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(DS.Colors.textPrimary)
-                    Spacer()
-                    if used >= total {
-                        Text("full")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(DS.Colors.warningText)
-                    }
-                }
+                Text("\(available) tool\(available == 1 ? "" : "s") available")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DS.Colors.textPrimary)
 
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(DS.Colors.surface2)
-                        Capsule()
-                            .fill(budgetColor(fraction: fraction))
-                            .frame(width: max(4, proxy.size.width * fraction))
-                    }
-                }
-                .frame(height: 6)
-
-                Text("The local model picks better from a short list, so only \(total) MCP tools are offered at once. Toggle a server's tools below to choose which ones fill the slots.")
+                Text("Install as many as you like. Each turn the model is shown only the ~\(perTurn) most relevant to your request — chosen by the router — so the prompt stays short and its tool choice stays sharp. Turn off a server's tools below to keep them from ever being offered.")
                     .font(.system(size: 10))
                     .foregroundStyle(DS.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-
-    private func budgetColor(fraction: Double) -> Color {
-        switch fraction {
-        case ..<0.75: return DS.Colors.success
-        case ..<1.0: return DS.Colors.warning
-        default: return DS.Colors.warning
         }
     }
 
@@ -554,7 +527,7 @@ private struct InstalledServerRow: View {
             }
 
             if isExpanded, let offered = status?.offeredTools {
-                toolList(offered: offered, exposed: Set(status?.exposedTools ?? []))
+                toolList(offered: offered)
             }
         }
         .padding(10)
@@ -564,7 +537,7 @@ private struct InstalledServerRow: View {
         )
     }
 
-    private func toolList(offered: [String], exposed: Set<String>) -> some View {
+    private func toolList(offered: [String]) -> some View {
         let allowed = store.allowedTools(name: record.name)
         // Empty allow-list means "all offered are permitted".
         let permitted: Set<String> = allowed.isEmpty ? Set(offered) : allowed
@@ -572,7 +545,6 @@ private struct InstalledServerRow: View {
         return VStack(spacing: 4) {
             ForEach(offered.sorted(), id: \.self) { toolName in
                 let isPermitted = permitted.contains(toolName)
-                let isLive = exposed.contains(toolName)
                 HStack(spacing: 8) {
                     Button {
                         toggleTool(toolName, offered: offered, currentlyPermitted: permitted)
@@ -589,14 +561,6 @@ private struct InstalledServerRow: View {
                         .foregroundStyle(DS.Colors.textSecondary)
 
                     Spacer(minLength: 0)
-
-                    // A tool can be permitted yet not live when the shared budget
-                    // is already full — worth saying, so the meter makes sense.
-                    if isPermitted && !isLive {
-                        Text("over budget")
-                            .font(.system(size: 8, weight: .medium))
-                            .foregroundStyle(DS.Colors.warningText)
-                    }
                 }
             }
         }
