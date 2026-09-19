@@ -151,6 +151,38 @@ final class InstalledMCPServerStore: ObservableObject {
         try persistAndReload()
     }
 
+    /// Installs a remote (Streamable HTTP) server directly — used by the
+    /// Composio flow, which provisions a URL rather than picking a catalog
+    /// template. When `usesComposioKeychainAuth` is set, no secret is written to
+    /// the file: MCPManager injects the `x-api-key` from the Keychain at connect
+    /// time, keeping the key out of `mcp.json`.
+    func installRemoteServer(
+        id: String,
+        url: URL,
+        source: String,
+        summary: String?,
+        usesComposioKeychainAuth: Bool
+    ) throws {
+        guard rawServers[id] == nil else {
+            throw StoreError.alreadyInstalled(id)
+        }
+
+        var entryDictionary: [String: Any] = [
+            "url": url.absoluteString,
+            "source": source,
+            "catalogId": id,
+            "enabled": true
+        ]
+        if let summary { entryDictionary["summary"] = summary }
+        if usesComposioKeychainAuth { entryDictionary["authFromKeychain"] = "composio" }
+
+        var servers = rawServers
+        servers[id] = entryDictionary
+        rawServers = servers
+
+        try persistAndReload()
+    }
+
     func uninstall(name: String) throws {
         var servers = rawServers
         servers.removeValue(forKey: name)

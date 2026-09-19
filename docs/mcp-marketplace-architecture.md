@@ -1,7 +1,9 @@
 # Wisp MCP Marketplace — Architecture
 
-Status: **Phase 2 complete** (marketplace UI + curated registry + install flow + budget meter
-landed & building). Next: Phase 3 (Composio). See [Phasing](#7-phasing) and
+Status: **Phase 3 code complete** (Composio: key in Keychain, client, toolkit catalog,
+managed-server install — landed & building). **Live-unverified**: needs a valid Composio API
+key to confirm the toolkit-list decode and the managed-OAuth handshake (the test key returned
+401). Next: Phase 4 (tool router) or Composio live-verification. See [Phasing](#7-phasing) and
 [Change log](#10-change-log).
 
 A browse-install-connect marketplace for MCP servers inside Wisp's dashboard, spanning a
@@ -169,8 +171,14 @@ Each phase is independently shippable and verifiable.
   config-field sheet for keys), enable/disable, remove, and per-tool enabling with a live
   budget meter. `InstalledMCPServerStore` owns `mcp.json` (preserving unknown keys) and reloads
   MCPManager on every change. Installed ≠ exposed.
-- **Phase 3 — Composio.** API key, toolkit catalog, managed-OAuth connect flow, user-scoped
-  URL, off-machine labeling.
+- **Phase 3 — Composio. (code done, building; live-unverified)** API key in Keychain,
+  `ComposioClient` (v3: list toolkits, create managed server, generate user-scoped URL),
+  `ComposioAccountStore`, a Composio section in the marketplace, install-as-remote-server, and
+  off-machine labeling. The key is injected into the remote transport from the Keychain at
+  connect time (never written to `mcp.json`). Confirmed endpoints:
+  `POST /api/v3/mcp/servers/custom`, `POST /api/v3/mcp/servers/generate`, `GET /api/v3/toolkits`,
+  auth `x-api-key`, base `https://backend.composio.dev`. Needs a valid key to verify the
+  toolkit-list JSON shape and the first-use OAuth prompt.
 - **Phase 4 — Tool router.** Per-turn relevance selection so a big library fits the budget.
 
 ## 8. Transport protocol (Phase 0 contract)
@@ -198,6 +206,14 @@ protocol MCPTransport: Sendable {
 
 ## 10. Change log
 
+- **Phase 3 (code done, verified building; live-unverified):** Added `ComposioKeychainStore`
+  (`x-api-key` in the login Keychain), `ComposioClient` (v3 API: `listToolkits`,
+  `createManagedServer`, `generateUserURL`, `provisionManagedServer`), and `ComposioAccountStore`
+  (key validation, stable user id, install flow). `InstalledMCPServerStore.installRemoteServer`
+  writes a Composio server with an `authFromKeychain` marker and **no secret in the file**;
+  `MCPManager` injects the `x-api-key` from the Keychain at connect time. `MarketplaceTab` gained
+  a Composio section (key entry, toolkit list, off-machine note) and a "cloud · Composio" badge on
+  installed rows. Needs a valid key to confirm the toolkit-list decode and OAuth handshake.
 - **Phase 2 (done, verified building):** Added the marketplace: `MCPCatalog.swift` (entry +
   config-field model), `curated-mcp-registry.json` (bundled; 8 stdio servers + the hosted GitHub
   remote server), `MCPCatalogProvider.swift` (`CuratedRegistryCatalogProvider`),

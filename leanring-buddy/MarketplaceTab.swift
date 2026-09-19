@@ -19,12 +19,14 @@ import SwiftUI
 struct MarketplaceTab: View {
     @ObservedObject private var store = InstalledMCPServerStore.shared
     @ObservedObject private var mcpManager = MCPManager.shared
+    @ObservedObject private var composio = ComposioAccountStore.shared
 
     @State private var catalogEntries: [MCPCatalogEntry] = []
     @State private var catalogError: String?
     @State private var searchText = ""
     @State private var selectedCategory: String?
     @State private var entryBeingInstalled: MCPCatalogEntry?
+    @State private var composioKeyDraft = ""
 
     private let catalogProvider: MCPCatalogProvider = CuratedRegistryCatalogProvider()
 
@@ -38,11 +40,17 @@ struct MarketplaceTab: View {
                 }
 
                 browseSection
+                composioSection
             }
             .padding(16)
         }
         .background(DS.Colors.background)
         .task { await loadCatalog() }
+        .task {
+            if composio.hasAPIKey && composio.toolkits.isEmpty {
+                await composio.refreshToolkits()
+            }
+        }
         .sheet(item: $entryBeingInstalled) { entry in
             InstallSheet(entry: entry) { values in
                 install(entry, values: values)
@@ -194,6 +202,154 @@ struct MarketplaceTab: View {
         .pointerCursor()
     }
 
+    // MARK: - Composio
+
+    private var composioSection: some View {
+        DashboardCard(title: "Composio · cloud toolkits") {
+            VStack(alignment: .leading, spacing: 12) {
+                offMachineNote
+
+                switch composio.state {
+                case .notConfigured:
+                    composioKeyEntry(prompt: "Paste your Composio API key to browse toolkits.")
+                case .validating:
+                    Text("Checking your key…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                case .failed(let message):
+                    Text(message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.destructiveText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    composioKeyEntry(prompt: "Re-enter your Composio API key.")
+                case .ready:
+                    composioToolkitList
+                }
+
+                if let error = composio.lastErrorMessage {
+                    Text(error)
+                        .font(.system(size: 10))
+                        .foregroundStyle(DS.Colors.destructiveText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var offMachineNote: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "cloud")
+                .font(.system(size: 12))
+                .foregroundStyle(DS.Colors.warningText)
+            Text("Composio runs in the cloud. Its servers send your transcript and tool calls off this Mac to Composio and the connected app. Local servers stay the default.")
+                .font(.system(size: 10))
+                .foregroundStyle(DS.Colors.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(DS.Colors.warning.opacity(0.08))
+        )
+    }
+
+    private func composioKeyEntry(prompt: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(prompt)
+                .font(.system(size: 11))
+                .foregroundStyle(DS.Colors.textSecondary)
+            HStack(spacing: 8) {
+                SecureField("Composio API key", text: $composioKeyDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                            .fill(DS.Colors.surface2)
+                    )
+
+                Button {
+                    let key = composioKeyDraft
+                    composioKeyDraft = ""
+                    Task { await composio.saveAPIKey(key) }
+                } label: {
+                    Text("Connect")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.background)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(DS.Colors.accent))
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .disabled(composioKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                .opacity(composioKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+            }
+            Text("The key is saved to your login Keychain, never to the config file.")
+                .font(.system(size: 10))
+                .foregroundStyle(DS.Colors.textTertiary)
+        }
+    }
+
+    private var composioToolkitList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("\(composio.toolkits.count) toolkits available")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                Spacer()
+                Button {
+                    composio.clearAPIKey()
+                } label: {
+                    Text("Disconnect")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(DS.Colors.destructiveText)
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+            }
+
+            if filteredComposioToolkits.isEmpty {
+                Text("No toolkits match.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DS.Colors.textTertiary)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(filteredComposioToolkits) { toolkit in
+                        ComposioToolkitRow(
+                            toolkit: toolkit,
+                            isInstalled: composio.isInstalled(toolkit: toolkit),
+                            isInstalling: composio.installingToolkitSlugs.contains(toolkit.slug),
+                            onAdd: { Task { await composio.installToolkit(toolkit) } }
+                        )
+                    }
+                }
+                if cappedComposioCount < searchedComposioToolkits.count {
+                    Text("Showing \(cappedComposioCount) of \(searchedComposioToolkits.count) — search to narrow.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                }
+            }
+        }
+    }
+
+    private var searchedComposioToolkits: [ComposioToolkit] {
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return composio.toolkits }
+        return composio.toolkits.filter {
+            $0.name.lowercased().contains(query) || $0.slug.lowercased().contains(query)
+        }
+    }
+
+    private var cappedComposioCount: Int { min(searchedComposioToolkits.count, 30) }
+
+    private var filteredComposioToolkits: [ComposioToolkit] {
+        Array(searchedComposioToolkits.prefix(cappedComposioCount))
+    }
+
     // MARK: - Derived
 
     private var allCategories: [String] {
@@ -321,6 +477,69 @@ private struct CatalogEntryRow: View {
     }
 }
 
+// MARK: - Composio toolkit row
+
+private struct ComposioToolkitRow: View {
+    let toolkit: ComposioToolkit
+    let isInstalled: Bool
+    let isInstalling: Bool
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "cloud.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(DS.Colors.accentText)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
+                        .fill(DS.Colors.accent.opacity(0.12))
+                )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(toolkit.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                if let description = toolkit.description, !description.isEmpty {
+                    Text(description)
+                        .font(.system(size: 10))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if isInstalling {
+                ProgressView()
+                    .controlSize(.small)
+            } else if isInstalled {
+                Label("Added", systemImage: "checkmark")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(DS.Colors.success)
+            } else {
+                Button(action: onAdd) {
+                    Text("Add")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.background)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(DS.Colors.accent))
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(DS.Colors.surface2)
+        )
+    }
+}
+
 // MARK: - Installed server row
 
 private struct InstalledServerRow: View {
@@ -341,7 +560,14 @@ private struct InstalledServerRow: View {
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(DS.Colors.textPrimary)
 
-                if record.transport == .streamableHttp {
+                if record.source == "composio" {
+                    Text("cloud · Composio")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(DS.Colors.warningText)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(DS.Colors.warning.opacity(0.15)))
+                } else if record.transport == .streamableHttp {
                     Text("remote")
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(DS.Colors.textTertiary)

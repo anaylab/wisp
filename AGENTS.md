@@ -126,7 +126,11 @@ cloud dependency to the local path, without asking.
   which owns `~/.wisp/mcp.json` (preserving unknown keys) and reloads the manager live. Installing
   is separate from exposing: only `MCPManager.maximumExposedTools` (8) tools are registered at
   once, the allow-list + budget are applied by `MCPManager` at registration (the connection no
-  longer filters), and the tab shows a budget meter + per-tool toggles.
+  longer filters), and the tab shows a budget meter + per-tool toggles. A **Composio** section
+  (opt-in, off-machine, labelled) lets a user paste a Composio API key (`ComposioKeychainStore`),
+  browse toolkits (`ComposioClient`/`ComposioAccountStore`), and install one as a managed remote
+  MCP server; the key is injected into the transport from the Keychain at connect time, never
+  written to `mcp.json`.
 - **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
   `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
   prompt; the full body is loaded on demand via the read-only `load_skill` tool —
@@ -257,7 +261,10 @@ Grouped by what they do. Line counts are approximate.
 | `MCPCatalog.swift` | ~90 | Marketplace catalog model: `MCPCatalogEntry` (stdio/remote install template) + `ConfigField` (user-supplied env/header, secret flag) + the bundled-registry file shape. |
 | `MCPCatalogProvider.swift` | ~55 | `MCPCatalogProvider` protocol + `CuratedRegistryCatalogProvider` (loads the bundled `curated-mcp-registry.json`). Composio's provider will conform here in Phase 3. |
 | `curated-mcp-registry.json` | ~180 | Bundled curated MCP registry (resource): 8 official stdio servers + the hosted GitHub remote server. |
-| `InstalledMCPServerStore.swift` | ~230 | Source of truth over `~/.wisp/mcp.json` (preserves unknown keys). Install/uninstall/enable/allow-list; reloads MCPManager on every change. |
+| `InstalledMCPServerStore.swift` | ~270 | Source of truth over `~/.wisp/mcp.json` (preserves unknown keys). Install/uninstall/enable/allow-list + `installRemoteServer` (Composio); reloads MCPManager on every change. |
+| `ComposioKeychainStore.swift` | ~75 | The Composio `x-api-key` in the login Keychain (mirrors `ProviderKeychainStore`). Never in the config file or logs. |
+| `ComposioClient.swift` | ~210 | Composio v3 API client: list toolkits, create a managed MCP server, mint a user-scoped URL. `x-api-key` auth; base `https://backend.composio.dev`. |
+| `ComposioAccountStore.swift` | ~140 | Composio marketplace state: key validation, a stable user id, and the install flow (provision managed server → install as a remote MCP server). Off-machine/opt-in. |
 | `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
@@ -288,7 +295,7 @@ Grouped by what they do. Line counts are approximate.
 | `DashboardView.swift` | ~708 | Sidebar shell plus the tabs (Home is the default) and the live memory footer. The content area follows the system appearance (adaptive light/dark). |
 | `HomeTab.swift` | ~250 | The dashboard's **Home command centre**: a hero (Wisp mark + `wisp` wordmark + "What can I help with?"), a summon card showing the talk/type/dictate gestures, a quick-actions grid that navigates the other tabs, and a recent-activity list from `AgentTaskRegistry`. Adaptive. The conversational hero itself lives in the Dynamic Island, not here. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
-| `MarketplaceTab.swift` | ~470 | Dashboard Marketplace tab: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, and the model tool-budget meter. Reads `InstalledMCPServerStore` + `MCPManager`. |
+| `MarketplaceTab.swift` | ~700 | Dashboard Marketplace tab: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
 | `ShortcutsTab.swift` | ~250 | Dashboard Shortcuts tab: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
 | `MenuBarPanelManager.swift` | ~247 | `NSStatusItem` + floating `NSPanel` lifecycle. |
 | `NotchWindowController.swift` | ~230 | Hosts the notch HUD in a fixed-size borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) and reloads skills when the panel opens. Owns `NotchViewModel`. |

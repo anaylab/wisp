@@ -236,10 +236,19 @@ final class MCPManager: ObservableObject {
             // A "url" entry (Streamable HTTP) is a remote server; anything with
             // a "command" is a local stdio server, exactly as before.
             if let urlString = entry["url"] as? String, let url = URL(string: urlString) {
+                var headers = entry["headers"] as? [String: String] ?? [:]
+
+                // Composio-installed servers keep no secret in the file; the key
+                // is injected from the Keychain here so it never touches disk.
+                if entry["authFromKeychain"] as? String == "composio",
+                   let composioKey = ComposioKeychainStore.apiKey() {
+                    headers["x-api-key"] = composioKey
+                }
+
                 return MCPServerConfiguration(
                     name: name,
                     url: url,
-                    headers: entry["headers"] as? [String: String] ?? [:],
+                    headers: headers,
                     isEnabled: isEnabled,
                     allowedToolNames: allowedToolNames
                 )
