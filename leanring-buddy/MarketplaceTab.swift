@@ -283,6 +283,24 @@ struct MarketplaceTab: View {
                 .disabled(composioKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                 .opacity(composioKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
             }
+            if composio.hasAPIKey {
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await composio.connect() }
+                    } label: {
+                        Text("Connect saved key")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(DS.Colors.accentText)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+
+                    Text("— a key is already saved; connect it without re-entering.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                }
+            }
+
             Text("The key is saved to your login Keychain, never to the config file.")
                 .font(.system(size: 10))
                 .foregroundStyle(DS.Colors.textTertiary)

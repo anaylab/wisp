@@ -36,7 +36,12 @@ final class ComposioAccountStore: ObservableObject {
     static let serverId = "composio-connect"
 
     private init() {
-        state = ComposioKeychainStore.hasAPIKey() ? .ready : .notConfigured
+        // Ready only when the key is present AND the server is actually
+        // installed. A saved key with no installed server still needs a
+        // connect, so it stays .notConfigured (which offers the connect action).
+        state = (ComposioKeychainStore.hasAPIKey()
+                 && InstalledMCPServerStore.shared.isInstalled(catalogId: Self.serverId))
+            ? .ready : .notConfigured
     }
 
     var hasAPIKey: Bool { ComposioKeychainStore.hasAPIKey() }
@@ -45,13 +50,17 @@ final class ComposioAccountStore: ObservableObject {
         InstalledMCPServerStore.shared.isInstalled(catalogId: Self.serverId)
     }
 
-    /// Saves the key, validates it against the connect server, and installs the
-    /// universal server on success.
-    func connect(apiKey: String) async {
-        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+    /// Saves the key (when a new one is provided), validates it against the
+    /// connect server, and installs the universal server on success. Passing no
+    /// key reuses the one already in the Keychain — so a saved-but-not-installed
+    /// key can be connected without retyping.
+    func connect(apiKey: String? = nil) async {
+        if let apiKey {
+            let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            ComposioKeychainStore.save(trimmed)
+        }
 
-        ComposioKeychainStore.save(trimmed)
         state = .validating
         lastErrorMessage = nil
 
