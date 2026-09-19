@@ -2,8 +2,7 @@
 //  MCPClient.swift
 //  leanring-buddy
 //
-//  A Model Context Protocol client, speaking JSON-RPC 2.0 over a child
-//  process's stdin and stdout.
+//  A Model Context Protocol client, speaking JSON-RPC 2.0 to one server.
 //
 //  Only four calls are needed to expose a server's tools — initialize, the
 //  initialized notification, tools/list and tools/call — which is little
@@ -12,18 +11,12 @@
 //  has neither, for a saving of a few hundred lines. The type below is shaped
 //  like that SDK's client so swapping later stays mechanical.
 //
-//  Two details cause most of the trouble in practice, and both are handled
-//  here rather than left for the user to discover:
-//
-//  * A GUI app launched at login inherits only /usr/bin:/bin:/usr/sbin:/sbin.
-//    Servers are usually started with npx or uvx, which live in Homebrew's
-//    directories, so they simply aren't found — while working perfectly when
-//    the user tries the same command in a terminal. The login shell's PATH is
-//    therefore resolved once and handed to every child.
-//
-//  * MCP servers report their problems on stderr, not over the protocol. A
-//    server that fails to start says why there and nowhere else, so stderr is
-//    captured and kept instead of discarded.
+//  How the bytes actually travel — a child process's stdin/stdout, or a
+//  Streamable HTTP connection to a remote server — lives behind `MCPTransport`
+//  (see MCPTransport.swift, MCPStdioTransport.swift). Everything in this file
+//  is transport-agnostic: id issuing, the pending-request table, timeouts, and
+//  the MCP handshake. That split is what lets Wisp reach remote MCP servers
+//  without duplicating any of this machinery.
 //
 
 import Foundation
@@ -82,64 +75,14 @@ enum MCPClientError: LocalizedError {
     }
 }
 
-// MARK: - Environment
-
-enum LoginShellEnvironment {
-    /// PATH as the user's login shell defines it.
-    ///
-    /// Resolved once and cached: it requires spawning a shell, and it does not
-    /// change while the app runs.
-    static let resolvedPath: String = {
-        let fallback = "/usr/bin:/bin:/usr/sbin:/sbin"
-
-        let shellPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shellPath)
-        // Interactive + login so the user's profile is actually sourced, which
-        // is where Homebrew and version managers add themselves.
-        process.arguments = ["-ilc", "printf '%s' \"$PATH\""]
-
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return fallback
-        }
-
-        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        let path = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return path.isEmpty ? fallback : path
-    }()
-
-    /// Finds an executable, accepting either a bare name or an absolute path.
-    static func locateExecutable(named command: String) -> String? {
-        if command.hasPrefix("/") {
-            return FileManager.default.isExecutableFile(atPath: command) ? command : nil
-        }
-
-        for directory in resolvedPath.split(separator: ":") {
-            let candidate = "\(directory)/\(command)"
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
-    }
-}
-
 // MARK: - Connection
 
 /// One connected MCP server.
 ///
-/// An actor because a JSON-RPC connection is a single stream shared by many
-/// in-flight requests: ids must be issued without collision and replies routed
-/// back to the right caller.
+/// An actor because a JSON-RPC connection is a single logical stream shared by
+/// many in-flight requests: ids must be issued without collision and replies
+/// routed back to the right caller. The underlying byte transport is chosen at
+/// construction and hidden behind `MCPTransport`.
 actor MCPServerConnection {
     struct DiscoveredTool: Sendable {
         let name: String
@@ -148,17 +91,12 @@ actor MCPServerConnection {
     }
 
     let configuration: MCPServerConfiguration
+    private let transport: MCPTransport
 
-    private var process: Process?
-    private var standardInput: FileHandle?
     private var readingTask: Task<Void, Never>?
 
     private var nextRequestID = 1
     private var pendingRequests: [Int: CheckedContinuation<JSONValue, Error>] = [:]
-
-    /// Recent stderr, kept because it's the only place startup failures appear.
-    private var standardErrorLines: [String] = []
-    private static let retainedErrorLineCount = 60
 
     private(set) var discoveredTools: [DiscoveredTool] = []
     private(set) var isConnected = false
@@ -167,51 +105,48 @@ actor MCPServerConnection {
 
     init(configuration: MCPServerConfiguration) {
         self.configuration = configuration
+        self.transport = Self.makeTransport(for: configuration)
     }
 
-    var recentErrorOutput: [String] { standardErrorLines }
+    /// Constructs a connection over a caller-supplied transport. Used by tests
+    /// and by future remote transports; the convenience initializer builds the
+    /// transport from the configuration.
+    init(configuration: MCPServerConfiguration, transport: MCPTransport) {
+        self.configuration = configuration
+        self.transport = transport
+    }
+
+    /// Chooses the transport for a configuration.
+    ///
+    /// Phase 0 is stdio only; the remote (Streamable HTTP) branch is added when
+    /// the configuration gains a transport/url field.
+    private static func makeTransport(for configuration: MCPServerConfiguration) -> MCPTransport {
+        StdioMCPTransport(
+            command: configuration.command,
+            arguments: configuration.arguments,
+            environment: configuration.environment
+        )
+    }
+
+    /// Recent diagnostic output from the transport (a stdio server's stderr).
+    /// It's the only place startup failures appear, so the dashboard reads it
+    /// when a connection fails.
+    var recentErrorOutput: [String] {
+        get async { await transport.recentDiagnostics() }
+    }
 
     // MARK: Lifecycle
 
     func connect() async throws {
-        guard let executablePath = LoginShellEnvironment.locateExecutable(named: configuration.command) else {
-            throw MCPClientError.executableNotFound(
-                command: configuration.command,
-                searchedPath: LoginShellEnvironment.resolvedPath
-            )
-        }
+        try await transport.start()
 
-        let childProcess = Process()
-        childProcess.executableURL = URL(fileURLWithPath: executablePath)
-        childProcess.arguments = configuration.arguments
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = LoginShellEnvironment.resolvedPath
-        for (key, value) in configuration.environment {
-            environment[key] = value
-        }
-        childProcess.environment = environment
-
-        let inputPipe = Pipe(), outputPipe = Pipe(), errorPipe = Pipe()
-        childProcess.standardInput = inputPipe
-        childProcess.standardOutput = outputPipe
-        childProcess.standardError = errorPipe
-
-        do {
-            try childProcess.run()
-        } catch {
-            throw MCPClientError.processFailedToStart(error.localizedDescription)
-        }
-
-        process = childProcess
-        standardInput = inputPipe.fileHandleForWriting
-
-        startReadingResponses(from: outputPipe)
-        startCapturingErrors(from: errorPipe)
+        // Consume the transport's message stream before any request is sent, so
+        // no reply is missed.
+        startReadingLoop()
 
         // MCP's handshake: declare the protocol version and this client, then
         // confirm with a notification before making any request.
-        let initializeResult = try await sendRequest(
+        _ = try await sendRequest(
             method: "initialize",
             parameters: .object([
                 "protocolVersion": .string("2024-11-05"),
@@ -222,15 +157,16 @@ actor MCPServerConnection {
                 ])
             ])
         )
-        _ = initializeResult
 
-        sendNotification(method: "notifications/initialized", parameters: .object([:]))
+        // Awaited so it is written before tools/list — some servers require the
+        // initialized notification to arrive first.
+        await sendNotification(method: "notifications/initialized", parameters: .object([:]))
         isConnected = true
 
         try await refreshTools()
     }
 
-    func disconnect() {
+    func disconnect() async {
         readingTask?.cancel()
         readingTask = nil
 
@@ -240,11 +176,7 @@ actor MCPServerConnection {
         }
         pendingRequests.removeAll()
 
-        try? standardInput?.close()
-        standardInput = nil
-
-        process?.terminate()
-        process = nil
+        await transport.close()
         isConnected = false
     }
 
@@ -317,8 +249,6 @@ actor MCPServerConnection {
     // MARK: JSON-RPC
 
     private func sendRequest(method: String, parameters: JSONValue) async throws -> JSONValue {
-        guard let standardInput else { throw MCPClientError.notConnected }
-
         let requestID = nextRequestID
         nextRequestID += 1
 
@@ -328,27 +258,28 @@ actor MCPServerConnection {
             "method": .string(method),
             "params": parameters
         ])
+        let messageData = try JSONSerialization.data(withJSONObject: payload.untypedValue)
 
-        let responseTask = Task { () -> JSONValue in
-            try await withCheckedThrowingContinuation { continuation in
-                pendingRequests[requestID] = continuation
+        // A server that never answers must not hold a conversation open.
+        let timeoutTask = Task { [weak self] in
+            try await Task.sleep(nanoseconds: UInt64(Self.requestTimeoutSeconds * 1_000_000_000))
+            await self?.failPendingRequest(requestID, with: MCPClientError.timedOut(method: method))
+        }
+        defer { timeoutTask.cancel() }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            // Register before sending so the reply can never arrive before the
+            // caller is waiting for it.
+            pendingRequests[requestID] = continuation
+            Task { [weak self] in
+                guard let self else { return }
                 do {
-                    try writeMessage(payload, to: standardInput)
+                    try await self.transport.send(messageData)
                 } catch {
-                    pendingRequests.removeValue(forKey: requestID)
-                    continuation.resume(throwing: error)
+                    await self.failPendingRequest(requestID, with: error)
                 }
             }
         }
-
-        // A server that never answers must not hold a conversation open.
-        let timeoutTask = Task {
-            try await Task.sleep(nanoseconds: UInt64(Self.requestTimeoutSeconds * 1_000_000_000))
-            await self.failPendingRequest(requestID, with: MCPClientError.timedOut(method: method))
-        }
-
-        defer { timeoutTask.cancel() }
-        return try await responseTask.value
     }
 
     private func failPendingRequest(_ requestID: Int, with error: Error) {
@@ -356,43 +287,31 @@ actor MCPServerConnection {
         continuation.resume(throwing: error)
     }
 
-    private func sendNotification(method: String, parameters: JSONValue) {
-        guard let standardInput else { return }
+    private func sendNotification(method: String, parameters: JSONValue) async {
         let payload: JSONValue = .object([
             "jsonrpc": .string("2.0"),
             "method": .string(method),
             "params": parameters
         ])
-        try? writeMessage(payload, to: standardInput)
+        guard let data = try? JSONSerialization.data(withJSONObject: payload.untypedValue) else { return }
+        try? await transport.send(data)
     }
 
-    private func writeMessage(_ message: JSONValue, to handle: FileHandle) throws {
-        var data = try JSONSerialization.data(withJSONObject: message.untypedValue)
-        // Newline-delimited JSON: one message per line.
-        data.append(0x0A)
-        try handle.write(contentsOf: data)
-    }
-
-    private func startReadingResponses(from pipe: Pipe) {
+    private func startReadingLoop() {
         readingTask = Task { [weak self] in
-            do {
-                for try await line in pipe.fileHandleForReading.bytes.lines {
-                    guard !Task.isCancelled else { return }
-                    await self?.handleIncomingLine(line)
-                }
-            } catch {
-                // The stream ends when the server exits. Anything still
-                // waiting is failed rather than left suspended.
-                await self?.handleStreamEnded()
-                return
+            guard let self else { return }
+            let stream = await self.transport.incomingMessages()
+            for await line in stream {
+                if Task.isCancelled { break }
+                await self.handleIncomingLine(line)
             }
-
-            // Clean end of stream — same handling.
-            await self?.handleStreamEnded()
+            // The stream finishes when the transport closes, for any reason.
+            // Anything still waiting is failed rather than left suspended.
+            await self.handleStreamEnded()
         }
     }
 
-    /// Called when the server's output stream closes, for any reason.
+    /// Called when the transport's message stream closes, for any reason.
     private func handleStreamEnded() {
         guard !pendingRequests.isEmpty else { return }
         for (_, continuation) in pendingRequests {
@@ -425,23 +344,5 @@ actor MCPServerConnection {
         }
 
         continuation.resume(returning: messageObject["result"] ?? .null)
-    }
-
-    private func startCapturingErrors(from pipe: Pipe) {
-        Task { [weak self] in
-            // Best effort: losing stderr costs diagnostics, not correctness.
-            try? await {
-                for try await line in pipe.fileHandleForReading.bytes.lines {
-                    await self?.appendErrorLine(line)
-                }
-            }()
-        }
-    }
-
-    private func appendErrorLine(_ line: String) {
-        standardErrorLines.append(line)
-        if standardErrorLines.count > Self.retainedErrorLineCount {
-            standardErrorLines.removeFirst(standardErrorLines.count - Self.retainedErrorLineCount)
-        }
     }
 }

@@ -112,8 +112,13 @@ cloud dependency to the local path, without asking.
   — short-circuits the confirmation prompt, reset every launch), and **permission** rows with
   deep-links to System Settings. Note: session auto-approve is currently blanket — it approves
   every tool while on, including MCP writes; a per-tool destructive floor is a follow-up.
-- **MCP**: hand-rolled JSON-RPC 2.0 over stdio subprocess. Config at `~/.wisp/mcp.json`
-  in Claude Desktop's format.
+- **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
+  format. The byte transport is abstracted behind `MCPTransport`
+  (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
+  while `StdioMCPTransport` (`MCPStdioTransport.swift`) carries the child-process/stdin/stdout
+  path. This split is the foundation for the in-flight **MCP marketplace** (remote Streamable
+  HTTP transport + Composio managed-OAuth toolkits + a curated registry) — see
+  `docs/mcp-marketplace-architecture.md`. Runtime is still stdio-only until Phase 1 lands.
 - **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
   `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
   prompt; the full body is loaded on demand via the read-only `load_skill` tool —
@@ -237,7 +242,9 @@ Grouped by what they do. Line counts are approximate.
 | `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
 | `AgentToolRegistry.swift` | ~490 | Built-in read-only tools. `requiresConfirmation` defaults to true for unknown names. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
-| `MCPClient.swift` | ~447 | JSON-RPC 2.0 over stdio subprocess, login-shell PATH resolution, stderr ring buffer. |
+| `MCPClient.swift` | ~330 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
+| `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
+| `MCPStdioTransport.swift` | ~230 | Stdio transport: child process over stdin/stdout as NDJSON, login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
 | `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
