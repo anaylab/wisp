@@ -46,11 +46,6 @@ struct MarketplaceTab: View {
         }
         .background(DS.Colors.background)
         .task { await loadCatalog() }
-        .task {
-            if composio.hasAPIKey && composio.toolkits.isEmpty {
-                await composio.refreshToolkits()
-            }
-        }
         .sheet(item: $entryBeingInstalled) { entry in
             InstallSheet(entry: entry) { values in
                 install(entry, values: values)
@@ -211,9 +206,9 @@ struct MarketplaceTab: View {
 
                 switch composio.state {
                 case .notConfigured:
-                    composioKeyEntry(prompt: "Paste your Composio API key to browse toolkits.")
+                    composioKeyEntry(prompt: "Paste your Composio API key (sent as x-consumer-api-key) to connect the universal server.")
                 case .validating:
-                    Text("Checking your key…")
+                    Text("Connecting…")
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textSecondary)
                 case .failed(let message):
@@ -223,7 +218,7 @@ struct MarketplaceTab: View {
                         .fixedSize(horizontal: false, vertical: true)
                     composioKeyEntry(prompt: "Re-enter your Composio API key.")
                 case .ready:
-                    composioToolkitList
+                    composioConnectedView
                 }
 
                 if let error = composio.lastErrorMessage {
@@ -274,7 +269,7 @@ struct MarketplaceTab: View {
                 Button {
                     let key = composioKeyDraft
                     composioKeyDraft = ""
-                    Task { await composio.saveAPIKey(key) }
+                    Task { await composio.connect(apiKey: key) }
                 } label: {
                     Text("Connect")
                         .font(.system(size: 11, weight: .semibold))
@@ -294,15 +289,20 @@ struct MarketplaceTab: View {
         }
     }
 
-    private var composioToolkitList: some View {
+    private var composioConnectedView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("\(composio.toolkits.count) toolkits available")
-                    .font(.system(size: 10))
-                    .foregroundStyle(DS.Colors.textTertiary)
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DS.Colors.success)
+                Text(composio.isServerInstalled
+                     ? "Connected — the universal server is installed."
+                     : "Key saved.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DS.Colors.textPrimary)
                 Spacer()
                 Button {
-                    composio.clearAPIKey()
+                    composio.disconnect()
                 } label: {
                     Text("Disconnect")
                         .font(.system(size: 10, weight: .medium))
@@ -312,42 +312,11 @@ struct MarketplaceTab: View {
                 .pointerCursor()
             }
 
-            if filteredComposioToolkits.isEmpty {
-                Text("No toolkits match.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DS.Colors.textTertiary)
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(filteredComposioToolkits) { toolkit in
-                        ComposioToolkitRow(
-                            toolkit: toolkit,
-                            isInstalled: composio.isInstalled(toolkit: toolkit),
-                            isInstalling: composio.installingToolkitSlugs.contains(toolkit.slug),
-                            onAdd: { Task { await composio.installToolkit(toolkit) } }
-                        )
-                    }
-                }
-                if cappedComposioCount < searchedComposioToolkits.count {
-                    Text("Showing \(cappedComposioCount) of \(searchedComposioToolkits.count) — search to narrow.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(DS.Colors.textTertiary)
-                }
-            }
+            Text("Its tools (search, execute, manage-connections) appear under Installed above and count against the tool budget. The model finds any of Composio's 500+ apps through them; Composio prompts you to sign in to an app the first time it's used.")
+                .font(.system(size: 10))
+                .foregroundStyle(DS.Colors.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    private var searchedComposioToolkits: [ComposioToolkit] {
-        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return composio.toolkits }
-        return composio.toolkits.filter {
-            $0.name.lowercased().contains(query) || $0.slug.lowercased().contains(query)
-        }
-    }
-
-    private var cappedComposioCount: Int { min(searchedComposioToolkits.count, 30) }
-
-    private var filteredComposioToolkits: [ComposioToolkit] {
-        Array(searchedComposioToolkits.prefix(cappedComposioCount))
     }
 
     // MARK: - Derived
@@ -459,69 +428,6 @@ private struct CatalogEntryRow: View {
             } else {
                 Button(action: onInstall) {
                     Text("Install")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(DS.Colors.background)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(DS.Colors.accent))
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-            }
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                .fill(DS.Colors.surface2)
-        )
-    }
-}
-
-// MARK: - Composio toolkit row
-
-private struct ComposioToolkitRow: View {
-    let toolkit: ComposioToolkit
-    let isInstalled: Bool
-    let isInstalling: Bool
-    let onAdd: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "cloud.fill")
-                .font(.system(size: 13))
-                .foregroundStyle(DS.Colors.accentText)
-                .frame(width: 26, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                        .fill(DS.Colors.accent.opacity(0.12))
-                )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(toolkit.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(DS.Colors.textPrimary)
-                if let description = toolkit.description, !description.isEmpty {
-                    Text(description)
-                        .font(.system(size: 10))
-                        .foregroundStyle(DS.Colors.textTertiary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            if isInstalling {
-                ProgressView()
-                    .controlSize(.small)
-            } else if isInstalled {
-                Label("Added", systemImage: "checkmark")
-                    .labelStyle(.titleAndIcon)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(DS.Colors.success)
-            } else {
-                Button(action: onAdd) {
-                    Text("Add")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(DS.Colors.background)
                         .padding(.horizontal, 12)

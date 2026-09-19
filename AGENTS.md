@@ -130,7 +130,10 @@ cloud dependency to the local path, without asking.
   (opt-in, off-machine, labelled) lets a user paste a Composio API key (`ComposioKeychainStore`),
   browse toolkits (`ComposioClient`/`ComposioAccountStore`), and install one as a managed remote
   MCP server; the key is injected into the transport from the Keychain at connect time, never
-  written to `mcp.json`.
+  written to `mcp.json`. Composio here is the **connect universal server**
+  (`https://connect.composio.dev/mcp`, auth `x-consumer-api-key`): connecting installs one
+  remote server whose meta-tools (`COMPOSIO_SEARCH_TOOLS`/`MULTI_EXECUTE_TOOL`/
+  `MANAGE_CONNECTIONS`, …) reach 500+ apps and count against the same tool budget.
 - **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
   `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
   prompt; the full body is loaded on demand via the read-only `load_skill` tool —
@@ -263,8 +266,8 @@ Grouped by what they do. Line counts are approximate.
 | `curated-mcp-registry.json` | ~180 | Bundled curated MCP registry (resource): 8 official stdio servers + the hosted GitHub remote server. |
 | `InstalledMCPServerStore.swift` | ~270 | Source of truth over `~/.wisp/mcp.json` (preserves unknown keys). Install/uninstall/enable/allow-list + `installRemoteServer` (Composio); reloads MCPManager on every change. |
 | `ComposioKeychainStore.swift` | ~75 | The Composio `x-api-key` in the login Keychain (mirrors `ProviderKeychainStore`). Never in the config file or logs. |
-| `ComposioClient.swift` | ~210 | Composio v3 API client: list toolkits, create a managed MCP server, mint a user-scoped URL. `x-api-key` auth; base `https://backend.composio.dev`. |
-| `ComposioAccountStore.swift` | ~140 | Composio marketplace state: key validation, a stable user id, and the install flow (provision managed server → install as a remote MCP server). Off-machine/opt-in. |
+| `ComposioClient.swift` | ~110 | Validates the Composio **connect** key by an MCP `initialize` against `https://connect.composio.dev/mcp` (auth header `x-consumer-api-key`). No provisioning — the connect server is a fixed universal endpoint. |
+| `ComposioAccountStore.swift` | ~110 | Composio marketplace state: `connect(apiKey:)` validates the key then installs one remote server (`composio-connect`) over the Phase 1 transport; `disconnect()` removes it. Off-machine/opt-in. |
 | `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |

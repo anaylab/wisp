@@ -240,9 +240,10 @@ final class MCPManager: ObservableObject {
 
                 // Composio-installed servers keep no secret in the file; the key
                 // is injected from the Keychain here so it never touches disk.
+                // The connect product authenticates with x-consumer-api-key.
                 if entry["authFromKeychain"] as? String == "composio",
                    let composioKey = ComposioKeychainStore.apiKey() {
-                    headers["x-api-key"] = composioKey
+                    headers[ComposioClient.authHeaderName] = composioKey
                 }
 
                 return MCPServerConfiguration(

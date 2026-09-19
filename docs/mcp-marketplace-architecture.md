@@ -1,10 +1,9 @@
 # Wisp MCP Marketplace — Architecture
 
-Status: **Phase 3 code complete** (Composio: key in Keychain, client, toolkit catalog,
-managed-server install — landed & building). **Live-unverified**: needs a valid Composio API
-key to confirm the toolkit-list decode and the managed-OAuth handshake (the test key returned
-401). Next: Phase 4 (tool router) or Composio live-verification. See [Phasing](#7-phasing) and
-[Change log](#10-change-log).
+Status: **Phase 3 complete, pivoted to Composio's connect product** (verified against the live
+connect server: `x-consumer-api-key` → `https://connect.composio.dev/mcp` returns the universal
+meta-tools). Composio now installs as one remote MCP server over the Phase 1 transport. Next:
+Phase 4 (tool router). See [Phasing](#7-phasing) and [Change log](#10-change-log).
 
 A browse-install-connect marketplace for MCP servers inside Wisp's dashboard, spanning a
 curated public MCP registry **and** Composio's hosted, managed-OAuth toolkits — built on top
@@ -206,7 +205,17 @@ protocol MCPTransport: Sendable {
 
 ## 10. Change log
 
-- **Phase 3 (code done, verified building; live-unverified):** Added `ComposioKeychainStore`
+- **Phase 3b (pivot, live-verified endpoint):** The test account uses Composio's **connect**
+  universal server, not the platform managed-server API. Discovery: the key authenticates via
+  the `x-consumer-api-key` header against `https://connect.composio.dev/mcp` (an MCP Streamable
+  HTTP server) — confirmed live: `initialize` → 200 + session id, `tools/list` → 11 meta-tools
+  (`COMPOSIO_SEARCH_TOOLS`, `COMPOSIO_MULTI_EXECUTE_TOOL`, `COMPOSIO_MANAGE_CONNECTIONS`, …).
+  Rewrote `ComposioClient` to validate the key against that endpoint (no provisioning);
+  `ComposioAccountStore.connect(apiKey:)` validates then installs one remote server
+  (`composio-connect`) pointing at the endpoint; `MCPManager` injects the key as
+  `x-consumer-api-key` from the Keychain. The marketplace's Composio section became a simple
+  connect/disconnect. The connect server's tools flow through the same budget as any server.
+- **Phase 3 (code done, verified building; superseded by 3b):** Added `ComposioKeychainStore`
   (`x-api-key` in the login Keychain), `ComposioClient` (v3 API: `listToolkits`,
   `createManagedServer`, `generateUserURL`, `provisionManagedServer`), and `ComposioAccountStore`
   (key validation, stable user id, install flow). `InstalledMCPServerStore.installRemoteServer`
