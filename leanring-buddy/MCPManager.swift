@@ -185,17 +185,36 @@ final class MCPManager: ObservableObject {
         }
 
         return servers.compactMap { name, value -> MCPServerConfiguration? in
-            guard let entry = value as? [String: Any],
-                  let command = entry["command"] as? String else { return nil }
+            guard let entry = value as? [String: Any] else { return nil }
 
-            return MCPServerConfiguration(
-                name: name,
-                command: command,
-                arguments: entry["args"] as? [String] ?? [],
-                environment: entry["env"] as? [String: String] ?? [:],
-                isEnabled: entry["enabled"] as? Bool ?? true,
-                allowedToolNames: Set(entry["allowedTools"] as? [String] ?? [])
-            )
+            let isEnabled = entry["enabled"] as? Bool ?? true
+            let allowedToolNames = Set(entry["allowedTools"] as? [String] ?? [])
+
+            // A "url" entry (Streamable HTTP) is a remote server; anything with
+            // a "command" is a local stdio server, exactly as before.
+            if let urlString = entry["url"] as? String, let url = URL(string: urlString) {
+                return MCPServerConfiguration(
+                    name: name,
+                    url: url,
+                    headers: entry["headers"] as? [String: String] ?? [:],
+                    isEnabled: isEnabled,
+                    allowedToolNames: allowedToolNames
+                )
+            }
+
+            if let command = entry["command"] as? String {
+                return MCPServerConfiguration(
+                    name: name,
+                    command: command,
+                    arguments: entry["args"] as? [String] ?? [],
+                    environment: entry["env"] as? [String: String] ?? [:],
+                    isEnabled: isEnabled,
+                    allowedToolNames: allowedToolNames
+                )
+            }
+
+            print("⚠️ MCP: \"\(name)\" has neither a \"command\" nor a \"url\" — skipping")
+            return nil
         }
         .sorted { $0.name < $1.name }
     }
@@ -209,11 +228,16 @@ final class MCPManager: ObservableObject {
 
         let example = """
         {
-          "_comment": "MCP servers for Wisp. Same format as Claude Desktop, so an existing config can be pasted in. Set enabled to true to switch one on.",
+          "_comment": "MCP servers for Wisp. Same format as Claude Desktop, so an existing config can be pasted in. Set enabled to true to switch one on. A server can be a local command (stdio) or a remote \\"url\\" (Streamable HTTP), with optional \\"headers\\" for auth.",
           "mcpServers": {
             "filesystem": {
               "command": "npx",
               "args": ["-y", "@modelcontextprotocol/server-filesystem", "\(FileManager.default.homeDirectoryForCurrentUser.path)/Documents"],
+              "enabled": false
+            },
+            "example-remote": {
+              "url": "https://example.com/mcp",
+              "headers": { "Authorization": "Bearer YOUR_TOKEN" },
               "enabled": false
             }
           }

@@ -1,7 +1,8 @@
 # Wisp MCP Marketplace — Architecture
 
-Status: **Phase 0 complete** (transport abstraction landed & building). Next: Phase 1
-(remote Streamable HTTP transport). See [Phasing](#7-phasing) and [Change log](#10-change-log).
+Status: **Phase 1 complete** (remote Streamable HTTP transport + `mcp.json` superset landed &
+building). Next: Phase 2 (marketplace UI + curated registry). See [Phasing](#7-phasing) and
+[Change log](#10-change-log).
 
 A browse-install-connect marketplace for MCP servers inside Wisp's dashboard, spanning a
 curated public MCP registry **and** Composio's hosted, managed-OAuth toolkits — built on top
@@ -158,9 +159,11 @@ Each phase is independently shippable and verifiable.
 
 - **Phase 0 — Transport refactor.** Extract `MCPTransport`; move stdio out. No new features;
   existing servers behave identically. *Verify: existing `~/.wisp/mcp.json` still connects.*
-- **Phase 1 — Remote transport + custom remote install.** `StreamableHTTPMCPTransport` +
-  persistence superset + manual "Add remote MCP (URL + header)". *Verify against a public
-  remote MCP server before Composio.*
+- **Phase 1 — Remote transport + custom remote install. (done, building)**
+  `MCPStreamableHTTPTransport` + `mcp.json` superset (`url`/`headers`) + starter-config
+  example. Manual install path = adding a `url` entry to `~/.wisp/mcp.json`; the dashboard
+  form lands with the Marketplace UI in Phase 2. *Verify against a public remote MCP server
+  before Composio.*
 - **Phase 2 — Marketplace UI + curated registry + budget meter.** Browse/install stdio &
   remote; installed ≠ exposed.
 - **Phase 3 — Composio.** API key, toolkit catalog, managed-OAuth connect flow, user-scoped
@@ -192,6 +195,13 @@ protocol MCPTransport: Sendable {
 
 ## 10. Change log
 
+- **Phase 1 (done, verified building):** Added `MCPStreamableHTTPTransport.swift` — remote MCP
+  over Streamable HTTP (one JSON-RPC message per POST; parses both `application/json` and
+  `text/event-stream` replies into the shared message stream; carries `Mcp-Session-Id`,
+  `MCP-Protocol-Version`, and per-server auth headers; 401/404 surfaced as diagnostics).
+  `MCPServerConfiguration` gained `transport`/`url`/`headers` with a remote initializer;
+  `makeTransport(for:)` branches on `url`; `MCPManager.loadConfigurations` parses `url`/`headers`
+  entries and the starter config shows a remote example. Existing stdio entries unchanged.
 - **Phase 0 (done, verified building):** Added `MCPTransport.swift` (protocol) and
   `MCPStdioTransport.swift` (`LoginShellEnvironment` + the child-process/stdout/stderr code
   moved out of `MCPClient.swift`). `MCPServerConnection` now owns only JSON-RPC framing +

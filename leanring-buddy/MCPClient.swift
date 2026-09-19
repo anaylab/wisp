@@ -23,16 +23,30 @@ import Foundation
 
 // MARK: - Configuration
 
+/// How a server's bytes travel. Stdio spawns a local child process; Streamable
+/// HTTP reaches a hosted server over the network.
+enum MCPTransportKind: String, Sendable {
+    case stdio
+    case streamableHttp
+}
+
 struct MCPServerConfiguration: Sendable {
     let name: String
+    let transport: MCPTransportKind
     let command: String
     let arguments: [String]
     let environment: [String: String]
+    /// Endpoint for a remote (Streamable HTTP) server. Nil for stdio.
+    let url: URL?
+    /// Extra HTTP headers for a remote server — for instance an `x-api-key` or
+    /// `Authorization`. Ignored for stdio.
+    let headers: [String: String]
     let isEnabled: Bool
     /// When non-empty, only these tools are offered to the model. Useful
     /// because a small model's tool choice degrades quickly as the list grows.
     let allowedToolNames: Set<String>
 
+    /// A local stdio server spawned from a command.
     init(
         name: String,
         command: String,
@@ -42,9 +56,31 @@ struct MCPServerConfiguration: Sendable {
         allowedToolNames: Set<String> = []
     ) {
         self.name = name
+        self.transport = .stdio
         self.command = command
         self.arguments = arguments
         self.environment = environment
+        self.url = nil
+        self.headers = [:]
+        self.isEnabled = isEnabled
+        self.allowedToolNames = allowedToolNames
+    }
+
+    /// A remote server reached over Streamable HTTP.
+    init(
+        name: String,
+        url: URL,
+        headers: [String: String] = [:],
+        isEnabled: Bool = true,
+        allowedToolNames: Set<String> = []
+    ) {
+        self.name = name
+        self.transport = .streamableHttp
+        self.command = ""
+        self.arguments = []
+        self.environment = [:]
+        self.url = url
+        self.headers = headers
         self.isEnabled = isEnabled
         self.allowedToolNames = allowedToolNames
     }
@@ -116,12 +152,14 @@ actor MCPServerConnection {
         self.transport = transport
     }
 
-    /// Chooses the transport for a configuration.
-    ///
-    /// Phase 0 is stdio only; the remote (Streamable HTTP) branch is added when
-    /// the configuration gains a transport/url field.
+    /// Chooses the transport for a configuration: a remote Streamable HTTP
+    /// transport when the configuration carries a URL, a local stdio transport
+    /// otherwise.
     private static func makeTransport(for configuration: MCPServerConfiguration) -> MCPTransport {
-        StdioMCPTransport(
+        if configuration.transport == .streamableHttp, let url = configuration.url {
+            return MCPStreamableHTTPTransport(url: url, headers: configuration.headers)
+        }
+        return StdioMCPTransport(
             command: configuration.command,
             arguments: configuration.arguments,
             environment: configuration.environment

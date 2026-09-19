@@ -118,7 +118,9 @@ cloud dependency to the local path, without asking.
   while `StdioMCPTransport` (`MCPStdioTransport.swift`) carries the child-process/stdin/stdout
   path. This split is the foundation for the in-flight **MCP marketplace** (remote Streamable
   HTTP transport + Composio managed-OAuth toolkits + a curated registry) — see
-  `docs/mcp-marketplace-architecture.md`. Runtime is still stdio-only until Phase 1 lands.
+  `docs/mcp-marketplace-architecture.md`. Remote servers now work: a `~/.wisp/mcp.json` entry
+  with a `url` (and optional `headers` for auth) connects over `MCPStreamableHTTPTransport`
+  (`MCPStreamableHTTPTransport.swift`); an entry with a `command` is stdio as before.
 - **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
   `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
   prompt; the full body is loaded on demand via the read-only `load_skill` tool —
@@ -245,6 +247,7 @@ Grouped by what they do. Line counts are approximate.
 | `MCPClient.swift` | ~330 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
 | `MCPStdioTransport.swift` | ~230 | Stdio transport: child process over stdin/stdout as NDJSON, login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
+| `MCPStreamableHTTPTransport.swift` | ~230 | Remote transport: JSON-RPC over MCP Streamable HTTP (one POST per message; parses JSON + SSE replies; `Mcp-Session-Id`, auth headers). |
 | `MCPManager.swift` | ~258 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, caps exposed tools at 8. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
