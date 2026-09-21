@@ -42,6 +42,28 @@ final class GlanceCardParserTests: XCTestCase {
         XCTAssertEqual(result.spokenText, "")
     }
 
+    // MARK: - Places intent (data-sourced card)
+
+    func testPlacesIntentParsesQueryAndStripsTag() {
+        let reply = #"Here are some spots. [CARD:{"kind":"places","query":"coffee"}]"#
+
+        let result = GlanceCardParser.parse(reply)
+
+        XCTAssertEqual(result.spokenText, "Here are some spots.")
+        XCTAssertEqual(result.request, .places(PlacesCardRequest(query: "coffee")))
+    }
+
+    func testPlacesIntentWithoutQueryIsDropped() {
+        // A places card needs something to search for; without a query there is
+        // nothing Wisp can look up, so the request is dropped.
+        let reply = #"[CARD:{"kind":"places"}]"#
+
+        let result = GlanceCardParser.parse(reply)
+
+        XCTAssertNil(result.request)
+        XCTAssertEqual(result.spokenText, "")
+    }
+
     // MARK: - A well-formed generic card
 
     func testGenericCardParsesBlocksAndStripsTagFromSpokenText() {

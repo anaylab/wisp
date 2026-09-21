@@ -135,6 +135,15 @@ struct WeatherCardRequest: Equatable {
     let locationName: String
 }
 
+/// What the model asked for when it requests a places-nearby card. It supplies
+/// only what the user is looking for — "coffee", "ramen", "pharmacy" — never a
+/// location or any results. Wisp resolves the user's current location on-device
+/// and searches Apple Maps itself (`PlacesDataProvider`), so the small model's
+/// job stays trivial and nothing it invents can become a wrong result.
+struct PlacesCardRequest: Equatable {
+    let query: String
+}
+
 /// What the model asked for when it requests a card from a user-configured
 /// source (`~/.wisp/sources.json`). It names which source; Wisp fetches that
 /// endpoint and maps the response into generic blocks. The model never sees the
@@ -157,6 +166,9 @@ enum GlanceCardRequest: Equatable {
     case calendar
     /// Show what is currently playing in Music or Spotify; read on this machine.
     case nowPlaying
+    /// Show places near the user matching a query; located on-device and
+    /// searched against Apple Maps by Wisp.
+    case places(PlacesCardRequest)
     /// Show a card from a user-configured source (an HTTPS endpoint), rendered
     /// as generic blocks from the fetched JSON.
     case source(SourceCardRequest)
@@ -175,6 +187,9 @@ enum ResolvedGlanceCard: Equatable {
     case weather(WeatherCardState)
     case calendar(CalendarCardState)
     case nowPlaying(NowPlayingCardState)
+    /// A places-nearby card. Its `query` is carried through the loading/failed
+    /// states so the card can label itself while it resolves.
+    case places(PlacesCardState)
     /// A user-configured source card. Its `sourceName` is carried through the
     /// loading/failed states so the card can label itself while it resolves.
     case source(SourceCardState)
@@ -210,6 +225,10 @@ enum GlanceCardParser {
 
     for what's playing right now (Music or Spotify), just ask — wisp reads it:
     [CARD:{"kind":"music"}]
+
+    for ANYTHING the user wants to find near them — restaurants, coffee, food, a bar, a pharmacy, a store, a gas station, or anywhere they say "near me", "nearby", "closest", or "around here" — you do NOT know the real places and must NEVER name one or invent an address. ALWAYS end your reply with this tag and let wisp find them; the query is just the type of place:
+    [CARD:{"kind":"places","query":"coffee"}]
+    keep your spoken words to a short lead-in like "here are some nearby", then this tag. (a places answer still appends [POINT:none].)
 
     for anything else, use blocks — at most three, each one of:
     - {"type":"header","title":"...","icon":"...","trailing":"..."} — a title line; icon and trailing are optional.
@@ -301,6 +320,13 @@ enum GlanceCardParser {
         // The model may name the now-playing kind a few natural ways.
         if kind == "music" || kind == "nowplaying" || kind == "now_playing" {
             return .nowPlaying
+        }
+
+        if kind == "places" {
+            guard let query = trimmedNonEmpty(decodedCard.query) else {
+                return nil
+            }
+            return .places(PlacesCardRequest(query: query))
         }
 
         if kind == "source" {
@@ -468,6 +494,8 @@ private struct DecodedCard: Decodable {
     let kind: String?
     /// The place a `weather` card is for.
     let location: String?
+    /// What a `places` card is looking for (e.g. "coffee", "ramen").
+    let query: String?
     /// The source a `source` card names (an entry in `~/.wisp/sources.json`).
     let name: String?
     let blocks: [DecodedBlock]?

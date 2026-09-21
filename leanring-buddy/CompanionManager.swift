@@ -1022,9 +1022,16 @@ final class CompanionManager: ObservableObject {
         // than restating the rule. The screen-relevance heuristic only gates
         // the local model, whose vision encoding is the costly part; a cloud
         // provider is sent the screenshot regardless.
-        PerfMetricsRecorder.shared.recordScreenshotDecision(
-            didAttach: !isSelectedModelProviderLocal || LocalOllamaAPI.promptLikelyRefersToScreen(transcript)
-        )
+        //
+        // This decision must gate the images actually sent below — not just the
+        // metric. A local vision model handed an irrelevant screenshot does not
+        // merely waste the ~6s encoding; it will answer about what is on screen
+        // instead of the question (e.g. a "coffee near me" turn reading whatever
+        // window happens to be open), so a world question like a places request
+        // only behaves when the screen is left out.
+        let shouldAttachScreenshot = !isSelectedModelProviderLocal
+            || LocalOllamaAPI.promptLikelyRefersToScreen(transcript)
+        PerfMetricsRecorder.shared.recordScreenshotDecision(didAttach: shouldAttachScreenshot)
 
         currentResponseTask = Task {
             // Stay in processing (spinner) state — no streaming text displayed
@@ -1049,10 +1056,16 @@ final class CompanionManager: ObservableObject {
                 // Build image labels with the actual screenshot pixel dimensions
                 // so Claude's coordinate space matches the image it sees. We
                 // scale from screenshot pixels to display points ourselves.
-                let labeledImages = screenCaptures.map { capture in
+                //
+                // Gated by the screen-relevance decision made above: when the
+                // question is not about the screen, no image is attached, so the
+                // model answers the question itself rather than describing
+                // whatever is on screen. Screens are still captured (cheaply,
+                // speculatively) so the choice stays here and nowhere else.
+                let labeledImages: [(data: Data, label: String)] = shouldAttachScreenshot ? screenCaptures.map { capture in
                     let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
                     return (data: capture.imageData, label: capture.label + dimensionInfo)
-                }
+                } : []
 
                 // Prior exchanges, projected down to what this request should
                 // carry: the questions and the answers, without the tool
@@ -1820,6 +1833,35 @@ final class CompanionManager: ObservableObject {
                 resolvedGlanceCard = .nowPlaying(.loaded(snapshot))
             } else {
                 resolvedGlanceCard = .nowPlaying(.nothingPlaying)
+            }
+
+        case let .places(placesRequest):
+            // Network-backed (MapKit's search reaches Apple's servers), so the
+            // gate is read here on the main actor and passed into the provider,
+            // mirroring the weather card. Location itself is gated separately by
+            // the provider's own permission request.
+            let isLiveCardDataEnabled = GlanceCardDataPreference.shared.isLiveCardDataEnabled
+            guard isLiveCardDataEnabled else {
+                resolvedGlanceCard = nil
+                return
+            }
+
+            resolvedGlanceCard = .places(.loading(query: placesRequest.query))
+            cardDataFetchTask = Task { [weak self] in
+                do {
+                    let snapshot = try await PlacesDataProvider.shared.snapshot(
+                        forQuery: placesRequest.query,
+                        isLiveCardDataEnabled: isLiveCardDataEnabled
+                    )
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .places(.loaded(snapshot))
+                } catch PlacesDataProvider.PlacesDataError.locationAccessDenied {
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .places(.accessDenied)
+                } catch {
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .places(.failed(query: placesRequest.query))
+                }
             }
 
         case let .source(sourceRequest):

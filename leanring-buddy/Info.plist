@@ -32,5 +32,7 @@
 	<string>Wisp reads your upcoming events on this Mac to show them in the notch. Your calendar is read on-device and never uploaded.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Wisp asks Music or Spotify what is currently playing so it can show it in the notch. It reads only the current track and controls nothing.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Wisp uses your location to find places near you — like coffee or restaurants — when you ask. Your location is used on this Mac to search Apple Maps and is never uploaded by Wisp.</string>
 </dict>
 </plist>

@@ -90,10 +90,14 @@ cloud dependency to the local path, without asking.
   `stats` blocks, tone `good`/`bad`/`neutral` → `DS.Colors`, 3-block cap, SF Symbol allowlist,
   network-free), `weather` (the model sends only a place name → Open-Meteo, no API key, Apple
   Weather layout), `calendar` (EventKit, on-device), `music`/now-playing (AppleScript to
-  Music/Spotify, on-device, best-effort), and `source` (user-configured HTTPS endpoints in
-  `~/.wisp/sources.json`, mapped to generic blocks). Network kinds are gated by
+  Music/Spotify, on-device, best-effort), `places` (the model sends only a query like
+  "coffee" → CoreLocation for the user's position + MapKit `MKLocalSearch`, no API key, a
+  Maps-style tappable results list that opens a place in Apple Maps), and `source`
+  (user-configured HTTPS endpoints in `~/.wisp/sources.json`, mapped to generic blocks).
+  Network kinds are gated by
   `GlanceCardDataPreference` (default on) and labelled "Live · source"; on-device kinds are
-  gated only by their macOS permission. Managed in the dashboard's **Sources tab**. Adding an
+  gated only by their macOS permission (`places` is both — network-gated *and* it requests
+  Location permission on first use). Managed in the dashboard's **Sources tab**. Adding an
   app = one data provider + one template.
 - **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor, downscaled to 896px
 - **Element Pointing**: the model embeds `[POINT:x,y:label:screenN]` tags; `CompanionManager`
@@ -322,6 +326,7 @@ Grouped by what they do. Line counts are approximate.
 | `WeatherSnapshot.swift` / `WeatherDataProvider.swift` / `WeatherCardView.swift` | ~330/~200/~260 | Weather kind: Open-Meteo fetch → snapshot → Apple-Weather-style card. |
 | `CalendarSnapshot.swift` / `CalendarDataProvider.swift` / `CalendarCardView.swift` | ~50/~110/~160 | Calendar kind: EventKit on-device read → next events card. Needs Calendar permission. |
 | `NowPlayingDataProvider.swift` / `NowPlayingCardView.swift` | ~150/~110 | Now-playing kind: AppleScript to Music/Spotify (best-effort, on-device). Needs Automation permission. |
+| `PlacesSnapshot.swift` / `PlacesDataProvider.swift` / `PlacesCardView.swift` | ~85/~230/~250 | `places` kind: CoreLocation one-shot (`WispLocationProvider`, in the provider file) + MapKit `MKLocalSearch` → a Maps-style nearby-results card whose rows open in Apple Maps. Network-gated by `GlanceCardDataPreference`; requests Location permission on first use. |
 | `ConfiguredSourceStore.swift` / `RESTSourceDataProvider.swift` / `SourceCardView.swift` | ~90/~140/~90 | `source` kind: user endpoints in `~/.wisp/sources.json`, fetched over HTTPS and mapped to generic blocks. |
 | `SourcesTab.swift` | ~150 | Dashboard Sources tab: the live-card-data master toggle + the configured-source list. |
 

@@ -277,6 +277,8 @@ struct NotchHUDView: View {
                 CalendarCardView(state: calendarCardState)
             case let .nowPlaying(nowPlayingCardState):
                 NowPlayingCardView(state: nowPlayingCardState)
+            case let .places(placesCardState):
+                PlacesCardView(state: placesCardState)
             case let .source(sourceCardState):
                 SourceCardView(state: sourceCardState)
             }
