@@ -201,7 +201,16 @@ composer instead, so hold-to-talk latency is untouched. The double-tap detector 
 of the hold path — the hold chord always needs a second modifier, so a bare-modifier tap can
 never be confused with it. The text composer (`TextComposerWindowController`) is a keyable
 panel that activates the app for typing and routes the typed question through the same
-screenshot turn as voice (spoken answer + on-screen pointing).
+screenshot turn as voice (spoken answer + on-screen pointing). Because the four modes look
+identical while they happen — one extra modifier decides whether your words are answered or
+typed into a field — the fired gesture is named by a brief overlay badge
+(`CompanionManager.activeCommandMode` → `PushToTalkCommandMode`, drawn by `CommandModeIndicator`
+under the notch): Talk / Dictate → app / Type / Hands-free, set when the gesture fires and
+cleared when it ends. This restored the mode feedback the old cursor waveform's dictation label
+used to carry. Alongside the badge, an ambient **listening glow** (`ScreenListeningGlow`) frames
+every screen's edges in a saturated lavender (the AI-activity accent) while `voiceState ==
+.listening`, so "is it hearing me?" is answered wherever the user is looking, not just at the
+badge.
 
 **Model residency is the binding constraint.** On 18GB, one 7B vision model plus the TTS
 server leaves almost nothing spare. A second concurrently-resident LLM is not feasible at
@@ -265,7 +274,9 @@ Grouped by what they do. Line counts are approximate.
 ### Overlay and annotation
 | File | Lines | Purpose |
 |------|-------|---------|
-| `OverlayWindow.swift` | ~250 | Full-screen transparent overlay (one per screen): hosts the tool-confirmation card and the annotation layer (markers, boxes, arrows, highlights) via `OverlayContentView`. Draws nothing while idle. Also owns `ignoresMouseEvents` toggling and the shared `Triangle` glyph. |
+| `OverlayWindow.swift` | ~265 | Full-screen transparent overlay (one per screen): hosts the tool-confirmation card, the command-mode badge, and the annotation layer (markers, boxes, arrows, highlights) via `OverlayContentView`. Draws nothing while idle. Also owns `ignoresMouseEvents` toggling and the shared `Triangle` glyph. |
+| `CommandModeIndicator.swift` | ~135 | The push-to-talk gesture badge: `PushToTalkCommandMode` (Talk / Dictate / Type / Hands-free, with label, icon, destination) and `CommandModeIndicator`, the glass capsule the overlay shows under the notch to name the fired gesture. |
+| `ScreenListeningGlow.swift` | ~100 | Ambient "Wisp is listening" cue: a breathing lavender (AI-activity accent) glow around every screen's edges, drawn by the overlay only while `voiceState == .listening`. Honours Reduce Motion (steady glow). |
 | `ScreenAnnotation.swift` | ~217 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 | `CompanionResponseOverlay.swift` | ~217 | Response bubble and waveform next to the cursor. |

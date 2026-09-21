@@ -524,6 +524,38 @@ final class CompanionManager: ObservableObject {
     /// way this goes wrong, and it is only recoverable before you speak.
     @Published private(set) var dictationDestinationName = ""
 
+    /// Which push-to-talk gesture the user just triggered, shown briefly on the
+    /// overlay so they can see what their key-chord did. Set when a gesture
+    /// fires, cleared when it ends. See `PushToTalkCommandMode`.
+    @Published private(set) var activeCommandMode: PushToTalkCommandMode?
+
+    /// Auto-dismiss for a transient mode badge (the tap-to-type confirmation),
+    /// held so a later gesture can cancel it before it fires.
+    private var commandModeClearWorkItem: DispatchWorkItem?
+
+    /// Shows the command-mode badge, replacing whatever was there.
+    ///
+    /// Held modes (talk, dictate, hands-free) pass `nil` for `autoDismissAfter`
+    /// and are cleared explicitly when the hold or session ends — a badge must
+    /// not vanish while the key is still down. The tap-to-type confirmation
+    /// auto-dismisses instead, because the composer window it opens is its own
+    /// lasting affordance and the badge is only there to name the gesture.
+    private func setActiveCommandMode(
+        _ mode: PushToTalkCommandMode?,
+        autoDismissAfter dismissDelay: TimeInterval? = nil
+    ) {
+        commandModeClearWorkItem?.cancel()
+        commandModeClearWorkItem = nil
+        activeCommandMode = mode
+
+        guard mode != nil, let dismissDelay else { return }
+        let clearWorkItem = DispatchWorkItem { [weak self] in
+            self?.activeCommandMode = nil
+        }
+        commandModeClearWorkItem = clearWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + dismissDelay, execute: clearWorkItem)
+    }
+
     /// A screenshot taken while the user was speaking, waiting to be claimed.
     private var speculativeScreenCaptureTask: Task<[CompanionScreenCapture], Error>?
 
@@ -557,6 +589,11 @@ final class CompanionManager: ObservableObject {
             if isDictatingIntoFocusedField {
                 dictationDestinationName = DictatedTextInserter.frontmostApplicationName()
             }
+            setActiveCommandMode(
+                isDictatingIntoFocusedField
+                    ? .dictate(destination: dictationDestinationName)
+                    : .talk
+            )
 
             // Cancel any pending transient hide so the overlay stays visible
             transientHideTask?.cancel()
@@ -641,6 +678,7 @@ final class CompanionManager: ObservableObject {
                 pendingKeyboardShortcutStartTask = nil
                 buddyDictationManager.cancelCurrentDictation(preserveDraftText: false)
                 voiceState = .idle
+                setActiveCommandMode(.type, autoDismissAfter: 2.5)
                 openTextComposer()
             }
 
@@ -659,6 +697,11 @@ final class CompanionManager: ObservableObject {
             if isDictatingIntoFocusedField, dictationDestinationName.isEmpty {
                 dictationDestinationName = DictatedTextInserter.frontmostApplicationName()
             }
+            setActiveCommandMode(
+                isDictatingIntoFocusedField
+                    ? .dictate(destination: dictationDestinationName)
+                    : .talk
+            )
 
         case .released:
             // Cancel the pending start task in case the user released the shortcut
@@ -669,6 +712,12 @@ final class CompanionManager: ObservableObject {
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = nil
             buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
+            // The hold is over, so the Talk/Dictate badge has done its job. A
+            // hands-free session is not key-held, so a stray release must not
+            // clear its badge — only clear when a hold mode is showing.
+            if case .handsFree = activeCommandMode {} else {
+                setActiveCommandMode(nil)
+            }
         case .none:
             break
         }
@@ -704,6 +753,7 @@ final class CompanionManager: ObservableObject {
         // Route the final transcript into the focused field, just like hold-to-dictate.
         isDictatingIntoFocusedField = true
         dictationDestinationName = DictatedTextInserter.frontmostApplicationName()
+        setActiveCommandMode(.handsFree(destination: dictationDestinationName))
 
         transientHideTask?.cancel()
         transientHideTask = nil
@@ -726,6 +776,7 @@ final class CompanionManager: ObservableObject {
                 submitDraftText: { [weak self] finalTranscript in
                     guard let self else { return }
                     self.isHandsFreeDictating = false
+                    self.setActiveCommandMode(nil)
                     self.sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
                 }
             )
@@ -734,6 +785,7 @@ final class CompanionManager: ObservableObject {
 
     private func stopHandsFreeDictation() {
         isHandsFreeDictating = false
+        setActiveCommandMode(nil)
         pendingKeyboardShortcutStartTask?.cancel()
         pendingKeyboardShortcutStartTask = nil
         buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
@@ -766,6 +818,8 @@ final class CompanionManager: ObservableObject {
 
         // A typed question is a question, never dictation into a field.
         isDictatingIntoFocusedField = false
+        // The gesture is spent — the composer has taken over.
+        setActiveCommandMode(nil)
 
         if !isCursorAlwaysVisible && !isOverlayVisible {
             overlayWindowManager.hasShownOverlayBefore = true

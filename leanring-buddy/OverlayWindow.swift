@@ -75,24 +75,33 @@ struct Triangle: Shape {
 
 /// The content of one screen's overlay window.
 ///
-/// It hosts two non-interactive surfaces: the tool-confirmation card (shown on
-/// the screen the cursor is on, so one question gets one answer) and the layer
-/// that draws the assistant's markers, boxes, arrows and highlights for this
-/// screen. It tracks no cursor and runs no idle animation — there is nothing to
-/// draw while the assistant is at rest.
+/// It hosts the assistant's non-interactive surfaces: the ambient listening glow
+/// (on every screen while the mic is live), the tool-confirmation card and the
+/// command-mode badge (both on the screen the cursor is on, so the user sees one
+/// of each), and the layer that draws the markers, boxes, arrows and highlights
+/// for this screen. It tracks no cursor and runs no idle animation — there is
+/// nothing to draw while the assistant is at rest.
 struct OverlayContentView: View {
     let screenFrame: CGRect
     @ObservedObject var companionManager: CompanionManager
 
-    /// Whether the mouse was on this screen at the moment a confirmation
-    /// appeared. Recomputed only when a confirmation arrives, so the resident
-    /// overlay does no work while idle.
+    /// Whether the mouse was on this screen at the moment a confirmation or a
+    /// command-mode badge appeared. Recomputed only when one of those arrives, so
+    /// the resident overlay does no work while idle.
     @State private var isCursorOnThisScreen: Bool = false
 
     var body: some View {
         ZStack {
             // Nearly transparent background (helps with compositing)
             Color.black.opacity(0.001)
+
+            // Ambient "Wisp is listening" glow around the screen edges. Drawn on
+            // every screen while the mic is live, behind everything else so it
+            // never obscures the badge, a card, or an annotation.
+            if companionManager.voiceState == .listening {
+                ScreenListeningGlow()
+                    .transition(.opacity)
+            }
 
             // Permission prompt, on the screen the user is looking at. Shown
             // on the cursor's screen alone — one question needs one answer,
@@ -120,6 +129,17 @@ struct OverlayContentView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            // The command-mode badge — naming which push-to-talk gesture just
+            // fired (Talk / Dictate / Type / Hands-free). Tucked just under the
+            // notch, above where a confirmation card would sit, on the screen the
+            // user is looking at.
+            if isCursorOnThisScreen,
+               let commandMode = companionManager.activeCommandMode {
+                CommandModeIndicator(mode: commandMode)
+                    .position(x: screenFrame.width / 2, y: 64)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Assistant-drawn markers, boxes, arrows and highlights for this
             // screen. A [POINT:] coordinate arrives here as a pulsing marker —
             // the replacement for the old flying cursor's pointing gesture.
@@ -145,6 +165,15 @@ struct OverlayContentView: View {
                 isCursorOnThisScreen = screenFrame.contains(NSEvent.mouseLocation)
             }
         }
+        .onChange(of: companionManager.activeCommandMode != nil) { hasCommandMode in
+            // Pin the badge to whichever screen the cursor is on when the gesture
+            // fires, the same way the confirmation card picks its screen.
+            if hasCommandMode {
+                isCursorOnThisScreen = screenFrame.contains(NSEvent.mouseLocation)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: companionManager.activeCommandMode)
+        .animation(WispMotion.smooth, value: companionManager.voiceState == .listening)
     }
 }
 
