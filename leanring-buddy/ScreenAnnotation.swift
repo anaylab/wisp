@@ -34,6 +34,10 @@ struct ScreenAnnotation: Identifiable, Equatable {
         case arrow
         /// Translucent wash over a region, for "this whole area".
         case highlight
+        /// A pulsing ring centred on a single point — the replacement for the
+        /// old flying cursor's [POINT:] gesture. The region carries the point as
+        /// its origin with zero size, the same shape an arrow's region uses.
+        case marker
     }
 
     let id: UUID

@@ -173,6 +173,11 @@ final class AgentToolRegistry: ObservableObject {
     /// The browser, driven through the DOM rather than the vision model.
     private let browserController = AppleScriptBrowserController()
 
+    /// Flies the on-screen cursor to elements the tier-2 browser loop acts on,
+    /// so the user watches the work. Set by CompanionManager at startup; weak so
+    /// the registry singleton never keeps the manager alive.
+    weak var browserCursorGuide: BrowserCursorGuide?
+
     /// Registers the deterministic browser tools.
     ///
     /// Kept out of the model's way as much as possible: reading a page returns
@@ -206,7 +211,8 @@ final class AgentToolRegistry: ObservableObject {
             let outcome = await BrowserAgent.run(
                 request: request,
                 controller: self.browserController,
-                chatClient: BuddyVisionChatClientFactory.makeDefaultProvider()
+                chatClient: BuddyVisionChatClientFactory.makeDefaultProvider(),
+                cursorGuide: self.browserCursorGuide
             )
 
             if let authURL = outcome.authenticationRequiredAt {

@@ -84,7 +84,51 @@ struct ScreenAnnotationLayer: View {
 
         case .arrow:
             drawArrow(pointingAt: CGPoint(x: rect.minX, y: rect.minY), in: &context, color: accent)
+
+        case .marker:
+            drawMarker(at: CGPoint(x: rect.minX, y: rect.minY), in: &context, color: accent)
         }
+    }
+
+    /// Draws a target marker at a single point: a filled centre dot ringed by
+    /// two concentric circles. The outer ring breathes with the shared pulse so
+    /// the eye is drawn to the spot the way the flying cursor's arrival once did,
+    /// without a cursor travelling there.
+    private func drawMarker(at point: CGPoint, in context: inout GraphicsContext, color: Color) {
+        // The pulse expands the outer ring and fades it as it grows, a radar-ping
+        // that repeats via the layer's autoreversing animation on `isPulsing`.
+        let pulseProgress: CGFloat = isPulsing ? 1.0 : 0.0
+        let outerRadius = 14.0 + pulseProgress * 8.0
+        let outerOpacity = 0.5 - pulseProgress * 0.35
+
+        let outerRing = Path(ellipseIn: CGRect(
+            x: point.x - outerRadius,
+            y: point.y - outerRadius,
+            width: outerRadius * 2,
+            height: outerRadius * 2
+        ))
+        context.stroke(outerRing, with: .color(color.opacity(outerOpacity)), lineWidth: 3)
+
+        // A steady inner ring so the point stays marked between pulses.
+        let innerRadius: CGFloat = 10
+        let innerRing = Path(ellipseIn: CGRect(
+            x: point.x - innerRadius,
+            y: point.y - innerRadius,
+            width: innerRadius * 2,
+            height: innerRadius * 2
+        ))
+        context.stroke(innerRing, with: .color(color.opacity(0.3)), lineWidth: 6)
+        context.stroke(innerRing, with: .color(color), lineWidth: 2)
+
+        // Centre dot marking the exact spot.
+        let dotRadius: CGFloat = 3
+        let centreDot = Path(ellipseIn: CGRect(
+            x: point.x - dotRadius,
+            y: point.y - dotRadius,
+            width: dotRadius * 2,
+            height: dotRadius * 2
+        ))
+        context.fill(centreDot, with: .color(color))
     }
 
     /// Draws an arrow that ends just short of its target, so the tip indicates
@@ -156,9 +200,15 @@ struct ScreenAnnotationLayer: View {
         let rect = overlayRect(for: annotation)
         let estimatedLabelHeight: CGFloat = 20
 
+        // A marker's ring extends ~22px around its point, so its label needs a
+        // wider berth than a box outline does to sit clear of the ring.
+        let isMarker = annotation.style == .marker
+        let aboveClearance: CGFloat = isMarker ? 30 : estimatedLabelHeight
+        let belowClearance: CGFloat = isMarker ? 26 : 6
+
         // Above the region normally, below it when there's no room above.
-        let placeAbove = rect.minY > estimatedLabelHeight + 6
-        let labelY = placeAbove ? rect.minY - estimatedLabelHeight : rect.maxY + 6
+        let placeAbove = rect.minY > aboveClearance + 6
+        let labelY = placeAbove ? rect.minY - aboveClearance : rect.maxY + belowClearance
 
         return Text(text)
             .font(.system(size: 11, weight: .semibold))

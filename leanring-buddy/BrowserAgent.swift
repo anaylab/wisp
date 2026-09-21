@@ -56,10 +56,15 @@ enum BrowserAgent {
     // MARK: - Entry point
 
     /// Runs a browser request, planning deterministically where possible.
+    ///
+    /// - Parameter cursorGuide: flies the on-screen cursor to each element the
+    ///   tier-2 step loop acts on, so the user watches the work. Nil disables the
+    ///   animation; nothing depends on it to act.
     static func run(
         request: String,
         controller: BrowserController,
         chatClient: any BuddyVisionChatClient,
+        cursorGuide: BrowserCursorGuide? = nil,
         onStep: (@MainActor (String) -> Void)? = nil
     ) async -> BrowserAgentOutcome {
         BrowserPlanCache.shared.recordRequest()
@@ -108,30 +113,38 @@ enum BrowserAgent {
 
         return await runWithModelPlanning(
             request: request, controller: controller,
-            chatClient: chatClient, onStep: onStep
+            chatClient: chatClient, cursorGuide: cursorGuide, onStep: onStep
         )
     }
 
     // MARK: - Model planning
 
+    /// Plans once, executes, and on a genuine execution failure hands the live
+    /// page to the tier-2 step loop rather than re-planning the whole workflow
+    /// blind. A plan written against an imagined page is sometimes wrong about a
+    /// real one; when it is, the loop is what looks at the real one.
     private static func runWithModelPlanning(
         request: String,
         controller: BrowserController,
         chatClient: any BuddyVisionChatClient,
+        cursorGuide: BrowserCursorGuide?,
         onStep: (@MainActor (String) -> Void)?
     ) async -> BrowserAgentOutcome {
         var planningCalls = 0
-        var replans = 0
+        var malformedRetries = 0
         var totalPlanningDuration: TimeInterval = 0
         var tokenEstimate = 0
-        var failureContext: String?
-        var lastResult: BrowserTaskResult?
+        var malformedContext: String?
 
-        while replans <= maximumReplans {
-            onStep?(failureContext == nil ? "planning…" : "replanning after a failed step…")
+        // Get one valid plan. A malformed reply is recoverable — the model is
+        // told what was wrong and gets one more attempt — but a malformed reply
+        // is not an execution failure, so it does not go to the step loop.
+        var plan: BrowserTaskPlan?
+        while malformedRetries <= maximumReplans {
+            onStep?(malformedContext == nil ? "planning…" : "re-reading the request…")
 
             let planningStartedAt = Date()
-            let promptText = planningPrompt(for: request, failureContext: failureContext)
+            let promptText = planningPrompt(for: request, failureContext: malformedContext)
             let modelOutput: String
             do {
                 let (text, _) = try await chatClient.analyzeImageStreaming(
@@ -144,7 +157,7 @@ enum BrowserAgent {
                 modelOutput = text
             } catch {
                 return failedOutcome(request: request, reason: error.localizedDescription,
-                                     planningCalls: planningCalls, replans: replans,
+                                     planningCalls: planningCalls, replans: malformedRetries,
                                      duration: totalPlanningDuration, tokens: tokenEstimate)
             }
             planningCalls += 1
@@ -152,65 +165,73 @@ enum BrowserAgent {
             totalPlanningDuration += Date().timeIntervalSince(planningStartedAt)
             tokenEstimate += (promptText.count + modelOutput.count) / 4
 
-            let plan: BrowserTaskPlan
             do {
                 plan = try BrowserPlanValidator.plan(
-                    from: modelOutput, goal: request,
-                    continuesFromCurrentPage: failureContext != nil
+                    from: modelOutput, goal: request, continuesFromCurrentPage: false
                 )
+                break
             } catch {
-                // A malformed plan is itself a recoverable failure: the model is
-                // told exactly what was wrong and gets one more attempt.
-                failureContext = "rejected: \(error.localizedDescription) reply with plan lines only."
-                replans += 1
+                malformedContext = "rejected: \(error.localizedDescription) reply with plan lines only."
+                malformedRetries += 1
                 BrowserPlanCache.shared.recordReplan()
-                continue
             }
-
-            onStep?("plan: " + plan.steps.map(\.description).joined(separator: " → "))
-            let result = await BrowserTaskRunner.execute(plan, using: controller, onStep: onStep)
-            lastResult = result
-
-            // A login wall is not a failure to replan around. Stop and hand it
-            // back to the user, who is the only one who can answer it.
-            if let authPrompt = authenticationPrompt(in: result.finalSnapshot) {
-                return BrowserAgentOutcome(
-                    result: result, planningCallCount: planningCalls, replanCount: replans,
-                    planningDuration: totalPlanningDuration, planTokenEstimate: tokenEstimate,
-                    authenticationRequiredAt: authPrompt
-                )
-            }
-
-            if result.didSucceed {
-                return BrowserAgentOutcome(
-                    result: result, planningCallCount: planningCalls, replanCount: replans,
-                    planningDuration: totalPlanningDuration, planTokenEstimate: tokenEstimate,
-                    authenticationRequiredAt: nil
-                )
-            }
-
-            // Failed. Give the model the structured state rather than the raw
-            // error, so it revises against what the page actually shows.
-            // Only what a correction needs: what broke, where the browser is
-            // now, and what can be clicked. Not the page's text, not the
-            // original plan, not the conversation — a replan that resends the
-            // page body pays for it in prompt evaluation on every attempt.
-            let state = stepState(from: result)
-            failureContext = """
-            failed: \(result.failureReason ?? "step failed")
-            now at: \(state.url)
-            clickable: \(state.pageState)
-            plan again from this page.
-            """
-            replans += 1
         }
 
-        return failedOutcome(
-            request: request,
-            reason: "Couldn't complete that after \(maximumReplans) attempts.",
-            planningCalls: planningCalls, replans: replans,
-            duration: totalPlanningDuration, tokens: tokenEstimate,
-            lastResult: lastResult
+        guard let plan else {
+            return failedOutcome(
+                request: request, reason: "Couldn't turn that into a plan.",
+                planningCalls: planningCalls, replans: malformedRetries,
+                duration: totalPlanningDuration, tokens: tokenEstimate
+            )
+        }
+
+        onStep?("plan: " + plan.steps.map(\.description).joined(separator: " → "))
+        let result = await BrowserTaskRunner.execute(plan, using: controller, onStep: onStep)
+
+        // A login wall is not a failure to work around. Stop and hand it back.
+        if let authPrompt = authenticationPrompt(in: result.finalSnapshot) {
+            return BrowserAgentOutcome(
+                result: result, planningCallCount: planningCalls, replanCount: malformedRetries,
+                planningDuration: totalPlanningDuration, planTokenEstimate: tokenEstimate,
+                authenticationRequiredAt: authPrompt
+            )
+        }
+
+        if result.didSucceed {
+            return BrowserAgentOutcome(
+                result: result, planningCallCount: planningCalls, replanCount: malformedRetries,
+                planningDuration: totalPlanningDuration, planTokenEstimate: tokenEstimate,
+                authenticationRequiredAt: nil
+            )
+        }
+
+        // The plan hit a real page it was wrong about. Hand the step loop what a
+        // correction needs — what broke and where the browser is now — and let
+        // it drive from here, one action at a time, cursor in tow.
+        let state = stepState(from: result)
+        let failureContext = """
+        a first plan failed here: \(result.failureReason ?? "a step failed")
+        now at: \(state.url)
+        """
+        onStep?("working through it step by step…")
+        let loopOutcome = await BrowserStepLoop.run(
+            goal: request,
+            controller: controller,
+            chatClient: chatClient,
+            startingFailureContext: failureContext,
+            cursorGuide: cursorGuide,
+            onStep: onStep
+        )
+
+        // Fold the tier-1 planning cost into the loop's own counters so the
+        // caller sees the whole request's expense, not just the loop's part.
+        return BrowserAgentOutcome(
+            result: loopOutcome.result,
+            planningCallCount: planningCalls + loopOutcome.planningCallCount,
+            replanCount: malformedRetries + loopOutcome.replanCount,
+            planningDuration: totalPlanningDuration + loopOutcome.planningDuration,
+            planTokenEstimate: tokenEstimate + loopOutcome.planTokenEstimate,
+            authenticationRequiredAt: loopOutcome.authenticationRequiredAt
         )
     }
 
@@ -277,7 +298,7 @@ enum BrowserAgent {
     /// for sites nobody thought to enumerate. Deliberately conservative: a false
     /// positive stops a task that might have worked, which is recoverable, while
     /// a false negative means the agent keeps clicking around a login wall.
-    private static func authenticationPrompt(in snapshot: BrowserPageSnapshot?) -> String? {
+    static func authenticationPrompt(in snapshot: BrowserPageSnapshot?) -> String? {
         guard let snapshot else { return nil }
 
         let haystack = (snapshot.title + " " + snapshot.url + " " +

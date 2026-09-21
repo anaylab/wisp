@@ -38,17 +38,6 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var hasMicrophonePermission = false
     @Published private(set) var hasScreenContentPermission = false
 
-    /// Screen location (global AppKit coords) of a detected UI element the
-    /// buddy should fly to and point at. Parsed from Claude's response;
-    /// observed by BlueCursorView to trigger the flight animation.
-    @Published var detectedElementScreenLocation: CGPoint?
-    /// The display frame (global AppKit coords) of the screen the detected
-    /// element is on, so BlueCursorView knows which screen overlay should animate.
-    @Published var detectedElementDisplayFrame: CGRect?
-    /// Custom speech bubble text for the pointing animation. When set,
-    /// BlueCursorView uses this instead of a random pointer phrase.
-    @Published var detectedElementBubbleText: String?
-
     /// The visual answer card for the current turn, shown in the notch's
     /// expanded panel. Parsed from the model reply and observed by
     /// `NotchHUDView`. A weather card is published in a loading state first and
@@ -288,6 +277,9 @@ final class CompanionManager: ObservableObject {
         observeScreenConfigurationChanges()
         observeToolConfirmations()
         registerBackgroundWorkTool()
+        // The browser step loop marks what it acts on; this is how it reaches
+        // the overlay this object owns.
+        AgentToolRegistry.shared.browserCursorGuide = self
         connectMCPServersIfAgentModeEnabled()
         bindVoiceStateObservation()
         bindAudioPowerLevel()
@@ -312,10 +304,10 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    func clearDetectedElementLocation() {
-        detectedElementScreenLocation = nil
-        detectedElementDisplayFrame = nil
-        detectedElementBubbleText = nil
+    /// Clears every on-screen marker, box, arrow and highlight. Called when a new
+    /// question starts, since annotations describe one answer and leaving them up
+    /// during the next would be misleading.
+    func clearScreenAnnotations() {
         activeAnnotationsByDisplayFrame.removeAll()
         annotationScreenshotSizeByDisplayFrame.removeAll()
     }
@@ -590,7 +582,7 @@ final class CompanionManager: ObservableObject {
             } else {
                 currentResponseTask?.cancel()
                 ttsProvider.stopPlayback()
-                clearDetectedElementLocation()
+                clearScreenAnnotations()
             }
 
     
@@ -808,13 +800,13 @@ final class CompanionManager: ObservableObject {
     - if you receive multiple screen images, the one labeled "primary focus" is where the cursor is — prioritize that one but reference others if relevant.
 
     element pointing:
-    you have a small blue triangle cursor that can fly to and point at things on screen. use it whenever pointing would genuinely help the user — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. err on the side of pointing rather than not pointing, because it makes your help way more useful and concrete.
+    you can drop a marker on things on screen to point them out. use it whenever pointing would genuinely help the user — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, mark the relevant element. err on the side of pointing rather than not pointing, because it makes your help way more useful and concrete.
 
     don't point at things when it would be pointless — like if the user asks a general knowledge question, or the conversation has nothing to do with what's on screen, or you'd just be pointing at something obvious they're already looking at. but if there's a specific UI element, menu, button, or area on screen that's relevant to what you're helping with, point at it.
 
     when you point, append a coordinate tag at the very end of your response, AFTER your spoken text. the screenshot images are labeled with their pixel dimensions. use those dimensions as the coordinate space. the origin (0,0) is the top-left corner of the image. x increases rightward, y increases downward.
 
-    format: [POINT:x,y:label] where x,y are integer pixel coordinates in the screenshot's coordinate space, and label is a short 1-3 word description of the element (like "search bar" or "save button"). if the element is on the cursor's screen you can omit the screen number. if the element is on a DIFFERENT screen, append :screenN where N is the screen number from the image label (e.g. :screen2). this is important — without the screen number, the cursor will point at the wrong place.
+    format: [POINT:x,y:label] where x,y are integer pixel coordinates in the screenshot's coordinate space, and label is a short 1-3 word description of the element (like "search bar" or "save button"). if the element is on the cursor's screen you can omit the screen number. if the element is on a DIFFERENT screen, append :screenN where N is the screen number from the image label (e.g. :screen2). this is important — without the screen number, the marker will land on the wrong screen.
 
     if pointing wouldn't help, append [POINT:none].
 
@@ -1140,13 +1132,10 @@ final class CompanionManager: ObservableObject {
                 let cardParseResult = GlanceCardParser.parse(spokenLineParseResult.displayText)
                 resolveAndPublishGlanceCard(cardParseResult.request)
 
-                // Parse the [POINT:...] tag from Claude's response
+                // Parse the [POINT:...] tag from Claude's response.
                 // Annotations are pulled out first so their tags are gone
                 // before the pointing parser looks for a trailing tag.
                 let annotationResult = ScreenAnnotationParser.parse(cardParseResult.spokenText)
-                if !annotationResult.annotations.isEmpty {
-                    applyAnnotations(annotationResult.annotations, from: screenCaptures)
-                }
 
                 let parseResult = Self.parsePointingCoordinates(from: annotationResult.spokenText)
                 let spokenText = parseResult.spokenText
@@ -1157,59 +1146,35 @@ final class CompanionManager: ObservableObject {
                 // it still shows, and speech is layered on top below.
                 currentReplyText = spokenText
 
-                // Handle element pointing if Claude returned coordinates.
-                // Switch to idle BEFORE setting the location so the triangle
-                // becomes visible and can fly to the target. Without this, the
-                // spinner hides the triangle and the flight animation is invisible.
-                let hasPointCoordinate = parseResult.coordinate != nil
-                if hasPointCoordinate {
-                    voiceState = .idle
-                }
-
-                // Pick the screen capture matching Claude's screen number,
-                // falling back to the cursor screen if not specified.
-                let targetScreenCapture: CompanionScreenCapture? = {
-                    if let screenNumber = parseResult.screenNumber,
-                       screenNumber >= 1 && screenNumber <= screenCaptures.count {
-                        return screenCaptures[screenNumber - 1]
-                    }
-                    return screenCaptures.first(where: { $0.isCursorScreen })
-                }()
-
-                if let pointCoordinate = parseResult.coordinate,
-                   let targetScreenCapture {
-                    // Claude's coordinates are in the screenshot's pixel space
-                    // (top-left origin, e.g. 1280x831). Scale to the display's
-                    // point space (e.g. 1512x982), then convert to AppKit global coords.
-                    let screenshotWidth = CGFloat(targetScreenCapture.screenshotWidthInPixels)
-                    let screenshotHeight = CGFloat(targetScreenCapture.screenshotHeightInPixels)
-                    let displayWidth = CGFloat(targetScreenCapture.displayWidthInPoints)
-                    let displayHeight = CGFloat(targetScreenCapture.displayHeightInPoints)
-                    let displayFrame = targetScreenCapture.displayFrame
-
-                    // Clamp to screenshot coordinate space
-                    let clampedX = max(0, min(pointCoordinate.x, screenshotWidth))
-                    let clampedY = max(0, min(pointCoordinate.y, screenshotHeight))
-
-                    // Scale from screenshot pixels to display points
-                    let displayLocalX = clampedX * (displayWidth / screenshotWidth)
-                    let displayLocalY = clampedY * (displayHeight / screenshotHeight)
-
-                    // Convert from top-left origin (screenshot) to bottom-left origin (AppKit)
-                    let appKitY = displayHeight - displayLocalY
-
-                    // Convert display-local coords to global screen coords
-                    let globalLocation = CGPoint(
-                        x: displayLocalX + displayFrame.origin.x,
-                        y: appKitY + displayFrame.origin.y
+                // A [POINT:] coordinate no longer flies a cursor to the element;
+                // it becomes a pulsing marker drawn at that spot through the same
+                // annotation layer as boxes and arrows. Its coordinates are in the
+                // screenshot's pixel space — exactly what a ScreenAnnotation
+                // stores — so it just joins the list applyAnnotations places on
+                // the right display.
+                var annotationsToDraw = annotationResult.annotations
+                if let pointCoordinate = parseResult.coordinate {
+                    annotationsToDraw.append(
+                        ScreenAnnotation(
+                            style: .marker,
+                            regionInScreenshotPixels: CGRect(
+                                x: pointCoordinate.x,
+                                y: pointCoordinate.y,
+                                width: 0,
+                                height: 0
+                            ),
+                            label: parseResult.elementLabel,
+                            screenNumber: parseResult.screenNumber
+                        )
                     )
-
-                    detectedElementScreenLocation = globalLocation
-                    detectedElementDisplayFrame = displayFrame
                     WispAnalytics.trackElementPointed(elementLabel: parseResult.elementLabel)
-                    print("🎯 Element pointing: (\(Int(pointCoordinate.x)), \(Int(pointCoordinate.y))) → \"\(parseResult.elementLabel ?? "element")\"")
+                    print("🎯 Element marker: (\(Int(pointCoordinate.x)), \(Int(pointCoordinate.y))) → \"\(parseResult.elementLabel ?? "element")\"")
                 } else {
                     print("🎯 Element pointing: \(parseResult.elementLabel ?? "no element")")
+                }
+
+                if !annotationsToDraw.isEmpty {
+                    applyAnnotations(annotationsToDraw, from: screenCaptures)
                 }
 
                 // Save this exchange to the transcript.
@@ -1487,9 +1452,10 @@ final class CompanionManager: ObservableObject {
     }
 
     /// If the cursor is in transient mode (user toggled "Show Wisp" off),
-    /// waits for TTS playback and any pointing animation to finish, then
-    /// fades out the overlay after a 1-second pause. Cancelled automatically
-    /// if the user starts another push-to-talk interaction.
+    /// waits for TTS playback to finish, gives any on-screen markers or
+    /// annotations a moment to be seen, then fades out the overlay after a
+    /// 1-second pause. Cancelled automatically if the user starts another
+    /// push-to-talk interaction.
     private func scheduleTransientHideIfNeeded() {
         guard !isCursorAlwaysVisible && isOverlayVisible else { return }
 
@@ -1501,10 +1467,11 @@ final class CompanionManager: ObservableObject {
                 guard !Task.isCancelled else { return }
             }
 
-            // Wait for pointing animation to finish (location is cleared
-            // when the buddy flies back to the cursor)
-            while detectedElementScreenLocation != nil {
-                try? await Task.sleep(nanoseconds: 200_000_000)
+            // Let a marker or annotation dwell long enough to read, even when
+            // there is no speech to hold the overlay open. A silent reply would
+            // otherwise fade the pointer almost immediately.
+            if !activeAnnotationsByDisplayFrame.isEmpty {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard !Task.isCancelled else { return }
             }
 
@@ -1692,7 +1659,7 @@ final class CompanionManager: ObservableObject {
 
                 guard let self, self.isOverlayVisible else { return }
 
-                self.clearDetectedElementLocation()
+                self.clearScreenAnnotations()
                 self.overlayWindowManager.hasShownOverlayBefore = true
                 self.overlayWindowManager.showOverlay(
                     onScreens: NSScreen.screens,
@@ -1990,5 +1957,58 @@ extension CompanionManager {
         }
         islandFlashClearWorkItem = clearWorkItem
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: clearWorkItem)
+    }
+}
+
+// MARK: - Browser cursor guidance
+
+extension CompanionManager: BrowserCursorGuide {
+    /// Marks the element the browser loop is about to act on with a pulsing ring.
+    ///
+    /// Kept in this file, rather than a separate extension file, because it sets
+    /// `isOverlayVisible`, whose setter is private to this type. The wait after
+    /// placing the marker is a fixed budget rather than a signal from the
+    /// overlay: the click that follows lands a beat after the marker appears,
+    /// which reads as the marker leading the action, and it keeps the loop from
+    /// stalling.
+    func guideCursor(to point: CGPoint, on displayFrame: CGRect, actionText: String) async {
+        // The loop often runs while the user's browser is frontmost, so the
+        // overlay may not be up. Show it so the marker is actually seen.
+        if !isOverlayVisible {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+
+        // `point` is a global AppKit location (bottom-left origin). Convert it to
+        // this display's top-left point space, which is what the annotation layer
+        // draws in. Using the display's own size as the "screenshot" size makes
+        // the layer's scale a no-op, so the marker lands exactly at the point.
+        let displayLocalPoint = CGPoint(
+            x: point.x - displayFrame.origin.x,
+            y: (displayFrame.origin.y + displayFrame.height) - point.y
+        )
+
+        let marker = ScreenAnnotation(
+            style: .marker,
+            regionInScreenshotPixels: CGRect(
+                x: displayLocalPoint.x,
+                y: displayLocalPoint.y,
+                width: 0,
+                height: 0
+            ),
+            label: actionText.isEmpty ? nil : actionText,
+            screenNumber: nil
+        )
+        activeAnnotationsByDisplayFrame = [displayFrame: [marker]]
+        annotationScreenshotSizeByDisplayFrame = [displayFrame: displayFrame.size]
+
+        // Long enough for the marker to register before the click follows.
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+    }
+
+    /// Clears the guidance marker once the workflow ends.
+    func endCursorGuidance() {
+        clearScreenAnnotations()
     }
 }

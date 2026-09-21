@@ -6,9 +6,9 @@ macOS menu bar companion app. Lives entirely in the macOS status bar
 (no dock icon, no main window). Clicking the menu bar icon opens a custom floating panel
 with companion voice controls. Uses push-to-talk (ctrl+option) to capture voice input,
 transcribes it on-device, and sends the transcript + a screenshot to a local model. The
-model responds with text, which is spoken by a local TTS server. A blue cursor overlay
-can fly to and point at UI elements the model references on any connected monitor, and
-can draw boxes, arrows and highlights on screen.
+model responds with text, which is spoken by a local TTS server. A transparent screen
+overlay can mark UI elements the model references on any connected monitor with a pulsing
+marker, and can draw boxes, arrows and highlights on screen.
 
 **Local-first and private by default.** Out of the box everything runs on this machine: the
 local Ollama model, on-device speech, and the local TTS server, with the only network
@@ -96,14 +96,16 @@ cloud dependency to the local path, without asking.
   gated only by their macOS permission. Managed in the dashboard's **Sources tab**. Adding an
   app = one data provider + one template.
 - **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor, downscaled to 896px
-- **Element Pointing**: the model embeds `[POINT:x,y:label:screenN]` tags; the overlay
-  parses them, maps to the correct monitor, and animates the cursor along a bezier arc
+- **Element Pointing**: the model embeds `[POINT:x,y:label:screenN]` tags; `CompanionManager`
+  parses them and turns each into a `.marker` `ScreenAnnotation` (a point in the screenshot's
+  pixel space) applied to the correct monitor. There is no flying cursor — the marker is a
+  pulsing target ring drawn by the same annotation layer as boxes and arrows, alongside them.
 - **Screen Annotation**: `[BOX:left,top,right,bottom:label]`, `[HIGHLIGHT:...]` and
-  `[ARROW:x,y:label]` tags render through a `Canvas` layer in the overlay. Note the corner
-  format — the model emits corners, not origin+size. When several tags appear in one reply
-  they are kept in document order and **auto-numbered** into a step-by-step walkthrough (badges
-  drawn per step, cap 8). The cursor and all annotations draw in the user-chosen colour from
-  `CursorAppearanceStore` (Cursor tab: blue/red/yellow/green).
+  `[ARROW:x,y:label]` tags render through a `Canvas` layer in the overlay, as does the `.marker`
+  from a `[POINT:]`. Note the corner format — the model emits corners, not origin+size. When
+  several tags appear in one reply they are kept in document order and **auto-numbered** into a
+  step-by-step walkthrough (badges drawn per step, cap 8). All annotations draw in the
+  user-chosen colour from `CursorAppearanceStore` (Cursor tab: blue/red/yellow/green).
 - **Agent loop**: off by default behind `AgentModeEnabled` in Info.plist. When on, tools
   are called via structured `[TOOL:name:{json}]` tags rather than native tool_calls, since
   the local model is unreliable at the latter. Surfaced in the dashboard's Agent tab: the
@@ -112,6 +114,19 @@ cloud dependency to the local path, without asking.
   — short-circuits the confirmation prompt, reset every launch), and **permission** rows with
   deep-links to System Settings. Note: session auto-approve is currently blanket — it approves
   every tool while on, including MCP writes; a per-tool destructive floor is a follow-up.
+- **Browser control**: the user's real Chrome/Safari, driven through the DOM (AppleScript +
+  injected JS in `AppleScriptBrowserController`), not the vision model — a snapshot assigns
+  every interactive element a stable id (`e7`) and actions refer to ids, so pointing costs a
+  few hundred ms against a screenshot's several seconds. Three tiers, cheapest first
+  (`BrowserAgent.run`): **tier 0** a deterministic planner (`BrowserTaskPlanner`, ~964ms, no
+  model), **tier 1** one planning call producing a whole mechanical plan executed end to end
+  (`BrowserTaskRunner`), and **tier 2** a bounded per-step observe→act loop (`BrowserStepLoop`,
+  cap 5, screenshot-free) that engages **only** when a tier-1 plan fails on a real page. A
+  login wall stops any tier dead rather than becoming something to loop against. During tier 2
+  each element is marked with a pulsing ring just before the loop clicks/types it, via
+  `BrowserCursorGuide` (implemented by `CompanionManager`, which converts the element's global
+  screen point into a `.marker` `ScreenAnnotation` on that display). Element
+  screen coordinates come from `BrowserController.screenPoint(ofElementID:)`.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -151,9 +166,11 @@ and a custom borderless `NSPanel` for the floating control panel. This gives ful
 over appearance and avoids standard macOS menu/popover chrome. The panel is non-activating
 so it doesn't steal focus.
 
-**Cursor Overlay**: A full-screen transparent `NSPanel` hosts the blue cursor companion.
-It's non-activating, joins all Spaces, and never steals focus. Because it covers the whole
-screen at `.screenSaver` level, it must keep `ignoresMouseEvents = true` except while a
+**Screen Overlay**: A full-screen transparent `NSPanel` (one per screen) hosts the
+assistant's on-screen surfaces — the tool-confirmation card and the drawn markers, boxes,
+arrows and highlights (`OverlayContentView`). It draws nothing while idle and tracks no
+cursor. It's non-activating, joins all Spaces, and never steals focus. Because it covers the
+whole screen at `.screenSaver` level, it must keep `ignoresMouseEvents = true` except while a
 tool confirmation card is up — otherwise the desktop becomes unclickable.
 
 **Notch HUD**: The resident primary surface (Phase 1 of the HeyClicky-style build).
@@ -248,9 +265,9 @@ Grouped by what they do. Line counts are approximate.
 ### Overlay and annotation
 | File | Lines | Purpose |
 |------|-------|---------|
-| `OverlayWindow.swift` | ~927 | Full-screen transparent overlay: blue cursor, waveform, pointing arcs, multi-monitor mapping. Also owns `ignoresMouseEvents` toggling. |
+| `OverlayWindow.swift` | ~250 | Full-screen transparent overlay (one per screen): hosts the tool-confirmation card and the annotation layer (markers, boxes, arrows, highlights) via `OverlayContentView`. Draws nothing while idle. Also owns `ignoresMouseEvents` toggling and the shared `Triangle` glyph. |
 | `ScreenAnnotation.swift` | ~217 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. |
-| `ScreenAnnotationLayer.swift` | ~150 | `Canvas` rendering for boxes, arrows and highlights. |
+| `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 | `CompanionResponseOverlay.swift` | ~217 | Response bubble and waveform next to the cursor. |
 | `ElementLocationDetector.swift` | ~335 | Locates UI elements in screenshots for pointing. |
 
@@ -258,6 +275,7 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
+| `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
 | `AgentToolRegistry.swift` | ~500 | Built-in read-only tools + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |
 | `AgentToolScope.swift` | ~120 | Deterministic built-in scope vocabulary (browser/filesystem/coding/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership adds a bonus, returns the top few within budget. Deterministic, model-free. |

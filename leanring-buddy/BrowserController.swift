@@ -164,6 +164,16 @@ protocol BrowserController: AnyObject {
     /// Present so vision remains reachable as a deliberate fallback rather than
     /// the default. Everything above should be tried first.
     func captureScreenshot() async throws -> Data
+
+    /// Where an element sits on screen, so the cursor overlay can be flown to it.
+    ///
+    /// Returns the element's centre in global AppKit coordinates (bottom-left
+    /// origin) together with the frame of the display it is on. Nil when the
+    /// element cannot be placed — scrolled out of the viewport, in a cross-origin
+    /// frame, or gone. This is purely for the watching user; nothing depends on
+    /// it to actually click, so a nil answer is a missing animation, not a
+    /// missing action.
+    func screenPoint(ofElementID elementID: String) throws -> (point: CGPoint, displayFrame: CGRect)?
 }
 
 extension BrowserController {
@@ -178,5 +188,10 @@ extension BrowserController {
 
     func waitUntilLoaded() async -> Bool {
         await waitUntilLoaded(timeout: 10)
+    }
+
+    /// Controllers that cannot place an element on screen simply do not animate.
+    func screenPoint(ofElementID elementID: String) throws -> (point: CGPoint, displayFrame: CGRect)? {
+        nil
     }
 }

@@ -268,6 +268,41 @@ final class AppleScriptBrowserController: BrowserController {
         guard result == "OK" else { throw BrowserControllerError.scriptFailed("Couldn't type into \(elementID).") }
     }
 
+    func screenPoint(ofElementID elementID: String) throws -> (point: CGPoint, displayFrame: CGRect)? {
+        let browser = try requireBrowser()
+        // Compute the element's centre in the browser's own screen coordinates:
+        // getBoundingClientRect is viewport-relative, window.screenX/screenY are
+        // the window's top-left on the desktop, and the chrome height is the
+        // difference between the outer and inner window. All are CSS pixels,
+        // which map 1:1 to points on macOS. scrollIntoView first so an element
+        // just off the viewport can still be pointed at.
+        let script = """
+        (function(){var e=document.querySelector('[data-wisp-id=\\'\(elementID)\\']');
+        if(!e){return 'MISSING';}e.scrollIntoView({block:'center'});
+        var r=e.getBoundingClientRect();
+        var cx=window.screenX+(window.outerWidth-window.innerWidth)/2+r.left+r.width/2;
+        var cy=window.screenY+(window.outerHeight-window.innerHeight)+r.top+r.height/2;
+        return Math.round(cx)+','+Math.round(cy);})()
+        """
+        guard let result = runJavaScript(script, in: browser), result != "MISSING" else { return nil }
+        let parts = result.split(separator: ",")
+        guard parts.count == 2,
+              let topLeftOriginX = Double(parts[0].trimmingCharacters(in: .whitespaces)),
+              let topLeftOriginY = Double(parts[1].trimmingCharacters(in: .whitespaces)) else { return nil }
+
+        // The browser reports a top-left origin anchored at the primary display;
+        // AppKit's global space is bottom-left origin anchored the same way, so
+        // only y flips, about the primary display's height.
+        let primaryDisplayHeight = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+            ?? NSScreen.main?.frame.height
+        guard let primaryDisplayHeight else { return nil }
+
+        let appKitPoint = CGPoint(x: topLeftOriginX, y: primaryDisplayHeight - topLeftOriginY)
+        let display = NSScreen.screens.first(where: { $0.frame.contains(appKitPoint) }) ?? NSScreen.main
+        guard let display else { return nil }
+        return (appKitPoint, display.frame)
+    }
+
     func scroll(_ direction: BrowserScrollDirection) throws {
         let browser = try requireBrowser()
         let body: String
