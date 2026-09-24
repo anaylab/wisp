@@ -870,6 +870,13 @@ final class CompanionManager: ObservableObject {
         textComposerWindowController?.show()
     }
 
+    /// The notch reply's "Follow up" action. Opens the text composer; no extra
+    /// plumbing is needed for context because `conversationTranscript` already
+    /// carries the recent turns into the next request.
+    func beginFollowUpQuestion() {
+        openTextComposer()
+    }
+
     /// Runs a typed question through the same pipeline as a spoken one: the answer
     /// is spoken and, when it helps, pointed at on screen.
     private func submitTextComposerQuery(_ typedQuery: String) {

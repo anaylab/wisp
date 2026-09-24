@@ -33,6 +33,13 @@ struct NotchHUDView: View {
     /// sizes to fit a short reply and the whole island shrinks when idle.
     @State private var answerContentHeight: CGFloat = 0
 
+    /// Brief confirmation shown on the reply action row after Copy / Insert, so
+    /// a click that has no visible effect elsewhere still reads as having worked.
+    @State private var replyActionFeedback: ReplyActionFeedback?
+
+    /// Which reply action button the pointer is over, for its hover highlight.
+    @State private var hoveredReplyAction: ReplyAction?
+
     var body: some View {
         // The glass container lets the pill and panel render as one Liquid Glass
         // element and morph fluidly between the collapsed and expanded frames.
@@ -134,7 +141,7 @@ struct NotchHUDView: View {
     /// to the message and inset below the notch. No affordance, skills or footer —
     /// those belong to the full panel a hover reveals.
     private var messageContent: some View {
-        answerSurface
+        answerSurfaceWithReplyActions
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
             .padding(.top, notchContentTopInset + 8)
@@ -401,7 +408,7 @@ struct NotchHUDView: View {
                 // Only present when there is an answer, so an idle panel collapses
                 // down to just the affordance, skills and footer.
                 if hasAnswer {
-                    answerSurface
+                    answerSurfaceWithReplyActions
                 }
 
                 // Skills stay one click away as a compact sideways-scrolling strip.
@@ -481,6 +488,149 @@ struct NotchHUDView: View {
             answerContentHeight = measuredHeight
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: answerContentHeight)
+    }
+
+    // MARK: Reply actions
+
+    /// The answer plus a row of things to do with it. The row sits outside the
+    /// answer's scroll view so it stays visible when a long reply scrolls.
+    private var answerSurfaceWithReplyActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            answerSurface
+            if hasReplyText {
+                replyActionRow
+            }
+        }
+        .onChange(of: companionManager.currentReplyText) { _, _ in
+            // A new turn's answer shouldn't inherit the last one's "Copied".
+            replyActionFeedback = nil
+        }
+    }
+
+    private var hasReplyText: Bool {
+        !companionManager.currentReplyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var replyActionRow: some View {
+        HStack(spacing: 6) {
+            replyActionButton(
+                .copy,
+                title: replyActionFeedback == .copied ? "Copied" : "Copy",
+                systemImageName: replyActionFeedback == .copied ? "checkmark" : "doc.on.doc",
+                tooltip: "Copy this answer to the clipboard",
+                isEnabled: true
+            ) {
+                copyReplyToClipboard()
+            }
+
+            let insertTargetAppName = insertTargetApplicationName
+            replyActionButton(
+                .insert,
+                title: insertButtonTitle,
+                systemImageName: replyActionFeedback == .inserted ? "checkmark" : "text.insert",
+                tooltip: insertTargetAppName.map { "Type this answer at the cursor in \($0)" }
+                    ?? "Click into a text field in another app first",
+                isEnabled: insertTargetAppName != nil
+            ) {
+                insertReplyIntoFrontmostApp()
+            }
+
+            replyActionButton(
+                .followUp,
+                title: "Follow up",
+                systemImageName: "arrowshape.turn.up.left",
+                tooltip: "Ask a follow-up — Wisp keeps this conversation's context",
+                isEnabled: true
+            ) {
+                companionManager.beginFollowUpQuestion()
+            }
+        }
+    }
+
+    private var insertButtonTitle: String {
+        switch replyActionFeedback {
+        case .inserted: return "Inserted"
+        case .insertFailed: return "Couldn't insert"
+        default: return "Insert"
+        }
+    }
+
+    /// The app an Insert would type into, or nil when that would be Wisp itself
+    /// (e.g. the dashboard is frontmost), where inserting makes no sense. The
+    /// notch panel is non-activating, so clicking it leaves the user's app
+    /// frontmost with its text field still focused.
+    private var insertTargetApplicationName: String? {
+        guard let frontmostApplication = NSWorkspace.shared.frontmostApplication,
+              frontmostApplication.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return nil
+        }
+        return frontmostApplication.localizedName
+    }
+
+    private func copyReplyToClipboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(companionManager.currentReplyText, forType: .string)
+        showReplyActionFeedback(.copied)
+    }
+
+    private func insertReplyIntoFrontmostApp() {
+        let insertionMethod = DictatedTextInserter.insert(companionManager.currentReplyText)
+        showReplyActionFeedback(insertionMethod == .failed ? .insertFailed : .inserted)
+    }
+
+    private func showReplyActionFeedback(_ feedback: ReplyActionFeedback) {
+        replyActionFeedback = feedback
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.6))
+            if replyActionFeedback == feedback {
+                replyActionFeedback = nil
+            }
+        }
+    }
+
+    private func replyActionButton(
+        _ action: ReplyAction,
+        title: String,
+        systemImageName: String,
+        tooltip: String,
+        isEnabled: Bool,
+        perform: @escaping () -> Void
+    ) -> some View {
+        let isHovered = hoveredReplyAction == action && isEnabled
+        return Button(action: perform) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImageName)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+            }
+            .foregroundColor(isEnabled ? DS.Colors.textPrimary : DS.Colors.textTertiary)
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(isHovered ? 0.14 : 0.07))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(DS.Colors.borderSubtle, lineWidth: 1)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .pointerCursor(isEnabled: isEnabled)
+        .nativeTooltip(tooltip)
+        .onHover { isHovering in
+            if isHovering {
+                hoveredReplyAction = action
+            } else if hoveredReplyAction == action {
+                hoveredReplyAction = nil
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 
     @ViewBuilder
@@ -762,6 +912,20 @@ struct NotchHUDView: View {
             .foregroundColor(DS.Colors.textTertiary)
             .tracking(0.6)
     }
+}
+
+/// The actions on the notch reply row.
+private enum ReplyAction {
+    case copy
+    case insert
+    case followUp
+}
+
+/// The short-lived confirmation a reply action shows on its own button.
+private enum ReplyActionFeedback: Equatable {
+    case copied
+    case inserted
+    case insertFailed
 }
 
 /// Carries the answer content's measured natural height up to `NotchHUDView`, so
