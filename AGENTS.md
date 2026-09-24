@@ -356,7 +356,7 @@ statics the tap reads on the main thread (`BuddyPushToTalkShortcut.currentShortc
 `tapMaxDuration` → open the text composer), and **double-tap** a bare modifier (default:
 double-tap Control → hands-free dictation). Recording still starts instantly on press for the
 hold case; a tap simply `cancelCurrentDictation`s the just-started session and opens the
-composer instead, so hold-to-talk latency is untouched. The double-tap detector is independent
+composer instead, so hold-to-talk latency is untouched. While the Talk chord is held, a **number key 1–9 runs that routine** (`routineShortcutPublisher`; the hold's recording is cancelled and its release swallowed, like the tap path). The double-tap detector is independent
 of the hold path — the hold chord always needs a second modifier, so a bare-modifier tap can
 never be confused with it. The text composer (`TextComposerWindowController`) is a keyable
 panel that activates the app for typing and routes the typed question through the same
@@ -470,6 +470,9 @@ Grouped by what they do. Line counts are approximate.
 | `ComposioAccountStore.swift` | ~110 | Composio marketplace state: `connect(apiKey:)` validates the key then installs one remote server (`composio-connect`) over the Phase 1 transport; `disconnect()` removes it. Off-machine/opt-in. |
 | `MCPManager.swift` | ~270 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
+| `RoutineStore.swift` | ~270 | Routines: user-fired saved instructions (`WispRoutine`: name, instruction, symbol, optional chord+digit shortcut, suggested app bundle ids, pinned-in-notch). Persists to `~/Library/Application Support/Wisp/routines.json`; seeds 4 starters when the file is absent. `notchSuggestions(forAppBundleIdentifier:)` powers the notch's app-aware section. Distinct from skills (model-loaded reference). |
+| `FrontmostAppTracker.swift` | ~55 | Last frontmost app that isn't Wisp (NSWorkspace activation notifications), so suggestions survive opening the dashboard/composer. |
+| `RoutinesTab.swift` | ~450 | Dashboard Routines tab: list + auto-saving editor (name, instruction, icon, shortcut digit with "used by" warnings, suggested apps from running apps or /Applications, pin toggle, Run now — closes the dashboard first so the screenshot sees the user's work). |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
 | `ShortcutsBridge.swift` | ~455 | Apple Shortcuts via `/usr/bin/shortcuts`: `ShortcutsListParser` (`list --show-identifiers` → name + UUID), `ShortcutsCommandLine` (argument arrays; name after `--`), `ShortcutsProcessRunner` (off-main `Process`, both pipes drained, timeout + cancellation terminate), `ShortcutRunResultFormatter` (capped text for the model), and the `ShortcutsBridge` ObservableObject (5-min cached list, availability, `runShortcut(named:textInput:)` with exact-name resolution and temp-file I/O). |
 | `ShortcutsAgentTools.swift` | ~280 | `ShortcutNameMatcher` (request → matching shortcut names; exact-name resolution), `ShortcutsToolRouting` (boost hints + per-turn `run_shortcut` description naming ≤3 matches; the `list_shortcuts`/`run_shortcut` definitions), and `AgentToolRegistry.registerShortcutsTools()`. |

@@ -15,6 +15,21 @@ import Foundation
 final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     let shortcutTransitionPublisher = PassthroughSubject<BuddyPushToTalkShortcut.ShortcutTransition, Never>()
 
+    /// Fires the digit (1–9) when a number key is pressed while the Talk chord is
+    /// held — ⌃⌥1 runs routine 1. Separate from `shortcutTransitionPublisher`
+    /// because it is an extra gesture layered on the hold, not a hold state.
+    let routineShortcutPublisher = PassthroughSubject<Int, Never>()
+
+    /// Set when a routine digit fires during the current hold. The hold's own
+    /// release is then swallowed: the routine replaced whatever the hold would
+    /// have become (a spoken turn or the tap-to-type composer).
+    private var didFireRoutineShortcutDuringCurrentHold = false
+
+    /// ANSI key codes for the number row, 1 through 9.
+    private static let digitByKeyCode: [UInt16: Int] = [
+        18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9,
+    ]
+
     private var globalEventTap: CFMachPort?
     private var globalEventTapRunLoopSource: CFRunLoopSource?
     /// Mutated exclusively from the CGEvent tap callback, which runs on
@@ -142,6 +157,18 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
         }
 
         let eventKeyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+
+        // A number key while the Talk chord is held runs that routine. Key
+        // repeat is ignored so holding the digit doesn't fire it again.
+        if isShortcutCurrentlyPressed,
+           activeInvocationMode == .assistant,
+           eventType == .keyDown,
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+           let routineDigit = Self.digitByKeyCode[eventKeyCode] {
+            didFireRoutineShortcutDuringCurrentHold = true
+            routineShortcutPublisher.send(routineDigit)
+        }
+
         let shortcutTransition = BuddyPushToTalkShortcut.shortcutTransition(
             for: eventType,
             keyCode: eventKeyCode,
@@ -154,6 +181,7 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
             break
         case .pressed(let mode):
             isShortcutCurrentlyPressed = true
+            didFireRoutineShortcutDuringCurrentHold = false
             activeInvocationMode = mode
             shortcutPressedAt = Date()
             shortcutTransitionPublisher.send(.pressed(mode))
@@ -162,6 +190,12 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
             break
         case .released:
             isShortcutCurrentlyPressed = false
+            // The routine that fired mid-hold already cleaned up the recording
+            // this hold started, so the release has nothing left to do.
+            if didFireRoutineShortcutDuringCurrentHold {
+                didFireRoutineShortcutDuringCurrentHold = false
+                break
+            }
             // A quick tap of the Talk chord opens the text composer instead of
             // submitting a (near-empty) spoken turn. Only the assistant chord
             // taps to type; a short Dictate press falls through to release.

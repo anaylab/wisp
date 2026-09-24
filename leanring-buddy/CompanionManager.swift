@@ -191,6 +191,7 @@ final class CompanionManager: ObservableObject {
     private var currentResponseTask: Task<Void, Never>?
 
     private var shortcutTransitionCancellable: AnyCancellable?
+    private var routineShortcutCancellable: AnyCancellable?
     private var voiceStateCancellable: AnyCancellable?
     private var audioPowerCancellable: AnyCancellable?
     private var accessibilityCheckTimer: Timer?
@@ -555,6 +556,13 @@ final class CompanionManager: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] transition in
                 self?.handleShortcutTransition(transition)
+            }
+
+        routineShortcutCancellable = globalPushToTalkShortcutMonitor
+            .routineShortcutPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] routineDigit in
+                self?.handleRoutineShortcut(digit: routineDigit)
             }
     }
 
@@ -1037,6 +1045,56 @@ final class CompanionManager: ObservableObject {
         // captured in the screenshot the turn is about to take.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             self?.sendTranscriptToClaudeWithScreenshot(transcript: skillInstruction)
+        }
+    }
+
+    // MARK: - Routines
+
+    /// ⌃⌥ + digit. The press of ⌃⌥ already began a recording for hold-to-talk;
+    /// the digit says this was a routine instead, so that recording is thrown
+    /// away exactly as the tap-to-type path does, then the routine runs.
+    private func handleRoutineShortcut(digit routineDigit: Int) {
+        pendingKeyboardShortcutStartTask?.cancel()
+        pendingKeyboardShortcutStartTask = nil
+        buddyDictationManager.cancelCurrentDictation(preserveDraftText: false)
+        voiceState = .idle
+        setActiveCommandMode(nil)
+
+        guard let routine = RoutineStore.shared.routine(forShortcutDigit: routineDigit) else {
+            // Say so rather than doing nothing, or the key looks broken.
+            flashIsland(.error)
+            return
+        }
+        runRoutine(withID: routine.id)
+    }
+
+    /// Runs a routine: its instruction goes through the ordinary screenshot turn,
+    /// as if the user had typed it, with the app they're in named so a routine
+    /// like "Explain this error" knows where to look.
+    func runRoutine(withID routineID: UUID) {
+        guard allPermissionsGranted else {
+            NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+            return
+        }
+        guard let routine = RoutineStore.shared.routine(withID: routineID) else { return }
+        RoutineStore.shared.markRoutineRun(withID: routineID)
+
+        // Wisp's own surfaces leave the screen before the screenshot, as with skills.
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+        if !isCursorAlwaysVisible && !isOverlayVisible {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+
+        var routinePrompt = routine.instruction
+        if let workingApplication = FrontmostAppTracker.shared.lastExternalApplication {
+            routinePrompt = "(I'm in \(workingApplication.displayName).) " + routinePrompt
+        }
+
+        // Let the panels finish animating out before the capture.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.sendTranscriptToClaudeWithScreenshot(transcript: routinePrompt)
         }
     }
 

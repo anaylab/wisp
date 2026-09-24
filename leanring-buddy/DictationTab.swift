@@ -159,7 +159,8 @@ struct DictationTab: View {
 }
 
 /// A simple left-aligned wrapping row of removable word chips.
-private struct FlowingWordChips: View {
+/// Also used by the Routines tab for its suggested-app chips.
+struct FlowingWordChips: View {
     let words: [String]
     let onRemove: (String) -> Void
 

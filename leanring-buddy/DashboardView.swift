@@ -38,6 +38,7 @@ struct DashboardView: View {
 
     enum DashboardTab: String, CaseIterable, Identifiable {
         case home = "Home"
+        case routines = "Routines"
         case activity = "Activity"
         case conversation = "Conversation"
         case memory = "Memory"
@@ -55,6 +56,7 @@ struct DashboardView: View {
         var symbolName: String {
             switch self {
             case .home: return "house"
+            case .routines: return "bolt"
             case .activity: return "list.bullet.rectangle"
             case .conversation: return "bubble.left.and.bubble.right"
             case .memory: return "brain.head.profile"
@@ -89,6 +91,7 @@ struct DashboardView: View {
                             companionManager: companionManager,
                             onSelectTab: { selectedTab = $0 }
                         )
+                    case .routines: RoutinesTab(companionManager: companionManager)
                     case .activity: ActivityTab(taskRegistry: taskRegistry)
                     case .conversation: ConversationTab(taskRegistry: taskRegistry)
                     case .memory: MemoryTab()

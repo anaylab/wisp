@@ -33,6 +33,8 @@ struct NotchHUDView: View {
     /// property can't tell SwiftUI that on its own.
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var upcomingEventMonitor = UpcomingEventMonitor.shared
+    @ObservedObject private var routineStore = RoutineStore.shared
+    @ObservedObject private var frontmostAppTracker = FrontmostAppTracker.shared
 
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
@@ -674,6 +676,9 @@ struct NotchHUDView: View {
                     answerSurfaceWithReplyActions
                 }
 
+                // Routines for the app the user is in (plus pinned ones).
+                routineSuggestionsSection
+
                 // Skills stay one click away as a compact sideways-scrolling strip.
                 skillsStrip
 
@@ -1046,6 +1051,77 @@ struct NotchHUDView: View {
                 }
             }
         }
+    }
+
+    // MARK: Routines — app-aware suggestions
+
+    /// Routines suggested for the frontmost app, then pinned ones, as a
+    /// two-column grid. Titled "FOR SAFARI" when any are specific to the app,
+    /// so the user can tell they're contextual; "ROUTINES" otherwise.
+    @ViewBuilder
+    private var routineSuggestionsSection: some View {
+        let workingApplication = frontmostAppTracker.lastExternalApplication
+        let suggestedRoutines = routineStore.notchSuggestions(
+            forAppBundleIdentifier: workingApplication?.bundleIdentifier
+        )
+        if !suggestedRoutines.isEmpty {
+            let hasAppSpecificSuggestions = routineStore.hasAppSpecificSuggestions(
+                forAppBundleIdentifier: workingApplication?.bundleIdentifier
+            )
+            let sectionTitle = hasAppSpecificSuggestions
+                ? "FOR \((workingApplication?.displayName ?? "THIS APP").uppercased())"
+                : "ROUTINES"
+            VStack(alignment: .leading, spacing: 6) {
+                sectionLabel(sectionTitle)
+                LazyVGrid(
+                    columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)],
+                    alignment: .leading,
+                    spacing: 6
+                ) {
+                    ForEach(suggestedRoutines) { routine in
+                        routineChip(routine)
+                    }
+                }
+            }
+        }
+    }
+
+    private func routineChip(_ routine: WispRoutine) -> some View {
+        Button {
+            companionManager.runRoutine(withID: routine.id)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: routine.symbolName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(WispColor.Brand.sage)
+                    .frame(width: 14)
+                Text(routine.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                if let shortcutDigit = routine.shortcutDigit {
+                    Text(RoutineStore.shortcutLabel(forDigit: shortcutDigit))
+                        .font(.system(size: 9.5, weight: .medium).monospacedDigit())
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(DS.Colors.borderSubtle.opacity(0.7), lineWidth: 0.75)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(PressableScaleButtonStyle())
+        .pointerCursor()
+        .nativeTooltip(routine.instruction)
     }
 
     private func skillChip(_ skill: SkillManager.SkillSummary) -> some View {
