@@ -878,6 +878,8 @@ final class CompanionManager: ObservableObject {
 
     if pointing wouldn't help, append [POINT:none].
 
+    if the user's message includes a list of on-screen elements with ids like a12, point at a listed element by its id instead of coordinates: [POINT:a12:label]. an id is exact; coordinates are a guess. use coordinates only for things not in the list.
+
     examples:
     - user asks how to color grade in final cut: "you'll want to open the color inspector — it's right up in the top right area of the toolbar. click that and you'll get all the color wheels and curves. [POINT:1100,42:color inspector]"
     - user asks what html is: "html stands for hypertext markup language, it's basically the skeleton of every web page. curious how it connects to the css you're looking at? [POINT:none]"
@@ -1075,10 +1077,30 @@ final class CompanionManager: ObservableObject {
             let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
 
             do {
+                // Read the frontmost native app's Accessibility tree alongside
+                // the screen capture, so the model can point at an element by
+                // id ([POINT:a12:label]) instead of guessing its pixel
+                // coordinates. Only on screen-referring turns — otherwise there
+                // is no screenshot to point into — and bounded to ~300ms, so it
+                // finishes within the capture it runs beside. Nil for browsers
+                // the DOM path handles, for Wisp itself, and without
+                // Accessibility permission; pointing then falls back to
+                // coordinates.
+                let accessibilityElementSnapshotTask: Task<AccessibilityElementSnapshot?, Never>? =
+                    shouldAttachScreenshot
+                        ? Task { await AccessibilityElementSnapshotter.captureFrontmostApplicationSnapshot() }
+                        : nil
+
                 // Capture all connected screens so the AI has full context
                 PerfMetricsRecorder.shared.beginPhase(.screenCapture)
                 let screenCaptures = try await claimScreenCaptures()
                 PerfMetricsRecorder.shared.endPhase(.screenCapture)
+
+                let accessibilityElementSnapshot = await accessibilityElementSnapshotTask?.value
+                let accessibilityElementPromptText = accessibilityElementSnapshot?.promptText() ?? ""
+                if let accessibilityElementSnapshot {
+                    print("♿️ Accessibility snapshot: \(accessibilityElementSnapshot.elements.count) elements in \(accessibilityElementSnapshot.applicationName)")
+                }
 
                 guard !Task.isCancelled else { return }
 
@@ -1126,6 +1148,7 @@ final class CompanionManager: ObservableObject {
                     let outcome = try await runner.run(
                         userText: transcript,
                         images: labeledImages,
+                        screenContextText: accessibilityElementPromptText,
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
                             + ScreenAnnotationParser.promptInstructions
                             + GlanceCardParser.promptInstructions
@@ -1160,9 +1183,19 @@ final class CompanionManager: ObservableObject {
                     // followed by this turn's screenshots. History is the prior
                     // exchanges, already projected down to questions and
                     // answers.
+                    //
+                    // The Accessibility element list, when there is one, rides
+                    // as its own text block after the transcript — in the user
+                    // message rather than the system prompt, so the system
+                    // prompt (and the local model's prefix cache) stays
+                    // identical between turns.
+                    let accessibilityElementBlocks: [BuddyContentBlock] = accessibilityElementPromptText.isEmpty
+                        ? []
+                        : [.text(accessibilityElementPromptText)]
                     let currentUserMessage = BuddyChatMessage(
                         role: .user,
                         blocks: [.text(transcript)]
+                            + accessibilityElementBlocks
                             + labeledImages.map { .image(data: $0.data, label: $0.label) }
                     )
                     let singleCallRequest = ModelRequest(
@@ -1233,7 +1266,22 @@ final class CompanionManager: ObservableObject {
                 // Parse the [POINT:...] tag from Claude's response.
                 // Annotations are pulled out first so their tags are gone
                 // before the pointing parser looks for a trailing tag.
-                let annotationResult = ScreenAnnotationParser.parse(cardParseResult.spokenText)
+                //
+                // Id-addressed tags ([BOX:a12:…], and [POINT:a12:…] below)
+                // resolve against this turn's Accessibility snapshot, taken
+                // before the model call, so they land on the element's real
+                // frame rather than on a guessed coordinate.
+                let accessibilityElementRegionResolver: (String) -> AccessibilityElementResolvedRegion? = { elementID in
+                    Self.resolveAccessibilityElementRegion(
+                        elementID: elementID,
+                        accessibilityElementSnapshot: accessibilityElementSnapshot,
+                        screenCaptures: screenCaptures
+                    )
+                }
+                let annotationResult = ScreenAnnotationParser.parse(
+                    cardParseResult.spokenText,
+                    accessibilityElementRegionResolver: accessibilityElementRegionResolver
+                )
 
                 let parseResult = Self.parsePointingCoordinates(from: annotationResult.spokenText)
                 let spokenText = parseResult.spokenText
@@ -1251,7 +1299,26 @@ final class CompanionManager: ObservableObject {
                 // stores — so it just joins the list applyAnnotations places on
                 // the right display.
                 var annotationsToDraw = annotationResult.annotations
-                if let pointCoordinate = parseResult.coordinate {
+                if let accessibilityElementID = parseResult.accessibilityElementID {
+                    // Pointed by Accessibility id: the marker goes on the centre
+                    // of the element's real frame, on the display it is on. An
+                    // id that is not in this turn's snapshot draws nothing
+                    // rather than a marker somewhere arbitrary.
+                    if let resolvedRegion = accessibilityElementRegionResolver(accessibilityElementID) {
+                        annotationsToDraw.append(
+                            ScreenAnnotation(
+                                style: .marker,
+                                regionInScreenshotPixels: resolvedRegion.centerPointRegionInScreenshotPixels,
+                                label: parseResult.elementLabel,
+                                screenNumber: resolvedRegion.screenNumber
+                            )
+                        )
+                        WispAnalytics.trackElementPointed(elementLabel: parseResult.elementLabel)
+                        print("🎯 Element marker: \(accessibilityElementID) → \"\(parseResult.elementLabel ?? "element")\"")
+                    } else {
+                        print("🎯 Element pointing: unknown accessibility id \(accessibilityElementID)")
+                    }
+                } else if let pointCoordinate = parseResult.coordinate {
                     annotationsToDraw.append(
                         ScreenAnnotation(
                             style: .marker,
@@ -1291,6 +1358,20 @@ final class CompanionManager: ObservableObject {
                 // model to answer with numbers about a screen it can no longer
                 // see. Every other message is kept exactly as it happened.
                 var recordedMessages = messagesFromThisTurn.map(\.withoutImages)
+                // The Accessibility element list goes the same way as the
+                // screenshot: its ids are only valid for this turn's snapshot,
+                // and replaying them would invite the model to point at `a12`
+                // next turn when `a12` has become a different element.
+                if !accessibilityElementPromptText.isEmpty {
+                    recordedMessages = recordedMessages.map { recordedMessage in
+                        var messageWithoutElementList = recordedMessage
+                        messageWithoutElementList.blocks.removeAll { block in
+                            if case .text(let blockText) = block { return blockText == accessibilityElementPromptText }
+                            return false
+                        }
+                        return messageWithoutElementList
+                    }
+                }
                 if let finalReplyIndex = recordedMessages.lastIndex(where: { $0.role == .assistant }) {
                     recordedMessages[finalReplyIndex].blocks = [.text(spokenText)]
                 }
@@ -1986,6 +2067,49 @@ final class CompanionManager: ObservableObject {
         print("🖍️ Annotations: \(summary)")
     }
 
+    // MARK: - Accessibility element resolution
+
+    /// Resolves an Accessibility element id the model named (`a12`) to that
+    /// element's region in the screenshot of the display it is on, or nil if
+    /// the id is not in this turn's snapshot or the element is on no captured
+    /// display.
+    ///
+    /// The Accessibility frame is exact, in global top-left-origin points; it
+    /// is converted into the same screenshot-pixel space coordinate tags use
+    /// so it can share `applyAnnotations`' per-display scale with them. The
+    /// conversion itself is `AccessibilityElementGeometry`, pure and tested.
+    static func resolveAccessibilityElementRegion(
+        elementID: String,
+        accessibilityElementSnapshot: AccessibilityElementSnapshot?,
+        screenCaptures: [CompanionScreenCapture]
+    ) -> AccessibilityElementResolvedRegion? {
+        guard let accessibilityElementSnapshot,
+              let snapshotElement = accessibilityElementSnapshot.element(withID: elementID) else {
+            return nil
+        }
+
+        // Accessibility coordinates are measured from the top-left of the
+        // primary display — the one whose AppKit frame sits at the origin,
+        // which `NSScreen.screens` always lists first.
+        guard let primaryDisplayHeight = NSScreen.screens.first?.frame.height else { return nil }
+
+        let capturedDisplays = screenCaptures.map { capture in
+            AccessibilityElementGeometry.CapturedDisplayGeometry(
+                displayFrameInAppKitCoordinates: capture.displayFrame,
+                screenshotSizeInPixels: CGSize(
+                    width: CGFloat(capture.screenshotWidthInPixels),
+                    height: CGFloat(capture.screenshotHeightInPixels)
+                )
+            )
+        }
+
+        return AccessibilityElementGeometry.screenshotRegion(
+            forAccessibilityFrame: snapshotElement.frameInAccessibilityCoordinates,
+            primaryDisplayHeight: primaryDisplayHeight,
+            capturedDisplays: capturedDisplays
+        )
+    }
+
     // MARK: - Point Tag Parsing
 
     /// Result of parsing a [POINT:...] tag from Claude's response.
@@ -1998,11 +2122,47 @@ final class CompanionManager: ObservableObject {
         let elementLabel: String?
         /// Which screen the coordinate refers to (1-based), or nil to default to cursor screen.
         let screenNumber: Int?
+        /// The Accessibility element id (`a12`) when the model pointed by id —
+        /// `[POINT:a12:label]` — instead of by coordinate. Resolved against this
+        /// turn's `AccessibilityElementSnapshot`; `coordinate` is nil in that case.
+        var accessibilityElementID: String? = nil
     }
 
-    /// Parses a [POINT:x,y:label:screenN] or [POINT:none] tag from the end of Claude's response.
-    /// Returns the spoken text (tag removed) and the optional coordinate + label + screen number.
+    /// Parses a [POINT:x,y:label:screenN], [POINT:a12:label] or [POINT:none] tag from the end of Claude's response.
+    /// Returns the spoken text (tag removed) and the optional coordinate or
+    /// Accessibility element id, plus label and screen number.
     static func parsePointingCoordinates(from responseText: String) -> PointingParseResult {
+        // The id form first: [POINT:a12:label]. An id names an element from the
+        // Accessibility snapshot, whose exact frame Wisp already knows, so it
+        // needs no screen number — a trailing :screenN is tolerated and ignored.
+        // The label separator is ":" by specification but a space is accepted,
+        // matching the annotation tags' leniency.
+        let accessibilityElementIDPattern = #"\[POINT:\s*([aA]\d+)\s*(?:[\s:]\s*([^\]:]*?))?\s*(?::screen\d+)?\]\s*$"#
+        if let accessibilityElementIDRegex = try? NSRegularExpression(pattern: accessibilityElementIDPattern),
+           let idMatch = accessibilityElementIDRegex.firstMatch(
+               in: responseText,
+               range: NSRange(responseText.startIndex..., in: responseText)
+           ),
+           let tagRange = Range(idMatch.range, in: responseText),
+           let elementIDRange = Range(idMatch.range(at: 1), in: responseText) {
+            let spokenText = String(responseText[..<tagRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var elementLabel: String? = nil
+            if let labelRange = Range(idMatch.range(at: 2), in: responseText) {
+                let trimmedLabel = String(responseText[labelRange]).trimmingCharacters(in: .whitespaces)
+                elementLabel = trimmedLabel.isEmpty ? nil : trimmedLabel
+            }
+
+            return PointingParseResult(
+                spokenText: spokenText,
+                coordinate: nil,
+                elementLabel: elementLabel,
+                screenNumber: nil,
+                accessibilityElementID: String(responseText[elementIDRange]).lowercased()
+            )
+        }
+
         // Match [POINT:none] or [POINT:123,456:label] or [POINT:123,456:label:screen2]
         let pattern = #"\[POINT:(?:none|(\d+)\s*,\s*(\d+)(?::([^\]:\s][^\]:]*?))?(?::screen(\d+))?)\]\s*$"#
 

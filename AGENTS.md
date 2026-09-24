@@ -104,6 +104,20 @@ cloud dependency to the local path, without asking.
   parses them and turns each into a `.marker` `ScreenAnnotation` (a point in the screenshot's
   pixel space) applied to the correct monitor. There is no flying cursor — the marker is a
   pulsing target ring drawn by the same annotation layer as boxes and arrows, alongside them.
+  **Accessibility-tree pointing** (native apps): on a screen-referring turn, concurrently with
+  the capture, `AccessibilityElementSnapshotter` walks the frontmost app's menu bar + focused
+  window AX tree (skips Wisp itself and Chrome/Safari, which the DOM path handles; bounded to
+  ~150 elements / 30 levels / ~300ms, 0.1s per-call AX timeout, detached off the main actor;
+  never reads secure-field values) and assigns ids `a1, a2…`. `AccessibilityElementSnapshot.promptText()`
+  (one short line per element + the id-tag instruction) rides as an extra text block on the
+  **user message**, not the system prompt, so the prefix cache is unaffected; it is stripped
+  from the stored transcript because ids are per-turn. The model can then write
+  `[POINT:a12:label]` (and `[BOX|HIGHLIGHT|ARROW:a12:label]`); `CompanionManager.resolveAccessibilityElementRegion`
+  converts the element's AX frame (top-left global) → AppKit → the right display's
+  screenshot-pixel space via `AccessibilityElementGeometry`, so it shares `applyAnnotations`'
+  per-display scale with coordinate tags. Unknown ids draw nothing; coordinate tags still work.
+  Note: annotation regexes must write the separator class as `[\s:]`, never `[:\s]` — ICU reads
+  `[:`…`:]` as a POSIX class and the pattern silently fails to compile.
 - **Screen Annotation**: `[BOX:left,top,right,bottom:label]`, `[HIGHLIGHT:...]` and
   `[ARROW:x,y:label]` tags render through a `Canvas` layer in the overlay, as does the `.marker`
   from a `[POINT:]`. Note the corner format — the model emits corners, not origin+size. When
@@ -357,7 +371,9 @@ Grouped by what they do. Line counts are approximate.
 | `OverlayWindow.swift` | ~265 | Full-screen transparent overlay (one per screen): hosts the tool-confirmation card, the command-mode badge, and the annotation layer (markers, boxes, arrows, highlights) via `OverlayContentView`. Draws nothing while idle. Also owns `ignoresMouseEvents` toggling and the shared `Triangle` glyph. |
 | `CommandModeIndicator.swift` | ~135 | The push-to-talk gesture badge: `PushToTalkCommandMode` (Talk / Dictate / Type / Hands-free, with label, icon, destination) and `CommandModeIndicator`, the glass capsule the overlay shows under the notch to name the fired gesture. |
 | `ScreenListeningGlow.swift` | ~100 | Ambient "Wisp is listening" cue: a breathing lavender (AI-activity accent) glow around every screen's edges, drawn by the overlay only while `voiceState == .listening`. Honours Reduce Motion (steady glow). |
-| `ScreenAnnotation.swift` | ~217 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. |
+| `ScreenAnnotation.swift` | ~315 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. Also the id form (`[BOX:a12:label]`…) via an optional Accessibility-region resolver. |
+| `AccessibilityElementSnapshot.swift` | ~305 | Pure, testable side of AX pointing: the snapshot/entry model, compact prompt rendering, role-name mapping, and `AccessibilityElementGeometry` (AX frame → screenshot-pixel region + screen number). |
+| `AccessibilityElementSnapshotter.swift` | ~380 | The bounded AX tree walk of the frontmost app (menu bar + focused window, breadth-first, pruned, time/count/depth-capped, off the main actor). |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 | `CompanionResponseOverlay.swift` | ~217 | Response bubble and waveform next to the cursor. |
 | `ElementLocationDetector.swift` | ~335 | Locates UI elements in screenshots for pointing. |

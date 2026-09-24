@@ -120,9 +120,15 @@ final class AgentTurnRunner {
     ///     Shown, never spoken — speaking every intermediate thought would
     ///     make a multi-step request unbearable to listen to.
     ///   - onStep: Called as each step completes, for the dashboard timeline.
+    ///   - screenContextText: Extra per-turn context about the screen (the
+    ///     Accessibility element list), carried as its own text block on the
+    ///     first user message, beside the screenshot. Kept out of `userText` so
+    ///     the tool router ranks tools against what the user said, not against
+    ///     a list of on-screen button names.
     func run(
         userText: String,
         images: [(data: Data, label: String)],
+        screenContextText: String? = nil,
         systemPrompt: String,
         conversationHistory: [BuddyChatMessage],
         onNarration: @MainActor (String) -> Void,
@@ -156,6 +162,9 @@ final class AgentTurnRunner {
             .image(data: $0.data, label: $0.label)
         }
         firstUserBlocks.append(.text(userText))
+        if let screenContextText, !screenContextText.isEmpty {
+            firstUserBlocks.append(.text(screenContextText))
+        }
         messages.append(BuddyChatMessage(role: .user, blocks: firstUserBlocks))
 
         for iteration in 0..<Self.maximumIterations {

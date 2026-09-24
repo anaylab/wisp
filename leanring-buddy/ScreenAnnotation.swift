@@ -133,7 +133,19 @@ enum ScreenAnnotationParser {
     """
 
     /// Extracts annotation tags and strips them from the spoken text.
-    static func parse(_ responseText: String) -> ParseResult {
+    ///
+    /// - Parameter accessibilityElementRegionResolver: Resolves an
+    ///   Accessibility element id (`a12`, from this turn's
+    ///   `AccessibilityElementSnapshot`) to its region in the screenshot. When
+    ///   given, `[BOX:a12:label]`, `[HIGHLIGHT:a12:label]` and
+    ///   `[ARROW:a12:label]` draw over that element's real frame. An id tag is
+    ///   always stripped from the spoken text, but draws nothing when there is
+    ///   no resolver or the id is unknown — a stale or invented id must not
+    ///   put a box somewhere arbitrary.
+    static func parse(
+        _ responseText: String,
+        accessibilityElementRegionResolver: ((String) -> AccessibilityElementResolvedRegion?)? = nil
+    ) -> ParseResult {
         // Paired with the tag's start offset so the final list can be restored to
         // the order the steps appear in the reply — the two regex passes below
         // would otherwise group all regions before all arrows, scrambling a
@@ -146,8 +158,14 @@ enum ScreenAnnotationParser {
         // The label separator is ":" by specification, but the model often
         // writes a space instead; both are accepted rather than discarding an
         // otherwise perfectly good box over punctuation.
-        let regionPattern = #"\[(BOX|HIGHLIGHT):\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:[:\s]\s*([^\]:]+?))?\s*(?::screen(\d+))?\]"#
-        let arrowPattern = #"\[(ARROW):\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:[:\s]\s*([^\]:]+?))?\s*(?::screen(\d+))?\]"#
+        //
+        // The separator class is written `[\s:]`, never `[:\s]`: ICU (behind
+        // NSRegularExpression) reads `[:` … `:]` as a POSIX class like
+        // `[:alpha:]`, and with the label's `[^\]:]` later in the pattern that
+        // made the whole pattern fail to compile — `try?` then silently
+        // dropped every box, highlight and arrow.
+        let regionPattern = #"\[(BOX|HIGHLIGHT):\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen(\d+))?\]"#
+        let arrowPattern = #"\[(ARROW):\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen(\d+))?\]"#
 
         for (pattern, isRegion) in [(regionPattern, true), (arrowPattern, false)] {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
@@ -215,6 +233,55 @@ enum ScreenAnnotationParser {
                     )
                 ))
                 rangesToRemove.append(tagRange)
+            }
+        }
+
+        // Id-addressed tags: [BOX:a12:label], [HIGHLIGHT:a12:label] and
+        // [ARROW:a12:label]. The numeric patterns above cannot match these,
+        // since an id starts with a letter. A box or highlight takes the
+        // element's whole frame; an arrow aims at its centre.
+        let accessibilityElementIDPattern = #"\[(BOX|HIGHLIGHT|ARROW):\s*([aA]\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen\d+)?\]"#
+        if let accessibilityElementIDRegex = try? NSRegularExpression(pattern: accessibilityElementIDPattern) {
+            let range = NSRange(responseText.startIndex..., in: responseText)
+            for match in accessibilityElementIDRegex.matches(in: responseText, range: range) {
+                guard let tagRange = Range(match.range, in: responseText),
+                      let styleRange = Range(match.range(at: 1), in: responseText),
+                      let elementIDRange = Range(match.range(at: 2), in: responseText) else { continue }
+
+                // Stripped whether or not it resolves: the tag is never speech.
+                rangesToRemove.append(tagRange)
+
+                let elementID = String(responseText[elementIDRange]).lowercased()
+                guard let resolvedRegion = accessibilityElementRegionResolver?(elementID) else { continue }
+
+                let style: ScreenAnnotation.Style
+                switch String(responseText[styleRange]).uppercased() {
+                case "BOX": style = .box
+                case "HIGHLIGHT": style = .highlight
+                default: style = .arrow
+                }
+
+                var label: String?
+                if let labelRange = Range(match.range(at: 3), in: responseText) {
+                    let text = String(responseText[labelRange]).trimmingCharacters(in: .whitespaces)
+                    label = text.isEmpty ? nil : text
+                }
+
+                let tagStartOffset = responseText.distance(from: responseText.startIndex, to: tagRange.lowerBound)
+                annotationsWithOffset.append((
+                    offset: tagStartOffset,
+                    annotation: ScreenAnnotation(
+                        style: style,
+                        regionInScreenshotPixels: style == .arrow
+                            ? resolvedRegion.centerPointRegionInScreenshotPixels
+                            : resolvedRegion.regionInScreenshotPixels,
+                        label: label,
+                        // The element's own display rather than a screen the
+                        // model named: the Accessibility frame already says
+                        // where the element is.
+                        screenNumber: resolvedRegion.screenNumber
+                    )
+                ))
             }
         }
 
