@@ -136,7 +136,8 @@ enum ScreenAnnotationParser {
     ///
     /// - Parameter accessibilityElementRegionResolver: Resolves an
     ///   Accessibility element id (`a12`, from this turn's
-    ///   `AccessibilityElementSnapshot`) to its region in the screenshot. When
+    ///   `AccessibilityElementSnapshot`) or an OCR line id (`t7`, from this
+    ///   turn's `ScreenTextSnapshot`) to its region in the screenshot. When
     ///   given, `[BOX:a12:label]`, `[HIGHLIGHT:a12:label]` and
     ///   `[ARROW:a12:label]` draw over that element's real frame. An id tag is
     ///   always stripped from the spoken text, but draws nothing when there is
@@ -237,10 +238,12 @@ enum ScreenAnnotationParser {
         }
 
         // Id-addressed tags: [BOX:a12:label], [HIGHLIGHT:a12:label] and
-        // [ARROW:a12:label]. The numeric patterns above cannot match these,
-        // since an id starts with a letter. A box or highlight takes the
-        // element's whole frame; an arrow aims at its centre.
-        let accessibilityElementIDPattern = #"\[(BOX|HIGHLIGHT|ARROW):\s*([aA]\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen\d+)?\]"#
+        // [ARROW:a12:label] — or the same with an OCR line id (`t7`, from this
+        // turn's `ScreenTextSnapshot`), which the same resolver handles. The
+        // numeric patterns above cannot match these, since an id starts with a
+        // letter. A box or highlight takes the element's whole frame; an arrow
+        // aims at its centre.
+        let accessibilityElementIDPattern = #"\[(BOX|HIGHLIGHT|ARROW):\s*([aAtT]\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen\d+)?\]"#
         if let accessibilityElementIDRegex = try? NSRegularExpression(pattern: accessibilityElementIDPattern) {
             let range = NSRange(responseText.startIndex..., in: responseText)
             for match in accessibilityElementIDRegex.matches(in: responseText, range: range) {

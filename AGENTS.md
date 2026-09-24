@@ -127,6 +127,24 @@ cloud dependency to the local path, without asking.
   per-display scale with coordinate tags. Unknown ids draw nothing; coordinate tags still work.
   Note: annotation regexes must write the separator class as `[\s:]`, never `[:\s]` — ICU reads
   `[:`…`:]` as a POSIX class and the pattern silently fails to compile.
+  **On-device OCR pointing** (any pixels — terminals, images, canvases, remote desktops): every
+  capture in `CompanionScreenCaptureUtility` immediately starts Vision text recognition on the
+  uncompressed 896px frame (`ScreenTextRecognizer`, Swift `RecognizeTextRequest`, `.accurate`
+  with a 5px minimum text height, detached off the main actor), cached per display keyed on the
+  exact bytes sent — the same identity `ScreenshotReuseCache` preserves, so an unchanged screen is
+  never re-recognised. The push-to-talk capture runs during speech, so recognition (~170ms warm on
+  an M3 Pro, ~300ms+ cold) usually finishes before the transcript; a screen-referring turn waits at
+  most `turnWaitBudgetSeconds` (0.4s) and otherwise leaves it running into the cache.
+  `ScreenTextSnapshot` (pure) confidence-filters (≥0.35), orders lines into reading order, caps them
+  (60 lines / 2500 chars, 120 per line) and assigns ids `t1, t2…`; its `promptText()`
+  (`t3 412,88,520,104 "Save changes"` + one id-tag line) is **joined into the same screen-context
+  block as the Accessibility list** (`ScreenTextSnapshot.screenContextPromptText`), so it rides the
+  user message and is stripped from history exactly like `a` ids. `[POINT:t7:label]` and
+  `[BOX|HIGHLIGHT|ARROW:t7:label]` use the same id regexes (`[aAtT]\d+`) and one resolver,
+  `CompanionManager.resolveScreenElementRegion` (in `ScreenTextRecognizer.swift`), which routes `t`
+  ids to the OCR line box (already in screenshot pixels) and `a` ids to the AX path. The read-only
+  `read_screen_text` agent tool (`.reading(.localMachine)`, general scope) returns the plain OCR text
+  of the current screen (150 lines / 4000 chars).
 - **Screen Annotation**: `[BOX:left,top,right,bottom:label]`, `[HIGHLIGHT:...]` and
   `[ARROW:x,y:label]` tags render through a `Canvas` layer in the overlay, as does the `.marker`
   from a `[POINT:]`. Note the corner format — the model emits corners, not origin+size. When
@@ -354,7 +372,7 @@ Grouped by what they do. Line counts are approximate.
 | `CursorTab.swift` | ~110 | Dashboard Cursor tab: dock-cursor toggle (shared with the notch) and the colour swatches. |
 | `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
 | `AgentTab.swift` | ~250 | Dashboard Agent tab: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), and permission rows with System Settings deep-links. |
-| `CompanionScreenCaptureUtility.swift` | ~139 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. |
+| `CompanionScreenCaptureUtility.swift` | ~150 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. Starts OCR (`ScreenTextRecognizer`) on each captured frame. |
 
 ### Local model stack
 | File | Lines | Purpose |
@@ -383,6 +401,9 @@ Grouped by what they do. Line counts are approximate.
 | `ScreenAnnotation.swift` | ~315 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. Also the id form (`[BOX:a12:label]`…) via an optional Accessibility-region resolver. |
 | `AccessibilityElementSnapshot.swift` | ~305 | Pure, testable side of AX pointing: the snapshot/entry model, compact prompt rendering, role-name mapping, and `AccessibilityElementGeometry` (AX frame → screenshot-pixel region + screen number). |
 | `AccessibilityElementSnapshotter.swift` | ~380 | The bounded AX tree walk of the frontmost app (menu bar + focused window, breadth-first, pruned, time/count/depth-capped, off the main actor). |
+| `ScreenTextSnapshot.swift` | ~360 | Pure, testable side of OCR pointing: recognised-line model, confidence filter, reading order, prompt caps, compact `t`-id rendering + plain text, line-id → region lookup, Vision→screenshot coordinate flip, and `ScreenTextRecognitionCache` (per-display, keyed on screenshot bytes). |
+| `ScreenTextRecognizer.swift` | ~265 | Runs Vision `RecognizeTextRequest` off the main actor for each capture, caches the tasks, and builds a turn's `ScreenTextSnapshot` within a wait budget. Also `CompanionManager.resolveScreenElementRegion` (the shared `a`/`t` id resolver). |
+| `ScreenTextReadingTool.swift` | ~60 | The read-only `read_screen_text` agent tool: captures the screen and returns its OCR text. |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 | `CompanionResponseOverlay.swift` | ~217 | Response bubble and waveform next to the cursor. |
 | `ElementLocationDetector.swift` | ~335 | Locates UI elements in screenshots for pointing. |

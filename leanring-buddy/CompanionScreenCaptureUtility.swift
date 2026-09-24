@@ -124,6 +124,17 @@ enum CompanionScreenCaptureUtility {
                 print("🖼️ Screen unchanged — reusing the cached frame (skips ~6s of image encoding)")
             }
 
+            // Start on-device OCR of this frame now, off the main actor, so it
+            // is usually finished by the time the turn wants it — the
+            // push-to-talk capture runs while the user is still speaking.
+            // Keyed on the bytes actually sent, so an unchanged (reused) frame
+            // is never recognised twice. See `ScreenTextRecognizer`.
+            ScreenTextRecognizer.shared.beginRecognitionIfNeeded(
+                forDisplay: display.displayID,
+                imageData: jpegData,
+                screenshotImage: cgImage
+            )
+
             let screenLabel: String
             if sortedDisplays.count == 1 {
                 screenLabel = "user's screen (cursor is here)"

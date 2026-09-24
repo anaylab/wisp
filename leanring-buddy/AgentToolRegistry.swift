@@ -577,6 +577,7 @@ final class AgentToolRegistry: ObservableObject {
         registerSkillTools()
         registerMemoryTools()
         registerReminderTools()
+        registerScreenTextTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

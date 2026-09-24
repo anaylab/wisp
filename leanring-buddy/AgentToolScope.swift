@@ -125,6 +125,7 @@ enum AgentToolScope: String, CaseIterable {
             // What a conversation plausibly reaches for: the things that
             // answer a question about the user's own machine right now.
             return name == "list_windows" || name == "read_clipboard" || name == "read_page"
+                || name == "read_screen_text"
         }
     }
 

@@ -1102,7 +1102,22 @@ final class CompanionManager: ObservableObject {
                 PerfMetricsRecorder.shared.endPhase(.screenCapture)
 
                 let accessibilityElementSnapshot = await accessibilityElementSnapshotTask?.value
-                let accessibilityElementPromptText = accessibilityElementSnapshot?.promptText() ?? ""
+                // On-device OCR of the same screenshots, started when they were
+                // captured, so the model can quote the screen's text and point
+                // at a line by id ([POINT:t7:label]). Waits at most ~400ms for
+                // recognition still running. Its text joins the Accessibility
+                // list in the same screen-context block, so the request and the
+                // history-stripping below handle both alike.
+                let screenTextSnapshot = shouldAttachScreenshot
+                    ? await ScreenTextRecognizer.shared.snapshot(
+                        for: screenCaptures,
+                        waitingAtMost: ScreenTextRecognizer.turnWaitBudgetSeconds
+                    )
+                    : nil
+                let accessibilityElementPromptText = ScreenTextSnapshot.screenContextPromptText(
+                    accessibilityElementPromptText: accessibilityElementSnapshot?.promptText() ?? "",
+                    screenTextSnapshot: screenTextSnapshot
+                )
                 if let accessibilityElementSnapshot {
                     print("♿️ Accessibility snapshot: \(accessibilityElementSnapshot.elements.count) elements in \(accessibilityElementSnapshot.applicationName)")
                 }
@@ -1277,9 +1292,10 @@ final class CompanionManager: ObservableObject {
                 // before the model call, so they land on the element's real
                 // frame rather than on a guessed coordinate.
                 let accessibilityElementRegionResolver: (String) -> AccessibilityElementResolvedRegion? = { elementID in
-                    Self.resolveAccessibilityElementRegion(
+                    Self.resolveScreenElementRegion(
                         elementID: elementID,
                         accessibilityElementSnapshot: accessibilityElementSnapshot,
+                        screenTextSnapshot: screenTextSnapshot,
                         screenCaptures: screenCaptures
                     )
                 }
@@ -2179,7 +2195,9 @@ final class CompanionManager: ObservableObject {
         // needs no screen number — a trailing :screenN is tolerated and ignored.
         // The label separator is ":" by specification but a space is accepted,
         // matching the annotation tags' leniency.
-        let accessibilityElementIDPattern = #"\[POINT:\s*([aA]\d+)\s*(?:[\s:]\s*([^\]:]*?))?\s*(?::screen\d+)?\]\s*$"#
+        // An OCR line id (`t7`) takes the same form and path; the resolver
+        // tells the two apart by prefix.
+        let accessibilityElementIDPattern = #"\[POINT:\s*([aAtT]\d+)\s*(?:[\s:]\s*([^\]:]*?))?\s*(?::screen\d+)?\]\s*$"#
         if let accessibilityElementIDRegex = try? NSRegularExpression(pattern: accessibilityElementIDPattern),
            let idMatch = accessibilityElementIDRegex.firstMatch(
                in: responseText,
