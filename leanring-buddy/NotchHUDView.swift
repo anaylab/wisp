@@ -281,6 +281,10 @@ struct NotchHUDView: View {
                 PlacesCardView(state: placesCardState)
             case let .source(sourceCardState):
                 SourceCardView(state: sourceCardState)
+            case let .reminders(remindersCardState):
+                RemindersCardView(state: remindersCardState)
+            case let .timer(timerCardState):
+                TimerCardView(state: timerCardState)
             }
         }
     }

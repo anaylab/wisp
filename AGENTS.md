@@ -92,7 +92,16 @@ cloud dependency to the local path, without asking.
   Weather layout), `calendar` (EventKit, on-device), `music`/now-playing (AppleScript to
   Music/Spotify, on-device, best-effort), `places` (the model sends only a query like
   "coffee" → CoreLocation for the user's position + MapKit `MKLocalSearch`, no API key, a
-  Maps-style tappable results list that opens a place in Apple Maps), and `source`
+  Maps-style tappable results list that opens a place in Apple Maps), `reminders` (EventKit
+  `EKReminder`, on-device; optional `list` + `filter` today/overdue/all → incomplete reminders
+  with list-colour dots, overdue in the bad tone, rows open Reminders.app; requests full
+  Reminders access on first use), `timer` (`seconds` + optional `label` → a live countdown
+  whose `TimelineView` clock ticks per second and pauses off-screen, with Cancel; the timer
+  itself lives in `WispTimerStore` so it survives the card being replaced/dismissed — its
+  `UNUserNotification` is scheduled at start and it calls `flashIsland(.success)`, which plays
+  the success cue, on finish; "set a timer for N minutes" also skips the model via
+  `FastCommandRouter`/`TimerCommandParser`, returning a card request resolved on the same
+  path), and `source`
   (user-configured HTTPS endpoints in `~/.wisp/sources.json`, mapped to generic blocks).
   Network kinds are gated by
   `GlanceCardDataPreference` (default on) and labelled "Live · source"; on-device kinds are
@@ -385,7 +394,7 @@ Grouped by what they do. Line counts are approximate.
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
 | `BrowserAgentLoop.swift` | ~720 | Long-horizon browser agent for cloud providers: observe→act loop (cap 30), line-grammar actions incl. batched form fills, stuck detection, untrusted-page prompt rules. Also `BrowserActionSafety` (which clicks/sends need the always-ask confirmation). |
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
-| `AgentToolRegistry.swift` | ~500 | Built-in read-only tools + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |
+| `AgentToolRegistry.swift` | ~640 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |
 | `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
@@ -419,13 +428,16 @@ Grouped by what they do. Line counts are approximate.
 | `VoiceOutputPreference.swift` | ~50 | Source of truth for voice/silent mode (reply speech on/off). Persists; defaults on. |
 | `WispVoiceAffordance.swift` | ~200 | Shared VoiceOS-style voice affordance: a Liquid Glass waveform reflecting `voiceState` and the live mic level (`currentAudioPowerLevel`). Used as the notch HUD's centerpiece and in the menu bar panel so both surfaces show one living voice element. Self-animates via a `TimelineView` clock that pauses while idle (no redraws on a resident app). |
 | `SpokenLineParser.swift` | ~90 | Parses/strips the `[SAY: …]` tag — the model's per-reply "speak this" line. |
-| `GlanceCard.swift` | ~500 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`) and the generic block card. |
+| `GlanceCard.swift` | ~655 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`, incl. `RemindersCardRequest`/`TimerCardRequest`) and the generic block card. |
+| `FastCommandRouter.swift` | ~520 | Model-free handling of rigid commands (mute/volume, open an app, and "set a timer for …" via `TimerCommandParser`, whose `Outcome.glanceCardRequest` CompanionManager resolves like a `[CARD:]` tag). Biased toward not matching. |
 | `GlanceCardView.swift` | ~180 | Renderer for the generic block card (header/list/keyValue/stats). |
 | `GlanceCardDataPreference.swift` | ~40 | The single gate for **network** card data (weather, sources). Default on. |
 | `WeatherSnapshot.swift` / `WeatherDataProvider.swift` / `WeatherCardView.swift` | ~330/~200/~260 | Weather kind: Open-Meteo fetch → snapshot → Apple-Weather-style card. |
 | `CalendarSnapshot.swift` / `CalendarDataProvider.swift` / `CalendarCardView.swift` | ~50/~110/~160 | Calendar kind: EventKit on-device read → next events card. Needs Calendar permission. |
 | `NowPlayingDataProvider.swift` / `NowPlayingCardView.swift` | ~150/~110 | Now-playing kind: AppleScript to Music/Spotify (best-effort, on-device). Needs Automation permission. |
 | `PlacesSnapshot.swift` / `PlacesDataProvider.swift` / `PlacesCardView.swift` | ~85/~230/~250 | `places` kind: CoreLocation one-shot (`WispLocationProvider`, in the provider file) + MapKit `MKLocalSearch` → a Maps-style nearby-results card whose rows open in Apple Maps. Network-gated by `GlanceCardDataPreference`; requests Location permission on first use. |
+| `RemindersSnapshot.swift` / `RemindersDataProvider.swift` / `RemindersCardView.swift` | ~210/~215/~240 | `reminders` kind: EventKit on-device read → incomplete-reminders card (rows open Reminders.app). The snapshot file also holds the pure `RemindersSelection` (overdue/today/all filtering + ordering) and `ReminderDueDateParser` (ISO 8601 variants for `create_reminder`); the provider also saves reminders for the confirmation-gated `create_reminder` tool. Needs Reminders permission (`NSRemindersFullAccessUsageDescription`). |
+| `WispTimerStore.swift` / `TimerCardView.swift` | ~235/~225 | `timer` kind: the main-actor store that owns countdowns (completion task, scheduled `UNUserNotification`, finish callback) independent of any card, plus `WispTimerDurationFormatter`; the card is a live countdown (`CountdownSecondTickSchedule`, paused when off-screen) with a Cancel button. |
 | `ConfiguredSourceStore.swift` / `RESTSourceDataProvider.swift` / `SourceCardView.swift` | ~90/~140/~90 | `source` kind: user endpoints in `~/.wisp/sources.json`, fetched over HTTPS and mapped to generic blocks. |
 | `SourcesTab.swift` | ~150 | Dashboard Sources tab: the live-card-data master toggle + the configured-source list. |
 | `MemoryTab.swift` | ~185 | Dashboard Memory tab: remembered facts with per-row delete, reveal/reload memory.md, and the saved-conversation summary with "Clear conversation history" (confirmation dialog). |

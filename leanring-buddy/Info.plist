@@ -30,6 +30,10 @@
 	<string>Wisp reads your upcoming events on this Mac to show them in the notch. Your calendar is read on-device and never uploaded.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Wisp reads your upcoming events on this Mac to show them in the notch. Your calendar is read on-device and never uploaded.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Wisp reads your reminders on this Mac to show them in the notch, and adds a reminder when you ask it to. Your reminders are read on-device and never uploaded by Wisp.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Wisp reads your reminders on this Mac to show them in the notch, and adds a reminder when you ask it to. Your reminders are read on-device and never uploaded by Wisp.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Wisp controls your web browser (Chrome or Safari) when you ask it to — opening tabs, going to sites and working through pages — and asks Music or Spotify what is currently playing to show it in the notch.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

@@ -1018,6 +1018,11 @@ final class CompanionManager: ObservableObject {
                 BuddyChatMessage(role: .user, text: transcript),
                 BuddyChatMessage(role: .assistant, text: fastOutcome.spokenConfirmation),
             ]))
+            // Some fast commands (a timer) have a card to show — resolved the
+            // same way as a model-emitted [CARD:] tag, so there is one path.
+            if let fastCommandGlanceCardRequest = fastOutcome.glanceCardRequest {
+                resolveAndPublishGlanceCard(fastCommandGlanceCardRequest)
+            }
             voiceState = .responding
             currentResponseTask = Task { [weak self] in
                 guard let self else { return }
@@ -1995,6 +2000,43 @@ final class CompanionManager: ObservableObject {
 
         case let .source(sourceRequest):
             resolveSourceCard(sourceRequest)
+
+        case let .reminders(remindersRequest):
+            // On-device read — no network gate, mirroring the calendar card.
+            resolvedGlanceCard = .reminders(.loading)
+            cardDataFetchTask = Task { [weak self] in
+                do {
+                    let snapshot = try await RemindersDataProvider.shared.snapshot(
+                        listName: remindersRequest.listName,
+                        filter: remindersRequest.filter
+                    )
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .reminders(.loaded(snapshot))
+                } catch RemindersDataProvider.RemindersDataError.accessDenied {
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .reminders(.accessDenied)
+                } catch let RemindersDataProvider.RemindersDataError.listNotFound(listName) {
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .reminders(.listNotFound(listName: listName))
+                } catch {
+                    guard let self, !Task.isCancelled else { return }
+                    self.resolvedGlanceCard = .reminders(.failed)
+                }
+            }
+
+        case let .timer(timerRequest):
+            // Nothing to fetch. The timer lives in WispTimerStore, not in the
+            // card, so it keeps running (and still notifies) after this card is
+            // replaced by the next turn or dismissed. flashIsland(.success) also
+            // plays the success sound cue.
+            let startedTimer = WispTimerStore.shared.startTimer(
+                durationSeconds: timerRequest.durationSeconds,
+                label: timerRequest.label,
+                onFinished: { [weak self] in
+                    self?.flashIsland(.success)
+                }
+            )
+            resolvedGlanceCard = .timer(TimerCardState(timerID: startedTimer.id))
         }
     }
 

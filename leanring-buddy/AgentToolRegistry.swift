@@ -497,11 +497,86 @@ final class AgentToolRegistry: ObservableObject {
         }
     }
 
+    /// Lets the model add a reminder to the user's Reminders, on this Mac.
+    ///
+    /// A write, so its metadata makes it ask first: the confirmation card shows
+    /// the exact title/due/list before anything is saved. Local only — EventKit
+    /// syncs through the user's own iCloud as Reminders always does, but Wisp
+    /// itself sends nothing anywhere.
+    private func registerReminderTools() {
+        register(
+            BuddyToolDefinition(
+                name: "create_reminder",
+                description: "Add a reminder to the user's Reminders app. Use when the user asks to be reminded of something or to add a to-do.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "title": .object([
+                            "type": .string("string"),
+                            "description": .string("What to be reminded of, short, e.g. \"call the dentist\"")
+                        ]),
+                        "due": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional due date/time in ISO 8601, e.g. \"2026-09-25T15:00\" or \"2026-09-25\" for a whole day. Omit if the user gave no time.")
+                        ]),
+                        "list": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional Reminders list name. Omit to use the default list.")
+                        ])
+                    ]),
+                    "required": .array([.string("title")])
+                ]),
+                metadata: .writing(.localMachine)
+            )
+        ) { input in
+            guard case .object(let arguments) = input,
+                  case .string(let rawTitle)? = arguments["title"],
+                  !rawTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return "i need a title for the reminder."
+            }
+            let reminderTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var parsedDueDate: ReminderDueDateParser.ParsedDueDate?
+            if case .string(let rawDueDateText)? = arguments["due"],
+               !rawDueDateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // A due date the model wrote but that cannot be read is sent
+                // back rather than silently dropped, so the reminder is never
+                // saved without the time the user asked for.
+                guard let readableDueDate = ReminderDueDateParser.parse(rawDueDateText) else {
+                    return "i couldn't read the due date \"\(rawDueDateText)\". use ISO 8601, like 2026-09-25T15:00."
+                }
+                parsedDueDate = readableDueDate
+            }
+
+            var requestedListName: String?
+            if case .string(let rawListName)? = arguments["list"],
+               !rawListName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                requestedListName = rawListName
+            }
+
+            let savedListName = try await RemindersDataProvider.shared.createReminder(
+                title: reminderTitle,
+                dueDate: parsedDueDate?.date,
+                dueDateIncludesTimeOfDay: parsedDueDate?.includesTimeOfDay ?? false,
+                listName: requestedListName
+            )
+
+            guard let parsedDueDate else {
+                return "added \"\(reminderTitle)\" to the \(savedListName) list."
+            }
+            let dueDateFormatter = DateFormatter()
+            dueDateFormatter.dateStyle = .medium
+            dueDateFormatter.timeStyle = parsedDueDate.includesTimeOfDay ? .short : .none
+            return "added \"\(reminderTitle)\" to the \(savedListName) list, due \(dueDateFormatter.string(from: parsedDueDate.date))."
+        }
+    }
+
     private func registerBuiltInTools() {
         registerBrowserTools()
         registerClaudeCodeTool()
         registerSkillTools()
         registerMemoryTools()
+        registerReminderTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

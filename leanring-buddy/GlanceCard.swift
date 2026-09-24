@@ -144,6 +144,33 @@ struct PlacesCardRequest: Equatable {
     let query: String
 }
 
+/// What the model asked for when it requests a reminders card: optionally one
+/// list by name, and which slice to show. It never supplies reminders itself —
+/// Wisp reads them on-device through EventKit (`RemindersDataProvider`).
+///
+/// `nonisolated` because the reminders provider actor reads it off the main
+/// actor, and the fast-path/parse code builds it from plain values.
+nonisolated struct RemindersCardRequest: Equatable {
+    /// The Reminders list to show, matched case-insensitively, or nil for every
+    /// list.
+    let listName: String?
+    let filter: RemindersFilter
+}
+
+/// What the model (or the "set a timer for…" fast path) asked for when it
+/// requests a timer card: how long, and an optional short label ("tea"). The
+/// countdown itself is owned by `WispTimerStore`, not by the card, so it keeps
+/// running after the card is replaced.
+nonisolated struct TimerCardRequest: Equatable {
+    /// Whole seconds, already validated into `1...maximumDurationSeconds`.
+    let durationSeconds: Int
+    let label: String?
+
+    /// The longest timer Wisp will run. Past a day a "timer" is really a
+    /// reminder, and an absurd value is more likely a model slip than intent.
+    static let maximumDurationSeconds = 24 * 60 * 60
+}
+
 /// What the model asked for when it requests a card from a user-configured
 /// source (`~/.wisp/sources.json`). It names which source; Wisp fetches that
 /// endpoint and maps the response into generic blocks. The model never sees the
@@ -172,6 +199,10 @@ enum GlanceCardRequest: Equatable {
     /// Show a card from a user-configured source (an HTTPS endpoint), rendered
     /// as generic blocks from the fetched JSON.
     case source(SourceCardRequest)
+    /// Show the user's incomplete reminders; read on-device via EventKit.
+    case reminders(RemindersCardRequest)
+    /// Start a countdown timer and show it live; run on-device by Wisp.
+    case timer(TimerCardRequest)
     /// The constrained, model-supplied block card — the fallback for anything
     /// without a dedicated app template.
     case generic(GlanceCard)
@@ -193,6 +224,11 @@ enum ResolvedGlanceCard: Equatable {
     /// A user-configured source card. Its `sourceName` is carried through the
     /// loading/failed states so the card can label itself while it resolves.
     case source(SourceCardState)
+    /// A reminders card, read on-device through EventKit.
+    case reminders(RemindersCardState)
+    /// A live countdown. The state only names the timer; the countdown itself
+    /// lives in `WispTimerStore` so it outlives this card.
+    case timer(TimerCardState)
 }
 
 // MARK: - Tag parsing
@@ -229,6 +265,12 @@ enum GlanceCardParser {
     for ANYTHING the user wants to find near them — restaurants, coffee, food, a bar, a pharmacy, a store, a gas station, or anywhere they say "near me", "nearby", "closest", or "around here" — you do NOT know the real places and must NEVER name one or invent an address. ALWAYS end your reply with this tag and let wisp find them; the query is just the type of place:
     [CARD:{"kind":"places","query":"coffee"}]
     keep your spoken words to a short lead-in like "here are some nearby", then this tag. (a places answer still appends [POINT:none].)
+
+    for the user's reminders — list is optional, filter is today, overdue or all — wisp reads them:
+    [CARD:{"kind":"reminders","filter":"today"}]
+
+    to start a timer, give its length in seconds and an optional label — wisp runs it and alerts when done:
+    [CARD:{"kind":"timer","seconds":300,"label":"tea"}]
 
     for anything else, use blocks — at most three, each one of:
     - {"type":"header","title":"...","icon":"...","trailing":"..."} — a title line; icon and trailing are optional.
@@ -336,6 +378,25 @@ enum GlanceCardParser {
             return .source(SourceCardRequest(sourceName: sourceName))
         }
 
+        // A reminders card needs nothing else: no list means every list, and
+        // an absent or unknown filter means all incomplete reminders.
+        if kind == "reminders" || kind == "reminder" {
+            return .reminders(RemindersCardRequest(
+                listName: trimmedNonEmpty(decodedCard.list),
+                filter: RemindersFilter(lenientRawValue: decodedCard.filter)
+            ))
+        }
+
+        if kind == "timer" || kind == "countdown" {
+            guard let durationSeconds = validatedTimerDurationSeconds(from: decodedCard) else {
+                return nil
+            }
+            return .timer(TimerCardRequest(
+                durationSeconds: durationSeconds,
+                label: validatedTimerLabel(decodedCard.label)
+            ))
+        }
+
         let validatedBlocks = validatedBlocks(from: decodedCard.blocks ?? [])
         guard !validatedBlocks.isEmpty else {
             return nil
@@ -344,6 +405,38 @@ enum GlanceCardParser {
     }
 
     // MARK: Validation
+
+    /// Reads a timer's length from the card body. The prompt asks for
+    /// `seconds`, but a small model sometimes writes `minutes` instead, so that
+    /// is accepted too (seconds wins if both appear). A missing, zero, negative
+    /// or over-a-day length drops the card rather than starting a nonsense
+    /// timer.
+    private static func validatedTimerDurationSeconds(from decodedCard: DecodedCard) -> Int? {
+        let requestedSeconds: Double
+        if let seconds = decodedCard.seconds?.value {
+            requestedSeconds = seconds
+        } else if let minutes = decodedCard.minutes?.value {
+            requestedSeconds = minutes * 60
+        } else {
+            return nil
+        }
+
+        guard requestedSeconds.isFinite else { return nil }
+        let roundedSeconds = Int(requestedSeconds.rounded())
+        guard roundedSeconds >= 1, roundedSeconds <= TimerCardRequest.maximumDurationSeconds else {
+            return nil
+        }
+        return roundedSeconds
+    }
+
+    /// The longest timer label kept. It sits on one line in a narrow card.
+    private static let maximumTimerLabelLength = 40
+
+    /// Trims a timer label and caps its length; blank becomes no label.
+    private static func validatedTimerLabel(_ rawLabel: String?) -> String? {
+        guard let label = trimmedNonEmpty(rawLabel) else { return nil }
+        return String(label.prefix(maximumTimerLabelLength))
+    }
 
     /// The maximum number of blocks a card may show. Past this the card stops
     /// clarifying and starts crowding the notch, so extra blocks are dropped —
@@ -498,7 +591,36 @@ private struct DecodedCard: Decodable {
     let query: String?
     /// The source a `source` card names (an entry in `~/.wisp/sources.json`).
     let name: String?
+    /// The Reminders list a `reminders` card is for (optional).
+    let list: String?
+    /// Which reminders a `reminders` card shows: today, overdue or all.
+    let filter: String?
+    /// A `timer` card's length. Lenient so `300` and `"300"` both read.
+    let seconds: LenientDecodedNumber?
+    /// A fallback timer length some models write instead of `seconds`.
+    let minutes: LenientDecodedNumber?
+    /// A `timer` card's optional short label ("tea").
+    let label: String?
     let blocks: [DecodedBlock]?
+}
+
+/// A number that decodes from either a JSON number or a numeric string, and
+/// never throws: anything else becomes a nil `value`. A synthesized `Double?`
+/// would fail the *whole* card decode on `"seconds":"300"`, which is exactly the
+/// kind of near-miss a small model produces.
+private struct LenientDecodedNumber: Decodable {
+    let value: Double?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let numberValue = try? container.decode(Double.self) {
+            value = numberValue
+        } else if let textValue = try? container.decode(String.self) {
+            value = Double(textValue.trimmingCharacters(in: .whitespaces))
+        } else {
+            value = nil
+        }
+    }
 }
 
 /// One decoded block. All block kinds share this one flat shape: the `type`
