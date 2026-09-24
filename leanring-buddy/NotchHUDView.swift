@@ -27,6 +27,7 @@ struct NotchHUDView: View {
     @ObservedObject private var skillManager = SkillManager.shared
     @ObservedObject private var mcpManager = MCPManager.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
+    @ObservedObject private var soundPreference = WispSoundPreference.shared
 
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
@@ -38,7 +39,14 @@ struct NotchHUDView: View {
         GlassEffectContainer {
             ZStack(alignment: .top) {
                 Color.clear
+                // The glass surface stays flush with the screen's top edge so it
+                // WRAPS the physical notch and reads as part of it. At idle nothing
+                // shows — the notch is untouched. When Wisp is active a small
+                // status surface hugs the notch, its content flanking the cutout on
+                // the left and right (never behind the camera); larger interactions
+                // let it expand downward. Visibility fades in/out with a spring.
                 hudSurface
+                    .opacity(islandIsVisible ? 1 : 0)
             }
             .frame(
                 width: viewModel.expandedSize.width,
@@ -46,6 +54,7 @@ struct NotchHUDView: View {
                 alignment: .top
             )
             .animation(.spring(response: 0.34, dampingFraction: 0.86), value: viewModel.isExpanded)
+            .animation(.spring(response: 0.36, dampingFraction: 0.84), value: islandIsVisible)
         }
         // The dynamic island is always dark, regardless of the system's light or
         // dark appearance, so the Liquid Glass renders its dark variant and the
@@ -64,68 +73,205 @@ struct NotchHUDView: View {
             // small when idle (just the affordance, skills and footer) and taller
             // when an answer is showing. The window itself never resizes; the
             // unused area below simply stays transparent.
-            expandedContent
-                .frame(width: viewModel.expandedSize.width, alignment: .top)
+            droppedContent
+                .frame(width: droppedWidth, alignment: .top)
                 .opacity(viewModel.isExpanded ? 1 : 0)
 
             collapsedContent
-                .frame(width: viewModel.collapsedSize.width, height: viewModel.collapsedSize.height)
+                .frame(width: collapsedPillWidth, height: viewModel.collapsedSize.height)
                 .opacity(viewModel.isExpanded ? 0 : 1)
         }
         // Expanded: fix the width but let the height wrap the content (nil). The
         // content is capped/scrolled internally so it never exceeds the window.
         // Collapsed: pin to the collapsed pill size, clipping the faded-out
-        // expanded content.
+        // dropped content. The dropped width depends on whether this is the compact
+        // message or the full panel; the collapsed width wraps the notch.
         .frame(
-            width: viewModel.isExpanded ? viewModel.expandedSize.width : viewModel.collapsedSize.width,
+            width: viewModel.isExpanded ? droppedWidth : collapsedPillWidth,
             height: viewModel.isExpanded ? nil : viewModel.collapsedSize.height,
             alignment: .top
         )
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: collapsedPillWidth)
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: droppedWidth)
         // Apple Liquid Glass, tinted dark (see `wispNotchGlassSurface`), so the
         // island refracts the desktop while staying legible. The subtle stroke
-        // defines the expanded panel's edge against a busy background.
-        .wispNotchGlassSurface(
-            in: RoundedRectangle(cornerRadius: DS.CornerRadius.extraLarge, style: .continuous)
-        )
+        // defines the expanded panel's edge against a busy background. The shape
+        // has FLUSH (square) top corners so the surface sits under the bezel and
+        // reads as the physical notch itself extending downward; only the bottom
+        // corners are rounded, like the real notch and the Dynamic Island.
+        .wispNotchGlassSurface(in: notchSurfaceShape)
         .overlay(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.extraLarge, style: .continuous)
+            notchSurfaceShape
                 .strokeBorder(DS.Colors.borderSubtle.opacity(viewModel.isExpanded ? 1 : 0), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: DS.CornerRadius.extraLarge, style: .continuous))
+        .clipShape(notchSurfaceShape)
     }
 
-    // MARK: - Collapsed pill
+    /// What drops down from the notch when expanded: the full panel on a
+    /// deliberate hover, or the compact message card for an auto-presented answer.
+    @ViewBuilder
+    private var droppedContent: some View {
+        if viewModel.isFullPanel {
+            expandedContent
+        } else {
+            messageContent
+        }
+    }
 
+    /// The width of the dropped surface — narrow for the compact message so a short
+    /// reply stays small, full width for the panel.
+    private var droppedWidth: CGFloat {
+        viewModel.isFullPanel ? viewModel.expandedSize.width : compactMessageWidth
+    }
+
+    /// The compact message width: a touch wider than the notch-wrap so the drop
+    /// reads as the wrap growing down, capped well under the full panel.
+    private var compactMessageWidth: CGFloat {
+        min(viewModel.expandedSize.width, max(collapsedPillWidth, 300))
+    }
+
+    /// The compact answer surface: just the reply text and any glance card, sized
+    /// to the message and inset below the notch. No affordance, skills or footer —
+    /// those belong to the full panel a hover reveals.
+    private var messageContent: some View {
+        answerSurface
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+            .padding(.top, notchContentTopInset + 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The bottom corner radius of the notch surface. Kept close to the physical
+    /// notch's own curvature while collapsed so the idle pill and the grown live
+    /// activity both read as the notch; a little rounder when expanded so the
+    /// hanging panel feels like a panel.
+    private var notchBottomCornerRadius: CGFloat {
+        viewModel.isExpanded ? 24 : 18
+    }
+
+    /// The notch-matched surface shape: square at the top (flush with the screen's
+    /// top bezel, exactly like the physical notch) and rounded only at the bottom.
+    /// Shared by the collapsed pill and the expanded panel so the morph between
+    /// them stays one continuous surface hanging from the notch.
+    private var notchSurfaceShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: notchBottomCornerRadius,
+            bottomTrailingRadius: notchBottomCornerRadius,
+            topTrailingRadius: 0,
+            style: .continuous
+        )
+    }
+
+    /// How far below the screen's top edge the island's surface begins. On a
+    /// notched Mac this equals the notch height, so all content clears the camera
+    /// housing and the surface hangs from the notch's bottom edge. On a non-notch
+    /// Mac there is no cutout to clear, so it stays 0 (the floating-pill fallback).
+    private var notchContentTopInset: CGFloat {
+        viewModel.hasNotch ? viewModel.collapsedSize.height : 0
+    }
+
+    /// Whether the island should be showing at all. On a notched Mac it stays
+    /// hidden at idle so the notch is just the notch, and drops in when Wisp is
+    /// active (listening / thinking / responding), when an answer is lingering, or
+    /// when the panel is expanded on hover. On a non-notch Mac there is no cutout
+    /// to serve as the resting affordance, so the floating pill stays visible.
+    private var islandIsVisible: Bool {
+        !viewModel.hasNotch
+            || viewModel.isExpanded
+            || companionManager.voiceState != .idle
+            || companionManager.islandFlash != nil
+            || hasAnswer
+    }
+
+    // MARK: - Collapsed live activity
+
+    /// The collapsed (mini) live activity. On a notched Mac it WRAPS the notch —
+    /// content sits to the left and right of the cutout, never behind the camera.
+    /// On a non-notch Mac there is no cutout, so it falls back to the old centred
+    /// pill that grows with its text.
+    @ViewBuilder
     private var collapsedContent: some View {
-        HStack(spacing: 6) {
+        if viewModel.hasNotch {
+            notchWrapContent
+        } else {
+            floatingPillContent
+        }
+    }
+
+    /// The notch-wrapping status surface: the living mark hugs the notch's left
+    /// edge and the state indicator hugs its right edge, with the exact width of
+    /// the physical notch reserved between them so nothing is ever occluded by the
+    /// camera. Kept intentionally minimal — the mark's motion plus the indicator
+    /// (waveform while listening, pulsing dots while thinking, a dot at rest) carry
+    /// the state; details live in the downward expansion.
+    private var notchWrapContent: some View {
+        HStack(spacing: 0) {
+            WispMark(state: companionManager.islandState.markState, size: 15)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 12)
+
+            // Reserve the physical notch's width so content only ever flanks it.
+            Color.clear.frame(width: viewModel.collapsedSize.width)
+
+            collapsedIndicator
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 12)
+        }
+        .frame(height: viewModel.collapsedSize.height)
+    }
+
+    /// The non-notch fallback: a centred pill that shows the mark, a one-line live
+    /// activity (what Wisp is hearing / a status word / the reply preview) and the
+    /// state indicator, growing with its text.
+    private var floatingPillContent: some View {
+        HStack(spacing: 7) {
             WispMark(state: companionManager.islandState.markState, size: 13)
-            // A one-line preview of the latest answer, so after the panel
-            // auto-collapses the reply lingers in the pill as a compact live
-            // activity rather than the pill going back to dead chrome. It takes
-            // the space between the glyph and the dot and truncates to fit.
-            if let collapsedReplySnippet {
-                Text(collapsedReplySnippet)
-                    .font(.system(size: 10, weight: .medium))
+            if let collapsedPrimaryText {
+                Text(collapsedPrimaryText)
+                    .font(.system(size: 10.5, weight: .medium))
                     .foregroundColor(DS.Colors.textSecondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .truncationMode(collapsedTruncationMode)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.opacity)
             }
             collapsedIndicator
         }
-        .padding(.horizontal, collapsedReplySnippet == nil ? 0 : 10)
+        .padding(.horizontal, collapsedPrimaryText == nil ? 0 : 11)
     }
 
-    /// The right-hand indicator in the collapsed pill: a live micro-waveform
-    /// while the companion is active, or a single status dot when idle — so the
-    /// pill reads as alive at a glance without expanding.
+    /// The right-hand indicator in the collapsed pill, matched to the state so the
+    /// pill reads as alive at a glance: a live micro-waveform while listening or
+    /// responding, pulsing dots while thinking, and a single status dot at rest.
     @ViewBuilder
     private var collapsedIndicator: some View {
-        if companionManager.voiceState.isActiveForAffordance {
+        switch companionManager.voiceState {
+        case .listening, .responding:
             collapsedMicroWaveform
-        } else {
+        case .processing:
+            collapsedThinkingDots
+        case .idle:
             stateDot
         }
+    }
+
+    /// Three dots that pulse in sequence while Wisp is thinking, tinted with the
+    /// island's active accent — a compact "working on it" signal beside the heard
+    /// prompt, distinct from the listening waveform.
+    private var collapsedThinkingDots: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
+            let elapsedSeconds = timeline.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 2.5) {
+                ForEach(0..<3, id: \.self) { dotIndex in
+                    Circle()
+                        .fill(companionManager.islandState.accent)
+                        .frame(width: 3.5, height: 3.5)
+                        .opacity(0.3 + 0.7 * ((sin(elapsedSeconds * 4 + Double(dotIndex) * 0.9) + 1) / 2))
+                }
+            }
+        }
+        .frame(height: 12)
     }
 
     /// Three tiny bars that ripple while active, tinted with the cursor colour.
@@ -156,6 +302,74 @@ struct NotchHUDView: View {
         return firstLine
     }
 
+    /// The one line of text the collapsed live-activity pill shows, chosen by
+    /// state: the words Wisp is hearing while listening or thinking (falling back
+    /// to a status label before any words land), the reply preview while
+    /// responding or lingering afterwards, and nothing at rest.
+    private var collapsedPrimaryText: String? {
+        switch companionManager.voiceState {
+        case .listening:
+            let heardSoFar = companionManager.liveTranscript
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return heardSoFar.isEmpty ? "Listening…" : heardSoFar
+        case .processing:
+            // A running browser task says what it is doing, which is more useful
+            // mid-task than echoing the request back.
+            let browserActivity = companionManager.browserActivityText
+            if !browserActivity.isEmpty { return browserActivity }
+            let heardSoFar = companionManager.liveTranscript
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return heardSoFar.isEmpty ? "Thinking…" : heardSoFar
+        case .responding:
+            return collapsedReplySnippet ?? "Responding…"
+        case .idle:
+            return collapsedReplySnippet
+        }
+    }
+
+    /// Whether the pill is currently showing the live transcript of speech. When
+    /// it is, the tail is truncated so the most recent words stay visible as the
+    /// user keeps talking; otherwise the start is kept (normal reply preview).
+    private var isShowingLiveTranscript: Bool {
+        switch companionManager.voiceState {
+        case .listening:
+            return !companionManager.liveTranscript
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .processing:
+            return companionManager.browserActivityText.isEmpty
+                && !companionManager.liveTranscript
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .responding, .idle:
+            return false
+        }
+    }
+
+    private var collapsedTruncationMode: Text.TruncationMode {
+        isShowingLiveTranscript ? .head : .tail
+    }
+
+    /// How far the notch-wrapping surface extends past each side of the physical
+    /// notch, giving the mark and the indicator room to sit in the menu bar beside
+    /// the cutout.
+    private let notchWrapSideExtension: CGFloat = 44
+
+    /// The collapsed surface's width. On a notched Mac it is the notch width plus a
+    /// fixed extension on each side (so the surface wraps the notch and content
+    /// flanks it) — a constant while active, so it doesn't reflow as the transcript
+    /// streams. On a non-notch Mac it grows with the pill's text.
+    private var collapsedPillWidth: CGFloat {
+        if viewModel.hasNotch {
+            return min(
+                viewModel.expandedSize.width,
+                viewModel.collapsedSize.width + notchWrapSideExtension * 2
+            )
+        }
+        let bareWidth = viewModel.collapsedSize.width
+        guard collapsedPrimaryText != nil else { return bareWidth }
+        let liveActivityWidth: CGFloat = 320
+        return min(viewModel.expandedSize.width, max(bareWidth, liveActivityWidth))
+    }
+
     /// A small dot that reflects the current voice state, so the collapsed pill
     /// is a live status indicator rather than dead chrome.
     private var stateDot: some View {
@@ -172,28 +386,32 @@ struct NotchHUDView: View {
     // MARK: - Expanded quick-panel
 
     private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
+        VStack(alignment: .leading, spacing: 0) {
+            // The header lives in the notch band itself, flanking the cutout:
+            // identity on its left, controls on its right. This uses the strip that
+            // would otherwise sit empty above the content and pins the logo and the
+            // icons to the very top, integrated with the notch.
+            notchFlankingHeader
 
-            // The living centerpiece: a voice waveform that reflects the current
-            // state and, while listening, the real microphone level. This is the
-            // first thing the eye lands on, VoiceOS-style.
-            voiceAffordanceSection
+            VStack(alignment: .leading, spacing: 10) {
+                // The living centerpiece: a voice waveform that reflects the current
+                // state and, while listening, the real microphone level.
+                voiceAffordanceSection
 
-            // Only present when there is an answer, so an idle panel collapses
-            // down to just the affordance, skills and footer instead of leaving
-            // a gap where an answer would go.
-            if hasAnswer {
-                answerSurface
+                // Only present when there is an answer, so an idle panel collapses
+                // down to just the affordance, skills and footer.
+                if hasAnswer {
+                    answerSurface
+                }
+
+                // Skills stay one click away as a compact sideways-scrolling strip.
+                skillsStrip
+
+                footer
             }
-
-            // Skills stay one click away as a compact sideways-scrolling strip.
-            skillsStrip
-
-            footer
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -290,28 +508,47 @@ struct NotchHUDView: View {
     }
 
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            WispMark(state: companionManager.islandState.markState, size: 16)
-            Text("Wisp")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(DS.Colors.textPrimary)
-            Spacer()
-            voiceOutputToggle
-            dockCursorToggle
-            Button {
-                NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
+    /// The panel header, laid out in the notch band so it flanks the cutout:
+    /// the wisp mark + wordmark hug the notch's left edge, the controls hug its
+    /// right edge, with the notch's own width reserved between them. This pins the
+    /// logo and the icons to the very top, integrated with the notch, instead of a
+    /// full-width row sitting below an empty band. The cursor-dock toggle moves to
+    /// the footer so three controls fit comfortably in the right flank.
+    private var notchFlankingHeader: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 7) {
+                WispMark(state: companionManager.islandState.markState, size: 16)
+                Text("Wisp")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DS.Colors.textPrimary)
             }
-            .buttonStyle(.plain)
-            .pointerCursor()
-            .nativeTooltip("Open dashboard")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 14)
+
+            // Reserve the physical notch's width so the header only ever flanks it
+            // (zero on a non-notch Mac, where the two clusters simply split the row).
+            Color.clear.frame(width: viewModel.hasNotch ? viewModel.collapsedSize.width : 0)
+
+            HStack(spacing: 3) {
+                soundCuesToggle
+                voiceOutputToggle
+                Button {
+                    NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .nativeTooltip("Open dashboard")
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.trailing, 12)
         }
+        .frame(height: viewModel.hasNotch ? notchContentTopInset : 36)
     }
 
     /// Compact cursor-dock toggle in the header. The stored flag is "cursor
@@ -332,6 +569,27 @@ struct NotchHUDView: View {
         .nativeTooltip(isDocked
             ? "Cursor docked — click to let it follow you"
             : "Dock the cursor (hide it and stop it following you)")
+    }
+
+    /// Sound-cue toggle in the header. Governs the short interaction sounds
+    /// (listening / thinking / reply / error) — separate from spoken replies,
+    /// which the voice/silent toggle governs.
+    private var soundCuesToggle: some View {
+        let areSoundsOn = soundPreference.areSoundCuesEnabled
+        return Button {
+            soundPreference.areSoundCuesEnabled.toggle()
+        } label: {
+            Image(systemName: areSoundsOn ? "bell.fill" : "bell.slash.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(areSoundsOn ? DS.Colors.accentText : DS.Colors.textTertiary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .nativeTooltip(areSoundsOn
+            ? "Sound cues on — Wisp chimes as it listens, thinks and replies. Click to mute."
+            : "Sound cues muted. Click to enable.")
     }
 
     /// Voice / silent mode toggle in the header. When voice is off (silent
@@ -455,6 +713,8 @@ struct NotchHUDView: View {
                 .foregroundColor(DS.Colors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            // Moved here from the header so the top-right flank stays uncrowded.
+            dockCursorToggle
             Button {
                 NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
             } label: {

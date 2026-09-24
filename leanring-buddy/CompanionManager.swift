@@ -33,10 +33,25 @@ final class CompanionManager: ObservableObject {
 
     @Published private(set) var lastTranscript: String?
 
+    /// The live, partial transcript of what Wisp is hearing right now, updated as
+    /// the user speaks. Surfaced in the notch's collapsed live-activity pill so
+    /// the user can see what the model heard, in real time, without expanding the
+    /// panel. Reset to empty when a new listening session begins; only read while
+    /// the companion is listening/thinking, so it needs no explicit clearing.
+    @Published private(set) var liveTranscript: String = ""
+
     /// What the browser agent is doing this moment — "Clicking “Add to cart”" —
     /// shown in the notch while a browser task runs, so a task that takes a
     /// minute reads as visible progress. Empty when no browser task is running.
     @Published private(set) var browserActivityText: String = ""
+
+    /// Rate-limits how often `liveTranscript` is republished. Apple Speech emits
+    /// partials many times a second; republishing each one re-renders the notch
+    /// HUD (and its Liquid Glass) every time, which made the pill feel laggy. The
+    /// final transcript is always published separately, so coalescing the partials
+    /// costs no accuracy. See `updateLiveTranscript(_:)`.
+    private var lastLiveTranscriptPublishTime: Date = .distantPast
+
     @Published private(set) var currentAudioPowerLevel: CGFloat = 0
     @Published private(set) var hasAccessibilityPermission = false
     @Published private(set) var hasScreenRecordingPermission = false
@@ -496,6 +511,12 @@ final class CompanionManager: ObservableObject {
                 if isFinalizing {
                     self.voiceState = .processing
                 } else if isRecording {
+                    // A soft cue the moment the mic actually opens, so the user
+                    // knows Wisp started hearing them without watching the notch.
+                    // Only on the entry into listening, not on every poll tick.
+                    if self.voiceState != .listening {
+                        WispSoundPlayer.shared.play(.listening)
+                    }
                     self.voiceState = .listening
                 } else if isPreparing {
                     self.voiceState = .processing
@@ -574,6 +595,19 @@ final class CompanionManager: ObservableObject {
     private var speculativeScreenCaptureTask: Task<[CompanionScreenCapture], Error>?
 
     /// Begins capturing during speech so the transcript does not have to wait.
+    /// Publishes a live speech partial to the notch, coalesced to ~11 Hz so the
+    /// stream of partials doesn't thrash the HUD's body and glass re-render. A
+    /// shorter string than the current one means a new utterance started, so that
+    /// resets publish immediately rather than waiting out the interval.
+    private func updateLiveTranscript(_ partialTranscript: String) {
+        let now = Date()
+        let enoughTimePassed = now.timeIntervalSince(lastLiveTranscriptPublishTime) >= 0.09
+        let isReset = partialTranscript.count < liveTranscript.count
+        guard enoughTimePassed || isReset else { return }
+        lastLiveTranscriptPublishTime = now
+        liveTranscript = partialTranscript
+    }
+
     private func startSpeculativeScreenCapture() {
         speculativeScreenCaptureTask?.cancel()
         speculativeScreenCaptureTask = Task {
@@ -650,6 +684,10 @@ final class CompanionManager: ObservableObject {
             // perceive, and the screen it records is the one they were looking
             // at when they started asking, which is the more faithful moment
             // anyway.
+            // A new utterance starts with a clean live transcript, so the notch
+            // pill shows this turn's words rather than the previous turn's.
+            liveTranscript = ""
+
             startSpeculativeScreenCapture()
 
             // Warm the local model on the same key-down signal, for the same
@@ -662,12 +700,15 @@ final class CompanionManager: ObservableObject {
             pendingKeyboardShortcutStartTask = Task {
                 await buddyDictationManager.startPushToTalkFromKeyboardShortcut(
                     currentDraftText: "",
-                    updateDraftText: { _ in
-                        // Partial transcripts are hidden (waveform-only UI)
+                    updateDraftText: { [weak self] partialTranscript in
+                        // Surface the partial live in the notch pill so the user
+                        // sees what Wisp is hearing as they speak (rate-limited).
+                        self?.updateLiveTranscript(partialTranscript)
                     },
                     submitDraftText: { [weak self] finalTranscript in
                         PerfMetricsRecorder.shared.endPhase(.transcription)
                         self?.lastTranscript = finalTranscript
+                        self?.liveTranscript = finalTranscript
                         print("🗣️ Companion received transcript: \(finalTranscript)")
 
                         // If the assistant is waiting on a yes or no, this is
@@ -780,16 +821,21 @@ final class CompanionManager: ObservableObject {
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
 
+        // A new hands-free utterance starts with a clean live transcript.
+        liveTranscript = ""
+
         pendingKeyboardShortcutStartTask?.cancel()
         pendingKeyboardShortcutStartTask = Task {
             await buddyDictationManager.startPushToTalkFromKeyboardShortcut(
                 currentDraftText: "",
-                updateDraftText: { _ in
-                    // Partial transcripts are hidden (waveform-only UI).
+                updateDraftText: { [weak self] partialTranscript in
+                    // Surface the partial live in the notch pill (rate-limited).
+                    self?.updateLiveTranscript(partialTranscript)
                 },
                 submitDraftText: { [weak self] finalTranscript in
                     guard let self else { return }
                     self.isHandsFreeDictating = false
+                    self.liveTranscript = finalTranscript
                     self.setActiveCommandMode(nil)
                     self.sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
                 }
@@ -1073,6 +1119,10 @@ final class CompanionManager: ObservableObject {
             // Stay in processing (spinner) state — no streaming text displayed
             voiceState = .processing
 
+            // A light cue that the model turn has begun, so the user hears that
+            // their prompt was received and Wisp is now working on it.
+            WispSoundPlayer.shared.play(.thinking)
+
             // Clear last turn's reply text from the notch so a new question
             // never shows a stale answer while this one is still generating.
             currentReplyText = ""
@@ -1312,6 +1362,12 @@ final class CompanionManager: ObservableObject {
                 // silent mode it is the only place the answer shows; in voice mode
                 // it still shows, and speech is layered on top below.
                 currentReplyText = spokenText
+
+                // A pleasant cue that the answer has landed, so the user knows
+                // the turn resolved even if they looked away from the notch.
+                if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    WispSoundPlayer.shared.play(.reply)
+                }
 
                 // A [POINT:] coordinate no longer flies a cursor to the element;
                 // it becomes a pulsing marker drawn at that spot through the same
@@ -2310,6 +2366,13 @@ extension CompanionManager {
     /// resolve after the user allows or declines an action.
     func flashIsland(_ state: WispIslandState, for duration: TimeInterval = 1.6) {
         islandFlashClearWorkItem?.cancel()
+        // Pair the visual flash with its matching sound cue so a resolution or a
+        // failure is felt as well as seen.
+        switch state {
+        case .success: WispSoundPlayer.shared.play(.success)
+        case .error:   WispSoundPlayer.shared.play(.error)
+        default:       break
+        }
         withAnimation(WispMotion.smooth) {
             islandFlash = state
         }
@@ -2339,6 +2402,7 @@ extension CompanionManager {
         PerfMetricsRecorder.shared.abandonTurn()
         voiceState = .processing
         currentReplyText = ""
+        WispSoundPlayer.shared.play(.thinking)
         let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
         let controller = AgentToolRegistry.shared.browserController
 

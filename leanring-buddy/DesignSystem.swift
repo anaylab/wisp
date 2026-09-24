@@ -912,7 +912,12 @@ extension View {
     /// lands between "flat black box" and "bright white frost" — a translucent
     /// dark glass the near-white text stays readable on.
     func wispNotchGlassSurface<GlassShape: Shape>(in shape: GlassShape) -> some View {
-        glassEffect(.regular.tint(Color.black.opacity(0.68)).interactive(), in: shape)
+        // Non-interactive on purpose: the collapsed pill is click-through and the
+        // expanded panel gets its feedback from its own controls, so the pointer-
+        // reactive `.interactive()` sheen bought nothing but made the glass
+        // recompute every frame — which is what made the pill's grow animation
+        // feel laggy as its width changed. A static tinted glass animates cheaply.
+        glassEffect(.regular.tint(Color.black.opacity(0.68)), in: shape)
     }
 
     /// A general Liquid Glass surface for the menu bar panel and dashboard, so

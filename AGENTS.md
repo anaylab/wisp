@@ -80,7 +80,25 @@ cloud dependency to the local path, without asking.
   transient `islandFlash` (`flashIsland(_:)`) for success/error moments. It drives the notch
   mark's motion, the state dot, and the label. The tool-confirmation card
   (`ToolConfirmationView`) is the island's glass confirmation panel, still presented via the
-  existing overlay plumbing (so the prompt is seen even when the cursor is hidden).
+  existing overlay plumbing (so the prompt is seen even when the cursor is hidden). On a
+  **notched Mac the island wraps the physical notch** rather than sitting behind it: at idle
+  nothing shows (`NotchHUDView.islandIsVisible` is false — the notch is untouched); when Wisp is
+  active a small status surface with **flush top / rounded bottom** corners
+  (`notchSurfaceShape`) hugs the cutout, its content flanking the notch left and right with the
+  notch's own width reserved between them (`notchWrapContent`) so nothing is occluded by the
+  camera — the mark's motion plus the indicator (waveform listening / pulsing dots thinking)
+  carry the state. A reply **auto-presents as a compact message card** that drops below the notch
+  (`messageContent`, content inset by `notchContentTopInset`; `viewModel.isFullPanel == false`),
+  and a deliberate **hover upgrades it to the full panel** (voice affordance, skills, footer;
+  `isFullPanel == true`) — the surface morphs and the whole thing collapses back to the bare
+  notch when done. Live speech is captured in `CompanionManager.liveTranscript` (fed from the
+  dictation partial-transcript callbacks that used to be discarded, throttled to ~11 Hz); it
+  drives the non-notch fallback pill's one-line preview and is available for the wrap. The
+  non-notch fallback keeps the old centred floating pill (`floatingPillContent`). The key moments
+  also play short **sound cues** (`WispSoundPlayer` / `WispSoundPreference`, built-in system
+  sounds, default on, muted from the notch header's bell toggle): listening onset, thinking (turn
+  start), reply landed, and success/error (from `flashIsland`). The notch glass is
+  **non-interactive** (`wispNotchGlassSurface`) so the surface animates cheaply.
 - **Glance cards**: a visual answer surface in the notch's expanded panel, parsed from one
   `[CARD:{...json...}]` tag at the end of the reply (same structured-text mechanism as
   `[POINT:]`/`[BOX:]`/`[TOOL:]` — the local model can't do native structured output; the tag is
@@ -469,6 +487,7 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `VoiceOutputPreference.swift` | ~50 | Source of truth for voice/silent mode (reply speech on/off). Persists; defaults on. |
+| `WispSoundPlayer.swift` | ~120 | The Dynamic Island's interaction sound cues (listening / thinking / reply / success / error), played as built-in macOS system sounds at low volume. `WispSoundPreference` is the UserDefaults-backed on/off gate (default on), toggled from the notch header's bell button. Separate from reply speech (`VoiceOutputPreference`). |
 | `WispVoiceAffordance.swift` | ~200 | Shared VoiceOS-style voice affordance: a Liquid Glass waveform reflecting `voiceState` and the live mic level (`currentAudioPowerLevel`). Used as the notch HUD's centerpiece and in the menu bar panel so both surfaces show one living voice element. Self-animates via a `TimelineView` clock that pauses while idle (no redraws on a resident app). |
 | `SpokenLineParser.swift` | ~90 | Parses/strips the `[SAY: …]` tag — the model's per-reply "speak this" line. |
 | `GlanceCard.swift` | ~655 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`, incl. `RemindersCardRequest`/`TimerCardRequest`) and the generic block card. |

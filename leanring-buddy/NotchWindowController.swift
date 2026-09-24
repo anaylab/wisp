@@ -31,6 +31,15 @@ import SwiftUI
 @MainActor
 final class NotchViewModel: ObservableObject {
     @Published var isExpanded: Bool = false
+    /// When the island is expanded, whether it shows the FULL panel (voice
+    /// affordance, skills, integrations — a deliberate hover) or the compact
+    /// MESSAGE card (just the reply/glance card — an auto-presented answer). The
+    /// message form is deliberately small so a short reply doesn't drop a whole
+    /// dashboard from the notch.
+    @Published var isFullPanel: Bool = false
+    /// Whether this screen physically has a notch. When it does, the island's
+    /// content is inset below the notch so the camera housing never covers it.
+    @Published var hasNotch: Bool = false
     /// The collapsed pill's size — matches the physical notch when there is one.
     @Published var collapsedSize: CGSize = CGSize(width: 180, height: 32)
     /// The expanded panel's size, and therefore the fixed window size.
@@ -74,6 +83,16 @@ final class NotchWindowController {
     /// not immediately collapse it — the hysteresis that keeps the hover stable.
     private let expandedZoneMargin: CGFloat = 10
 
+    /// How long the cursor must rest on the notch before the panel opens. Without
+    /// this, simply sweeping the cursor across the top of the screen (to reach a
+    /// menu bar item, a browser tab, a window's title bar) popped the panel open.
+    /// A short dwell separates "I'm aiming at Wisp" from "I'm passing through".
+    private let hoverOpenDwellSeconds: TimeInterval = 0.2
+
+    /// When the cursor entered the collapsed hot-zone, or nil while it is outside.
+    /// The panel opens only once it has stayed inside for `hoverOpenDwellSeconds`.
+    private var cursorEnteredCollapsedZoneDate: Date?
+
     init(companionManager: CompanionManager) {
         self.companionManager = companionManager
     }
@@ -110,6 +129,7 @@ final class NotchWindowController {
         guard let geometry = currentGeometry() else { return }
 
         viewModel.collapsedSize = geometry.collapsedPillSize
+        viewModel.hasNotch = geometry.hasNotch
         viewModel.expandedSize = panelSize
 
         let notchHUDView = NotchHUDView(
@@ -196,6 +216,7 @@ final class NotchWindowController {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.viewModel.isExpanded = false
+                self.viewModel.isFullPanel = false
                 // A dismiss means the current answer surface is being cleared off
                 // the screen, so the glance card goes with it.
                 self.companionManager.resolvedGlanceCard = nil
@@ -217,6 +238,7 @@ final class NotchWindowController {
                 guard let self else { return }
                 if let geometry = self.currentGeometry() {
                     self.viewModel.collapsedSize = geometry.collapsedPillSize
+                    self.viewModel.hasNotch = geometry.hasNotch
                 }
                 self.positionWindow()
             }
@@ -271,9 +293,16 @@ final class NotchWindowController {
         let isWithinPresentationHold = Date() < presentationHoldUntil
 
         if viewModel.isExpanded {
+            // Hovering the surface is a deliberate look — upgrade a compact
+            // auto-presented message to the full panel (skills, toggles, …). This
+            // runs even during a presentation hold so a hover always reveals more.
+            if !viewModel.isFullPanel, expandedHotZone(geometry).contains(mouseLocation) {
+                viewModel.isFullPanel = true
+            }
             if isWithinPresentationHold { return }
             if !expandedHotZone(geometry).contains(mouseLocation) {
                 viewModel.isExpanded = false
+                viewModel.isFullPanel = false
                 performHUDHaptic()
             }
         } else {
@@ -283,8 +312,22 @@ final class NotchWindowController {
                 viewModel.isExpanded = true
                 return
             }
-            if collapsedHotZone(geometry).contains(mouseLocation) {
+            // A held mouse button means the user is dragging a window or selecting
+            // text near the top of the screen, not reaching for Wisp.
+            let isMouseButtonHeld = NSEvent.pressedMouseButtons != 0
+            guard collapsedHotZone(geometry).contains(mouseLocation), !isMouseButtonHeld else {
+                cursorEnteredCollapsedZoneDate = nil
+                return
+            }
+            guard let cursorEnteredCollapsedZoneDate else {
+                cursorEnteredCollapsedZoneDate = Date()
+                return
+            }
+            if Date().timeIntervalSince(cursorEnteredCollapsedZoneDate) >= hoverOpenDwellSeconds {
+                // A deliberate, resting hover opens the full panel.
+                self.cursorEnteredCollapsedZoneDate = nil
                 viewModel.isExpanded = true
+                viewModel.isFullPanel = true
                 performHUDHaptic()
             }
         }
@@ -302,6 +345,10 @@ final class NotchWindowController {
         // The turn that produced this answer began with a force-collapse that
         // briefly suspends hover; clear that so the answer can open immediately.
         hoverSuspendedUntil = .distantPast
+        // An answer auto-presents as the COMPACT message, not the full panel — a
+        // short reply shouldn't drop a whole dashboard. A deliberate hover upgrades
+        // it to the full panel (see the hover logic above).
+        viewModel.isFullPanel = false
         if !viewModel.isExpanded {
             viewModel.isExpanded = true
             performHUDHaptic()
@@ -316,10 +363,18 @@ final class NotchWindowController {
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
     }
 
-    /// A generous target around the pill at the very top-center of the screen.
+    /// A tight target hugging the notch at the very top-center of the screen —
+    /// only the notch itself plus a small margin, confined to the menu bar strip,
+    /// so passing over nearby menu bar items or the top of a window doesn't open
+    /// it. Only while the island is actually showing something (listening,
+    /// thinking, a lingering answer) does the zone reach down to cover the
+    /// surface hanging below the notch, so hovering that visible island opens it.
     private func collapsedHotZone(_ geometry: NotchGeometry) -> CGRect {
-        let width = max(geometry.collapsedPillSize.width + 48, 240)
-        let height = max(geometry.collapsedPillSize.height, 34)
+        let width = geometry.collapsedPillSize.width + 24
+        let isIslandShowingBelowNotch = geometry.hasNotch
+            && (companionManager.voiceState != .idle || !companionManager.currentReplyText.isEmpty)
+        let hangingBarReach: CGFloat = isIslandShowingBelowNotch ? 48 : 0
+        let height = max(geometry.collapsedPillSize.height + hangingBarReach, 34)
         let originX = geometry.screenFrame.midX - width / 2
         let originY = geometry.screenFrame.maxY - height
         return CGRect(x: originX, y: originY, width: width, height: height)
