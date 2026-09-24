@@ -202,11 +202,15 @@ final class ToolPermissionBoundaryTests: XCTestCase {
 
     /// A prompt nobody can hear cannot be consent.
     func testNoSpeechChannelDeniesRatherThanAllows() async {
-        let coordinator = ToolConfirmationCoordinator.shared
+        // A fresh coordinator rather than `.shared`: the test host is the full
+        // app, whose `CompanionManager.start()` installs a speech handler on the
+        // shared one — so `.shared` would put up a real prompt that anyone at
+        // the machine could answer.
+        let coordinator = ToolConfirmationCoordinator()
         let decision = await coordinator.requestApproval(
             toolName: "test_tool", argumentSummary: "{}"
         )
-        // No handler installed in a test process, so this must refuse.
+        // No handler installed on this coordinator, so this must refuse.
         XCTAssertFalse(decision.isApproved,
                        "an unanswerable question must not be treated as approval")
     }

@@ -136,13 +136,6 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         )
     }
 
-    /// Asks before a browser action that cannot be taken back — placing an
-    /// order, sending a message, deleting something.
-    ///
-    /// Deliberately ignores session auto-approve. Auto-approve exists so a long
-    /// task does not stop to ask about every read and every click; it was never
-    /// meant as consent to spend the user's money or speak in their name, and a
-    /// browser agent is exactly the tool that can do both.
     /// Asks about a tool call using its structured arguments.
     ///
     /// The registry's entry point. Two things need the arguments rather than a
@@ -174,6 +167,13 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         )
     }
 
+    /// Asks before a browser action that cannot be taken back — placing an
+    /// order, sending a message, deleting something.
+    ///
+    /// Deliberately ignores session auto-approve. Auto-approve exists so a long
+    /// task does not stop to ask about every read and every click; it was never
+    /// meant as consent to spend the user's money or speak in their name, and a
+    /// browser agent is exactly the tool that can do both.
     func requestIrreversibleBrowserActionApproval(actionSummary: String) async -> Decision {
         guard let speakHandler else {
             return .declined(reason: "there was no way to ask you about this")
