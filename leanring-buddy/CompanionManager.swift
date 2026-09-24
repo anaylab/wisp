@@ -45,6 +45,20 @@ final class CompanionManager: ObservableObject {
     /// minute reads as visible progress. Empty when no browser task is running.
     @Published private(set) var browserActivityText: String = ""
 
+    /// Every distinct progress line of the running browser task, oldest first.
+    /// The notch's executing state shows the step count and the recent steps
+    /// from this, so the user can see what has already happened, not just the
+    /// current action. Cleared with `browserActivityText` when the task ends.
+    @Published private(set) var browserTaskStepHistory: [String] = []
+
+    /// Only the most recent steps are worth showing; a 30-decision task keeps
+    /// its count without the list growing unbounded.
+    private static let maximumRetainedBrowserTaskSteps = 40
+
+    /// How many steps the running browser task has taken, including ones
+    /// trimmed from `browserTaskStepHistory`.
+    @Published private(set) var browserTaskStepCount: Int = 0
+
     /// Rate-limits how often `liveTranscript` is republished. Apple Speech emits
     /// partials many times a second; republishing each one re-renders the notch
     /// HUD (and its Liquid Glass) every time, which made the pill feel laggy. The
@@ -2356,6 +2370,9 @@ extension CompanionManager {
     var islandState: WispIslandState {
         if let islandFlash { return islandFlash }
         if pendingToolConfirmation != nil { return .confirmation }
+        // A browser task reporting progress is carrying out the request, which is
+        // more specific than "thinking" — unless the user has started talking over it.
+        if !browserActivityText.isEmpty && voiceState != .listening { return .executing }
 
         switch voiceState {
         case .listening:  return .listening
@@ -2364,7 +2381,9 @@ extension CompanionManager {
         case .idle:
             let hasReply = !currentReplyText
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            return (hasReply || resolvedGlanceCard != nil) ? .preview : .idle
+            if hasReply || resolvedGlanceCard != nil { return .preview }
+            // Work the user started earlier is still going in the background.
+            return AgentTaskRegistry.shared.backgroundRunningCount > 0 ? .processing : .idle
         }
     }
 
@@ -2585,6 +2604,8 @@ extension CompanionManager: BrowserCursorGuide {
     func endCursorGuidance() {
         clearScreenAnnotations()
         browserActivityText = ""
+        browserTaskStepHistory = []
+        browserTaskStepCount = 0
     }
 
     func reportBrowserProgress(_ progressText: String) {
@@ -2596,5 +2617,32 @@ extension CompanionManager: BrowserCursorGuide {
             isOverlayVisible = true
         }
         browserActivityText = progressText
+
+        // The cloud loop reports each line through both its progress callback
+        // and the cursor guide, so a repeat of the last line is the same step.
+        if browserTaskStepHistory.last != progressText {
+            browserTaskStepHistory.append(progressText)
+            browserTaskStepCount += 1
+            if browserTaskStepHistory.count > Self.maximumRetainedBrowserTaskSteps {
+                browserTaskStepHistory.removeFirst(
+                    browserTaskStepHistory.count - Self.maximumRetainedBrowserTaskSteps
+                )
+            }
+        }
+    }
+
+    /// The notch's Stop button for a running task. Does what speaking again
+    /// already does to the in-flight turn — cancel it, silence speech, clear
+    /// the on-screen marks — and then settles the island back to idle, since
+    /// no new turn is starting to take over the voice state. Browser loops
+    /// check for cancellation between steps, so an action already in flight
+    /// finishes before the task stops.
+    func stopCurrentTask() {
+        currentResponseTask?.cancel()
+        currentResponseTask = nil
+        AgentTaskRegistry.shared.cancelCurrentInteractiveTask()
+        ttsProvider.stopPlayback()
+        endCursorGuidance()
+        voiceState = .idle
     }
 }

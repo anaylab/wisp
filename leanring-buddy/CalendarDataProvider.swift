@@ -69,6 +69,41 @@ actor CalendarDataProvider: GlanceCardDataProvider {
         return CalendarSnapshot(events: Array(upcomingEvents), generatedAt: now)
     }
 
+    /// The next timed (not all-day) event starting within `lookAheadInterval`,
+    /// or one that started less than `recentlyStartedInterval` ago. For the
+    /// notch's ambient "next meeting" countdown.
+    ///
+    /// Unlike `snapshot`, this never requests access: it runs on a timer with
+    /// nobody having asked for anything, so a permission prompt would appear out
+    /// of nowhere. Without full access it simply returns nil.
+    func imminentTimedEventIfAuthorized(
+        now: Date = Date(),
+        lookAheadInterval: TimeInterval,
+        recentlyStartedInterval: TimeInterval
+    ) -> CalendarGlanceEvent? {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
+
+        let predicate = eventStore.predicateForEvents(
+            withStart: now.addingTimeInterval(-recentlyStartedInterval),
+            end: now.addingTimeInterval(lookAheadInterval),
+            calendars: nil
+        )
+        let earliestEvent = eventStore.events(matching: predicate)
+            .filter { !$0.isAllDay && $0.startDate >= now.addingTimeInterval(-recentlyStartedInterval) }
+            .min { $0.startDate < $1.startDate }
+        guard let earliestEvent else { return nil }
+
+        return CalendarGlanceEvent(
+            id: earliestEvent.eventIdentifier ?? UUID().uuidString,
+            title: earliestEvent.title ?? "(no title)",
+            startDate: earliestEvent.startDate,
+            endDate: earliestEvent.endDate,
+            isAllDay: false,
+            location: earliestEvent.location?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil,
+            calendarColorHex: earliestEvent.calendar?.cgColor?.hexString
+        )
+    }
+
     /// Ensures the app can read events, requesting access on first use.
     private func ensureAccess() async throws {
         switch EKEventStore.authorizationStatus(for: .event) {

@@ -28,6 +28,11 @@ struct NotchHUDView: View {
     @ObservedObject private var mcpManager = MCPManager.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
+    /// Observed so background work starting or finishing re-renders the
+    /// island's ambient state — `islandState` reads the registry, but a computed
+    /// property can't tell SwiftUI that on its own.
+    @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
+    @ObservedObject private var upcomingEventMonitor = UpcomingEventMonitor.shared
 
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
@@ -189,6 +194,235 @@ struct NotchHUDView: View {
             || companionManager.voiceState != .idle
             || companionManager.islandFlash != nil
             || hasAnswer
+            || hasAmbientActivity
+    }
+
+    // MARK: - Live activities (executing + ambient)
+
+    /// A browser task is carrying out the request right now.
+    private var isExecutingBrowserTask: Bool {
+        companionManager.islandState == .executing
+    }
+
+    /// Background tasks still running, newest first.
+    private var runningBackgroundTasks: [AgentTaskRecord] {
+        taskRegistry.records.filter { $0.kind == .background && !$0.status.isTerminal }
+    }
+
+    /// Something worth a glance while Wisp is otherwise idle: background work in
+    /// flight, or a meeting about to start. Keeps the island showing on a notched
+    /// Mac, where it would otherwise disappear into the notch at rest.
+    private var hasAmbientActivity: Bool {
+        !runningBackgroundTasks.isEmpty || upcomingEventMonitor.imminentEvent != nil
+    }
+
+    /// Whether a flank is showing a label (step count, task count, countdown)
+    /// rather than a lone glyph — the wrap widens a little to fit it.
+    private var isShowingFlankLabel: Bool {
+        if isExecutingBrowserTask { return true }
+        guard companionManager.voiceState == .idle else { return false }
+        return hasAmbientActivity
+    }
+
+    /// An indeterminate progress ring: the step total of a browser task is not
+    /// known in advance, so the ring spins rather than filling, and the number
+    /// beside it counts steps taken. Pauses when Reduce Motion is on.
+    private func activityRing(diameter: CGFloat) -> some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: WispMotion.prefersReducedMotion)) { timeline in
+            let rotationDegrees = timeline.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: 1.2) / 1.2 * 360
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.15), lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: 0.3)
+                    .stroke(WispColor.Brand.lavender, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(rotationDegrees))
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    /// A small ring + number for a flank, e.g. the spinning ring beside "4".
+    private func flankActivityLabel(_ text: String) -> some View {
+        HStack(spacing: 5) {
+            activityRing(diameter: 11)
+            Text(text)
+                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(1)
+        }
+    }
+
+    /// The calendar glyph + "12m" countdown for the right flank.
+    private func flankEventCountdown(_ event: CalendarGlanceEvent) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "calendar")
+                .font(.system(size: 10, weight: .semibold))
+            Text(UpcomingEventMonitor.compactCountdownText(until: event.startDate))
+                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .lineLimit(1)
+        }
+        .foregroundColor(DS.Colors.textSecondary)
+    }
+
+    /// The left flank: the living mark, except while idle with background work
+    /// running, when it shows that work (spinner + how many tasks). Work on the
+    /// left, time on the right.
+    @ViewBuilder
+    private var notchLeftFlank: some View {
+        if companionManager.voiceState == .idle && !isExecutingBrowserTask && !runningBackgroundTasks.isEmpty {
+            flankActivityLabel("\(runningBackgroundTasks.count)")
+                .nativeTooltip(runningBackgroundTasks.count == 1
+                    ? "1 task running in the background"
+                    : "\(runningBackgroundTasks.count) tasks running in the background")
+        } else {
+            WispMark(state: companionManager.islandState.markState, size: 15)
+        }
+    }
+
+    /// The live section at the top of the hover panel: the running browser task's
+    /// steps with a Stop button, background tasks each with their own Stop, and
+    /// the imminent meeting. Empty (and absent) when none of those apply.
+    @ViewBuilder
+    private var liveActivitySection: some View {
+        let imminentEvent = upcomingEventMonitor.imminentEvent
+        if isExecutingBrowserTask || !runningBackgroundTasks.isEmpty || imminentEvent != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                if isExecutingBrowserTask {
+                    executingTaskCard
+                }
+                ForEach(runningBackgroundTasks) { backgroundTask in
+                    backgroundTaskRow(backgroundTask)
+                }
+                if let imminentEvent {
+                    imminentEventRow(imminentEvent)
+                }
+            }
+        }
+    }
+
+    /// How many past steps the executing card lists above the current one.
+    private let executingCardPreviousStepLimit = 3
+
+    private var executingTaskCard: some View {
+        let stepHistory = companionManager.browserTaskStepHistory
+        let previousSteps = Array(stepHistory.dropLast().suffix(executingCardPreviousStepLimit))
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                sectionLabel("STEP \(max(companionManager.browserTaskStepCount, 1))")
+                Spacer(minLength: 0)
+                // Only a task the user is waiting on (a live turn) is stopped here.
+                // A browser task running in the background has its own row below
+                // with a Stop that cancels that task specifically.
+                if companionManager.voiceState != .idle {
+                    liveActivityStopButton(tooltip: "Stop this task") {
+                        companionManager.stopCurrentTask()
+                    }
+                }
+            }
+            ForEach(Array(previousSteps.enumerated()), id: \.offset) { _, previousStep in
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .frame(width: 12)
+                    Text(previousStep)
+                        .font(.system(size: 11.5))
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            HStack(spacing: 8) {
+                activityRing(diameter: 12)
+                Text(companionManager.browserActivityText)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+    }
+
+    private func backgroundTaskRow(_ backgroundTask: AgentTaskRecord) -> some View {
+        HStack(spacing: 8) {
+            activityRing(diameter: 12)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(backgroundTask.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                Text(backgroundTaskStatusLine(backgroundTask))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            liveActivityStopButton(tooltip: "Stop this background task") {
+                taskRegistry.cancelTask(backgroundTask.id)
+            }
+        }
+    }
+
+    /// "Background · 2 min · Opening github.com" — how long it has run plus its
+    /// latest step when it has one.
+    private func backgroundTaskStatusLine(_ backgroundTask: AgentTaskRecord) -> String {
+        let elapsedMinutes = Int(backgroundTask.elapsedSeconds / 60)
+        let elapsedText = elapsedMinutes < 1 ? "just started" : "\(elapsedMinutes) min"
+        if backgroundTask.status == .waitingForApproval {
+            return "Background · waiting for your ok"
+        }
+        if let latestStepSummary = backgroundTask.steps.last?.summary {
+            return "Background · \(elapsedText) · \(latestStepSummary)"
+        }
+        return "Background · \(elapsedText)"
+    }
+
+    private func imminentEventRow(_ event: CalendarGlanceEvent) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "calendar")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(DS.Colors.textSecondary)
+                .frame(width: 12)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(event.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                Text([UpcomingEventMonitor.countdownPhrase(until: event.startDate), event.location]
+                    .compactMap { $0 }
+                    .joined(separator: " · "))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func liveActivityStopButton(tooltip: String, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            HStack(spacing: 4) {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 8, weight: .bold))
+                Text("Stop")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(DS.Colors.textPrimary)
+            .padding(.horizontal, 9)
+            .frame(height: 22)
+            .background(Capsule(style: .continuous).fill(Color.white.opacity(0.08)))
+            .overlay(Capsule(style: .continuous).strokeBorder(DS.Colors.borderSubtle, lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressableScaleButtonStyle())
+        .pointerCursor()
+        .nativeTooltip(tooltip)
     }
 
     // MARK: - Collapsed live activity
@@ -214,7 +448,7 @@ struct NotchHUDView: View {
     /// the state; details live in the downward expansion.
     private var notchWrapContent: some View {
         HStack(spacing: 0) {
-            WispMark(state: companionManager.islandState.markState, size: 15)
+            notchLeftFlank
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 12)
 
@@ -253,13 +487,24 @@ struct NotchHUDView: View {
     /// responding, pulsing dots while thinking, and a single status dot at rest.
     @ViewBuilder
     private var collapsedIndicator: some View {
-        switch companionManager.voiceState {
-        case .listening, .responding:
-            collapsedMicroWaveform
-        case .processing:
-            collapsedThinkingDots
-        case .idle:
-            stateDot
+        if isExecutingBrowserTask {
+            // Steps taken so far; the ring spins because the total isn't known.
+            flankActivityLabel("\(max(companionManager.browserTaskStepCount, 1))")
+                .nativeTooltip(companionManager.browserActivityText)
+        } else {
+            switch companionManager.voiceState {
+            case .listening, .responding:
+                collapsedMicroWaveform
+            case .processing:
+                collapsedThinkingDots
+            case .idle:
+                if let imminentEvent = upcomingEventMonitor.imminentEvent {
+                    flankEventCountdown(imminentEvent)
+                        .nativeTooltip(imminentEvent.title)
+                } else {
+                    stateDot
+                }
+            }
         }
     }
 
@@ -330,8 +575,20 @@ struct NotchHUDView: View {
         case .responding:
             return collapsedReplySnippet ?? "Responding…"
         case .idle:
-            return collapsedReplySnippet
+            return collapsedReplySnippet ?? ambientSummaryText
         }
+    }
+
+    /// The non-notch pill's line while idle with nothing to preview: the meeting
+    /// about to start, else how much background work is running.
+    private var ambientSummaryText: String? {
+        if let imminentEvent = upcomingEventMonitor.imminentEvent {
+            let countdownText = UpcomingEventMonitor.compactCountdownText(until: imminentEvent.startDate)
+            return "\(imminentEvent.title) · \(countdownText)"
+        }
+        let runningCount = runningBackgroundTasks.count
+        guard runningCount > 0 else { return nil }
+        return runningCount == 1 ? "1 task running" : "\(runningCount) tasks running"
     }
 
     /// Whether the pill is currently showing the live transcript of speech. When
@@ -357,8 +614,11 @@ struct NotchHUDView: View {
 
     /// How far the notch-wrapping surface extends past each side of the physical
     /// notch, giving the mark and the indicator room to sit in the menu bar beside
-    /// the cutout.
-    private let notchWrapSideExtension: CGFloat = 44
+    /// the cutout. A little wider when a flank carries a label ("4", "12m")
+    /// rather than a lone glyph, so the text isn't crowded against the notch.
+    private var notchWrapSideExtension: CGFloat {
+        isShowingFlankLabel ? 58 : 44
+    }
 
     /// The collapsed surface's width. On a notched Mac it is the notch width plus a
     /// fixed extension on each side (so the surface wraps the notch and content
@@ -404,6 +664,9 @@ struct NotchHUDView: View {
                 // The living centerpiece: a voice waveform that reflects the current
                 // state and, while listening, the real microphone level.
                 voiceAffordanceSection
+
+                // What's in flight right now, with a way to stop it.
+                liveActivitySection
 
                 // Only present when there is an answer, so an idle panel collapses
                 // down to just the affordance, skills and footer.

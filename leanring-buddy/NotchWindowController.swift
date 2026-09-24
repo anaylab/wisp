@@ -116,6 +116,8 @@ final class NotchWindowController {
         positionWindow()
         panel?.orderFrontRegardless()
         startHoverTracking()
+        // Feeds the island's ambient next-meeting countdown.
+        UpcomingEventMonitor.shared.start()
     }
 
     func hide() {
