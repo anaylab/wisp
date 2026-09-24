@@ -216,6 +216,26 @@ cloud dependency to the local path, without asking.
   `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
   prompt; the full body is loaded on demand via the read-only `load_skill` tool —
   progressive disclosure, so an arbitrarily large skill library costs nothing until used.
+- **Memory** (local-only, private): two layers. **Recent conversation history** —
+  `ConversationHistoryStore` mirrors the live `ConversationTranscript` (via a `didSet` on
+  `CompanionManager.conversationTranscript`, merged by turn id, debounced ~1s, flushed on quit) to
+  `~/Library/Application Support/Wisp/conversation.json`, keeping the last 20 turns (the live
+  transcript keeps 10). Text, tool-use and tool-result blocks only — **images are never persisted**
+  (dropped by `ConversationHistoryCodec`; tool results capped at 2000 chars on disk). The stored
+  record stays the source and requests stay projections (`messagesForFollowUpRequest`). On launch
+  only turns from the last **6 hours** are resumed into the live transcript
+  (`ConversationHistoryCodec.turnsToResume`); older ones stay on disk for reference but are not fed
+  back, because a stale "this page"/"that error" refers to a screen the user no longer sees and
+  every resumed turn costs prompt tokens. **User memory** — `~/.wisp/memory.md`, human-editable
+  markdown, one fact per bullet, owned by `MemoryStore` (re-reads on file change, writes only
+  touch bullet lines). A compact index (`MemoryIndex`, ≤800 chars, newest facts preferred) is
+  appended to the companion system prompt on both turn paths via
+  `MemoryStore.shared.promptInstructions()`, so it applies with or without agent mode. In agent
+  mode the model can call `remember` (`.writing`) and `forget` (destructive; refuses a vague
+  query matching >3 facts) — both confirm, since the file shapes every later prompt; the
+  `.memory` `AgentToolScope` routes "remember that…"/"forget…" to them. The dashboard's
+  **Memory tab** lists facts with delete buttons, reveals memory.md, and clears conversation
+  history (which also empties the live transcript via `onConversationHistoryCleared`).
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 
@@ -350,7 +370,7 @@ Grouped by what they do. Line counts are approximate.
 | `BrowserAgentLoop.swift` | ~720 | Long-horizon browser agent for cloud providers: observe→act loop (cap 30), line-grammar actions incl. batched form fills, stuck detection, untrusted-page prompt rules. Also `BrowserActionSafety` (which clicks/sends need the always-ask confirmation). |
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
 | `AgentToolRegistry.swift` | ~500 | Built-in read-only tools + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |
-| `AgentToolScope.swift` | ~120 | Deterministic built-in scope vocabulary (browser/filesystem/coding/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
+| `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~330 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
@@ -367,6 +387,8 @@ Grouped by what they do. Line counts are approximate.
 | `MCPManager.swift` | ~270 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
+| `ConversationHistoryStore.swift` | ~420 | Persists the last 20 transcript turns to `~/Library/Application Support/Wisp/conversation.json` (Codable `Persisted*` shapes, images dropped, debounced + flushed on quit) and hands back the ≤6h-old ones to resume on launch. `ConversationHistoryCodec` holds the pure encode/decode/merge/resume policy. |
+| `MemoryStore.swift` | ~330 | `~/.wisp/memory.md` user memory: `MemoryFileFormat` (pure bullet parse/append/remove), `MemoryIndex` (the ≤800-char system-prompt block, newest facts first), and the `MemoryStore` ObservableObject behind the `remember`/`forget` tools and the Memory tab. |
 | `ToolConfirmationCoordinator.swift` | ~320 | Permission requests with a 45s timeout and spoken-affirmative parsing. `requestApproval(toolName:toolInput:)` applies the `ToolCallSafety` floor under session auto-approve and attaches the `ToolConfirmationCardBuilder` card to `PendingConfirmation.confirmationCard`. |
 | `ToolConfirmationView.swift` | ~150 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, the optional confirmation card (`GlanceCardView`), exact call in a chip, Cancel / Allow→, "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
 | `ToolCallInspection.swift` | ~310 | Deterministic reading of a tool call: `server__` namespace stripping, identifier → words (camelCase/underscores), Composio execute-meta-tool unwrapping into `InspectedToolAction`s (tolerates JSON-string arguments), lenient case/underscore-insensitive argument lookup, display text for arrays/objects, path-argument extraction and `..`-safe path containment. |
@@ -390,6 +412,7 @@ Grouped by what they do. Line counts are approximate.
 | `PlacesSnapshot.swift` / `PlacesDataProvider.swift` / `PlacesCardView.swift` | ~85/~230/~250 | `places` kind: CoreLocation one-shot (`WispLocationProvider`, in the provider file) + MapKit `MKLocalSearch` → a Maps-style nearby-results card whose rows open in Apple Maps. Network-gated by `GlanceCardDataPreference`; requests Location permission on first use. |
 | `ConfiguredSourceStore.swift` / `RESTSourceDataProvider.swift` / `SourceCardView.swift` | ~90/~140/~90 | `source` kind: user endpoints in `~/.wisp/sources.json`, fetched over HTTPS and mapped to generic blocks. |
 | `SourcesTab.swift` | ~150 | Dashboard Sources tab: the live-card-data master toggle + the configured-source list. |
+| `MemoryTab.swift` | ~185 | Dashboard Memory tab: remembered facts with per-row delete, reveal/reload memory.md, and the saved-conversation summary with "Clear conversation history" (confirmation dialog). |
 
 ### Dashboard and UI
 | File | Lines | Purpose |

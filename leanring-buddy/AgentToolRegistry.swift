@@ -426,10 +426,82 @@ final class AgentToolRegistry: ObservableObject {
         }
     }
 
+    /// Lets the model add to and remove from the user's memory file,
+    /// `~/.wisp/memory.md` (see `MemoryStore`).
+    ///
+    /// Both ask first. They only touch a local text file, but that file is fed
+    /// into every future prompt, so a fact the model invents — or one planted
+    /// by a web page it read — would otherwise quietly shape every later
+    /// answer. The confirmation card shows the exact fact, which is the
+    /// user's chance to catch that.
+    private func registerMemoryTools() {
+        register(
+            BuddyToolDefinition(
+                name: "remember",
+                description: "Save one lasting fact about the user to their memory, when they ask you to remember something (their name, a preference, a project). One short sentence per call.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object(["fact": .object([
+                        "type": .string("string"),
+                        "description": .string("The fact as one short sentence, e.g. \"prefers metric units\"")
+                    ])]),
+                    "required": .array([.string("fact")])
+                ]),
+                // A recoverable local write: the user can edit the file back.
+                metadata: .writing(.localMachine)
+            )
+        ) { input in
+            guard case .object(let arguments) = input,
+                  case .string(let fact)? = arguments["fact"] else {
+                return "i need the fact to remember."
+            }
+            switch try MemoryStore.shared.remember(fact) {
+            case .added(let savedFact):
+                return "remembered: \(savedFact)"
+            case .alreadyKnown(let knownFact):
+                return "that's already in memory: \(knownFact)"
+            case .nothingToRemember:
+                return "there was nothing to remember in that."
+            }
+        }
+
+        register(
+            BuddyToolDefinition(
+                name: "forget",
+                description: "Remove a fact from the user's memory when they ask you to forget it. Describe it with a few words that appear in the fact.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object(["fact": .object([
+                        "type": .string("string"),
+                        "description": .string("Words from the fact to remove, e.g. \"metric units\"")
+                    ])]),
+                    "required": .array([.string("fact")])
+                ]),
+                // Deleting a line the user may have written by hand.
+                metadata: ToolMetadata(readOnly: false, destructive: true, dataSource: .localMachine)
+            )
+        ) { input in
+            guard case .object(let arguments) = input,
+                  case .string(let query)? = arguments["fact"] else {
+                return "i need to know which fact to forget."
+            }
+            switch try MemoryStore.shared.forget(matching: query) {
+            case .removed(let removedFacts):
+                return "forgot: " + removedFacts.joined(separator: "; ")
+            case .nothingMatched:
+                return "nothing in memory matches \"\(query)\"."
+            case .tooManyMatches(let matchingFacts):
+                return "that matches several facts (" + matchingFacts.joined(separator: "; ")
+                    + "). ask the user which one they mean."
+            }
+        }
+    }
+
     private func registerBuiltInTools() {
         registerBrowserTools()
         registerClaudeCodeTool()
         registerSkillTools()
+        registerMemoryTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

@@ -29,6 +29,10 @@ enum AgentToolScope: String, CaseIterable {
     case browser
     case filesystem
     case coding
+    /// The user's long-term memory (`remember` / `forget`). Its own scope
+    /// because "remember that…" shares no vocabulary with the others, and
+    /// without it the two tools would surface only on lexical luck.
+    case memory
     case general
 
     /// Words that indicate this scope, weighted equally.
@@ -49,6 +53,10 @@ enum AgentToolScope: String, CaseIterable {
         case .coding:
             return ["code", "bug", "test", "tests", "refactor", "function", "compile",
                     "build", "commit", "git", "implement", "fix the", "stack trace"]
+        case .memory:
+            // Not "memory": "how much memory is free" is about RAM, and should
+            // stay in the general scope.
+            return ["remember", "forget", "memorize", "keep in mind", "note that"]
         case .general:
             return []
         }
@@ -111,6 +119,8 @@ enum AgentToolScope: String, CaseIterable {
             return name.hasPrefix("filesystem__")
         case .coding:
             return name == "delegate_coding_task" || name.hasPrefix("filesystem__")
+        case .memory:
+            return name == "remember" || name == "forget"
         case .general:
             // What a conversation plausibly reaches for: the things that
             // answer a question about the user's own machine right now.

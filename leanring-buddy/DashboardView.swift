@@ -40,6 +40,7 @@ struct DashboardView: View {
         case home = "Home"
         case activity = "Activity"
         case conversation = "Conversation"
+        case memory = "Memory"
         case shortcuts = "Shortcuts"
         case dictation = "Dictation"
         case cursor = "Cursor"
@@ -56,6 +57,7 @@ struct DashboardView: View {
             case .home: return "house"
             case .activity: return "list.bullet.rectangle"
             case .conversation: return "bubble.left.and.bubble.right"
+            case .memory: return "brain.head.profile"
             case .shortcuts: return "keyboard"
             case .dictation: return "mic"
             case .cursor: return "cursorarrow"
@@ -89,6 +91,7 @@ struct DashboardView: View {
                         )
                     case .activity: ActivityTab(taskRegistry: taskRegistry)
                     case .conversation: ConversationTab(taskRegistry: taskRegistry)
+                    case .memory: MemoryTab()
                     case .shortcuts: ShortcutsTab()
                     case .dictation: DictationTab()
                     case .cursor: CursorTab(companionManager: companionManager)

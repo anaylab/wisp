@@ -147,7 +147,15 @@ final class CompanionManager: ObservableObject {
     /// answered from memory. What goes to the model is still a projection of
     /// this — see `messagesForFollowUpRequest` — but the projecting now happens
     /// where the request is built, not where the history is stored.
-    private var conversationTranscript = ConversationTranscript()
+    ///
+    /// Mirrored to disk by `ConversationHistoryStore` on every change (it
+    /// merges by turn id and debounces the write), so the recent conversation
+    /// survives a relaunch. Screenshots never reach the file.
+    private var conversationTranscript = ConversationTranscript() {
+        didSet {
+            ConversationHistoryStore.shared.recordTranscriptTurns(conversationTranscript.turns)
+        }
+    }
 
     /// The currently running AI response task, if any. Cancelled when the user
     /// speaks again so a new response can begin immediately.
@@ -285,6 +293,7 @@ final class CompanionManager: ObservableObject {
         // The browser step loop marks what it acts on; this is how it reaches
         // the overlay this object owns.
         AgentToolRegistry.shared.browserCursorGuide = self
+        restoreRecentConversationHistory()
         connectMCPServersIfAgentModeEnabled()
         bindVoiceStateObservation()
         bindAudioPowerLevel()
@@ -1121,7 +1130,8 @@ final class CompanionManager: ObservableObject {
                             + ScreenAnnotationParser.promptInstructions
                             + GlanceCardParser.promptInstructions
                             + SpokenLineParser.promptInstructions
-                            + glanceCardSourcesPromptAddendum,
+                            + glanceCardSourcesPromptAddendum
+                            + MemoryStore.shared.promptInstructions(),
                         conversationHistory: historyMessages,
                         onNarration: { narration in
                             print("💭 \(narration)")
@@ -1160,7 +1170,8 @@ final class CompanionManager: ObservableObject {
                             + ScreenAnnotationParser.promptInstructions
                             + GlanceCardParser.promptInstructions
                             + SpokenLineParser.promptInstructions
-                            + glanceCardSourcesPromptAddendum,
+                            + glanceCardSourcesPromptAddendum
+                            + MemoryStore.shared.promptInstructions(),
                         messages: historyMessages + [currentUserMessage],
                         // No tools on the single-call path — this branch runs
                         // only when agent mode is off.
@@ -1774,6 +1785,23 @@ final class CompanionManager: ObservableObject {
     /// A short, runtime line naming the user's enabled sources from
     /// `~/.wisp/sources.json`, so the model knows which `source` cards it may
     /// ask for. Empty when the user has configured none, so it costs nothing.
+    /// Seeds the live transcript with the recent turns saved last session, and
+    /// lets the dashboard's "Clear conversation history" empty it too.
+    ///
+    /// Only turns from the last few hours come back into the model's context
+    /// (`ConversationHistoryCodec.maximumResumedTurnAge`); older ones stay on
+    /// disk for reference. See `ConversationHistoryStore` for why.
+    private func restoreRecentConversationHistory() {
+        let historyStore = ConversationHistoryStore.shared
+        historyStore.onConversationHistoryCleared = { [weak self] in
+            self?.conversationTranscript.removeAll()
+        }
+        let resumableTurns = historyStore.turnsWorthResumingOnLaunch()
+        guard !resumableTurns.isEmpty else { return }
+        conversationTranscript = ConversationTranscript(restoringTurns: resumableTurns)
+        print("🧠 Conversation history: resumed \(resumableTurns.count) recent exchanges")
+    }
+
     private var glanceCardSourcesPromptAddendum: String {
         let enabledSourceNames = ConfiguredSourceStore.shared.enabledSourceNames
         guard !enabledSourceNames.isEmpty else { return "" }
