@@ -899,6 +899,13 @@ final class CompanionManager: ObservableObject {
         openTextComposer()
     }
 
+    /// The dashboard's ask bar: runs a typed question exactly as the text
+    /// composer does. The caller closes the dashboard first so the screenshot
+    /// shows the user's work rather than Wisp's own window.
+    func askTypedQuestion(_ typedQuestion: String) {
+        submitTextComposerQuery(typedQuestion)
+    }
+
     /// Runs a typed question through the same pipeline as a spoken one: the answer
     /// is spoken and, when it helps, pointed at on screen.
     private func submitTextComposerQuery(_ typedQuery: String) {
