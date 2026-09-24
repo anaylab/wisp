@@ -51,10 +51,16 @@ enum AgentToolRouter {
     ]
 
     /// Selects the tools to show the model, ranked by relevance to the request.
+    ///
+    /// - Parameter boostedToolNames: Tools a caller knows are relevant beyond
+    ///   what words alone show — e.g. `run_shortcut` when the request names one
+    ///   of the user's Apple Shortcuts. They get the same bonus as scope
+    ///   membership (not stacked with it).
     static func select(
         from tools: [BuddyToolDefinition],
         for transcript: String,
-        limit: Int
+        limit: Int,
+        boostedToolNames: Set<String> = []
     ) -> [BuddyToolDefinition] {
         guard limit > 0, !tools.isEmpty else { return [] }
 
@@ -68,7 +74,9 @@ enum AgentToolRouter {
         var scored: [ScoredTool] = []
         for tool in tools where !alwaysNames.contains(tool.name) {
             var score = lexicalScore(tool, queryTerms: queryTerms)
-            if scope.includes(toolNamed: tool.name) { score += scopeMembershipBonus }
+            if scope.includes(toolNamed: tool.name) || boostedToolNames.contains(tool.name) {
+                score += scopeMembershipBonus
+            }
             if score > 0 { scored.append(ScoredTool(tool: tool, score: score)) }
         }
         // Highest score first; ties broken by name so selection is stable.

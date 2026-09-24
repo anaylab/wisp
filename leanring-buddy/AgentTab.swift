@@ -14,6 +14,7 @@ struct AgentTab: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var agentSettings = AgentSettingsStore.shared
     @ObservedObject private var confirmationCoordinator = ToolConfirmationCoordinator.shared
+    @ObservedObject private var shortcutsBridge = ShortcutsBridge.shared
 
     var body: some View {
         ScrollView {
@@ -23,11 +24,17 @@ struct AgentTab: View {
                 }
                 agentFolderCard
                 approvalsCard
+                appleShortcutsCard
                 permissionsCard
             }
             .padding(16)
         }
         .background(DS.Colors.background)
+        .task {
+            // Reads the cached list if it is fresh; otherwise lists once so the
+            // count shown is current when the tab opens.
+            await shortcutsBridge.refreshIfStale()
+        }
     }
 
     private var agentModeOffNotice: some View {
@@ -151,7 +158,7 @@ struct AgentTab: View {
                     Text("Auto-approve this session")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(DS.Colors.textPrimary)
-                    Text("Let the agent run its tools without asking each time, until Wisp restarts. Anything that can't be taken back — sending, posting, deleting, paying, inviting, running commands, or writing outside the agent folder — still asks. Off by default so you approve each step.")
+                    Text("Let the agent run its tools without asking each time, until Wisp restarts. Anything that can't be taken back — sending, posting, deleting, paying, inviting, running commands or shortcuts, or writing outside the agent folder — still asks. Off by default so you approve each step.")
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -162,6 +169,74 @@ struct AgentTab: View {
                     .toggleStyle(.switch)
                     .pointerCursor()
             }
+        }
+    }
+
+    // MARK: - Apple Shortcuts
+
+    /// Whether the agent can run the user's Apple Shortcuts, how many it
+    /// found, and a manual refresh for after the user edits Shortcuts.
+    private var appleShortcutsCard: some View {
+        DashboardCard(title: "Apple Shortcuts") {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(appleShortcutsStatusTitle)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text(appleShortcutsStatusDetail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    Task { await shortcutsBridge.refresh() }
+                } label: {
+                    HStack(spacing: 5) {
+                        if shortcutsBridge.isRefreshing {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        Text("Refresh")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                            .fill(DS.Colors.surface3)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(shortcutsBridge.isRefreshing)
+                .pointerCursor(isEnabled: !shortcutsBridge.isRefreshing)
+                .nativeTooltip("List your shortcuts again")
+            }
+        }
+    }
+
+    private var appleShortcutsStatusTitle: String {
+        switch shortcutsBridge.availability {
+        case .notChecked:
+            return "Checking Shortcuts…"
+        case .available:
+            let shortcutCount = shortcutsBridge.shortcuts.count
+            return shortcutCount == 1 ? "1 shortcut available" : "\(shortcutCount) shortcuts available"
+        case .unavailable:
+            return "Shortcuts unavailable"
+        }
+    }
+
+    private var appleShortcutsStatusDetail: String {
+        switch shortcutsBridge.availability {
+        case .notChecked, .available:
+            return "Ask Wisp to run one by name — \"run my morning routine\". Every run asks first, even with auto-approve on, since a shortcut can do anything it's built to do. Runs locally through the shortcuts command."
+        case .unavailable(let reason):
+            return reason
         }
     }
 

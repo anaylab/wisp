@@ -68,6 +68,12 @@ final class AgentTurnRunner {
     /// still bounded, and the user can stop it at any time by talking.
     private static let longRunningToolTimeoutSeconds: [String: TimeInterval] = [
         "browser_task": 10 * 60,
+        // A shortcut can call the network or other apps. Its own run is
+        // bounded by `ShortcutsBridge.runTimeoutSeconds`; this outlasts that
+        // plus the confirmation window, so the bridge's clearer "still
+        // running after…" message wins over a generic timeout.
+        "run_shortcut": ToolConfirmationCoordinator.confirmationTimeoutSeconds
+            + ShortcutsBridge.runTimeoutSeconds + 15,
     ]
 
     private static func timeoutSeconds(forToolNamed toolName: String) -> TimeInterval {

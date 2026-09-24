@@ -74,6 +74,13 @@ enum ToolConfirmationCardBuilder {
         toolInput: JSONValue,
         agentWorkingDirectoryPath: String?
     ) -> GlanceCard? {
+        // Checked by name before any word matching: "run shortcut" matches no
+        // shape below, and without its own card the user would approve an
+        // opaque automation from a line of raw JSON.
+        if ToolCallInspection.bareToolName(toolName) == ShortcutsToolRouting.runShortcutToolName {
+            return runShortcutCard(toolInput: toolInput)
+        }
+
         let inspectedActions = ToolCallInspection.inspectedActions(toolName: toolName, toolInput: toolInput)
 
         if inspectedActions.count > 1 {
@@ -313,6 +320,32 @@ enum ToolConfirmationCardBuilder {
             let editCountText = editItems.count == 1 ? "1 edit" : "\(editItems.count) edits"
             blocks.append(.list(rows: [GlanceListRow(text: editCountText, iconName: "list.bullet", tone: .neutral)]))
         }
+        return GlanceCard(blocks: blocks)
+    }
+
+    // MARK: - Apple Shortcuts
+
+    /// "Run Shortcut": the shortcut's name and the text it will receive, plus
+    /// a reminder that what it does is up to the shortcut — the reason this
+    /// card appears even under session auto-approve.
+    static func runShortcutCard(toolInput: JSONValue) -> GlanceCard {
+        var blocks: [GlanceBlock] = [
+            .header(title: "Run Shortcut", iconName: "square.stack.3d.up", trailingText: "Shortcuts")
+        ]
+        var keyValuePairs: [GlanceKeyValuePair] = []
+        if let shortcutName = ToolCallInspection.stringValue(forAnyOf: ["name"], in: toolInput) {
+            keyValuePairs.append(GlanceKeyValuePair(key: "Shortcut", value: truncatedFieldValue(shortcutName), tone: .neutral))
+        }
+        if let shortcutInputText = ToolCallInspection.stringValue(forAnyOf: ["input"], in: toolInput) {
+            let inputPreviewText = truncatedPreview(shortcutInputText, maximumCharacters: maximumBodyPreviewCharacters)
+            if !inputPreviewText.isEmpty {
+                keyValuePairs.append(GlanceKeyValuePair(key: "Input", value: inputPreviewText, tone: .neutral))
+            }
+        }
+        if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
+        blocks.append(.list(rows: [
+            GlanceListRow(text: "Does whatever this shortcut is built to do", iconName: "info.circle", tone: .neutral)
+        ]))
         return GlanceCard(blocks: blocks)
     }
 

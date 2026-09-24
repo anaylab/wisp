@@ -253,6 +253,26 @@ cloud dependency to the local path, without asking.
   (`https://connect.composio.dev/mcp`, auth `x-consumer-api-key`): connecting installs one
   remote server whose meta-tools (`COMPOSIO_SEARCH_TOOLS`/`MULTI_EXECUTE_TOOL`/
   `MANAGE_CONNECTIONS`, …) reach 500+ apps and count against the same tool budget.
+- **Apple Shortcuts as agent tools** (local, no server): `list_shortcuts` (read-only) and
+  `run_shortcut` (name + optional text input) drive the system `/usr/bin/shortcuts` CLI via
+  `ShortcutsBridge` — `Process` with an **argument array** (name last, after `--`, so spaces,
+  quotes or a leading dash stay one name; runs by the listing's UUID when known), off the main
+  actor on a dispatch queue, a 120s run timeout (`ShortcutsBridge.runTimeoutSeconds`; the process
+  is terminated on timeout *or* task cancellation), input/output through per-run temp files,
+  output capped at 2000 chars. The list (`shortcuts list --show-identifiers`) is cached 5 min and
+  refreshed on demand (dashboard button, or a name miss). `run_shortcut` resolves only an exact
+  name (case/punctuation-insensitive, unique) — never fuzzy, because the user approved that name.
+  It is declared with worst-case metadata (write + destructive + external) **and** listed in
+  `ToolCallSafety.alwaysAskBareToolNames`, so it asks **even under session auto-approve** (what a
+  shortcut does is opaque); the card is "Run Shortcut" with the shortcut and its input.
+  `AgentTurnRunner` gives it confirmation window + run timeout + slack. **Routing**: rather than
+  listing every shortcut in the tool description (tokens every turn, growing with the library),
+  `AgentToolRegistry.definitions(forRequest:)` matches the request against the *cached* names
+  (`ShortcutNameMatcher` — all meaningful name words present, one-word names need a "run"-like
+  cue, grammar/question words ignored) and, only on a match, boosts `run_shortcut` via the
+  router's `boostedToolNames` and appends at most 3 matching names to its description for that
+  turn (`ShortcutsToolRouting`); a request saying "shortcut(s)" (not "keyboard shortcut") boosts
+  both tools and relies on `list_shortcuts`. The Agent tab shows availability + count + Refresh.
 - **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
   `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
   prompt; the full body is loaded on demand via the read-only `load_skill` tool —
@@ -371,7 +391,7 @@ Grouped by what they do. Line counts are approximate.
 | `CursorAppearanceStore.swift` | ~90 | Source of truth for the cursor/annotation colour (blue/red/yellow/green). Observed by the overlay, annotation layer, and brand glyphs so a change applies live. |
 | `CursorTab.swift` | ~110 | Dashboard Cursor tab: dock-cursor toggle (shared with the notch) and the colour swatches. |
 | `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
-| `AgentTab.swift` | ~250 | Dashboard Agent tab: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), and permission rows with System Settings deep-links. |
+| `AgentTab.swift` | ~325 | Dashboard Agent tab: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`), and permission rows with System Settings deep-links. |
 | `CompanionScreenCaptureUtility.swift` | ~150 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. Starts OCR (`ScreenTextRecognizer`) on each captured frame. |
 
 ### Local model stack
@@ -417,7 +437,7 @@ Grouped by what they do. Line counts are approximate.
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
 | `AgentToolRegistry.swift` | ~640 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |
 | `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
-| `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership adds a bonus, returns the top few within budget. Deterministic, model-free. |
+| `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership (or a caller's `boostedToolNames`, e.g. `run_shortcut` when the request names a shortcut) adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~330 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
@@ -433,13 +453,15 @@ Grouped by what they do. Line counts are approximate.
 | `MCPManager.swift` | ~270 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
+| `ShortcutsBridge.swift` | ~455 | Apple Shortcuts via `/usr/bin/shortcuts`: `ShortcutsListParser` (`list --show-identifiers` → name + UUID), `ShortcutsCommandLine` (argument arrays; name after `--`), `ShortcutsProcessRunner` (off-main `Process`, both pipes drained, timeout + cancellation terminate), `ShortcutRunResultFormatter` (capped text for the model), and the `ShortcutsBridge` ObservableObject (5-min cached list, availability, `runShortcut(named:textInput:)` with exact-name resolution and temp-file I/O). |
+| `ShortcutsAgentTools.swift` | ~280 | `ShortcutNameMatcher` (request → matching shortcut names; exact-name resolution), `ShortcutsToolRouting` (boost hints + per-turn `run_shortcut` description naming ≤3 matches; the `list_shortcuts`/`run_shortcut` definitions), and `AgentToolRegistry.registerShortcutsTools()`. |
 | `ConversationHistoryStore.swift` | ~420 | Persists the last 20 transcript turns to `~/Library/Application Support/Wisp/conversation.json` (Codable `Persisted*` shapes, images dropped, debounced + flushed on quit) and hands back the ≤6h-old ones to resume on launch. `ConversationHistoryCodec` holds the pure encode/decode/merge/resume policy. |
 | `MemoryStore.swift` | ~330 | `~/.wisp/memory.md` user memory: `MemoryFileFormat` (pure bullet parse/append/remove), `MemoryIndex` (the ≤800-char system-prompt block, newest facts first), and the `MemoryStore` ObservableObject behind the `remember`/`forget` tools and the Memory tab. |
 | `ToolConfirmationCoordinator.swift` | ~320 | Permission requests with a 45s timeout and spoken-affirmative parsing. `requestApproval(toolName:toolInput:)` applies the `ToolCallSafety` floor under session auto-approve and attaches the `ToolConfirmationCardBuilder` card to `PendingConfirmation.confirmationCard`. |
 | `ToolConfirmationView.swift` | ~150 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, the optional confirmation card (`GlanceCardView`), exact call in a chip, Cancel / Allow→, "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
 | `ToolCallInspection.swift` | ~310 | Deterministic reading of a tool call: `server__` namespace stripping, identifier → words (camelCase/underscores), Composio execute-meta-tool unwrapping into `InspectedToolAction`s (tolerates JSON-string arguments), lenient case/underscore-insensitive argument lookup, display text for arrays/objects, path-argument extraction and `..`-safe path containment. |
-| `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules. |
-| `ToolConfirmationCardBuilder.swift` | ~485 | Builds the confirmation panel's `GlanceCard` from a call: email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). |
+| `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules, and `alwaysAskBareToolNames` (`run_shortcut`). |
+| `ToolConfirmationCardBuilder.swift` | ~520 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
 | `AgentTaskRegistry.swift` | ~140 | Task and step records backing the dashboard's Activity tab. |
 

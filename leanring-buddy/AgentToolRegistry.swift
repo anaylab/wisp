@@ -75,10 +75,24 @@ final class AgentToolRegistry: ObservableObject {
     /// callable, but only what is exposed appears in the prompt and therefore
     /// costs tokens and competes for the model's attention.
     func definitions(forRequest transcript: String) -> [BuddyToolDefinition] {
-        AgentToolRouter.select(
+        // Apple Shortcuts are matched by name against the cached list — never
+        // a fresh process spawn on the turn's critical path; a stale cache is
+        // refreshed in the background for the next turn instead. See
+        // `ShortcutsToolRouting` for why only matching names reach the prompt.
+        ShortcutsBridge.shared.refreshInBackgroundIfStale()
+        let shortcutsRoutingHints = ShortcutsToolRouting.routingHints(
+            forRequest: transcript,
+            knownShortcutNames: ShortcutsBridge.shared.cachedShortcutNames
+        )
+        let selectedDefinitions = AgentToolRouter.select(
             from: definitions,
             for: transcript,
-            limit: AgentToolScope.maximumExposedTools
+            limit: AgentToolScope.maximumExposedTools,
+            boostedToolNames: shortcutsRoutingHints.boostedToolNames
+        )
+        return ShortcutsToolRouting.applyingMatchingShortcutNames(
+            shortcutsRoutingHints.matchingShortcutNames,
+            to: selectedDefinitions
         )
     }
 
@@ -578,6 +592,7 @@ final class AgentToolRegistry: ObservableObject {
         registerMemoryTools()
         registerReminderTools()
         registerScreenTextTools()
+        registerShortcutsTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

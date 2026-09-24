@@ -56,7 +56,16 @@ enum ToolCallSafety {
         "shell", "bash", "zsh", "terminal", "applescript", "osascript",
     ]
     private static let executionVerbWords: Set<String> = ["run", "execute", "exec", "eval"]
-    private static let executionObjectWords: Set<String> = ["command", "commands", "script", "code"]
+    private static let executionObjectWords: Set<String> = ["command", "commands", "script", "code", "shortcut", "shortcuts"]
+
+    /// Tools that always ask, by bare name, whatever their arguments say.
+    ///
+    /// `run_shortcut` runs one of the user's Apple Shortcuts, and what a
+    /// shortcut does cannot be told from its name or its input — "Morning
+    /// Routine" may only read the weather or may text half the user's
+    /// contacts. Listed by name so the guarantee does not depend on word
+    /// matching (though "run" + "shortcut" would also catch it).
+    static let alwaysAskBareToolNames: Set<String> = ["run_shortcut"]
 
     /// Verbs that write to the file system. Deletion is already in
     /// `alwaysIrreversibleWords`, so these are the recoverable-inside-the-agent-
@@ -88,6 +97,8 @@ enum ToolCallSafety {
         agentWorkingDirectoryPath: String
     ) -> Bool {
         let bareName = ToolCallInspection.bareToolName(toolName)
+
+        if alwaysAskBareToolNames.contains(bareName) { return true }
 
         if ToolCallInspection.isComposioMetaTool(bareToolName: bareName) {
             if ToolCallInspection.isComposioExecuteMetaTool(bareToolName: bareName) {
