@@ -30,11 +30,50 @@ struct DashboardView: View {
     @ObservedObject var metricsRecorder: PerfMetricsRecorder
 
     @State private var selectedTab: DashboardTab = .home
+    /// The page last open in each section, so returning to Settings lands on
+    /// Dictation again rather than resetting to the section's first page.
+    @State private var lastSelectedPageBySection: [DashboardSection: DashboardTab] = [:]
     @State private var memory = SystemReadouts.memoryBreakdown()
 
     /// Two seconds: fast enough to catch a model loading, slow enough that the
     /// sidebar is not redrawing constantly behind whatever the user is reading.
     private let memoryRefreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    /// The sidebar's five destinations. Each groups one or more pages
+    /// (`DashboardTab`); a section with several pages shows them as sub-tabs in
+    /// the content header. Grouped by what the user came to do — see what's
+    /// happening, look back, automate, connect things, adjust how Wisp behaves —
+    /// instead of one sidebar row per settings screen.
+    enum DashboardSection: String, CaseIterable, Identifiable {
+        case today = "Today"
+        case history = "History"
+        case routines = "Routines"
+        case connections = "Connections"
+        case settings = "Settings"
+
+        var id: String { rawValue }
+
+        var symbolName: String {
+            switch self {
+            case .today: return "sun.max"
+            case .history: return "clock.arrow.circlepath"
+            case .routines: return "bolt"
+            case .connections: return "powerplug"
+            case .settings: return "slider.horizontal.3"
+            }
+        }
+
+        /// The section's pages, in sub-tab order. The first is the default.
+        var pages: [DashboardTab] {
+            switch self {
+            case .today: return [.home]
+            case .history: return [.activity, .conversation, .memory]
+            case .routines: return [.routines]
+            case .connections: return [.marketplace, .tools, .sources]
+            case .settings: return [.shortcuts, .dictation, .cursor, .agent, .performance]
+            }
+        }
+    }
 
     enum DashboardTab: String, CaseIterable, Identifiable {
         case home = "Home"
@@ -52,6 +91,21 @@ struct DashboardView: View {
         case performance = "Model & Performance"
 
         var id: String { rawValue }
+
+        /// The section this page lives under in the sidebar.
+        var section: DashboardSection {
+            DashboardSection.allCases.first { $0.pages.contains(self) } ?? .today
+        }
+
+        /// The page's name as a sub-tab — shorter than `rawValue` where the
+        /// section title already says the rest.
+        var subTabTitle: String {
+            switch self {
+            case .tools: return "Servers & Tools"
+            case .performance: return "Model"
+            default: return rawValue
+            }
+        }
 
         var symbolName: String {
             switch self {
@@ -89,7 +143,7 @@ struct DashboardView: View {
                         HomeTab(
                             taskRegistry: taskRegistry,
                             companionManager: companionManager,
-                            onSelectTab: { selectedTab = $0 }
+                            onSelectTab: { selectPage($0) }
                         )
                     case .routines: RoutinesTab(companionManager: companionManager)
                     case .activity: ActivityTab(taskRegistry: taskRegistry)
@@ -120,8 +174,8 @@ struct DashboardView: View {
             identityHeader
 
             VStack(spacing: 2) {
-                ForEach(DashboardTab.allCases) { tab in
-                    sidebarItem(for: tab)
+                ForEach(DashboardSection.allCases) { section in
+                    sidebarItem(for: section)
                 }
             }
             .padding(.horizontal, 8)
@@ -161,24 +215,34 @@ struct DashboardView: View {
         .padding(.bottom, 16)
     }
 
-    private func sidebarItem(for tab: DashboardTab) -> some View {
-        let isSelected = selectedTab == tab
-        let runningCount = tab == .activity ? taskRegistry.runningRecords.count : 0
+    /// Opens a section at the page last used in it (or its first page).
+    private func selectSection(_ section: DashboardSection) {
+        selectPage(lastSelectedPageBySection[section] ?? section.pages[0])
+    }
+
+    private func selectPage(_ page: DashboardTab) {
+        selectedTab = page
+        lastSelectedPageBySection[page.section] = page
+    }
+
+    private func sidebarItem(for section: DashboardSection) -> some View {
+        let isSelected = selectedTab.section == section
+        let runningCount = section == .history ? taskRegistry.runningRecords.count : 0
 
         return Button {
-            selectedTab = tab
+            selectSection(section)
         } label: {
             HStack(spacing: 9) {
-                Image(systemName: tab.symbolName)
+                Image(systemName: section.symbolName)
                     .font(.system(size: 12, weight: .medium))
                     .frame(width: 16)
-                Text(tab.rawValue)
+                Text(section.rawValue)
                     .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                     .lineLimit(1)
 
                 Spacer(minLength: 4)
 
-                // A running-task count belongs next to Activity, not in a
+                // A running-task count belongs next to History, not in a
                 // corner of the window: it is the reason someone would switch
                 // to that section.
                 if runningCount > 0 {
@@ -276,10 +340,14 @@ struct DashboardView: View {
     // MARK: - Content header
 
     private var contentHeader: some View {
-        HStack(spacing: 8) {
-            Text(selectedTab.rawValue)
+        HStack(spacing: 12) {
+            Text(selectedTab.section.rawValue)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(DS.Colors.textPrimary)
+
+            if selectedTab.section.pages.count > 1 {
+                subTabBar(for: selectedTab.section)
+            }
 
             Spacer()
 
@@ -295,6 +363,42 @@ struct DashboardView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(DS.Colors.surface1)
+    }
+
+    /// The pages of a multi-page section, as a row of pill tabs beside its title.
+    private func subTabBar(for section: DashboardSection) -> some View {
+        HStack(spacing: 2) {
+            ForEach(section.pages) { page in
+                subTabButton(for: page)
+            }
+        }
+        .padding(2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(DS.Colors.surface2)
+        )
+    }
+
+    private func subTabButton(for page: DashboardTab) -> some View {
+        let isSelected = selectedTab == page
+        return Button {
+            selectPage(page)
+        } label: {
+            Text(page.subTabTitle)
+                .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? DS.Colors.textPrimary : DS.Colors.textSecondary)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isSelected ? DS.Colors.surface4 : .clear)
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }
 
