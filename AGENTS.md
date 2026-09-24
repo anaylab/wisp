@@ -116,8 +116,29 @@ cloud dependency to the local path, without asking.
   **working folder** (`AgentSettingsStore`, read by the tool registry; defaults to
   `CodeProjectDirectory`), a **session auto-approve** toggle (`ToolConfirmationCoordinator.autoApproveThisSession`
   — short-circuits the confirmation prompt, reset every launch), and **permission** rows with
-  deep-links to System Settings. Note: session auto-approve is currently blanket — it approves
-  every tool while on, including MCP writes; a per-tool destructive floor is a follow-up.
+  deep-links to System Settings. Session auto-approve has a **destructive-action floor**
+  (`ToolCallSafety`, modeled on `BrowserActionSafety`): calls classified as irreversible or
+  outward-facing — send/post/reply/forward, delete/remove/trash, pay/purchase/transfer/refund,
+  share/invite/publish/merge/deploy, arbitrary command execution, calendar events with guests
+  (they email invitations), file writes whose path lands outside the agent working folder, and
+  Composio `COMPOSIO_MULTI_EXECUTE_TOOL` calls whose unwrapped tool slugs are any of those (or
+  can't be read; remote bash/workbench always) — still go to the confirmation card with
+  auto-approve on. Reads and benign writes stay auto-approved. Deterministic word matching on the
+  tool name + argument shapes, no model; errs toward asking. The registry now asks via
+  `ToolPermissionBroker.requestApproval(toolName:toolInput:)` (structured args; a default
+  extension forwards to the old summary-string method so stubs keep working).
+- **Rich confirmation cards** ("Phase 6" of `docs/glance-cards-plan.md`): the pending
+  confirmation carries an optional `confirmationCard: GlanceCard?`, built deterministically from
+  the call by `ToolConfirmationCardBuilder` (never the model) and drawn by `GlanceCardView` above
+  Cancel/Allow in `ToolConfirmationView` — "New Email" (To/Cc/Subject + truncated body), "New
+  Message"/"New Post", "New Event" (title/start/end/where/guests), file writes/moves (file,
+  folder, content preview, flagged "Outside agent folder"), deletions and other irreversible
+  actions (identifying args + "can't be taken back"), and Composio batches (one row per unwrapped
+  tool). Reading tools and unrecognised shapes get no card, so the panel falls back to the plain
+  summary (zero regression). Display-only; the spoken yes/no, 45s timeout and deny-by-default
+  flow are unchanged; inline-editable fields are a deliberate future extension. Argument/name
+  parsing shared by both lives in `ToolCallInspection` (lenient key lookup, Composio unwrapping,
+  path containment).
 - **Browser control**: the user's real Chrome/Safari, driven through the DOM (AppleScript +
   injected JS in `AppleScriptBrowserController`), not the vision model — a snapshot assigns
   every interactive element a stable id (`e7`) and actions refer to ids, so pointing costs a
@@ -289,7 +310,7 @@ Grouped by what they do. Line counts are approximate.
 | `CursorAppearanceStore.swift` | ~90 | Source of truth for the cursor/annotation colour (blue/red/yellow/green). Observed by the overlay, annotation layer, and brand glyphs so a change applies live. |
 | `CursorTab.swift` | ~110 | Dashboard Cursor tab: dock-cursor toggle (shared with the notch) and the colour swatches. |
 | `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
-| `AgentTab.swift` | ~250 | Dashboard Agent tab: agent folder (folder picker + reset), session auto-approve toggle, and permission rows with System Settings deep-links. |
+| `AgentTab.swift` | ~250 | Dashboard Agent tab: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), and permission rows with System Settings deep-links. |
 | `CompanionScreenCaptureUtility.swift` | ~139 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. |
 
 ### Local model stack
@@ -346,8 +367,11 @@ Grouped by what they do. Line counts are approximate.
 | `MCPManager.swift` | ~270 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
-| `ToolConfirmationCoordinator.swift` | ~193 | Permission requests with a 45s timeout and spoken-affirmative parsing. |
-| `ToolConfirmationView.swift` | ~130 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, exact call in a chip, Cancel / Allow→, "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
+| `ToolConfirmationCoordinator.swift` | ~320 | Permission requests with a 45s timeout and spoken-affirmative parsing. `requestApproval(toolName:toolInput:)` applies the `ToolCallSafety` floor under session auto-approve and attaches the `ToolConfirmationCardBuilder` card to `PendingConfirmation.confirmationCard`. |
+| `ToolConfirmationView.swift` | ~150 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, the optional confirmation card (`GlanceCardView`), exact call in a chip, Cancel / Allow→, "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
+| `ToolCallInspection.swift` | ~310 | Deterministic reading of a tool call: `server__` namespace stripping, identifier → words (camelCase/underscores), Composio execute-meta-tool unwrapping into `InspectedToolAction`s (tolerates JSON-string arguments), lenient case/underscore-insensitive argument lookup, display text for arrays/objects, path-argument extraction and `..`-safe path containment. |
+| `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules. |
+| `ToolConfirmationCardBuilder.swift` | ~485 | Builds the confirmation panel's `GlanceCard` from a call: email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
 | `AgentTaskRegistry.swift` | ~140 | Task and step records backing the dashboard's Activity tab. |
 

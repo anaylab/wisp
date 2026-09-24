@@ -15,6 +15,14 @@
 //  allowing it. The presentation/interactivity plumbing is unchanged; only the
 //  look is the new liquid-glass identity.
 //
+//  When the coordinator attached a confirmation card (built deterministically
+//  from the call by `ToolConfirmationCardBuilder` — "New Email" with To and
+//  Subject, a file write with its path), it is drawn with the generic glance-
+//  card renderer between the request and the buttons, and the raw call chip
+//  shrinks to a single line beneath it. Without a card the panel is exactly the
+//  plain summary it always was. The card is display-only; inline-editable
+//  fields (VoiceOS-style `{{param}}` bindings) are a deliberate future extension.
+//
 
 import Combine
 import SwiftUI
@@ -86,8 +94,16 @@ struct ToolConfirmationView: View {
                 .foregroundColor(WispColor.OnGlass.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // What the call will do, laid out as a card, when its shape is
+            // one Wisp recognises.
+            if let confirmationCard = confirmation.confirmationCard {
+                GlanceCardView(card: confirmationCard)
+            }
+
             // The exact call + arguments, so a decision is made on what will
-            // actually run rather than on a spoken paraphrase.
+            // actually run rather than on a spoken paraphrase. With a card
+            // above, the raw arguments shrink to one (still selectable) line —
+            // the card already shows them legibly.
             VStack(alignment: .leading, spacing: WispSpacing.xs) {
                 Text(confirmation.toolName)
                     .font(WispFont.mono)
@@ -96,7 +112,7 @@ struct ToolConfirmationView: View {
                     Text(confirmation.argumentSummary)
                         .font(WispFont.mono)
                         .foregroundColor(WispColor.OnGlass.textTertiary)
-                        .lineLimit(3)
+                        .lineLimit(confirmation.confirmationCard == nil ? 3 : 1)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }

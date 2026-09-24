@@ -36,6 +36,19 @@ import Combine
 @MainActor
 protocol ToolPermissionBroker: AnyObject {
     func requestApproval(toolName: String, argumentSummary: String) async -> ToolConfirmationCoordinator.Decision
+
+    /// Asks with the call's structured arguments rather than a one-line summary,
+    /// so the broker can judge the call (the destructive floor under session
+    /// auto-approve) and describe it (the rich confirmation card).
+    func requestApproval(toolName: String, toolInput: JSONValue) async -> ToolConfirmationCoordinator.Decision
+}
+
+extension ToolPermissionBroker {
+    /// A broker that only understands summaries — a test stub, say — still
+    /// works: it is asked with the compact JSON, exactly as before.
+    func requestApproval(toolName: String, toolInput: JSONValue) async -> ToolConfirmationCoordinator.Decision {
+        await requestApproval(toolName: toolName, argumentSummary: toolInput.compactDescription)
+    }
 }
 import Foundation
 
@@ -50,6 +63,12 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         let spokenQuestion: String
         let argumentSummary: String
         let requestedAt: Date
+        /// What the call will do, as a glance card — "New Email" with To and
+        /// Subject, a file write with its path — built deterministically from
+        /// the arguments by `ToolConfirmationCardBuilder`. Nil for a tool with
+        /// no recognisable shape, in which case the panel shows the plain
+        /// summary exactly as it always has. Display-only.
+        let confirmationCard: GlanceCard?
     }
 
     enum Decision: Equatable {
@@ -72,6 +91,10 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     /// Deliberately session-scoped and not persisted: a blanket "always approve"
     /// that survived relaunches would be too easy to forget you left on. Reset
     /// every launch so the safe default (ask each time) is what you come back to.
+    ///
+    /// Not blanket: calls that `ToolCallSafety` classifies as irreversible or
+    /// outward-facing (sending, posting, deleting, paying, inviting, running
+    /// commands, writing outside the agent folder) are still asked about.
     @Published var autoApproveThisSession = false
 
     /// How questions are asked aloud.
@@ -120,6 +143,37 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     /// task does not stop to ask about every read and every click; it was never
     /// meant as consent to spend the user's money or speak in their name, and a
     /// browser agent is exactly the tool that can do both.
+    /// Asks about a tool call using its structured arguments.
+    ///
+    /// The registry's entry point. Two things need the arguments rather than a
+    /// summary string: the destructive-action floor, which keeps asking about
+    /// sends, deletes and payments even with session auto-approve on, and the
+    /// confirmation card, which shows what the call will do.
+    func requestApproval(toolName: String, toolInput: JSONValue) async -> Decision {
+        guard let speakHandler else {
+            // No way to ask means no way to consent.
+            return .declined(reason: "there was no way to ask you about this")
+        }
+        let agentWorkingDirectoryPath = AgentSettingsStore.resolvedWorkingDirectoryPath()
+        let mustAskEvenWithSessionAutoApprove = ToolCallSafety.mustAskEvenWithSessionAutoApprove(
+            toolName: toolName,
+            toolInput: toolInput,
+            agentWorkingDirectoryPath: agentWorkingDirectoryPath
+        )
+        let confirmationCard = ToolConfirmationCardBuilder.confirmationCard(
+            forToolNamed: toolName,
+            toolInput: toolInput,
+            agentWorkingDirectoryPath: agentWorkingDirectoryPath
+        )
+        return await requestApproval(
+            toolName: toolName,
+            argumentSummary: toolInput.compactDescription,
+            speak: speakHandler,
+            ignoresSessionAutoApprove: mustAskEvenWithSessionAutoApprove,
+            confirmationCard: confirmationCard
+        )
+    }
+
     func requestIrreversibleBrowserActionApproval(actionSummary: String) async -> Decision {
         guard let speakHandler else {
             return .declined(reason: "there was no way to ask you about this")
@@ -138,7 +192,8 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         argumentSummary: String,
         speak: @MainActor (String) async -> Void,
         ignoresSessionAutoApprove: Bool = false,
-        spokenQuestionOverride: String? = nil
+        spokenQuestionOverride: String? = nil,
+        confirmationCard: GlanceCard? = nil
     ) async -> Decision {
         // Session auto-approve short-circuits the whole prompt so long tasks can
         // run without stopping to ask on every step — except for the few actions
@@ -158,7 +213,8 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
             toolName: toolName,
             spokenQuestion: question,
             argumentSummary: argumentSummary,
-            requestedAt: Date()
+            requestedAt: Date(),
+            confirmationCard: confirmationCard
         )
 
         await speak(question)

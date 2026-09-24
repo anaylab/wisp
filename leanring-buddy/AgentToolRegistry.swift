@@ -147,7 +147,7 @@ final class AgentToolRegistry: ObservableObject {
         if tool.definition.metadata.requiresConfirmation {
             let decision = await permissionBroker.requestApproval(
                 toolName: name,
-                argumentSummary: input.compactDescription
+                toolInput: input
             )
             guard decision.isApproved else {
                 let reason: String

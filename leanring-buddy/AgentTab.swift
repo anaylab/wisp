@@ -151,7 +151,7 @@ struct AgentTab: View {
                     Text("Auto-approve this session")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(DS.Colors.textPrimary)
-                    Text("Let the agent run its tools without asking each time, until Wisp restarts. Off by default so you approve each step.")
+                    Text("Let the agent run its tools without asking each time, until Wisp restarts. Anything that can't be taken back — sending, posting, deleting, paying, inviting, running commands, or writing outside the agent folder — still asks. Off by default so you approve each step.")
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
