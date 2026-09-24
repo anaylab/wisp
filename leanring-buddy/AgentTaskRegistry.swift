@@ -34,6 +34,29 @@ final class AgentTaskRegistry: ObservableObject {
 
     private var runningTasks: [UUID: Task<Void, Never>] = [:]
 
+    /// Saves the history to disk shortly after it changes. Debounced because a
+    /// single turn mutates its record several times (steps, durations, status)
+    /// and one write per burst is plenty.
+    private var historyPersistenceObserver: AnyCancellable?
+
+    private init() {
+        records = AgentTaskHistoryStore.loadRecords()
+        trimIfNeeded()
+
+        historyPersistenceObserver = $records
+            .dropFirst()
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { changedRecords in
+                AgentTaskHistoryStore.saveRecords(changedRecords)
+            }
+    }
+
+    /// Writes the history synchronously. Called on quit so the last turn isn't
+    /// lost to the save debounce.
+    func saveHistoryImmediately() {
+        AgentTaskHistoryStore.saveRecordsImmediately(records)
+    }
+
     // MARK: - Lifecycle
 
     @discardableResult

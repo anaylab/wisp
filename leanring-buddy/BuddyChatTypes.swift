@@ -556,8 +556,8 @@ struct ConversationTranscript: Sendable {
 
 /// One step an agent task took — today that's a single model call; with the
 /// agent loop it becomes one entry per tool invocation.
-struct AgentStepRecord: Sendable, Identifiable {
-    enum Kind: Sendable {
+struct AgentStepRecord: Sendable, Identifiable, Codable {
+    enum Kind: Sendable, Codable {
         case modelCall
         case tool(name: String)
     }
@@ -596,13 +596,13 @@ struct AgentStepRecord: Sendable, Identifiable {
     }
 }
 
-struct AgentTaskRecord: Sendable, Identifiable {
-    enum Kind: String, Sendable {
+struct AgentTaskRecord: Sendable, Identifiable, Codable {
+    enum Kind: String, Sendable, Codable {
         case interactive
         case background
     }
 
-    enum Status: Sendable, Equatable {
+    enum Status: Sendable, Equatable, Codable {
         case running
         case waitingForApproval
         case succeeded

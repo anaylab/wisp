@@ -74,6 +74,8 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         companionManager.stop()
+        // After stop(), so any task it cancelled is saved in its final state.
+        AgentTaskRegistry.shared.saveHistoryImmediately()
     }
 
     /// Registers the app as a login item so it launches automatically on

@@ -481,7 +481,8 @@ Grouped by what they do. Line counts are approximate.
 | `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules, and `alwaysAskBareToolNames` (`run_shortcut`). |
 | `ToolConfirmationCardBuilder.swift` | ~520 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
-| `AgentTaskRegistry.swift` | ~140 | Task and step records backing the dashboard's Activity tab. |
+| `AgentTaskRegistry.swift` | ~165 | Task and step records backing the dashboard's Activity tab. Loads saved history on launch and saves it (debounced) on every change. |
+| `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
 
 ### Voice modes, glance cards & sources
 | File | Lines | Purpose |
