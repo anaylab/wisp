@@ -140,6 +140,17 @@ struct OverlayContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            // Live browser-task progress, in the badge's spot while no gesture
+            // badge needs it. Shown on the main screen's overlay only, where the
+            // notch is, so one task does not print its progress on every monitor.
+            if companionManager.activeCommandMode == nil,
+               !companionManager.browserActivityText.isEmpty,
+               screenFrame == NSScreen.screens.first?.frame {
+                BrowserActivityIndicator(activityText: companionManager.browserActivityText)
+                    .position(x: screenFrame.width / 2, y: 64)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Assistant-drawn markers, boxes, arrows and highlights for this
             // screen. A [POINT:] coordinate arrives here as a pulsing marker —
             // the replacement for the old flying cursor's pointing gesture.
@@ -173,6 +184,7 @@ struct OverlayContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: companionManager.activeCommandMode)
+        .animation(.easeOut(duration: 0.18), value: companionManager.browserActivityText.isEmpty)
         .animation(WispMotion.smooth, value: companionManager.voiceState == .listening)
     }
 }

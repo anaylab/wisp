@@ -171,7 +171,9 @@ final class AgentToolRegistry: ObservableObject {
     // MARK: - Built-in tools
 
     /// The browser, driven through the DOM rather than the vision model.
-    private let browserController = AppleScriptBrowserController()
+    /// Internal so CompanionManager's direct browser-command route drives the
+    /// same controller — and so the same dedicated tab — as `browser_task`.
+    let browserController = AppleScriptBrowserController()
 
     /// Flies the on-screen cursor to elements the tier-2 browser loop acts on,
     /// so the user watches the work. Set by CompanionManager at startup; weak so
@@ -189,12 +191,12 @@ final class AgentToolRegistry: ObservableObject {
         register(
             BuddyToolDefinition(
                 name: "browser_task",
-                description: "Run a whole browser workflow in one go — open a site, search it, and read the result — then report back. Prefer this over open_url plus read_page for anything that takes more than one step.",
+                description: "Operate the user's web browser to complete a whole task — research, compare, find and read something, fill in a form, work through a site across many pages — then report back. Hand over the complete goal in one call with every detail the user gave (names, dates, quantities, preferences); it works autonomously and asks the user itself before buying, sending or deleting anything. Prefer this over open_url plus read_page for anything that takes more than one step.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object(["request": .object([
                         "type": .string("string"),
-                        "description": .string("What to do, in plain words, e.g. \"search google for nvidia stock\"")
+                        "description": .string("The whole task in plain words, with every detail needed, e.g. \"find the cheapest direct flight from SFO to JFK on Oct 12 on google flights and tell me the airline and price\"")
                     ])]),
                     "required": .array([.string("request")])
                 ]),
@@ -208,15 +210,22 @@ final class AgentToolRegistry: ObservableObject {
 
             // BrowserAgent tries the deterministic planner first and only falls
             // back to a planning call when the request is not recognised.
+            // The selected provider decides the strategy: a cloud model drives
+            // the long observe-act loop, the local model keeps its plan-once
+            // tiers. Either way the local model is still what the tiers use.
+            let cursorGuide = self.browserCursorGuide
             let outcome = await BrowserAgent.run(
                 request: request,
                 controller: self.browserController,
                 chatClient: BuddyVisionChatClientFactory.makeDefaultProvider(),
-                cursorGuide: self.browserCursorGuide
+                modelProvider: ModelProviderFactory.make(),
+                cursorGuide: cursorGuide,
+                onStep: { stepText in cursorGuide?.reportBrowserProgress(stepText) }
             )
+            cursorGuide?.endCursorGuidance()
 
             if let authURL = outcome.authenticationRequiredAt {
-                return "that page wants you to sign in first (\(authURL)). log in yourself and ask me again — i won't try to get past it."
+                return "that page wants you to sign in first (\(authURL)). ask the user to log in in their browser, then try again — never try to get past it."
             }
 
             return outcome.result.promptRepresentation()

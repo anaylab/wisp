@@ -71,12 +71,24 @@ struct BrowserTaskResult: Sendable {
     let browserOperationCount: Int
     let didSucceed: Bool
     let failureReason: String?
+    /// The agent's own finished answer, when it gave one.
+    ///
+    /// When present it replaces the final page dump in the tool result: the
+    /// agent has already read that page and distilled it, and handing the
+    /// conversation sixty elements it no longer needs only buries the answer.
+    var answer: String? = nil
 
     /// What the model is given to answer from. One read, at the end.
     func promptRepresentation() -> String {
         var lines = ["BROWSER TASK: \(goal)", "STEPS:"]
         lines.append(contentsOf: stepLog.map { "  \($0)" })
-        if let finalSnapshot {
+        if let answer, !answer.isEmpty {
+            lines.append("")
+            lines.append("ANSWER: \(answer)")
+            if let finalSnapshot {
+                lines.append("ENDED ON: \(finalSnapshot.title) — \(finalSnapshot.url)")
+            }
+        } else if let finalSnapshot {
             lines.append("")
             lines.append(finalSnapshot.promptRepresentation())
         }
@@ -192,14 +204,17 @@ enum BrowserTaskRunner {
         matching query: String,
         using controller: BrowserController
     ) throws -> BrowserElement {
-        let named = try controller.findElements(matching: query)
+        // Password and card fields are never a target: the controller refuses
+        // them anyway, and picking one here would turn a search into an error.
+        let named = try controller.findElements(matching: query).filter { !$0.isSensitiveInput }
         if let match = named.first(where: { $0.role.contains("text") || $0.role == "search" }) {
             return match
         }
         if let anyMatch = named.first { return anyMatch }
 
         let typeable = try controller.snapshot().elements.filter {
-            $0.role.contains("text") || $0.role == "search" || $0.role == "email"
+            !$0.isSensitiveInput
+                && ($0.role.contains("text") || $0.role.contains("search") || $0.role == "email")
         }
         guard let fallback = typeable.first else {
             throw BrowserControllerError.elementNotFound(query)

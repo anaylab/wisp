@@ -62,6 +62,18 @@ final class AgentTurnRunner {
     /// Exposed so a test can assert the ordering that keeps prompts alive.
     static var perToolTimeoutSecondsForTesting: TimeInterval { perToolTimeoutSeconds }
 
+    /// Tools that legitimately run for minutes. A browser task drives a real
+    /// site across many pages — and may stop mid-way to ask about a purchase —
+    /// so the flat per-tool budget would kill it part-way through a form. It is
+    /// still bounded, and the user can stop it at any time by talking.
+    private static let longRunningToolTimeoutSeconds: [String: TimeInterval] = [
+        "browser_task": 10 * 60,
+    ]
+
+    private static func timeoutSeconds(forToolNamed toolName: String) -> TimeInterval {
+        longRunningToolTimeoutSeconds[toolName] ?? perToolTimeoutSeconds
+    }
+
     struct Outcome {
         /// The final reply, with any tool tags removed — this is what's spoken.
         let terminalText: String
@@ -365,7 +377,7 @@ final class AgentTurnRunner {
                 await registry.invoke(name: name, input: input)
             }
             group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(Self.perToolTimeoutSeconds * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(Self.timeoutSeconds(forToolNamed: name) * 1_000_000_000))
                 return nil
             }
 

@@ -79,10 +79,18 @@ enum AgentToolScope: String, CaseIterable {
         var bestScope = AgentToolScope.general
         var bestScore = 0
 
+        // A named site ("youtube", "amazon") or a web address is as clear a
+        // browser signal as the word "browser" — clearer, since nobody says
+        // "open youtube" about anything else. Without this, "open youtube"
+        // was routed to general and the browser tools never reached the model.
+        let namesAWebDestination = BrowserSiteRegistry.site(namedIn: text) != nil
+            || text.range(of: "\\b[a-z0-9-]+\\.(com|org|net|io|dev|ai|co|app|edu|gov)\\b", options: .regularExpression) != nil
+
         for scope in AgentToolScope.allCases where scope != .general {
-            let score = scope.indicativeTerms.reduce(into: 0) { total, term in
+            var score = scope.indicativeTerms.reduce(into: 0) { total, term in
                 if text.contains(term) { total += 1 }
             }
+            if scope == .browser && namesAWebDestination { score += 2 }
             if score > bestScore {
                 bestScore = score
                 bestScope = scope

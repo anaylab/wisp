@@ -126,7 +126,42 @@ cloud dependency to the local path, without asking.
   model), **tier 1** one planning call producing a whole mechanical plan executed end to end
   (`BrowserTaskRunner`), and **tier 2** a bounded per-step observe→act loop (`BrowserStepLoop`,
   cap 5, screenshot-free) that engages **only** when a tier-1 plan fails on a real page. A
-  login wall stops any tier dead rather than becoming something to loop against. During tier 2
+  login wall stops any tier dead rather than becoming something to loop against. **When the
+  selected provider is a cloud model**, anything tier 0 doesn't recognise goes instead to
+  `BrowserAgentLoop` — a Cowork-style long-horizon observe→act loop (up to 30 decisions, several
+  form actions per reply, stable element ids across steps, `look` for an on-demand screenshot,
+  `done`/`ask`/`fail` to finish) driven by the user's `ModelProvider`; the local model keeps the
+  tiers. Irreversible clicks (buy/send/post/delete…, classified by `BrowserActionSafety`) always
+  go to the confirmation card via `requestIrreversibleBrowserActionApproval`, **even with session
+  auto-approve on**; password/payment fields are refused in the injected JS itself. The snapshot
+  JS walks shadow roots + same-origin iframes and lists an open dialog's elements, then in-view
+  ones, first; actions fire real pointer events and React-safe value setters. `browser_task` gets
+  a 10-minute tool timeout (`AgentTurnRunner.longRunningToolTimeoutSeconds`) and talking cancels
+  it. **Browser control needs the `com.apple.security.automation.apple-events` entitlement**
+  (in `leanring-buddy.entitlements`): the app runs with the hardened runtime, and without it macOS
+  silently rejects every Apple Event to Chrome/Safari with -1743 and never prompts — which is how
+  "open a new tab" did nothing. `NSAppleEventsUsageDescription` names the browser use. **Plain
+  browser commands bypass the model's tool choice** (`BrowserCommandRouter`, checked in
+  `sendTranscriptToClaudeWithScreenshot` right after `FastCommandRouter`): the local 3B model was
+  measured emitting *no* tool call for "open a new tab" / "open youtube" / "go to github.com", so
+  tab commands (new tab, close tab, back, forward, reload, new window) run directly via
+  `AppleScriptBrowserController.performTabCommand` (plain AppleScript, no JS permission needed,
+  frontmost browser), and clear web tasks (named site, address, "search for …") go straight to
+  `BrowserAgent.run` (`runDirectBrowserRoute`; web tasks only when agent mode is on). The user's
+  words are the consent, so the generic browser_task prompt is skipped; irreversible actions are
+  still gated. A named site/domain also routes the model's tool scope to `.browser`
+  (`AgentToolScope.forRequest`). **Every browser task runs in Wisp's own tab**, never the user's:
+  `BrowserAgent.run` calls `beginDedicatedTabSession()` (opens a tab at the end of the front
+  window — or reuses the last task's tab — and launches the browser if needed) and
+  `endDedicatedTabSession()` after; in between every controller op targets that tab
+  (`AppleScriptBrowserController.runInTargetTab`). Chrome addresses it by tab id (ids come back
+  as *text* — compare as strings) and re-finds it across windows; Safari has no tab ids, so it
+  uses window id + position, guarded by the window's tab count and re-found by last URL. If the
+  tab is closed mid-task that is treated as "stop" (`BrowserControllerError.dedicatedTabClosed`)
+  — ops never fall back to the user's tab. The user's page at ask-time is passed to the loop so
+  "this page" tasks can open it. Outside a task (`read_page`, `click_element`) the user's front
+  tab is still the target. Live step text is `CompanionManager.browserActivityText`, drawn as
+  `BrowserActivityIndicator` under the notch. During tier 2
   each element is marked with a pulsing ring just before the loop clicks/types it, via
   `BrowserCursorGuide` (implemented by `CompanionManager`, which converts the element's global
   screen point into a `.marker` `ScreenAnnotation` on that display). Element
@@ -290,6 +325,8 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
+| `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
+| `BrowserAgentLoop.swift` | ~720 | Long-horizon browser agent for cloud providers: observe→act loop (cap 30), line-grammar actions incl. batched form fills, stuck detection, untrusted-page prompt rules. Also `BrowserActionSafety` (which clicks/sends need the always-ask confirmation). |
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
 | `AgentToolRegistry.swift` | ~500 | Built-in read-only tools + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |
 | `AgentToolScope.swift` | ~120 | Deterministic built-in scope vocabulary (browser/filesystem/coding/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |

@@ -122,3 +122,47 @@ struct CommandModeIndicator: View {
         .fixedSize()
     }
 }
+
+/// What the browser agent is doing right now, as a glass capsule under the notch.
+///
+/// A browser task can run for a minute or more while the user watches their own
+/// browser being driven; this names each step as it happens ("Clicking “Add to
+/// cart”") in the same spot the command-mode badge uses, in the lavender
+/// AI-activity accent. The overlay is click-through, so stopping is by voice —
+/// starting to talk cancels the task — and the capsule says so.
+struct BrowserActivityIndicator: View {
+    let activityText: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "safari")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(WispColor.intelligence)
+
+            Text(activityText)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 380, alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
+
+            Text("· talk to stop")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(WispColor.intelligence.opacity(0.4), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 3)
+        )
+        .fixedSize()
+        .animation(WispMotion.smooth, value: activityText)
+    }
+}

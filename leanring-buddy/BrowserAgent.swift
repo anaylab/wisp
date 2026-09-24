@@ -60,14 +60,33 @@ enum BrowserAgent {
     /// - Parameter cursorGuide: flies the on-screen cursor to each element the
     ///   tier-2 step loop acts on, so the user watches the work. Nil disables the
     ///   animation; nothing depends on it to act.
+    ///
+    /// - Parameter modelProvider: the user's selected provider. When it is a
+    ///   capable cloud model, anything the deterministic planner does not
+    ///   recognise goes to `BrowserAgentLoop` — the long-horizon observe-act
+    ///   loop — instead of the plan-once tiers built around the local model's
+    ///   cost per call. Nil keeps the local tiers.
     static func run(
         request: String,
         controller: BrowserController,
         chatClient: any BuddyVisionChatClient,
+        modelProvider: (any ModelProvider)? = nil,
         cursorGuide: BrowserCursorGuide? = nil,
         onStep: (@MainActor (String) -> Void)? = nil
     ) async -> BrowserAgentOutcome {
         BrowserPlanCache.shared.recordRequest()
+
+        // Every tier works in Wisp's own tab, never in the one the user is
+        // reading. Opening it is also where an unavailable browser is found out,
+        // so a disabled setting is reported before any planning is spent.
+        let usersPageWhenAsked: BrowserTabDescription?
+        do {
+            usersPageWhenAsked = try await controller.beginDedicatedTabSession()
+        } catch {
+            return failedOutcome(request: request, reason: error.localizedDescription,
+                                 planningCalls: 0, replans: 0, duration: 0, tokens: 0)
+        }
+        defer { controller.endDedicatedTabSession() }
 
         // The fast path, unchanged. A recognised request never reaches the
         // model at all — measured at 964ms end to end, and worth protecting.
@@ -111,10 +130,31 @@ enum BrowserAgent {
             }
         }
 
+        if let modelProvider, usesAgentLoop(modelProvider) {
+            return await BrowserAgentLoop.run(
+                goal: request,
+                controller: controller,
+                modelProvider: modelProvider,
+                usersPageWhenAsked: usersPageWhenAsked,
+                cursorGuide: cursorGuide
+            )
+        }
+
         return await runWithModelPlanning(
             request: request, controller: controller,
             chatClient: chatClient, cursorGuide: cursorGuide, onStep: onStep
         )
+    }
+
+    /// Whether a provider can carry the long observe-act loop.
+    ///
+    /// Decided on where the model runs rather than on a capability flag: the
+    /// loop needs a model that is both quick per call and dependable across
+    /// thirty decisions, and on this machine's memory budget the local model is
+    /// neither. Being remote is the honest proxy for that today; if a large
+    /// local model becomes viable, this is the one place to widen.
+    static func usesAgentLoop(_ modelProvider: any ModelProvider) -> Bool {
+        modelProvider.deployment.sendsDataOffThisMachine
     }
 
     // MARK: - Model planning

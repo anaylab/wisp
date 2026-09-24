@@ -113,14 +113,37 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         )
     }
 
+    /// Asks before a browser action that cannot be taken back — placing an
+    /// order, sending a message, deleting something.
+    ///
+    /// Deliberately ignores session auto-approve. Auto-approve exists so a long
+    /// task does not stop to ask about every read and every click; it was never
+    /// meant as consent to spend the user's money or speak in their name, and a
+    /// browser agent is exactly the tool that can do both.
+    func requestIrreversibleBrowserActionApproval(actionSummary: String) async -> Decision {
+        guard let speakHandler else {
+            return .declined(reason: "there was no way to ask you about this")
+        }
+        return await requestApproval(
+            toolName: "browser_action",
+            argumentSummary: actionSummary,
+            speak: speakHandler,
+            ignoresSessionAutoApprove: true,
+            spokenQuestionOverride: "before i \(actionSummary) — is that okay?"
+        )
+    }
+
     func requestApproval(
         toolName: String,
         argumentSummary: String,
-        speak: @MainActor (String) async -> Void
+        speak: @MainActor (String) async -> Void,
+        ignoresSessionAutoApprove: Bool = false,
+        spokenQuestionOverride: String? = nil
     ) async -> Decision {
         // Session auto-approve short-circuits the whole prompt so long tasks can
-        // run without stopping to ask on every step.
-        if autoApproveThisSession {
+        // run without stopping to ask on every step — except for the few actions
+        // that must always be asked about.
+        if autoApproveThisSession && !ignoresSessionAutoApprove {
             return .approved
         }
 
@@ -130,7 +153,7 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
             return .declined(reason: "another confirmation was already waiting")
         }
 
-        let question = Self.spokenQuestion(forToolNamed: toolName)
+        let question = spokenQuestionOverride ?? Self.spokenQuestion(forToolNamed: toolName)
         pendingConfirmation = PendingConfirmation(
             toolName: toolName,
             spokenQuestion: question,

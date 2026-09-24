@@ -42,6 +42,11 @@ protocol BrowserCursorGuide: AnyObject {
 
     /// Returns the cursor to normal cursor-following once the workflow ends.
     func endCursorGuidance()
+
+    /// Shows a short line of what the browser agent is doing right now —
+    /// "Clicking “Add to cart”" — where the user is already looking, so a long
+    /// task reads as visible progress rather than a silent spinner.
+    func reportBrowserProgress(_ progressText: String)
 }
 
 // MARK: - Actions
