@@ -587,7 +587,7 @@ struct NotchHUDView: View {
     private func finishedWorkRow(_ finishedRecord: AgentTaskRecord) -> some View {
         let didSucceed = finishedRecord.status == .succeeded
         let resultLine = didSucceed
-            ? (finishedRecord.finalText ?? "Done")
+            ? AnswerDisplayText.cleaned(finishedRecord.finalText ?? "Done")
             : "Didn't finish — see History for details"
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: didSucceed ? "checkmark.circle.fill" : "exclamationmark.circle.fill")

@@ -511,6 +511,7 @@ struct HistoryTab: View {
         if record.title.hasPrefix(AgentTaskRecord.routineRunTitlePrefix) { return "bolt" }
         if record.title.hasPrefix(AgentTaskRecord.skillRunTitlePrefix) { return "sparkles" }
         if record.title.hasPrefix(AgentTaskRecord.dictationTitlePrefix) { return "text.cursor" }
+        if record.title.hasPrefix(AgentTaskRecord.buddyRunTitlePrefix) { return "cloud" }
         if record.steps.contains(where: { $0.kindLabel.localizedCaseInsensitiveContains("browser") }) { return "globe" }
         if record.kind == .background { return "clock.arrow.2.circlepath" }
         return "bubble.left"

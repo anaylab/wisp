@@ -153,6 +153,10 @@ final class NotchWindowController {
         // Quiet mode first, so the briefing's first check already knows about a call.
         QuietModeMonitor.shared.start()
         MorningBriefingController.shared.start()
+        // Buddies' scheduled runs; each run is a background task started here.
+        BuddyStore.shared.start { [weak companionManager] buddy in
+            companionManager?.startBuddyRun(buddy)
+        }
     }
 
     func hide() {

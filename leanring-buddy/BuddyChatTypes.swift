@@ -671,6 +671,8 @@ struct AgentTaskRecord: Sendable, Identifiable, Codable {
     static let skillRunTitlePrefix = "Skill · "
     /// Dictation typed into another app — a record of where words went, not a question.
     static let dictationTitlePrefix = "Dictation → "
+    /// A buddy's run, listed by the buddy's name rather than its whole job.
+    static let buddyRunTitlePrefix = "Buddy · "
 
     /// Whether this record is the user's own question (spoken or typed), as
     /// opposed to a routine run, skill run or dictation, whose title is a label.
@@ -678,5 +680,6 @@ struct AgentTaskRecord: Sendable, Identifiable, Codable {
         !title.hasPrefix(Self.routineRunTitlePrefix)
             && !title.hasPrefix(Self.skillRunTitlePrefix)
             && !title.hasPrefix(Self.dictationTitlePrefix)
+            && !title.hasPrefix(Self.buddyRunTitlePrefix)
     }
 }

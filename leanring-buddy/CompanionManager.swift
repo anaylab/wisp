@@ -1985,6 +1985,23 @@ final class CompanionManager: ObservableObject {
         }
     }
 
+    /// Starts one run of a buddy's job as a background task, listed under the
+    /// buddy's name. Returns the task id, or nil when the background-task limit
+    /// is reached (the buddy store retries a scheduled run a minute later).
+    func startBuddyRun(_ buddy: WispBuddy) -> UUID? {
+        guard BackgroundTaskLauncher.canStartAnotherTask else { return nil }
+        return BackgroundTaskLauncher.start(
+            request: buddy.instruction,
+            title: AgentTaskRecord.buddyRunTitlePrefix + buddy.name,
+            modelProvider: selectedModelProvider,
+            systemPrompt: Self.companionVoiceResponseSystemPrompt,
+            speakConfirmation: { [weak self] question in
+                guard let self else { return }
+                try? await self.ttsProvider.speakText(question)
+            }
+        )
+    }
+
     /// Starts any configured MCP servers.
     ///
     /// Only when agent mode is on: their tools are unusable otherwise, and

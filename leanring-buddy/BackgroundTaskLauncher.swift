@@ -34,10 +34,14 @@ enum BackgroundTaskLauncher {
 
     /// Starts a background agent task.
     ///
+    /// - Parameter title: How the task is listed (History, the notch, the
+    ///   notification). Defaults to the request itself; a buddy's run passes
+    ///   "Buddy · <name>" instead of repeating its whole job.
     /// - Returns: The task's id, or nil when too many are already running.
     @discardableResult
     static func start(
         request: String,
+        title: String? = nil,
         modelProvider: any ModelProvider,
         systemPrompt: String,
         speakConfirmation: @escaping @MainActor (String) async -> Void
@@ -47,7 +51,8 @@ enum BackgroundTaskLauncher {
             return nil
         }
 
-        let taskID = AgentTaskRegistry.shared.beginTask(title: request, kind: .background)
+        let displayTitle = title ?? request
+        let taskID = AgentTaskRegistry.shared.beginTask(title: displayTitle, kind: .background)
 
         let work = Task { @MainActor in
             let runner = AgentTurnRunner(
@@ -79,7 +84,7 @@ enum BackgroundTaskLauncher {
                     finalText: outcome.terminalText
                 )
                 FinishedWorkInbox.shared.recordFinishedTask(taskID)
-                notifyCompletion(request: request, result: outcome.terminalText, didSucceed: true)
+                notifyCompletion(request: displayTitle, result: outcome.terminalText, didSucceed: true)
             } catch is CancellationError {
                 AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
             } catch {
@@ -88,7 +93,7 @@ enum BackgroundTaskLauncher {
                     status: .failed(error.localizedDescription)
                 )
                 FinishedWorkInbox.shared.recordFinishedTask(taskID)
-                notifyCompletion(request: request, result: error.localizedDescription, didSucceed: false)
+                notifyCompletion(request: displayTitle, result: error.localizedDescription, didSucceed: false)
             }
         }
 

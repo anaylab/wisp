@@ -71,6 +71,7 @@ struct NotchWorkspaceView: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var bindingStore = ShortcutBindingStore.shared
+    @ObservedObject private var buddyStore = BuddyStore.shared
 
     let page: NotchWorkspacePage
 
@@ -81,6 +82,10 @@ struct NotchWorkspaceView: View {
     @FocusState private var isTypeFieldFocused: Bool
     @State private var hoveredSessionID: UUID?
     @State private var hoveredSettingsSection: NotchSettingsSection?
+    /// The buddy whose thread is shown instead of a conversation, if any.
+    @State private var selectedBuddyID: UUID?
+    /// Whether the main area is showing the new-buddy form.
+    @State private var isCreatingBuddy = false
 
     private let sidebarWidth: CGFloat = 214
     private let threadBottomAnchorID = "notch-thread-bottom"
@@ -140,6 +145,9 @@ struct NotchWorkspaceView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    buddiesSidebarSection
+
+                    sidebarSectionHeader("CONVERSATIONS")
                     if filteredSessions.isEmpty {
                         Text(sessionSearchText.isEmpty ? "No conversations yet" : "Nothing matches")
                             .font(.system(size: 11))
@@ -178,10 +186,134 @@ struct NotchWorkspaceView: View {
         )
     }
 
+    private func sidebarSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(0.6)
+            .foregroundColor(DS.Colors.textTertiary)
+            .padding(.horizontal, 6)
+            .padding(.top, 8)
+            .padding(.bottom, 3)
+    }
+
+    /// BUDDIES: each buddy with its face and what it's up to, and a + to
+    /// summon a new one. Search narrows it by name or job.
+    private var buddiesSidebarSection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                sidebarSectionHeader("BUDDIES")
+                Spacer(minLength: 0)
+                Button {
+                    selectedBuddyID = nil
+                    isCreatingBuddy = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Color.white.opacity(isCreatingBuddy ? 0.14 : 0.07)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .nativeTooltip("Summon a buddy — give it one job to keep doing")
+                .padding(.top, 6)
+            }
+            if buddyStore.buddies.isEmpty {
+                Text("Give a buddy a job it can repeat — a morning digest, a weekly check.")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 4)
+            }
+            ForEach(filteredBuddies) { buddy in
+                buddyRow(buddy)
+            }
+        }
+    }
+
+    private var filteredBuddies: [WispBuddy] {
+        let trimmedSearchText = sessionSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearchText.isEmpty else { return buddyStore.buddies }
+        return buddyStore.buddies.filter { buddy in
+            buddy.name.localizedCaseInsensitiveContains(trimmedSearchText)
+                || buddy.instruction.localizedCaseInsensitiveContains(trimmedSearchText)
+        }
+    }
+
+    private func buddyRow(_ buddy: WispBuddy) -> some View {
+        let isSelected = selectedBuddyID == buddy.id && !isCreatingBuddy
+        let isHovered = hoveredSessionID == buddy.id
+        let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
+        return Button {
+            isCreatingBuddy = false
+            selectedBuddyID = buddy.id
+        } label: {
+            HStack(spacing: 8) {
+                BuddyAvatar(colorIndex: buddy.colorIndex, size: 28, isWorking: isRunning)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(buddy.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .lineLimit(1)
+                    Text(buddyStatusLine(buddy, isRunning: isRunning))
+                        .font(.system(size: 10.5))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(isSelected
+                          ? BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex).opacity(0.28)
+                          : Color.white.opacity(isHovered ? 0.06 : 0))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(isSelected ? BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex).opacity(0.6) : .clear, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .onHover { isHovering in
+            hoveredSessionID = isHovering ? buddy.id : (hoveredSessionID == buddy.id ? nil : hoveredSessionID)
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+
+    /// "Working…", "Done 10:39 PM", "Next: tomorrow 9:00 AM", "Ready".
+    private func buddyStatusLine(_ buddy: WispBuddy, isRunning: Bool) -> String {
+        if isRunning { return "Working…" }
+        if let latestRunRecord = buddyStore.runRecords(of: buddy, in: taskRegistry).last {
+            let finishedText = (latestRunRecord.finishedAt ?? latestRunRecord.startedAt)
+                .formatted(date: .omitted, time: .shortened)
+            switch latestRunRecord.status {
+            case .failed: return "Failed · \(finishedText)"
+            case .succeeded where !buddy.schedule.isRepeating: return "Done · \(finishedText)"
+            default: break
+            }
+        }
+        if let nextScheduledRunAt = buddy.nextScheduledRunAt {
+            let nextRunText = Calendar.current.isDateInToday(nextScheduledRunAt)
+                ? nextScheduledRunAt.formatted(date: .omitted, time: .shortened)
+                : nextScheduledRunAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+            return "Next · \(nextRunText)"
+        }
+        return "Ready"
+    }
+
     private func sessionRow(_ session: NotchConversationSession) -> some View {
-        let isSelected = session.id == displayedSession?.id
+        let isSelected = session.id == displayedSession?.id && selectedBuddyID == nil && !isCreatingBuddy
         let isHovered = hoveredSessionID == session.id
         return Button {
+            selectedBuddyID = nil
+            isCreatingBuddy = false
             // Picking the newest one returns to following the live conversation.
             selectedSessionID = session.id == allSessions.first?.id ? nil : session.id
         } label: {
@@ -372,7 +504,30 @@ struct NotchWorkspaceView: View {
     private var mainArea: some View {
         switch page {
         case .chat:
-            chatArea
+            if isCreatingBuddy {
+                ZStack(alignment: .topTrailing) {
+                    NewBuddyForm(
+                        topInset: notchTopInset,
+                        onCreated: { newBuddyID in
+                            isCreatingBuddy = false
+                            selectedBuddyID = newBuddyID
+                        },
+                        onCancel: { isCreatingBuddy = false }
+                    )
+                    workspaceHeaderControls
+                        .padding(.top, 8)
+                        .padding(.trailing, 12)
+                }
+            } else if let selectedBuddyID, buddyStore.buddy(withID: selectedBuddyID) != nil {
+                ZStack(alignment: .topTrailing) {
+                    BuddyDetailView(buddyID: selectedBuddyID, topInset: notchTopInset)
+                    workspaceHeaderControls
+                        .padding(.top, 8)
+                        .padding(.trailing, 12)
+                }
+            } else {
+                chatArea
+            }
         case .settings(let section):
             settingsArea(section)
         }
@@ -381,7 +536,7 @@ struct NotchWorkspaceView: View {
     /// The top-right controls, in the notch band to the right of the cutout.
     private var workspaceHeaderControls: some View {
         HStack(spacing: 4) {
-            if !isShowingSettings {
+            if !isShowingSettings && selectedBuddyID == nil && !isCreatingBuddy {
                 headerIconButton(
                     systemImageName: "arrow.up.left.and.arrow.down.right",
                     tooltip: "Open the conversation in its own window"
@@ -572,7 +727,7 @@ struct NotchWorkspaceView: View {
 
     @ViewBuilder
     private func answerBody(_ exchange: AgentTaskRecord) -> some View {
-        let answerText = (exchange.finalText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let answerText = AnswerDisplayText.cleaned(exchange.finalText ?? "")
         switch exchange.status {
         case .running, .waitingForApproval:
             HStack(spacing: 7) {
@@ -706,6 +861,7 @@ struct NotchWorkspaceView: View {
         typedQuestionText = ""
         // The answer continues the live conversation, so follow it there.
         selectedSessionID = nil
+        selectedBuddyID = nil
         companionManager.askTypedQuestion(question)
     }
 

@@ -36,7 +36,7 @@ struct NotchConversationSession: Identifiable, Equatable {
         case .interrupted:
             return "Interrupted"
         case .succeeded:
-            let answerText = (latestExchange.finalText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let answerText = AnswerDisplayText.cleaned(latestExchange.finalText ?? "")
             return answerText.isEmpty ? "Done" : answerText
         }
     }
@@ -97,5 +97,26 @@ enum NotchConversationSessionGrouper {
                     || (exchange.finalText ?? "").range(of: trimmedSearchText, options: [.caseInsensitive, .diacriticInsensitive]) != nil
             }
         }
+    }
+}
+
+/// Cleans a stored answer for display. History keeps the model's raw text,
+/// which still carries Wisp's machine tags — `[POINT:…]`, `[BOX:…]`,
+/// `[SAY:…]`, a trailing `[CARD:{…}]` — that the live notch strips before
+/// showing a reply. Only those tags go; other bracketed text is the answer's.
+enum AnswerDisplayText {
+    /// A card tag is always the reply's last thing and its JSON may contain
+    /// brackets, so it is removed through to the end.
+    private static let trailingCardTagPattern = #"\[CARD[\s:][\s\S]*$"#
+    /// Separator class written `[\s:]`, never `[:\s]` — ICU reads `[:` as the
+    /// start of a POSIX class and the pattern silently fails to compile.
+    private static let inlineMachineTagPattern = #"\[(?:POINT|BOX|HIGHLIGHT|ARROW|SAY|TOOL)[\s:][^\]]*\]"#
+
+    static func cleaned(_ storedAnswer: String) -> String {
+        var cleanedAnswer = storedAnswer
+            .replacingOccurrences(of: trailingCardTagPattern, with: "", options: .regularExpression)
+            .replacingOccurrences(of: inlineMachineTagPattern, with: "", options: [.regularExpression, .caseInsensitive])
+        cleanedAnswer = cleanedAnswer.replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: .regularExpression)
+        return cleanedAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

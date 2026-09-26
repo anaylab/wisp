@@ -114,6 +114,21 @@ cloud dependency to the local path, without asking.
   is internal for this). The quick panel's middle sections scroll within the fixed window so its
   footer stays reachable. `nativeTooltip`'s overlay view returns nil from `hitTest` — before, it
   swallowed clicks on the button beneath it.
+- **Buddies** (HeyClicky's "Clickys"): named, coloured agents that each own one job, listed under
+  BUDDIES in the notch chat's sidebar (+ to summon). `BuddyStore` (`~/Library/Application
+  Support/Wisp/buddies.json`) holds identity (name from `BuddyNameGenerator` — subject + role word,
+  no model call; colour from `BuddyAppearance`, least-used first), the job, a `BuddySchedule`
+  (once / daily / weekly; `inferred(fromInstruction:)` pre-fills the form from "every morning…"),
+  and the ids of its runs. A buddy has no loop of its own: each run is an ordinary background task
+  via `CompanionManager.startBuddyRun` → `BackgroundTaskLauncher.start(title: "Buddy · <name>")`,
+  so it queues behind the model like any background work and its record lives in
+  `AgentTaskRegistry`/History. The schedule is checked every minute while Wisp runs
+  (`runDueBuddies`); a missed slot runs once on the next check, and a run that can't start (the
+  2-task limit) keeps its due date and retries. The thread (`BuddyDetailView`) shows the job card,
+  then each run with a monospaced status chip, "5m 10s · 10:39 PM", collapsible progress
+  messages and the answer; `BuddyAvatar` is a cloud with "^ ^" eyes that bobs (eyes open) while
+  working. Stored answers are shown through `AnswerDisplayText.cleaned`, which strips Wisp's
+  machine tags (`[POINT:…]`, `[SAY:…]`, trailing `[CARD:…]`) that history keeps raw.
 - **Morning notch & quiet mode** (modeled on HeyClicky): once a day, the first time the user is
   at the Mac (5am–5pm, input within 2 min), `MorningBriefingController` builds suggestions with
   **no model call** (`MorningSuggestionBuilder`: today's remaining meetings / due reminders — only
@@ -578,8 +593,11 @@ names forward here.
 | `Components/WispMark.swift` | ~180 | The liquid-ribbon logo. `WispMarkState` drives per-state motion; static mode; clock paused at rest. `CompanionVoiceState.markState` maps to it. |
 | `Components/WispIcon.swift` | ~200 | The Liquid Icon System: `WispIconSymbol` (bespoke single-stroke glyphs + `.system` SF-Symbol fallback), `WispIconState`, rendered by `WispIcon`. |
 | `DynamicIsland/WispIslandState.swift` | ~120 | The 9-state island vocabulary + its mark/label/accent mapping. Derived, not stored — see `CompanionManager.islandState`, which now also drives `.executing` (a browser task reporting progress; step list + Stop in the hover panel, spinner + step count in the right flank) and `.processing` (idle with background tasks running). |
-| `DynamicIsland/NotchWorkspaceView.swift` | ~800 | The notch's large surface: `NotchWorkspacePage` (.chat / .settings(section)), `NotchSettingsSection`, and the view — chat (conversation sidebar with search, thread bubbles, talk pill, Type field → `askTypedQuestion`) and settings (section list whose pages are the dashboard's own tab views, plus a small General page). |
-| `DynamicIsland/NotchConversationSessions.swift` | ~100 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search. |
+| `DynamicIsland/NotchWorkspaceView.swift` | ~960 | The notch's large surface: `NotchWorkspacePage` (.chat / .settings(section)), `NotchSettingsSection`, and the view — chat (conversation sidebar with search, thread bubbles, talk pill, Type field → `askTypedQuestion`) and settings (section list whose pages are the dashboard's own tab views, plus a small General page). |
+| `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
+| `Buddies/BuddyStore.swift` | ~390 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy`, `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/reschedule/delete). |
+| `Buddies/BuddyAvatar.swift` | ~130 | `BuddyAppearance` (the 8-colour palette) and `BuddyAvatar` (cloud + happy eyes, bobs while working, clock paused at rest). |
+| `Buddies/BuddyViews.swift` | ~560 | `BuddyScheduleEditor`, `BuddyDetailView` (a buddy's thread + Run now/Stop, schedule, rename, delete) and `NewBuddyForm`. |
 | `DynamicIsland/MorningBriefing.swift` | ~255 | The morning notch: `MorningSuggestion`, the pure `MorningSuggestionBuilder` and `MorningBriefingSchedule` (once a day, daytime, user present), and `MorningBriefingController` (1-min check, pending suggestions, `presentationSequenceNumber` the notch drops the banner on, `perform`). |
 | `DynamicIsland/QuietModeMonitor.swift` | ~280 | Quiet mode: `QuietModeDetection` (CoreAudio processes capturing input, CoreMediaIO camera running, system-listener filter) and the polling `QuietModeMonitor` publishing `activeQuietReason`. |
 | `DynamicIsland/FinishedWorkInbox.swift` | ~55 | Unseen finished background task ids behind the notch's "N new" badge and NEW section (in-memory, cap 5). |
