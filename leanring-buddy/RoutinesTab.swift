@@ -32,9 +32,12 @@ struct RoutinesTab: View {
         }
         .background(DS.Colors.background)
         .onAppear {
-            if selectedRoutineID == nil {
+            if !openRoutineHandedOverByAnotherScreen() && selectedRoutineID == nil {
                 selectRoutine(routineStore.routines.first?.id)
             }
+        }
+        .onChange(of: routineStore.routineIDToOpenInEditor) { _, _ in
+            _ = openRoutineHandedOverByAnotherScreen()
         }
     }
 
@@ -121,6 +124,15 @@ struct RoutinesTab: View {
             parts.append("In the notch")
         }
         return parts.isEmpty ? "Run from the dashboard" : parts.joined(separator: " · ")
+    }
+
+    /// Selects a routine another screen created for editing (History's "Save as
+    /// routine") and clears the handover. Returns whether there was one.
+    private func openRoutineHandedOverByAnotherScreen() -> Bool {
+        guard let handedOverRoutineID = routineStore.routineIDToOpenInEditor else { return false }
+        routineStore.routineIDToOpenInEditor = nil
+        selectRoutine(handedOverRoutineID)
+        return true
     }
 
     private func selectRoutine(_ routineID: UUID?) {

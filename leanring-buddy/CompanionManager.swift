@@ -978,7 +978,7 @@ final class CompanionManager: ObservableObject {
     /// app is otherwise untraceable.
     private func insertDictatedTranscript(_ transcript: String) {
         let destination = DictatedTextInserter.frontmostApplicationName()
-        let taskID = AgentTaskRegistry.shared.beginTask(title: "Dictation → \(destination)")
+        let taskID = AgentTaskRegistry.shared.beginTask(title: AgentTaskRecord.dictationTitlePrefix + destination)
 
         let method = DictatedTextInserter.insert(transcript)
 
@@ -1051,7 +1051,10 @@ final class CompanionManager: ObservableObject {
         // A short delay lets the panels finish animating out so they are not
         // captured in the screenshot the turn is about to take.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.sendTranscriptToClaudeWithScreenshot(transcript: skillInstruction)
+            self?.sendTranscriptToClaudeWithScreenshot(
+                transcript: skillInstruction,
+                historyTitle: AgentTaskRecord.skillRunTitlePrefix + skillName
+            )
         }
     }
 
@@ -1101,7 +1104,10 @@ final class CompanionManager: ObservableObject {
 
         // Let the panels finish animating out before the capture.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.sendTranscriptToClaudeWithScreenshot(transcript: routinePrompt)
+            self?.sendTranscriptToClaudeWithScreenshot(
+                transcript: routinePrompt,
+                historyTitle: AgentTaskRecord.routineRunTitlePrefix + routine.name
+            )
         }
     }
 
@@ -1110,7 +1116,10 @@ final class CompanionManager: ObservableObject {
     /// the spinner/processing state until TTS audio begins playing.
     /// Claude's response may include a [POINT:x,y:label] tag which triggers
     /// the buddy to fly to that element on screen.
-    private func sendTranscriptToClaudeWithScreenshot(transcript: String) {
+    /// `historyTitle` names the turn in History when the prompt itself would read
+    /// badly there — a routine or skill run is listed by its name, not its whole
+    /// instruction. Nil uses the transcript.
+    private func sendTranscriptToClaudeWithScreenshot(transcript: String, historyTitle: String? = nil) {
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
 
@@ -1136,7 +1145,7 @@ final class CompanionManager: ObservableObject {
         // for. The router declines anything it is not certain about, so the
         // cost of it being wrong is one ordinary model round-trip.
         if let fastOutcome = FastCommandRouter.handle(transcript) {
-            let fastTaskID = AgentTaskRegistry.shared.beginTask(title: transcript)
+            let fastTaskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
             AgentTaskRegistry.shared.appendStep(
                 AgentStepRecord(kind: .modelCall, summary: "Handled natively — no model call"),
                 to: fastTaskID
@@ -1182,7 +1191,7 @@ final class CompanionManager: ObservableObject {
             }
         }
 
-        let taskID = AgentTaskRegistry.shared.beginTask(title: transcript)
+        let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
         PerfMetricsRecorder.shared.beginTurn(transcript: transcript, modelName: ActiveStackReadout.shared.chatModelName)
         // Whether the screenshot gets attached is the single biggest factor in
         // how long a turn takes, so timings are only comparable between turns

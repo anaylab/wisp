@@ -662,4 +662,21 @@ struct AgentTaskRecord: Sendable, Identifiable, Codable {
     var elapsedSeconds: TimeInterval {
         (finishedAt ?? Date()).timeIntervalSince(startedAt)
     }
+
+    /// Title prefixes for turns started by a routine or a skill. History lists
+    /// those by name ("Routine · Summarize this page") rather than by their full
+    /// instruction, and uses the prefix to know the title isn't the user's own
+    /// question — so it isn't offered to re-ask or save as a routine.
+    static let routineRunTitlePrefix = "Routine · "
+    static let skillRunTitlePrefix = "Skill · "
+    /// Dictation typed into another app — a record of where words went, not a question.
+    static let dictationTitlePrefix = "Dictation → "
+
+    /// Whether this record is the user's own question (spoken or typed), as
+    /// opposed to a routine run, skill run or dictation, whose title is a label.
+    var isUsersOwnQuestion: Bool {
+        !title.hasPrefix(Self.routineRunTitlePrefix)
+            && !title.hasPrefix(Self.skillRunTitlePrefix)
+            && !title.hasPrefix(Self.dictationTitlePrefix)
+    }
 }

@@ -101,6 +101,7 @@ struct DashboardView: View {
         /// section title already says the rest.
         var subTabTitle: String {
             switch self {
+            case .activity: return "Timeline"
             case .tools: return "Servers & Tools"
             case .performance: return "Model"
             default: return rawValue
@@ -146,7 +147,12 @@ struct DashboardView: View {
                             onSelectTab: { selectPage($0) }
                         )
                     case .routines: RoutinesTab(companionManager: companionManager)
-                    case .activity: ActivityTab(taskRegistry: taskRegistry)
+                    case .activity:
+                        HistoryTab(
+                            taskRegistry: taskRegistry,
+                            companionManager: companionManager,
+                            onSelectTab: { selectPage($0) }
+                        )
                     case .conversation: ConversationTab(taskRegistry: taskRegistry)
                     case .memory: MemoryTab()
                     case .shortcuts: ShortcutsTab()
@@ -399,181 +405,6 @@ struct DashboardView: View {
         .buttonStyle(.plain)
         .pointerCursor()
         .animation(.easeInOut(duration: 0.15), value: isSelected)
-    }
-}
-
-// MARK: - Activity
-
-private struct ActivityTab: View {
-    @ObservedObject var taskRegistry: AgentTaskRegistry
-    @State private var expandedTaskIDs: Set<UUID> = []
-
-    var body: some View {
-        if taskRegistry.records.isEmpty {
-            DashboardEmptyState(
-                symbolName: "list.bullet.rectangle",
-                title: "No activity yet",
-                message: "Hold control + option and say something. Each interaction shows up here with a timing breakdown."
-            )
-        } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(taskRegistry.records) { record in
-                        TaskRow(
-                            record: record,
-                            isExpanded: expandedTaskIDs.contains(record.id),
-                            onToggleExpanded: { toggleExpanded(record.id) },
-                            onCancel: { taskRegistry.cancelTask(record.id) }
-                        )
-                    }
-                }
-                .padding(12)
-            }
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    Spacer()
-                    Button("Clear finished") { taskRegistry.clearCompleted() }
-                        .font(.system(size: 11))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(DS.Colors.textSecondary)
-                        .pointerCursor()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(DS.Colors.surface1)
-            }
-        }
-    }
-
-    private func toggleExpanded(_ id: UUID) {
-        if expandedTaskIDs.contains(id) {
-            expandedTaskIDs.remove(id)
-        } else {
-            expandedTaskIDs.insert(id)
-        }
-    }
-}
-
-private struct TaskRow: View {
-    let record: AgentTaskRecord
-    let isExpanded: Bool
-    let onToggleExpanded: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: onToggleExpanded) {
-                HStack(alignment: .top, spacing: 10) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 7, height: 7)
-                        .padding(.top, 5)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(record.title)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(DS.Colors.textPrimary)
-                            .lineLimit(isExpanded ? nil : 1)
-                            .multilineTextAlignment(.leading)
-
-                        HStack(spacing: 8) {
-                            Text(record.status.displayName)
-                                .foregroundStyle(statusColor)
-                            Text("·")
-                            Text(formattedElapsed)
-                            if record.steps.count > 1 {
-                                Text("·")
-                                Text("\(record.steps.count) steps")
-                            }
-                            if record.kind == .background {
-                                Text("·")
-                                Text("background")
-                            }
-                        }
-                        .font(.system(size: 10))
-                        .foregroundStyle(DS.Colors.textTertiary)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    if !record.status.isTerminal {
-                        Button("Cancel", action: onCancel)
-                            .font(.system(size: 10))
-                            .buttonStyle(.plain)
-                            .foregroundStyle(DS.Colors.textSecondary)
-                            .pointerCursor()
-                    }
-
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(DS.Colors.textTertiary)
-                        .padding(.top, 3)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .pointerCursor()
-
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let finalText = record.finalText, !finalText.isEmpty {
-                        Text(finalText)
-                            .font(.system(size: 11))
-                            .foregroundStyle(DS.Colors.textSecondary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    ForEach(record.steps) { step in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text(step.kindLabel)
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .foregroundStyle(step.isError ? DS.Colors.destructiveText : DS.Colors.accentText)
-                                .frame(width: 74, alignment: .leading)
-
-                            Text(step.summary)
-                                .font(.system(size: 10))
-                                .foregroundStyle(DS.Colors.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Spacer(minLength: 4)
-
-                            Text(String(format: "%.2fs", step.durationSeconds))
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(DS.Colors.textTertiary)
-                        }
-                    }
-                }
-                .padding(.top, 8)
-                .padding(.leading, 17)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.large, style: .continuous)
-                .fill(DS.Colors.surface1)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.large, style: .continuous)
-                .stroke(DS.Colors.borderSubtle, lineWidth: 1)
-        )
-    }
-
-    private var statusColor: Color {
-        switch record.status {
-        case .running: return DS.Colors.accentText
-        case .waitingForApproval: return DS.Colors.warning
-        case .succeeded: return DS.Colors.success
-        case .failed: return DS.Colors.destructiveText
-        case .cancelled, .interrupted: return DS.Colors.textTertiary
-        }
-    }
-
-    private var formattedElapsed: String {
-        let seconds = record.elapsedSeconds
-        return seconds < 60
-            ? String(format: "%.1fs", seconds)
-            : String(format: "%dm %ds", Int(seconds) / 60, Int(seconds) % 60)
     }
 }
 
@@ -980,7 +811,7 @@ private struct LabeledReadout: View {
     }
 }
 
-private struct DashboardEmptyState: View {
+struct DashboardEmptyState: View {
     let symbolName: String
     let title: String
     let message: String

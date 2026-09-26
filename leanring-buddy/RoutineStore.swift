@@ -94,6 +94,11 @@ final class RoutineStore: ObservableObject {
 
     @Published private(set) var routines: [WispRoutine] = []
 
+    /// A routine another screen just created and wants open in the Routines
+    /// editor (History's "Save as routine"). The Routines tab selects it and
+    /// clears this.
+    @Published var routineIDToOpenInEditor: UUID?
+
     static let defaultRoutinesFileURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Wisp/routines.json")
 
