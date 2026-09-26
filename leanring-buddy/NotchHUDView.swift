@@ -812,6 +812,17 @@ struct NotchHUDView: View {
             ) {
                 companionManager.beginFollowUpQuestion()
             }
+
+            // Icon-only so the row still fits the compact card's width.
+            replyActionButton(
+                .openWindow,
+                title: "",
+                systemImageName: "arrow.up.left.and.arrow.down.right",
+                tooltip: "Open the conversation in a window — the whole thread, follow-ups and running tasks",
+                isEnabled: true
+            ) {
+                companionManager.openConversationWindow()
+            }
         }
     }
 
@@ -870,9 +881,11 @@ struct NotchHUDView: View {
             HStack(spacing: 5) {
                 Image(systemName: systemImageName)
                     .font(.system(size: 10, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
+                if !title.isEmpty {
+                    Text(title)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                }
             }
             .foregroundColor(isEnabled ? DS.Colors.textPrimary : DS.Colors.textTertiary)
             .padding(.horizontal, 9)
@@ -1258,6 +1271,7 @@ private enum ReplyAction {
     case copy
     case insert
     case followUp
+    case openWindow
 }
 
 /// The short-lived confirmation a reply action shows on its own button.

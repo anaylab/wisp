@@ -110,6 +110,15 @@ struct HomeTab: View {
             }
             Spacer(minLength: 8)
             Button {
+                companionManager.openConversationWindow()
+            } label: {
+                Label("Conversation", systemImage: "bubble.left.and.bubble.right")
+                    .font(WispFont.caption)
+            }
+            .buttonStyle(WispGlassButtonStyle())
+            .pointerCursor()
+            .nativeTooltip("Open the conversation in its own window, with follow-ups and running tasks")
+            Button {
                 voiceOutputPreference.isReplySpeechEnabled.toggle()
             } label: {
                 Label(

@@ -93,21 +93,17 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func returnToMenuBarOnlyMode() {
-        // Back to accessory so Wisp disappears from the dock and app
-        // switcher again — the menu bar item remains the only entry point.
-        NSApp.setActivationPolicy(.accessory)
-    }
-
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
+        let closingWindow = window
         window = nil
 
         // Defer until the close completes, otherwise AppKit can leave a
-        // stale dock icon behind.
-        DispatchQueue.main.async { [weak self] in
-            self?.returnToMenuBarOnlyMode()
+        // stale dock icon behind. Stays `.regular` if the conversation window
+        // is still open.
+        DispatchQueue.main.async {
+            WispWindowActivation.returnToMenuBarOnlyModeIfNoWindowsRemain(excluding: closingWindow)
         }
     }
 }

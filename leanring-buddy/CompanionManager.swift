@@ -899,6 +899,21 @@ final class CompanionManager: ObservableObject {
         openTextComposer()
     }
 
+    // MARK: - Conversation window
+
+    private var conversationWindowController: ConversationWindowController?
+
+    /// Lifts the conversation out of the notch into its own window — the full
+    /// thread, a follow-up box and the running tasks. Created on first use.
+    func openConversationWindow() {
+        if conversationWindowController == nil {
+            conversationWindowController = ConversationWindowController(companionManager: self)
+        }
+        // The notch collapses; the window is now where the conversation lives.
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+        conversationWindowController?.showConversationWindow()
+    }
+
     /// The dashboard's ask bar: runs a typed question exactly as the text
     /// composer does. The caller closes the dashboard first so the screenshot
     /// shows the user's work rather than Wisp's own window.
