@@ -176,12 +176,21 @@ struct RoutinesTab: View {
         return Binding(
             get: { self.editedRoutine?[keyPath: keyPath] ?? editedRoutine[keyPath: keyPath] },
             set: { newValue in
-                self.editedRoutine?[keyPath: keyPath] = newValue
-                if let updatedRoutine = self.editedRoutine {
-                    routineStore.updateRoutine(updatedRoutine)
-                }
+                guard var updatedRoutine = latestEditedRoutine() else { return }
+                updatedRoutine[keyPath: keyPath] = newValue
+                self.editedRoutine = updatedRoutine
+                routineStore.updateRoutine(updatedRoutine)
             }
         )
+    }
+
+    /// The routine being edited as the store has it now. Edits start from this
+    /// rather than the local copy, which can be stale: running the routine from
+    /// the notch updates its last-run time, and another routine taking its
+    /// shortcut clears its digit — saving the old copy would undo either.
+    private func latestEditedRoutine() -> WispRoutine? {
+        guard let editedRoutine else { return nil }
+        return routineStore.routine(withID: editedRoutine.id) ?? editedRoutine
     }
 
     private func editorHeader(_ routine: WispRoutine) -> some View {
@@ -424,7 +433,7 @@ struct RoutinesTab: View {
     }
 
     private func addSuggestedApp(bundleIdentifier: String, displayName: String) {
-        guard var updatedRoutine = editedRoutine,
+        guard var updatedRoutine = latestEditedRoutine(),
               !updatedRoutine.suggestedAppBundleIdentifiers.contains(bundleIdentifier) else { return }
         updatedRoutine.suggestedAppBundleIdentifiers.append(bundleIdentifier)
         updatedRoutine.suggestedAppNames.append(displayName)
@@ -433,7 +442,7 @@ struct RoutinesTab: View {
     }
 
     private func removeSuggestedApp(named appName: String) {
-        guard var updatedRoutine = editedRoutine,
+        guard var updatedRoutine = latestEditedRoutine(),
               let appIndex = updatedRoutine.suggestedAppNames.firstIndex(of: appName) else { return }
         updatedRoutine.suggestedAppNames.remove(at: appIndex)
         if appIndex < updatedRoutine.suggestedAppBundleIdentifiers.count {

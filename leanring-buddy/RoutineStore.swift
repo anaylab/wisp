@@ -94,12 +94,15 @@ final class RoutineStore: ObservableObject {
 
     @Published private(set) var routines: [WispRoutine] = []
 
-    private var routinesFileURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Wisp/routines.json")
-    }
+    static let defaultRoutinesFileURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Wisp/routines.json")
 
-    private init() {
+    private let routinesFileURL: URL
+
+    /// The app uses `shared`, backed by the real file. Tests make their own store
+    /// on a temporary file so they never touch the user's routines.
+    init(routinesFileURL: URL = RoutineStore.defaultRoutinesFileURL) {
+        self.routinesFileURL = routinesFileURL
         routines = loadRoutines()
     }
 

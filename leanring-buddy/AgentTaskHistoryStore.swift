@@ -45,16 +45,26 @@ enum AgentTaskHistoryStore {
     /// history rather than an error: losing history is not worth blocking launch.
     static func loadRecords() -> [AgentTaskRecord] {
         guard let fileData = try? Data(contentsOf: historyFileURL) else { return [] }
+        guard let loadedRecords = decodeRecords(from: fileData, now: Date()) else {
+            print("⚠️ AgentTaskHistoryStore: could not read \(historyFileURL.path); starting with empty history")
+            return []
+        }
+        return loadedRecords
+    }
 
+    /// The load policy on its own, without the file: decodes a saved history,
+    /// marks still-running records `.interrupted` and drops expired ones. Nil when
+    /// the data isn't a history file of the current format. Separate from
+    /// `loadRecords` so it can be tested without touching the user's real file.
+    static func decodeRecords(from fileData: Data, now: Date) -> [AgentTaskRecord]? {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let historyFile = try? decoder.decode(HistoryFile.self, from: fileData),
               historyFile.formatVersion == currentFileFormatVersion else {
-            print("⚠️ AgentTaskHistoryStore: could not read \(historyFileURL.path); starting with empty history")
-            return []
+            return nil
         }
 
-        let oldestRetainedDate = Date().addingTimeInterval(-retentionPeriodSeconds)
+        let oldestRetainedDate = now.addingTimeInterval(-retentionPeriodSeconds)
         return historyFile.records.compactMap { savedRecord in
             var loadedRecord = savedRecord
             if !loadedRecord.status.isTerminal {
@@ -84,7 +94,7 @@ enum AgentTaskHistoryStore {
         }
     }
 
-    private static func encode(_ recordsToEncode: [AgentTaskRecord]) -> Data? {
+    static func encode(_ recordsToEncode: [AgentTaskRecord]) -> Data? {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         do {
