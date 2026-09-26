@@ -463,7 +463,7 @@ private struct ConversationTab: View {
 
 // MARK: - Performance
 
-private struct PerformanceTab: View {
+struct PerformanceTab: View {
     @ObservedObject var metricsRecorder: PerfMetricsRecorder
     @ObservedObject var companionManager: CompanionManager
     @State private var memoryReadout: String = "—"

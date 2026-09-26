@@ -99,6 +99,36 @@ cloud dependency to the local path, without asking.
   sounds, default on, muted from the notch header's bell toggle): listening onset, thinking (turn
   start), reply landed, and success/error (from `flashIsland`). The notch glass is
   **non-interactive** (`wispNotchGlassSurface`) so the surface animates cheaply.
+- **Chat & settings in the notch** (HeyClicky-style workspace): the quick panel's footer **Chat**
+  button and header gear open `NotchWorkspaceView` (760×480) hanging from the notch —
+  `NotchViewModel.workspacePage` + `requestWorkspacePage`. Opening it is a click, not a hover, so
+  `NotchWindowController.setWorkspacePage` may resize the window (grow before the morph, shrink
+  0.4s after the collapse) without the old resize-on-hover feedback loop; the SwiftUI root fills
+  `viewModel.windowSize`. While open, the `NotchPanel` may become key (`allowsBecomingKey`) —
+  non-activating, so typing works while the user's app stays active — and closing orders the
+  panel out/in to hand key focus back. It stays open while the pointer is over it, a text field is
+  being edited, a turn is listening, or a button is held; otherwise closes after 0.6s outside, on
+  Esc (`NotchPanel.cancelOperation`), the ✕, or `.wispCloseNotchWorkspace`. `.wispDismissPanel`
+  (push-to-talk start) does not close it, and reply/card/morning-banner auto-present is skipped while
+  it's open (the chat shows the answer). Settings pages reuse the dashboard tabs (`PerformanceTab`
+  is internal for this). The quick panel's middle sections scroll within the fixed window so its
+  footer stays reachable. `nativeTooltip`'s overlay view returns nil from `hitTest` — before, it
+  swallowed clicks on the button beneath it.
+- **Morning notch & quiet mode** (modeled on HeyClicky): once a day, the first time the user is
+  at the Mac (5am–5pm, input within 2 min), `MorningBriefingController` builds suggestions with
+  **no model call** (`MorningSuggestionBuilder`: today's remaining meetings / due reminders — only
+  if access was already granted, never prompts — then pinned and recently-run routines, cap 7) and
+  the notch drops a compact banner ("I can do 5 things for you today", Dismiss / Show me). Show me
+  switches to the full panel, whose **TODAY** section runs each suggestion in one click; ignored,
+  the banner tucks into a ✦ count in the right flank. **Quiet mode** (`QuietModeMonitor`, 4s poll
+  with hysteresis): another process capturing the mic (CoreAudio per-process
+  `kAudioProcessPropertyIsRunningInput`, own PID and always-listening system services like
+  `com.apple.CoreSpeech` excluded) or any camera running → no morning banner, and finished
+  background tasks post **no** notification. Focus/DND is deliberately not detected (needs Full
+  Disk Access or a provisioned entitlement). Finished background tasks go to `FinishedWorkInbox`
+  → an "N new" flank badge and a **NEW** section in the full panel, marked seen when the panel
+  closes. Both switches live in the Agent tab's Announcements card (`AnnouncementPreferences`),
+  which also has a "Show now" preview.
 - **Glance cards**: a visual answer surface in the notch's expanded panel, parsed from one
   `[CARD:{...json...}]` tag at the end of the reply (same structured-text mechanism as
   `[POINT:]`/`[BOX:]`/`[TOOL:]` — the local model can't do native structured output; the tag is
@@ -521,8 +551,8 @@ Grouped by what they do. Line counts are approximate.
 | `MarketplaceTab.swift` | ~700 | Dashboard Marketplace tab: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
 | `ShortcutsTab.swift` | ~250 | Dashboard Shortcuts tab: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
 | `MenuBarPanelManager.swift` | ~247 | `NSStatusItem` + floating `NSPanel` lifecycle. |
-| `NotchWindowController.swift` | ~230 | Hosts the notch HUD in a fixed-size borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) and reloads skills when the panel opens. Owns `NotchViewModel`. |
-| `NotchHUDView.swift` | ~380 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
+| `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
+| `NotchHUDView.swift` | ~1620 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `CompanionPanelView.swift` | ~775 | The menu bar panel's SwiftUI content. |
 | `DesignSystem.swift` | ~940 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
@@ -548,6 +578,12 @@ names forward here.
 | `Components/WispMark.swift` | ~180 | The liquid-ribbon logo. `WispMarkState` drives per-state motion; static mode; clock paused at rest. `CompanionVoiceState.markState` maps to it. |
 | `Components/WispIcon.swift` | ~200 | The Liquid Icon System: `WispIconSymbol` (bespoke single-stroke glyphs + `.system` SF-Symbol fallback), `WispIconState`, rendered by `WispIcon`. |
 | `DynamicIsland/WispIslandState.swift` | ~120 | The 9-state island vocabulary + its mark/label/accent mapping. Derived, not stored — see `CompanionManager.islandState`, which now also drives `.executing` (a browser task reporting progress; step list + Stop in the hover panel, spinner + step count in the right flank) and `.processing` (idle with background tasks running). |
+| `DynamicIsland/NotchWorkspaceView.swift` | ~800 | The notch's large surface: `NotchWorkspacePage` (.chat / .settings(section)), `NotchSettingsSection`, and the view — chat (conversation sidebar with search, thread bubbles, talk pill, Type field → `askTypedQuestion`) and settings (section list whose pages are the dashboard's own tab views, plus a small General page). |
+| `DynamicIsland/NotchConversationSessions.swift` | ~100 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search. |
+| `DynamicIsland/MorningBriefing.swift` | ~255 | The morning notch: `MorningSuggestion`, the pure `MorningSuggestionBuilder` and `MorningBriefingSchedule` (once a day, daytime, user present), and `MorningBriefingController` (1-min check, pending suggestions, `presentationSequenceNumber` the notch drops the banner on, `perform`). |
+| `DynamicIsland/QuietModeMonitor.swift` | ~280 | Quiet mode: `QuietModeDetection` (CoreAudio processes capturing input, CoreMediaIO camera running, system-listener filter) and the polling `QuietModeMonitor` publishing `activeQuietReason`. |
+| `DynamicIsland/FinishedWorkInbox.swift` | ~55 | Unseen finished background task ids behind the notch's "N new" badge and NEW section (in-memory, cap 5). |
+| `DynamicIsland/AnnouncementPreferences.swift` | ~50 | UserDefaults switches for morning suggestions and quiet-on-calls (both default on). |
 | `DynamicIsland/UpcomingEventMonitor.swift` | ~85 | Ambient next-meeting countdown: polls EventKit every 30s via `CalendarDataProvider.imminentTimedEventIfAuthorized` (never prompts — nil without access) for a timed event starting within 15 min; the notch's right flank shows `12m`, and the island stays visible at idle while one is imminent or background work runs. |
 
 ### Unused upstream leftovers

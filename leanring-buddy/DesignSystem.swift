@@ -844,11 +844,22 @@ struct IBeamCursorView: NSViewRepresentable {
 /// Uses AppKit's `NSView.toolTip` to show a tooltip on hover.
 /// SwiftUI's `.help()` conflicts with `.onHover` tracking areas, so
 /// this bridges directly to AppKit's tooltip system which works independently.
+/// Carries a tooltip but never takes a click. A plain `NSView` overlaid on a
+/// SwiftUI button is hit-tested first and swallows the mouse-down, so the
+/// button under it silently never fired (found with the Agent tab's "Show
+/// now"). Tooltips don't need hit-testing — AppKit tracks tooltip rects per
+/// window — so, like `PointerCursorNSView`, this view opts out of it.
+private final class ClickThroughTooltipNSView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+}
+
 private struct NativeTooltipView: NSViewRepresentable {
     let tooltip: String
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+        let view = ClickThroughTooltipNSView()
         view.toolTip = tooltip
         return view
     }

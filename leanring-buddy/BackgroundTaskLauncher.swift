@@ -78,6 +78,7 @@ enum BackgroundTaskLauncher {
                     status: .succeeded,
                     finalText: outcome.terminalText
                 )
+                FinishedWorkInbox.shared.recordFinishedTask(taskID)
                 notifyCompletion(request: request, result: outcome.terminalText, didSucceed: true)
             } catch is CancellationError {
                 AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
@@ -86,6 +87,7 @@ enum BackgroundTaskLauncher {
                     taskID,
                     status: .failed(error.localizedDescription)
                 )
+                FinishedWorkInbox.shared.recordFinishedTask(taskID)
                 notifyCompletion(request: request, result: error.localizedDescription, didSucceed: false)
             }
         }
@@ -103,7 +105,15 @@ enum BackgroundTaskLauncher {
     /// moment of its own choosing, and interrupting whatever the user is doing
     /// — possibly another conversation — to announce it would be worse than
     /// useless. The dashboard holds the full result either way.
+    ///
+    /// On a call (`QuietModeMonitor`) no notification is posted at all — a
+    /// banner sliding over a shared screen is exactly what quiet mode is for.
+    /// The result waits in the notch's "new" badge (`FinishedWorkInbox`) instead.
     private static func notifyCompletion(request: String, result: String, didSucceed: Bool) {
+        guard !QuietModeMonitor.shared.isQuiet else {
+            print("🌙 Background: finished during a call — holding the notification, badge only")
+            return
+        }
         let center = UNUserNotificationCenter.current()
 
         center.requestAuthorization(options: [.alert, .sound]) { isGranted, _ in

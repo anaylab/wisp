@@ -35,10 +35,17 @@ struct NotchHUDView: View {
     @ObservedObject private var upcomingEventMonitor = UpcomingEventMonitor.shared
     @ObservedObject private var routineStore = RoutineStore.shared
     @ObservedObject private var frontmostAppTracker = FrontmostAppTracker.shared
+    @ObservedObject private var morningBriefing = MorningBriefingController.shared
+    @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
+    @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
 
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
     @State private var answerContentHeight: CGFloat = 0
+
+    /// The measured natural height of the quick panel's middle sections, so it
+    /// wraps short content and scrolls only once it would overflow the window.
+    @State private var quickPanelSectionsHeight: CGFloat = 0
 
     /// Brief confirmation shown on the reply action row after Copy / Insert, so
     /// a click that has no visible effect elsewhere still reads as having worked.
@@ -62,12 +69,15 @@ struct NotchHUDView: View {
                 hudSurface
                     .opacity(islandIsVisible ? 1 : 0)
             }
+            // Fills the window, which is the quick panel's size normally and
+            // the workspace's while chat/settings is open.
             .frame(
-                width: viewModel.expandedSize.width,
-                height: viewModel.expandedSize.height,
+                width: viewModel.windowSize.width,
+                height: viewModel.windowSize.height,
                 alignment: .top
             )
             .animation(.spring(response: 0.34, dampingFraction: 0.86), value: viewModel.isExpanded)
+            .animation(.spring(response: 0.38, dampingFraction: 0.86), value: viewModel.isWorkspaceOpen)
             .animation(.spring(response: 0.36, dampingFraction: 0.84), value: islandIsVisible)
         }
         // The dynamic island is always dark, regardless of the system's light or
@@ -102,7 +112,7 @@ struct NotchHUDView: View {
         // message or the full panel; the collapsed width wraps the notch.
         .frame(
             width: viewModel.isExpanded ? droppedWidth : collapsedPillWidth,
-            height: viewModel.isExpanded ? nil : viewModel.collapsedSize.height,
+            height: viewModel.isExpanded ? droppedFixedHeight : viewModel.collapsedSize.height,
             alignment: .top
         )
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: collapsedPillWidth)
@@ -125,7 +135,17 @@ struct NotchHUDView: View {
     /// deliberate hover, or the compact message card for an auto-presented answer.
     @ViewBuilder
     private var droppedContent: some View {
-        if viewModel.isFullPanel {
+        if let workspacePage = viewModel.workspacePage {
+            NotchWorkspaceView(
+                viewModel: viewModel,
+                companionManager: companionManager,
+                page: workspacePage
+            )
+            .frame(
+                width: NotchViewModel.workspaceSize.width,
+                height: NotchViewModel.workspaceSize.height
+            )
+        } else if viewModel.isFullPanel {
             expandedContent
         } else {
             messageContent
@@ -135,7 +155,14 @@ struct NotchHUDView: View {
     /// The width of the dropped surface — narrow for the compact message so a short
     /// reply stays small, full width for the panel.
     private var droppedWidth: CGFloat {
-        viewModel.isFullPanel ? viewModel.expandedSize.width : compactMessageWidth
+        if viewModel.isWorkspaceOpen { return NotchViewModel.workspaceSize.width }
+        return viewModel.isFullPanel ? viewModel.expandedSize.width : compactMessageWidth
+    }
+
+    /// The workspace is a fixed size; the quick panel and message wrap their
+    /// content (nil).
+    private var droppedFixedHeight: CGFloat? {
+        viewModel.isWorkspaceOpen ? NotchViewModel.workspaceSize.height : nil
     }
 
     /// The compact message width: a touch wider than the notch-wrap so the drop
@@ -148,11 +175,22 @@ struct NotchHUDView: View {
     /// to the message and inset below the notch. No affordance, skills or footer —
     /// those belong to the full panel a hover reveals.
     private var messageContent: some View {
-        answerSurfaceWithReplyActions
+        compactDroppedContent
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
             .padding(.top, notchContentTopInset + 8)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// An answer always wins the compact surface; the morning banner only shows
+    /// on an otherwise empty notch.
+    @ViewBuilder
+    private var compactDroppedContent: some View {
+        if !hasAnswer && morningBriefing.hasPendingBriefing {
+            morningBannerContent
+        } else {
+            answerSurfaceWithReplyActions
+        }
     }
 
     /// The bottom corner radius of the notch surface. Kept close to the physical
@@ -160,7 +198,8 @@ struct NotchHUDView: View {
     /// activity both read as the notch; a little rounder when expanded so the
     /// hanging panel feels like a panel.
     private var notchBottomCornerRadius: CGFloat {
-        viewModel.isExpanded ? 24 : 18
+        if viewModel.isWorkspaceOpen { return 28 }
+        return viewModel.isExpanded ? 24 : 18
     }
 
     /// The notch-matched surface shape: square at the top (flush with the screen's
@@ -215,7 +254,10 @@ struct NotchHUDView: View {
     /// flight, or a meeting about to start. Keeps the island showing on a notched
     /// Mac, where it would otherwise disappear into the notch at rest.
     private var hasAmbientActivity: Bool {
-        !runningBackgroundTasks.isEmpty || upcomingEventMonitor.imminentEvent != nil
+        !runningBackgroundTasks.isEmpty
+            || upcomingEventMonitor.imminentEvent != nil
+            || !finishedWorkInbox.unseenTaskIDs.isEmpty
+            || morningBriefing.hasPendingBriefing
     }
 
     /// Whether a flank is showing a label (step count, task count, countdown)
@@ -427,6 +469,211 @@ struct NotchHUDView: View {
         .nativeTooltip(tooltip)
     }
 
+    // MARK: - Morning briefing, new results, quiet mode
+
+    private var morningBannerTitle: String {
+        let suggestionCount = morningBriefing.pendingSuggestions.count
+        return suggestionCount == 1
+            ? "I can do 1 thing for you today"
+            : "I can do \(suggestionCount) things for you today"
+    }
+
+    /// The banner the notch drops once a day: the mark on the left, the offer
+    /// and its two buttons on the right. Show me swaps the compact surface for
+    /// the full panel, whose TODAY list holds the suggestions.
+    private var morningBannerContent: some View {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(WispGradient.signature)
+                    .opacity(0.22)
+                    .blur(radius: 8)
+                WispMark(state: .thinking, size: 30)
+            }
+            .frame(width: 44, height: 44)
+
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(morningBannerTitle)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Text("Pick what you'd like me to take on.")
+                        .font(.system(size: 11))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+                HStack(spacing: 6) {
+                    Button("Dismiss") {
+                        dismissMorningBriefing()
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .wispGlassButtonStyle(prominence: .subtle, cornerRadius: 999)
+                    .nativeTooltip("Skip today's suggestions")
+
+                    Button {
+                        viewModel.isFullPanel = true
+                    } label: {
+                        Label("Show me", systemImage: "lightbulb.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .wispGlassButtonStyle(prominence: .prominent, cornerRadius: 999)
+                    .nativeTooltip("See what Wisp can take on today")
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func dismissMorningBriefing() {
+        morningBriefing.dismiss()
+        // Nothing left to show, so the notch goes back to being the notch.
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+    }
+
+    /// "2 new" in the right flank: background results waiting to be seen.
+    private func flankUnseenResultsBadge(count: Int) -> some View {
+        Text("\(count) new")
+            .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+            .foregroundColor(DS.Colors.textPrimary)
+            .padding(.horizontal, 6)
+            .frame(height: 16)
+            .background(Capsule(style: .continuous).fill(WispColor.Brand.lavender.opacity(0.35)))
+            .lineLimit(1)
+            .nativeTooltip(count == 1
+                ? "A background task finished — hover to see it"
+                : "\(count) background tasks finished — hover to see them")
+    }
+
+    /// "✦ 5" in the right flank: the day's suggestions, tucked away after the
+    /// banner was left alone.
+    private func flankMorningSuggestionsCount(_ suggestionCount: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(WispColor.Brand.lavender)
+            Text("\(suggestionCount)")
+                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .foregroundColor(DS.Colors.textSecondary)
+        }
+        .nativeTooltip("Wisp has \(suggestionCount) suggestions for today — hover to see them")
+    }
+
+    /// A moon in the panel header while quiet mode holds announcements back.
+    private func quietModeIndicator(_ quietReason: QuietModeReason) -> some View {
+        Image(systemName: "moon.fill")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(WispColor.Brand.lavender)
+            .frame(width: 22, height: 22)
+            .nativeTooltip("\(quietReason.summary), so Wisp is keeping quiet. Finished tasks wait here instead of notifying you.")
+    }
+
+    /// NEW: background results that finished since the panel was last opened.
+    /// Closing the panel marks them seen (see `NotchWindowController`).
+    @ViewBuilder
+    private var finishedWorkSection: some View {
+        let unseenRecords = finishedWorkInbox.unseenRecords(in: taskRegistry)
+        if !unseenRecords.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("NEW")
+                ForEach(unseenRecords) { finishedRecord in
+                    finishedWorkRow(finishedRecord)
+                }
+            }
+        }
+    }
+
+    private func finishedWorkRow(_ finishedRecord: AgentTaskRecord) -> some View {
+        let didSucceed = finishedRecord.status == .succeeded
+        let resultLine = didSucceed
+            ? (finishedRecord.finalText ?? "Done")
+            : "Didn't finish — see History for details"
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: didSucceed ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(didSucceed ? DS.Colors.success : DS.Colors.destructive)
+                .frame(width: 12)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(finishedRecord.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                Text(resultLine)
+                    .font(.system(size: 11))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(WispColor.Brand.lavender.opacity(0.10))
+        )
+    }
+
+    /// TODAY: the morning briefing's suggestions, one click each, with a way to
+    /// dismiss the rest.
+    @ViewBuilder
+    private var todaySuggestionsSection: some View {
+        if morningBriefing.hasPendingBriefing {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    sectionLabel("TODAY")
+                    Spacer(minLength: 0)
+                    Button {
+                        morningBriefing.dismiss()
+                    } label: {
+                        Text("Dismiss")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(DS.Colors.textTertiary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                    .nativeTooltip("Skip the rest of today's suggestions")
+                }
+                ForEach(morningBriefing.pendingSuggestions) { suggestion in
+                    morningSuggestionRow(suggestion)
+                }
+            }
+        }
+    }
+
+    private func morningSuggestionRow(_ suggestion: MorningSuggestion) -> some View {
+        Button {
+            morningBriefing.perform(suggestion, companionManager: companionManager)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: suggestion.symbolName)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundColor(WispColor.Brand.lavender)
+                    .frame(width: 14)
+                Text(suggestion.title)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(PressableScaleButtonStyle())
+        .pointerCursor()
+    }
+
     // MARK: - Collapsed live activity
 
     /// The collapsed (mini) live activity. On a notched Mac it WRAPS the notch —
@@ -500,9 +747,15 @@ struct NotchHUDView: View {
             case .processing:
                 collapsedThinkingDots
             case .idle:
+                // Most time-sensitive first: a meeting about to start, then
+                // results waiting to be seen, then the day's suggestions.
                 if let imminentEvent = upcomingEventMonitor.imminentEvent {
                     flankEventCountdown(imminentEvent)
                         .nativeTooltip(imminentEvent.title)
+                } else if !finishedWorkInbox.unseenTaskIDs.isEmpty {
+                    flankUnseenResultsBadge(count: finishedWorkInbox.unseenTaskIDs.count)
+                } else if morningBriefing.hasPendingBriefing {
+                    flankMorningSuggestionsCount(morningBriefing.pendingSuggestions.count)
                 } else {
                     stateDot
                 }
@@ -589,8 +842,17 @@ struct NotchHUDView: View {
             return "\(imminentEvent.title) · \(countdownText)"
         }
         let runningCount = runningBackgroundTasks.count
-        guard runningCount > 0 else { return nil }
-        return runningCount == 1 ? "1 task running" : "\(runningCount) tasks running"
+        if runningCount > 0 {
+            return runningCount == 1 ? "1 task running" : "\(runningCount) tasks running"
+        }
+        let unseenCount = finishedWorkInbox.unseenTaskIDs.count
+        if unseenCount > 0 {
+            return unseenCount == 1 ? "1 new result" : "\(unseenCount) new results"
+        }
+        if morningBriefing.hasPendingBriefing {
+            return morningBannerTitle
+        }
+        return nil
     }
 
     /// Whether the pill is currently showing the live transcript of speech. When
@@ -663,12 +925,55 @@ struct NotchHUDView: View {
             notchFlankingHeader
 
             VStack(alignment: .leading, spacing: 10) {
+                // Everything between the header and the footer scrolls once it
+                // outgrows the fixed window (an answer + the day's suggestions +
+                // routines + skills can), so the footer — with Chat and Manage —
+                // always stays reachable.
+                ScrollView {
+                    quickPanelScrollingSections
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(key: QuickPanelSectionsHeightKey.self, value: proxy.size.height)
+                            }
+                        )
+                }
+                .scrollIndicators(.never)
+                .frame(height: min(max(quickPanelSectionsHeight, 1), quickPanelSectionsMaxHeight))
+                .onPreferenceChange(QuickPanelSectionsHeightKey.self) { measuredHeight in
+                    quickPanelSectionsHeight = measuredHeight
+                }
+
+                footer
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The tallest the quick panel's middle may grow: the window's height less
+    /// the header band, the footer row and the padding around them.
+    private var quickPanelSectionsMaxHeight: CGFloat {
+        let headerHeight = viewModel.hasNotch ? notchContentTopInset : 36
+        let footerRowHeight: CGFloat = 28
+        let paddingAndSpacing: CGFloat = 14 * 2 + 10
+        return viewModel.expandedSize.height - headerHeight - footerRowHeight - paddingAndSpacing
+    }
+
+    private var quickPanelScrollingSections: some View {
+            VStack(alignment: .leading, spacing: 10) {
                 // The living centerpiece: a voice waveform that reflects the current
                 // state and, while listening, the real microphone level.
                 voiceAffordanceSection
 
                 // What's in flight right now, with a way to stop it.
                 liveActivitySection
+
+                // Background results that finished since the user last looked.
+                finishedWorkSection
+
+                // The day's suggestions, until run or dismissed.
+                todaySuggestionsSection
 
                 // Only present when there is an answer, so an idle panel collapses
                 // down to just the affordance, skills and footer.
@@ -681,13 +986,8 @@ struct NotchHUDView: View {
 
                 // Skills stay one click away as a compact sideways-scrolling strip.
                 skillsStrip
-
-                footer
             }
-            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Whether the current turn has anything to show — reply text or a glance
@@ -961,10 +1261,13 @@ struct NotchHUDView: View {
             Color.clear.frame(width: viewModel.hasNotch ? viewModel.collapsedSize.width : 0)
 
             HStack(spacing: 3) {
+                if let activeQuietReason = quietModeMonitor.activeQuietReason {
+                    quietModeIndicator(activeQuietReason)
+                }
                 soundCuesToggle
                 voiceOutputToggle
                 Button {
-                    NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
+                    viewModel.requestWorkspacePage?(.settings(.general))
                 } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 12, weight: .medium))
@@ -974,7 +1277,7 @@ struct NotchHUDView: View {
                 }
                 .buttonStyle(.plain)
                 .pointerCursor()
-                .nativeTooltip("Open dashboard")
+                .nativeTooltip("Settings, right here in the notch")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.trailing, 12)
@@ -1218,6 +1521,27 @@ struct NotchHUDView: View {
             // Moved here from the header so the top-right flank stays uncrowded.
             dockCursorToggle
             Button {
+                viewModel.requestWorkspacePage?(.chat)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 9.5, weight: .semibold))
+                    Text("Chat")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(DS.Colors.textPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(WispColor.Brand.sage.opacity(0.26))
+                )
+                .contentShape(Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .nativeTooltip("Open the chat in the notch — your conversations, talk or type")
+            Button {
                 NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
             } label: {
                 Text("Manage")
@@ -1291,3 +1615,11 @@ private struct AnswerContentHeightKey: PreferenceKey {
     }
 }
 
+/// Carries the quick panel's middle sections' natural height up to
+/// `NotchHUDView`, the same way `AnswerContentHeightKey` does for the answer.
+private struct QuickPanelSectionsHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}

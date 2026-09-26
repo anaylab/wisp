@@ -104,6 +104,23 @@ actor CalendarDataProvider: GlanceCardDataProvider {
         )
     }
 
+    /// How many timed (not all-day) events are still to start today, or nil
+    /// without Calendar access. For the morning suggestions banner; like
+    /// `imminentTimedEventIfAuthorized`, never prompts.
+    func remainingTimedEventCountTodayIfAuthorized(now: Date = Date()) -> Int? {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
+        guard let startOfTomorrow = Calendar.current.date(
+            byAdding: .day,
+            value: 1,
+            to: Calendar.current.startOfDay(for: now)
+        ) else { return nil }
+
+        let predicate = eventStore.predicateForEvents(withStart: now, end: startOfTomorrow, calendars: nil)
+        return eventStore.events(matching: predicate)
+            .filter { !$0.isAllDay && $0.startDate >= now }
+            .count
+    }
+
     /// Ensures the app can read events, requesting access on first use.
     private func ensureAccess() async throws {
         switch EKEventStore.authorizationStatus(for: .event) {

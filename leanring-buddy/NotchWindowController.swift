@@ -42,8 +42,21 @@ final class NotchViewModel: ObservableObject {
     @Published var hasNotch: Bool = false
     /// The collapsed pill's size — matches the physical notch when there is one.
     @Published var collapsedSize: CGSize = CGSize(width: 180, height: 32)
-    /// The expanded panel's size, and therefore the fixed window size.
+    /// The expanded quick panel's size.
     @Published var expandedSize: CGSize = CGSize(width: 360, height: 404)
+    /// The window's current size: the quick panel's bounds normally, the
+    /// workspace's while chat or settings is open. The SwiftUI root fills it.
+    @Published var windowSize: CGSize = CGSize(width: 360, height: 404)
+    /// The chat or settings page open in the notch's large surface, or nil.
+    @Published var workspacePage: NotchWorkspacePage?
+    /// Set by the controller: asks it to open a workspace page (or close the
+    /// workspace with nil), since that also resizes the window and moves focus.
+    var requestWorkspacePage: ((NotchWorkspacePage?) -> Void)?
+
+    /// The notch's large surface — chat and settings, HeyClicky-style.
+    static let workspaceSize = CGSize(width: 760, height: 480)
+
+    var isWorkspaceOpen: Bool { workspacePage != nil }
 }
 
 @MainActor
@@ -62,6 +75,11 @@ final class NotchWindowController {
     /// happens to hover the notch, which is why silent mode looked broken.
     private var replyPresentationObserver: AnyCancellable?
     private var cardPresentationObserver: AnyCancellable?
+    /// Drops the morning suggestions banner out of the notch when a briefing arrives.
+    private var morningBriefingPresentationObserver: AnyCancellable?
+    /// Marks the "new" background results seen once the user has opened the
+    /// full panel (where they are listed) and then closed it again.
+    private var finishedWorkSeenObserver: AnyCancellable?
 
     /// Hover is ignored until this moment. Set when the HUD is force-collapsed
     /// (e.g. a skill was launched) so the click that triggered it — or the
@@ -93,6 +111,17 @@ final class NotchWindowController {
     /// The panel opens only once it has stayed inside for `hoverOpenDwellSeconds`.
     private var cursorEnteredCollapsedZoneDate: Date?
 
+    /// When the cursor left the open workspace, or nil while it's inside. The
+    /// workspace closes after a short grace outside, so a brief overshoot while
+    /// reaching for its edge doesn't slam it shut.
+    private var cursorLeftWorkspaceDate: Date?
+    private let workspaceCloseGraceSeconds: TimeInterval = 0.6
+
+    /// The pending shrink back to the quick panel's size after the workspace
+    /// closes — delayed so the collapse animates inside the still-large window.
+    private var workspaceCloseResizeWorkItem: DispatchWorkItem?
+    private var closeWorkspaceObserver: NSObjectProtocol?
+
     init(companionManager: CompanionManager) {
         self.companionManager = companionManager
     }
@@ -103,6 +132,9 @@ final class NotchWindowController {
         }
         if let dismissObserver {
             NotificationCenter.default.removeObserver(dismissObserver)
+        }
+        if let closeWorkspaceObserver {
+            NotificationCenter.default.removeObserver(closeWorkspaceObserver)
         }
         hoverPollTimer?.invalidate()
     }
@@ -118,6 +150,9 @@ final class NotchWindowController {
         startHoverTracking()
         // Feeds the island's ambient next-meeting countdown.
         UpcomingEventMonitor.shared.start()
+        // Quiet mode first, so the briefing's first check already knows about a call.
+        QuietModeMonitor.shared.start()
+        MorningBriefingController.shared.start()
     }
 
     func hide() {
@@ -133,6 +168,10 @@ final class NotchWindowController {
         viewModel.collapsedSize = geometry.collapsedPillSize
         viewModel.hasNotch = geometry.hasNotch
         viewModel.expandedSize = panelSize
+        viewModel.windowSize = panelSize
+        viewModel.requestWorkspacePage = { [weak self] requestedPage in
+            self?.setWorkspacePage(requestedPage)
+        }
 
         let notchHUDView = NotchHUDView(
             viewModel: viewModel,
@@ -169,6 +208,9 @@ final class NotchWindowController {
         // Collapsed to begin with, so the transparent window is click-through.
         notchPanel.ignoresMouseEvents = true
         notchPanel.contentView = hostingView
+        notchPanel.onEscapePressed = { [weak self] in
+            self?.setWorkspacePage(nil)
+        }
         self.panel = notchPanel
 
         // The window itself never resizes; it only stops being click-through
@@ -195,6 +237,8 @@ final class NotchWindowController {
             .sink { [weak self] replyText in
                 let trimmed = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
+                // The open workspace's chat already shows the answer as it lands.
+                guard self?.viewModel.isWorkspaceOpen == false else { return }
                 self?.autoPresentAnswer(readingLength: trimmed.count)
             }
 
@@ -203,7 +247,34 @@ final class NotchWindowController {
         cardPresentationObserver = companionManager.$resolvedGlanceCard
             .sink { [weak self] resolvedGlanceCard in
                 guard resolvedGlanceCard != nil else { return }
+                guard self?.viewModel.isWorkspaceOpen == false else { return }
                 self?.autoPresentAnswer(readingLength: 0)
+            }
+
+        // A fresh morning briefing drops its banner from the notch — but only
+        // onto an idle notch. Mid-turn, or with an answer still up, it would
+        // bury what the user is looking at; it waits in the flank's ✦ count and
+        // the hover panel's TODAY list instead.
+        morningBriefingPresentationObserver = MorningBriefingController.shared.$presentationSequenceNumber
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let isNotchShowingAnswer = !self.companionManager.currentReplyText
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || self.companionManager.resolvedGlanceCard != nil
+                guard self.companionManager.voiceState == .idle,
+                      !isNotchShowingAnswer,
+                      !self.viewModel.isWorkspaceOpen else { return }
+                self.autoPresentMorningBriefing()
+            }
+
+        finishedWorkSeenObserver = viewModel.$isFullPanel
+            .removeDuplicates()
+            .dropFirst()
+            .sink { isFullPanel in
+                guard !isFullPanel else { return }
+                FinishedWorkInbox.shared.markAllSeen()
             }
 
         // When the app clears its surfaces off the screen (a skill launching, a
@@ -217,6 +288,14 @@ final class NotchWindowController {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                // The workspace is where the user is talking to Wisp, so a turn
+                // starting (push-to-talk posts this) must not close it — Wisp's
+                // own windows are left out of the screenshot anyway. Only drop
+                // the auto-present hold so it can't reopen the quick panel.
+                if self.viewModel.isWorkspaceOpen {
+                    self.presentationHoldUntil = .distantPast
+                    return
+                }
                 self.viewModel.isExpanded = false
                 self.viewModel.isFullPanel = false
                 // A dismiss means the current answer surface is being cleared off
@@ -227,6 +306,18 @@ final class NotchWindowController {
                 // dismiss just closed (e.g. over the screenshot being captured).
                 self.presentationHoldUntil = .distantPast
                 self.hoverSuspendedUntil = Date().addingTimeInterval(1.0)
+            }
+        }
+
+        // Anything that needs the notch's workspace out of the way (e.g. the
+        // Agent page's "Show now", which drops the morning banner) posts this.
+        closeWorkspaceObserver = NotificationCenter.default.addObserver(
+            forName: .wispCloseNotchWorkspace,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.setWorkspacePage(nil)
             }
         }
 
@@ -249,7 +340,88 @@ final class NotchWindowController {
 
     private func positionWindow() {
         guard let panel, let geometry = currentGeometry() else { return }
-        panel.setFrame(geometry.expandedWindowFrame(size: panelSize), display: true)
+        panel.setFrame(geometry.expandedWindowFrame(size: viewModel.windowSize), display: true)
+    }
+
+    // MARK: - Workspace (chat + settings in the notch)
+
+    /// Opens a workspace page, switches between pages, or closes the workspace
+    /// (nil). Unlike hover, this is a deliberate click, so resizing the window
+    /// here can't feed back into the hover detection the way the old
+    /// resize-on-hover did. The window grows before the morph starts and shrinks
+    /// only after the collapse has animated, so neither is ever clipped.
+    private func setWorkspacePage(_ requestedPage: NotchWorkspacePage?) {
+        guard let panel, let geometry = currentGeometry() else { return }
+
+        if let requestedPage {
+            workspaceCloseResizeWorkItem?.cancel()
+            workspaceCloseResizeWorkItem = nil
+            if !viewModel.isWorkspaceOpen {
+                viewModel.windowSize = NotchViewModel.workspaceSize
+                panel.setFrame(geometry.expandedWindowFrame(size: NotchViewModel.workspaceSize), display: true)
+                // Typing (the Type field, search, dictionary words) needs key
+                // focus. A non-activating panel can take it without activating
+                // Wisp, so the user's app stays the active one.
+                panel.allowsBecomingKey = true
+            }
+            presentationHoldUntil = .distantPast
+            cursorLeftWorkspaceDate = nil
+            viewModel.workspacePage = requestedPage
+            viewModel.isExpanded = true
+            viewModel.isFullPanel = true
+            return
+        }
+
+        guard viewModel.isWorkspaceOpen else { return }
+        viewModel.workspacePage = nil
+        viewModel.isExpanded = false
+        viewModel.isFullPanel = false
+        panel.allowsBecomingKey = false
+        cursorLeftWorkspaceDate = nil
+        // Don't let the cursor, still near the notch, reopen the quick panel
+        // the instant the workspace closes.
+        hoverSuspendedUntil = Date().addingTimeInterval(0.6)
+        performHUDHaptic()
+
+        let shrinkWindowWorkItem = DispatchWorkItem { [weak self] in
+            guard let self, let panel = self.panel, !self.viewModel.isWorkspaceOpen else { return }
+            self.viewModel.windowSize = self.panelSize
+            self.positionWindow()
+            // Hand the keyboard back: ordering the key panel out and in makes the
+            // window server return key focus to the user's app, and with
+            // `allowsBecomingKey` off it can't take it back.
+            if panel.isKeyWindow {
+                panel.orderOut(nil)
+                panel.orderFrontRegardless()
+            }
+        }
+        workspaceCloseResizeWorkItem = shrinkWindowWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: shrinkWindowWorkItem)
+    }
+
+    /// While the workspace is open it stays open as long as the cursor is over
+    /// it, the user is typing in it, a turn is listening, or a mouse button is
+    /// held (e.g. a scroll-bar drag that strays outside); otherwise it closes
+    /// after a short grace outside.
+    private func updateWorkspaceHover(geometry: NotchGeometry, mouseLocation: CGPoint) {
+        let workspaceZone = geometry.expandedWindowFrame(size: NotchViewModel.workspaceSize)
+            .insetBy(dx: -expandedZoneMargin, dy: -expandedZoneMargin)
+        let isTypingInWorkspace = panel?.isKeyWindow == true && panel?.firstResponder is NSText
+        let shouldStayOpen = workspaceZone.contains(mouseLocation)
+            || isTypingInWorkspace
+            || companionManager.voiceState == .listening
+            || NSEvent.pressedMouseButtons != 0
+        if shouldStayOpen {
+            cursorLeftWorkspaceDate = nil
+            return
+        }
+        guard let cursorLeftWorkspaceDate else {
+            self.cursorLeftWorkspaceDate = Date()
+            return
+        }
+        if Date().timeIntervalSince(cursorLeftWorkspaceDate) >= workspaceCloseGraceSeconds {
+            setWorkspacePage(nil)
+        }
     }
 
     // MARK: - Hover from the mouse position
@@ -287,6 +459,11 @@ final class NotchWindowController {
 
         guard let geometry = currentGeometry() else { return }
         let mouseLocation = NSEvent.mouseLocation
+
+        if viewModel.isWorkspaceOpen {
+            updateWorkspaceHover(geometry: geometry, mouseLocation: mouseLocation)
+            return
+        }
 
         // While an answer is being auto-presented, the panel stays open on its
         // own regardless of hover. Once the hold expires the normal hover logic
@@ -357,6 +534,21 @@ final class NotchWindowController {
         }
     }
 
+    /// Opens the compact morning banner and holds it long enough to notice and
+    /// decide on. A hover upgrades it to the full panel's TODAY list, like an
+    /// answer; left alone, it tucks back into the notch's ✦ count.
+    private func autoPresentMorningBriefing() {
+        let morningBannerHoldSeconds: TimeInterval = 30
+        presentationHoldUntil = Date().addingTimeInterval(morningBannerHoldSeconds)
+        hoverSuspendedUntil = .distantPast
+        viewModel.isFullPanel = false
+        if !viewModel.isExpanded {
+            viewModel.isExpanded = true
+            performHUDHaptic()
+        }
+        WispSoundPlayer.shared.play(.reply)
+    }
+
     /// A light, smooth "alignment" tick when the HUD opens or closes — the same
     /// gentle feedback macOS uses when a dragged guide snaps into place. It is a
     /// no-op on Macs without a Force Touch trackpad and respects the user's
@@ -401,12 +593,22 @@ final class NotchWindowController {
     }
 }
 
-/// Non-activating panel that never steals focus. Kept distinct from the menu
-/// bar's `KeyablePanel` because the notch HUD, in this phase, has nothing that
-/// needs to become first responder; a later text-composer phase can revisit it.
+/// Non-activating panel that never steals focus — except while the notch's
+/// workspace (chat + settings) is open, when it may become key so its text
+/// fields take typing. Being non-activating, it takes key focus without
+/// activating Wisp, so the user's app stays in front.
 final class NotchPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
+    /// Turned on by the controller only while the workspace is open.
+    var allowsBecomingKey = false
+    /// Esc while the panel is key (the workspace is open and focused).
+    var onEscapePressed: (() -> Void)?
+
+    override var canBecomeKey: Bool { allowsBecomingKey }
     override var canBecomeMain: Bool { false }
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscapePressed?()
+    }
 }
 
 /// An `NSHostingView` that accepts the first mouse click. On a menu-bar-only app

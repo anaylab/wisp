@@ -15,6 +15,8 @@ struct AgentTab: View {
     @ObservedObject private var agentSettings = AgentSettingsStore.shared
     @ObservedObject private var confirmationCoordinator = ToolConfirmationCoordinator.shared
     @ObservedObject private var shortcutsBridge = ShortcutsBridge.shared
+    @ObservedObject private var announcementPreferences = AnnouncementPreferences.shared
+    @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
 
     var body: some View {
         ScrollView {
@@ -24,6 +26,7 @@ struct AgentTab: View {
                 }
                 agentFolderCard
                 approvalsCard
+                announcementsCard
                 appleShortcutsCard
                 permissionsCard
             }
@@ -170,6 +173,80 @@ struct AgentTab: View {
                     .pointerCursor()
             }
         }
+    }
+
+    // MARK: - Announcements
+
+    /// What Wisp brings up without being asked: the morning suggestions banner,
+    /// and whether it holds back while the user is on a call.
+    private var announcementsCard: some View {
+        DashboardCard(title: "Announcements") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Morning suggestions")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Text("The first time you're at your Mac each day, the notch offers a few things Wisp can do — today's meetings, what's due, your pinned and recent routines. Built on this Mac, no model call.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        // Get Wisp's own surfaces out of the way first (the dashboard,
+                        // as the Today page does, or the notch's settings when this
+                        // page is shown there) so the banner drops onto the user's screen.
+                        if let keyWindow = NSApp.keyWindow, !(keyWindow is NotchPanel) {
+                            keyWindow.performClose(nil)
+                        }
+                        NotificationCenter.default.post(name: .wispCloseNotchWorkspace, object: nil)
+                        MorningBriefingController.shared.presentNow()
+                    } label: {
+                        Text("Show now")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                                    .fill(DS.Colors.surface3)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!announcementPreferences.areMorningSuggestionsEnabled)
+                    .pointerCursor(isEnabled: announcementPreferences.areMorningSuggestionsEnabled)
+                    .nativeTooltip("Show today's suggestions in the notch")
+                    Toggle("", isOn: $announcementPreferences.areMorningSuggestionsEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .pointerCursor()
+                }
+
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Stay quiet on calls")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Text(quietDuringCallsDetail)
+                            .font(.system(size: 11))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Toggle("", isOn: $announcementPreferences.isQuietDuringCallsEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .pointerCursor()
+                }
+            }
+        }
+    }
+
+    private var quietDuringCallsDetail: String {
+        let explanation = "While another app is using your microphone or a camera is on, Wisp holds its own announcements: no morning banner, and finished background tasks wait in the notch as \"new\" instead of notifying you. Anything you ask for still works."
+        guard let activeQuietReason = quietModeMonitor.activeQuietReason else { return explanation }
+        return "\(activeQuietReason.summary) — Wisp is keeping quiet right now. " + explanation
     }
 
     // MARK: - Apple Shortcuts

@@ -20,6 +20,8 @@ extension Notification.Name {
     /// dashboard window, so the request travels by notification rather than
     /// threading a controller reference down through the SwiftUI view.
     static let wispOpenDashboard = Notification.Name("wispOpenDashboard")
+    /// Closes the chat/settings workspace in the notch, if it's open.
+    static let wispCloseNotchWorkspace = Notification.Name("wispCloseNotchWorkspace")
 }
 
 /// Custom NSPanel subclass that can become the key window even with
