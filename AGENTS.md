@@ -56,7 +56,8 @@ cloud dependency to the local path, without asking.
   used sparingly) and `WispMotion` (named curves + reduce-motion). Colours come in three layers:
   raw brand (fixed), **adaptive** semantic tokens (`WispColor.background` etc., resolve light/dark
   live via a dynamic `NSColor`), and a fixed **on-glass** set (`WispColor.OnGlass.*`) for the
-  always-dark surfaces. The legacy `DS.*` API is a thin facade that **forwards to these tokens**,
+  always-dark surfaces, plus a fixed **island** set (`WispColor.Island.*`: true black, white/grey
+  text, flat white-alpha control fills, a white prominent capsule) for the notch. The legacy `DS.*` API is a thin facade that **forwards to these tokens**,
   so `DS.Colors.background` etc. are now adaptive and the whole app reskins from one place.
   Reusable components live in `Components/` (`WispGlassPanel`/`WispGlassButtonStyle`/`WispGlassIcon`,
   `WispGlassInput`, `WispMark`, `WispIcon`). **Do not reintroduce hardcoded hex** — reference the
@@ -66,7 +67,14 @@ cloud dependency to the local path, without asking.
   material in every appearance** — they pin `.environment(\.colorScheme, .dark)` so their adaptive
   tokens resolve dark, keeping near-white text legible over any wallpaper. `wispGlassSurface` /
   `wispGlassCard` use an **adaptive** glass tint (`WispColor.glassTint` / `glassCardTint`);
-  `wispNotchGlassSurface` stays fixed dark.
+  `wispNotchGlassSurface` stays fixed dark. **The notch island is solid black by default**, like
+  Apple's Dynamic Island, so on a notched Mac it is indistinguishable from the camera cutout:
+  `wispNotchIslandSurface(in:style:)` draws `WispColor.Island.surface`, text and chips in
+  `NotchHUDView`/`NotchWorkspaceView` use `WispColor.Island.*` (no sage tint, no hairlines), and
+  buttons use `WispIslandButtonStyle`. Colour on the island comes from content and from the mark +
+  lavender rim state light only. Liquid Glass is opt-in via `NotchIslandStylePreference` (notch
+  settings → General → Island), which also brings back the border and the rim's specular highlight
+  (`wispLiquidRim(showsSpecularHighlight:)`).
 - **The Wisp mark**: a flowing liquid-ribbon logo (`Components/WispMark.swift`), filled with the
   signature gradient, with subtle per-state motion (idle/listening/thinking/acting/success/error),
   a static mode, and a paused `TimelineView` clock while at rest. It replaced the old rotated
@@ -589,11 +597,13 @@ names forward here.
 | `DesignSystem/WispGradients.swift` | ~55 | The single signature gradient (sage→mist→lavender) and its animated variants. Use sparingly. |
 | `DesignSystem/WispMotion.swift` | ~55 | Named animation curves (`quick`/`smooth`/`gentle`/`island`/`springSoft`/`breath`) + reduce-motion helpers. |
 | `Components/WispGlassComponents.swift` | ~200 | `WispGlassPanel` container, `WispGlassButtonStyle` (subtle/prominent), `WispGlassIcon`, and `PressableScaleButtonStyle`. |
+| `Components/WispLiquidRim.swift` | ~185 | The Liquid Glass rim: `.wispLiquidRim(in:light:highlightEdge:)` adds a `.plusLighter` specular edge highlight plus state light (`WispLiquidRimLight`: resting / flowing arc / even glow). `WispIslandState.rimLight` maps AI activity → flowing lavender, confirmation/success/error → glow. Used by the notch surface and `WispGlassPanel`; the flowing clock only exists while flowing, and Reduce Motion swaps it for a steady glow. |
 | `Components/WispGlassInput.swift` | ~90 | The floating "Ask Wisp anything…" field; the signature gradient blooms into the border on focus. |
 | `Components/WispMark.swift` | ~180 | The liquid-ribbon logo. `WispMarkState` drives per-state motion; static mode; clock paused at rest. `CompanionVoiceState.markState` maps to it. |
 | `Components/WispIcon.swift` | ~200 | The Liquid Icon System: `WispIconSymbol` (bespoke single-stroke glyphs + `.system` SF-Symbol fallback), `WispIconState`, rendered by `WispIcon`. |
 | `DynamicIsland/WispIslandState.swift` | ~120 | The 9-state island vocabulary + its mark/label/accent mapping. Derived, not stored — see `CompanionManager.islandState`, which now also drives `.executing` (a browser task reporting progress; step list + Stop in the hover panel, spinner + step count in the right flank) and `.processing` (idle with background tasks running). |
 | `DynamicIsland/NotchWorkspaceView.swift` | ~960 | The notch's large surface: `NotchWorkspacePage` (.chat / .settings(section)), `NotchSettingsSection`, and the view — chat (conversation sidebar with search, thread bubbles, talk pill, Type field → `askTypedQuestion`) and settings (section list whose pages are the dashboard's own tab views, plus a small General page). |
+| `DynamicIsland/NotchIslandStyle.swift` | ~125 | `NotchIslandSurfaceStyle` (black default / Liquid Glass), the persisted `NotchIslandStylePreference`, the `wispNotchIslandSurface(in:style:)` modifier, and `WispIslandButtonStyle` (flat subtle fill / white prominent capsule). |
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
 | `Buddies/BuddyStore.swift` | ~390 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy`, `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/reschedule/delete). |
 | `Buddies/BuddyAvatar.swift` | ~130 | `BuddyAppearance` (the 8-colour palette) and `BuddyAvatar` (cloud + happy eyes, bobs while working, clock paused at rest). |

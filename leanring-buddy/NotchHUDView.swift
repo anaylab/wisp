@@ -28,6 +28,7 @@ struct NotchHUDView: View {
     @ObservedObject private var mcpManager = MCPManager.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
+    @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
     /// Observed so background work starting or finishing re-renders the
     /// island's ambient state — `islandState` reads the registry, but a computed
     /// property can't tell SwiftUI that on its own.
@@ -54,6 +55,8 @@ struct NotchHUDView: View {
     /// Which reply action button the pointer is over, for its hover highlight.
     @State private var hoveredReplyAction: ReplyAction?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         // The glass container lets the pill and panel render as one Liquid Glass
         // element and morph fluidly between the collapsed and expanded frames.
@@ -67,6 +70,15 @@ struct NotchHUDView: View {
                 // the left and right (never behind the camera); larger interactions
                 // let it expand downward. Visibility fades in/out with a spring.
                 hudSurface
+                    // Liquid emergence: the island squeezes out of the notch
+                    // like a droplet — starting narrow and short, anchored to
+                    // the bezel — rather than just fading in. Reduce Motion
+                    // keeps the plain fade.
+                    .scaleEffect(
+                        x: islandIsVisible || reduceMotion ? 1 : 0.72,
+                        y: islandIsVisible || reduceMotion ? 1 : 0.35,
+                        anchor: .top
+                    )
                     .opacity(islandIsVisible ? 1 : 0)
             }
             // Fills the window, which is the quick panel's size normally and
@@ -117,18 +129,38 @@ struct NotchHUDView: View {
         )
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: collapsedPillWidth)
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: droppedWidth)
-        // Apple Liquid Glass, tinted dark (see `wispNotchGlassSurface`), so the
-        // island refracts the desktop while staying legible. The subtle stroke
-        // defines the expanded panel's edge against a busy background. The shape
-        // has FLUSH (square) top corners so the surface sits under the bezel and
-        // reads as the physical notch itself extending downward; only the bottom
-        // corners are rounded, like the real notch and the Dynamic Island.
-        .wispNotchGlassSurface(in: notchSurfaceShape)
+        // Solid black by default, like Apple's Dynamic Island, so on a notched
+        // Mac the surface is indistinguishable from the camera cutout; Liquid
+        // Glass is the opt-in alternative (`NotchIslandStylePreference`). The
+        // shape has FLUSH (square) top corners so the surface sits under the
+        // bezel and reads as the physical notch itself extending downward; only
+        // the bottom corners are rounded, like the real notch and the Dynamic
+        // Island.
+        .wispNotchIslandSurface(in: notchSurfaceShape, style: islandStylePreference.surfaceStyle)
+        // Glass only: a subtle stroke defines the translucent panel's edge
+        // against a busy background. Black needs none, just like the notch.
         .overlay(
             notchSurfaceShape
-                .strokeBorder(DS.Colors.borderSubtle.opacity(viewModel.isExpanded ? 1 : 0), lineWidth: 1)
+                .strokeBorder(
+                    DS.Colors.borderSubtle.opacity(isGlassIslandExpanded ? 1 : 0),
+                    lineWidth: 1
+                )
         )
         .clipShape(notchSurfaceShape)
+        // The rim carries state: lavender light travelling around it while Wisp
+        // works, and the whole rim lighting up for a pending decision or a
+        // success / error flash. On glass it also catches a specular highlight
+        // (lit from below, since the top edge is under the bezel).
+        .wispLiquidRim(
+            in: notchSurfaceShape,
+            light: companionManager.islandState.rimLight,
+            highlightEdge: .bottom,
+            showsSpecularHighlight: islandStylePreference.surfaceStyle == .liquidGlass
+        )
+    }
+
+    private var isGlassIslandExpanded: Bool {
+        viewModel.isExpanded && islandStylePreference.surfaceStyle == .liquidGlass
     }
 
     /// What drops down from the notch when expanded: the full panel on a
@@ -293,7 +325,7 @@ struct NotchHUDView: View {
             activityRing(diameter: 11)
             Text(text)
                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundColor(DS.Colors.textPrimary)
+                .foregroundColor(WispColor.Island.textPrimary)
                 .lineLimit(1)
         }
     }
@@ -307,7 +339,7 @@ struct NotchHUDView: View {
                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
                 .lineLimit(1)
         }
-        .foregroundColor(DS.Colors.textSecondary)
+        .foregroundColor(WispColor.Island.textSecondary)
     }
 
     /// The left flank: the living mark, except while idle with background work
@@ -369,11 +401,11 @@ struct NotchHUDView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark")
                         .font(.system(size: 8, weight: .bold))
-                        .foregroundColor(DS.Colors.textTertiary)
+                        .foregroundColor(WispColor.Island.textTertiary)
                         .frame(width: 12)
                     Text(previousStep)
                         .font(.system(size: 11.5))
-                        .foregroundColor(DS.Colors.textTertiary)
+                        .foregroundColor(WispColor.Island.textTertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -382,14 +414,14 @@ struct NotchHUDView: View {
                 activityRing(diameter: 12)
                 Text(companionManager.browserActivityText)
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                     .lineLimit(2)
             }
         }
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(WispColor.Island.controlFill)
         )
     }
 
@@ -399,11 +431,11 @@ struct NotchHUDView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(backgroundTask.title)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                     .lineLimit(1)
                 Text(backgroundTaskStatusLine(backgroundTask))
                     .font(.system(size: 10.5))
-                    .foregroundColor(DS.Colors.textTertiary)
+                    .foregroundColor(WispColor.Island.textTertiary)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -431,18 +463,18 @@ struct NotchHUDView: View {
         HStack(spacing: 8) {
             Image(systemName: "calendar")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(DS.Colors.textSecondary)
+                .foregroundColor(WispColor.Island.textSecondary)
                 .frame(width: 12)
             VStack(alignment: .leading, spacing: 1) {
                 Text(event.title)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                     .lineLimit(1)
                 Text([UpcomingEventMonitor.countdownPhrase(until: event.startDate), event.location]
                     .compactMap { $0 }
                     .joined(separator: " · "))
                     .font(.system(size: 10.5))
-                    .foregroundColor(DS.Colors.textTertiary)
+                    .foregroundColor(WispColor.Island.textTertiary)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -457,11 +489,10 @@ struct NotchHUDView: View {
                 Text("Stop")
                     .font(.system(size: 11, weight: .medium))
             }
-            .foregroundColor(DS.Colors.textPrimary)
+            .foregroundColor(WispColor.Island.textPrimary)
             .padding(.horizontal, 9)
             .frame(height: 22)
-            .background(Capsule(style: .continuous).fill(Color.white.opacity(0.08)))
-            .overlay(Capsule(style: .continuous).strokeBorder(DS.Colors.borderSubtle, lineWidth: 1))
+            .background(Capsule(style: .continuous).fill(WispColor.Island.controlFill))
             .contentShape(Capsule())
         }
         .buttonStyle(PressableScaleButtonStyle())
@@ -496,12 +527,12 @@ struct NotchHUDView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(morningBannerTitle)
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(DS.Colors.textPrimary)
+                        .foregroundColor(WispColor.Island.textPrimary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                     Text("Pick what you'd like me to take on.")
                         .font(.system(size: 11))
-                        .foregroundColor(DS.Colors.textSecondary)
+                        .foregroundColor(WispColor.Island.textSecondary)
                         .lineLimit(1)
                 }
                 HStack(spacing: 6) {
@@ -509,7 +540,7 @@ struct NotchHUDView: View {
                         dismissMorningBriefing()
                     }
                     .font(.system(size: 11, weight: .medium))
-                    .wispGlassButtonStyle(prominence: .subtle, cornerRadius: 999)
+                    .wispIslandButtonStyle(prominence: .subtle)
                     .nativeTooltip("Skip today's suggestions")
 
                     Button {
@@ -518,7 +549,7 @@ struct NotchHUDView: View {
                         Label("Show me", systemImage: "lightbulb.fill")
                             .font(.system(size: 11, weight: .semibold))
                     }
-                    .wispGlassButtonStyle(prominence: .prominent, cornerRadius: 999)
+                    .wispIslandButtonStyle(prominence: .prominent)
                     .nativeTooltip("See what Wisp can take on today")
                 }
             }
@@ -536,7 +567,7 @@ struct NotchHUDView: View {
     private func flankUnseenResultsBadge(count: Int) -> some View {
         Text("\(count) new")
             .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-            .foregroundColor(DS.Colors.textPrimary)
+            .foregroundColor(WispColor.Island.textPrimary)
             .padding(.horizontal, 6)
             .frame(height: 16)
             .background(Capsule(style: .continuous).fill(WispColor.Brand.lavender.opacity(0.35)))
@@ -555,7 +586,7 @@ struct NotchHUDView: View {
                 .foregroundColor(WispColor.Brand.lavender)
             Text("\(suggestionCount)")
                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundColor(DS.Colors.textSecondary)
+                .foregroundColor(WispColor.Island.textSecondary)
         }
         .nativeTooltip("Wisp has \(suggestionCount) suggestions for today — hover to see them")
     }
@@ -598,11 +629,11 @@ struct NotchHUDView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(finishedRecord.title)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                     .lineLimit(1)
                 Text(resultLine)
                     .font(.system(size: 11))
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundColor(WispColor.Island.textSecondary)
                     .lineLimit(3)
                     .textSelection(.enabled)
             }
@@ -629,7 +660,7 @@ struct NotchHUDView: View {
                     } label: {
                         Text("Dismiss")
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(DS.Colors.textTertiary)
+                            .foregroundColor(WispColor.Island.textTertiary)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -654,19 +685,19 @@ struct NotchHUDView: View {
                     .frame(width: 14)
                 Text(suggestion.title)
                     .font(.system(size: 11.5, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(DS.Colors.textTertiary)
+                    .foregroundColor(WispColor.Island.textTertiary)
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(WispColor.Island.controlFill)
             )
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
@@ -720,7 +751,7 @@ struct NotchHUDView: View {
             if let collapsedPrimaryText {
                 Text(collapsedPrimaryText)
                     .font(.system(size: 10.5, weight: .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundColor(WispColor.Island.textSecondary)
                     .lineLimit(1)
                     .truncationMode(collapsedTruncationMode)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -911,7 +942,7 @@ struct NotchHUDView: View {
 
     private var stateDotColor: Color {
         let state = companionManager.islandState
-        return state.isActive ? state.accent : DS.Colors.textTertiary
+        return state.isActive ? state.accent : WispColor.Island.textTertiary
     }
 
     // MARK: - Expanded quick-panel
@@ -1009,7 +1040,7 @@ struct NotchHUDView: View {
             )
             Text(companionManager.islandState.label)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(WispColor.Island.textTertiary)
                 .tracking(0.4)
                 .animation(.easeInOut(duration: 0.2), value: companionManager.islandState.label)
         }
@@ -1032,7 +1063,7 @@ struct NotchHUDView: View {
                         sectionLabel("REPLY")
                         Text(companionManager.currentReplyText)
                             .font(.system(size: 12.5))
-                            .foregroundColor(DS.Colors.textPrimary)
+                            .foregroundColor(WispColor.Island.textPrimary)
                             .lineSpacing(2)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1187,16 +1218,12 @@ struct NotchHUDView: View {
                         .lineLimit(1)
                 }
             }
-            .foregroundColor(isEnabled ? DS.Colors.textPrimary : DS.Colors.textTertiary)
+            .foregroundColor(isEnabled ? WispColor.Island.textPrimary : WispColor.Island.textTertiary)
             .padding(.horizontal, 9)
             .frame(height: 24)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color.white.opacity(isHovered ? 0.14 : 0.07))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(DS.Colors.borderSubtle, lineWidth: 1)
+                    .fill(isHovered ? WispColor.Island.controlFillHovered : WispColor.Island.controlFill)
             )
             .contentShape(Capsule())
         }
@@ -1251,7 +1278,7 @@ struct NotchHUDView: View {
                 WispMark(state: companionManager.islandState.markState, size: 16)
                 Text("Wisp")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 14)
@@ -1271,7 +1298,7 @@ struct NotchHUDView: View {
                 } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(DS.Colors.textSecondary)
+                        .foregroundColor(WispColor.Island.textSecondary)
                         .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
                 }
@@ -1294,7 +1321,7 @@ struct NotchHUDView: View {
         } label: {
             Image(systemName: isDocked ? "cursorarrow.slash" : "cursorarrow")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(isDocked ? DS.Colors.textTertiary : DS.Colors.accentText)
+                .foregroundColor(isDocked ? WispColor.Island.textTertiary : WispColor.Island.textPrimary)
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
@@ -1315,7 +1342,7 @@ struct NotchHUDView: View {
         } label: {
             Image(systemName: areSoundsOn ? "bell.fill" : "bell.slash.fill")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(areSoundsOn ? DS.Colors.accentText : DS.Colors.textTertiary)
+                .foregroundColor(areSoundsOn ? WispColor.Island.textPrimary : WispColor.Island.textTertiary)
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
@@ -1335,7 +1362,7 @@ struct NotchHUDView: View {
         } label: {
             Image(systemName: isVoiceOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(isVoiceOn ? DS.Colors.accentText : DS.Colors.textTertiary)
+                .foregroundColor(isVoiceOn ? WispColor.Island.textPrimary : WispColor.Island.textTertiary)
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
@@ -1409,29 +1436,25 @@ struct NotchHUDView: View {
             HStack(spacing: 6) {
                 Image(systemName: routine.symbolName)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(WispColor.Brand.sage)
+                    .foregroundColor(WispColor.Island.textSecondary)
                     .frame(width: 14)
                 Text(routine.name)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
                 if let shortcutDigit = routine.shortcutDigit {
                     Text(RoutineStore.shortcutLabel(forDigit: shortcutDigit))
                         .font(.system(size: 9.5, weight: .medium).monospacedDigit())
-                        .foregroundColor(DS.Colors.textTertiary)
+                        .foregroundColor(WispColor.Island.textTertiary)
                 }
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(DS.Colors.borderSubtle.opacity(0.7), lineWidth: 0.75)
+                    .fill(WispColor.Island.controlFill)
             )
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
@@ -1447,21 +1470,17 @@ struct NotchHUDView: View {
             HStack(spacing: 5) {
                 Image(systemName: iconName(forSkillNamed: skill.name))
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(WispColor.Brand.sage)
+                    .foregroundColor(WispColor.Island.textSecondary)
                 Text(prettifiedName(fromSkillName: skill.name))
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                     .lineLimit(1)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(DS.Colors.borderSubtle.opacity(0.7), lineWidth: 0.75)
+                    .fill(WispColor.Island.controlFill)
             )
             .contentShape(Capsule(style: .continuous))
         }
@@ -1512,10 +1531,10 @@ struct NotchHUDView: View {
         HStack(spacing: 8) {
             Image(systemName: "puzzlepiece.extension.fill")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(WispColor.Island.textTertiary)
             Text(integrationsSummary)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(DS.Colors.textSecondary)
+                .foregroundColor(WispColor.Island.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 0)
             // Moved here from the header so the top-right flank stays uncrowded.
@@ -1529,12 +1548,12 @@ struct NotchHUDView: View {
                     Text("Chat")
                         .font(.system(size: 11, weight: .medium))
                 }
-                .foregroundColor(DS.Colors.textPrimary)
+                .foregroundColor(WispColor.Island.textPrimary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(WispColor.Brand.sage.opacity(0.26))
+                        .fill(WispColor.Island.controlFill)
                 )
                 .contentShape(Capsule(style: .continuous))
             }
@@ -1546,12 +1565,12 @@ struct NotchHUDView: View {
             } label: {
                 Text("Manage")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundColor(WispColor.Island.textSecondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(Color.white.opacity(0.06))
+                            .fill(WispColor.Island.controlFill)
                     )
                     .contentShape(Capsule(style: .continuous))
             }
@@ -1585,7 +1604,7 @@ struct NotchHUDView: View {
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 9, weight: .semibold))
-            .foregroundColor(DS.Colors.textTertiary)
+            .foregroundColor(WispColor.Island.textTertiary)
             .tracking(0.6)
     }
 }

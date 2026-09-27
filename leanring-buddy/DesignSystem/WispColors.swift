@@ -162,6 +162,36 @@ enum WispColor {
         static let chipFill = Color.white.opacity(0.06)
     }
 
+    // MARK: - 4. Fixed island tokens (the notch's Dynamic Island)
+
+    /// Colours for the notch island, modeled on Apple's Dynamic Island: a solid
+    /// true-black surface, so on a notched Mac it reads as the camera cutout
+    /// itself growing, with neutral white/grey text and no brand tint. Colour on
+    /// the island comes from content (a card, a buddy) and from Wisp's mark and
+    /// lavender activity light — never from the surface or the text.
+    enum Island {
+        /// Pure black, to match the physical notch exactly. Any tint or
+        /// translucency leaves a visible seam where the hardware ends.
+        static let surface = Color.black
+
+        static let textPrimary   = Color.white
+        static let textSecondary = Color.white.opacity(0.62)
+        static let textTertiary  = Color.white.opacity(0.40)
+
+        /// Controls and chips are flat fills on the black, with no hairlines.
+        static let controlFill        = Color.white.opacity(0.10)
+        static let controlFillHovered = Color.white.opacity(0.16)
+        static let controlFillPressed = Color.white.opacity(0.22)
+
+        /// The one prominent action (Allow, Show me): a white capsule with
+        /// black text, like the island's play button.
+        static let prominentFill = Color.white
+        static let prominentText = Color.black
+
+        /// Dividers and the few edges that still need one (a text field).
+        static let separator = Color.white.opacity(0.12)
+    }
+
     // MARK: - Adaptive helpers
 
     /// Builds a `Color` that resolves to `light` or `dark` live, following the

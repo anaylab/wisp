@@ -97,7 +97,7 @@ struct NotchWorkspaceView: View {
                 .frame(maxHeight: .infinity, alignment: .top)
                 .background(Color.white.opacity(0.035))
             Rectangle()
-                .fill(DS.Colors.borderSubtle)
+                .fill(WispColor.Island.separator)
                 .frame(width: 1)
             mainArea
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -136,7 +136,7 @@ struct NotchWorkspaceView: View {
                 WispMark(state: companionManager.islandState.markState, size: 16)
                 Text("Wisp")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                 Spacer(minLength: 0)
             }
             .frame(height: max(notchTopInset, 28))
@@ -151,7 +151,7 @@ struct NotchWorkspaceView: View {
                     if filteredSessions.isEmpty {
                         Text(sessionSearchText.isEmpty ? "No conversations yet" : "Nothing matches")
                             .font(.system(size: 11))
-                            .foregroundColor(DS.Colors.textTertiary)
+                            .foregroundColor(WispColor.Island.textTertiary)
                             .padding(.vertical, 8)
                             .padding(.horizontal, 6)
                     }
@@ -172,17 +172,17 @@ struct NotchWorkspaceView: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(WispColor.Island.textTertiary)
             TextField("Search", text: $sessionSearchText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
-                .foregroundColor(DS.Colors.textPrimary)
+                .foregroundColor(WispColor.Island.textPrimary)
         }
         .padding(.horizontal, 9)
         .frame(height: 28)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.07))
+                .fill(WispColor.Island.controlFill)
         )
     }
 
@@ -190,7 +190,7 @@ struct NotchWorkspaceView: View {
         Text(title)
             .font(.system(size: 9, weight: .semibold))
             .tracking(0.6)
-            .foregroundColor(DS.Colors.textTertiary)
+            .foregroundColor(WispColor.Island.textTertiary)
             .padding(.horizontal, 6)
             .padding(.top, 8)
             .padding(.bottom, 3)
@@ -209,7 +209,7 @@ struct NotchWorkspaceView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundColor(DS.Colors.textSecondary)
+                        .foregroundColor(WispColor.Island.textSecondary)
                         .frame(width: 22, height: 22)
                         .background(Circle().fill(Color.white.opacity(isCreatingBuddy ? 0.14 : 0.07)))
                         .contentShape(Circle())
@@ -222,7 +222,7 @@ struct NotchWorkspaceView: View {
             if buddyStore.buddies.isEmpty {
                 Text("Give a buddy a job it can repeat — a morning digest, a weekly check.")
                     .font(.system(size: 10.5))
-                    .foregroundColor(DS.Colors.textTertiary)
+                    .foregroundColor(WispColor.Island.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 6)
                     .padding(.bottom, 4)
@@ -255,11 +255,11 @@ struct NotchWorkspaceView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(buddy.name)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(DS.Colors.textPrimary)
+                        .foregroundColor(WispColor.Island.textPrimary)
                         .lineLimit(1)
                     Text(buddyStatusLine(buddy, isRunning: isRunning))
                         .font(.system(size: 10.5))
-                        .foregroundColor(DS.Colors.textSecondary)
+                        .foregroundColor(WispColor.Island.textSecondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -321,17 +321,17 @@ struct NotchWorkspaceView: View {
                 HStack(spacing: 6) {
                     Text(session.title)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(DS.Colors.textPrimary)
+                        .foregroundColor(WispColor.Island.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     Text(sessionTimeLabel(session.lastActivityAt))
                         .font(.system(size: 10))
-                        .foregroundColor(DS.Colors.textTertiary)
+                        .foregroundColor(WispColor.Island.textTertiary)
                         .lineLimit(1)
                 }
                 Text(session.latestAnswerPreview)
                     .font(.system(size: 11))
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundColor(WispColor.Island.textSecondary)
                     .lineLimit(1)
             }
             .padding(.horizontal, 9)
@@ -340,12 +340,8 @@ struct NotchWorkspaceView: View {
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(isSelected
-                          ? WispColor.Brand.sage.opacity(0.22)
-                          : Color.white.opacity(isHovered ? 0.06 : 0))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(isSelected ? WispColor.Brand.sage.opacity(0.45) : .clear, lineWidth: 1)
+                          ? WispColor.Island.controlFillHovered
+                          : (isHovered ? WispColor.Island.controlFill : Color.clear))
             )
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
@@ -401,10 +397,10 @@ struct NotchWorkspaceView: View {
                         Text("Back")
                             .font(.system(size: 11.5, weight: .medium))
                     }
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundColor(WispColor.Island.textSecondary)
                     .padding(.horizontal, 9)
                     .frame(height: 24)
-                    .background(Capsule(style: .continuous).fill(Color.white.opacity(0.08)))
+                    .background(Capsule(style: .continuous).fill(WispColor.Island.controlFill))
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -413,7 +409,7 @@ struct NotchWorkspaceView: View {
 
                 Text("Settings")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundColor(WispColor.Island.textPrimary)
                 Spacer(minLength: 0)
             }
             .frame(height: max(notchTopInset, 28))
@@ -451,7 +447,7 @@ struct NotchWorkspaceView: View {
                     .font(.system(size: 12, weight: .medium))
                 Spacer(minLength: 0)
             }
-            .foregroundColor(isSelected ? DS.Colors.textPrimary : DS.Colors.textSecondary)
+            .foregroundColor(isSelected ? WispColor.Island.textPrimary : WispColor.Island.textSecondary)
             .padding(.horizontal, 9)
             .frame(height: 28)
             .background(
@@ -482,10 +478,10 @@ struct NotchWorkspaceView: View {
                         .font(.system(size: 11.5, weight: .medium))
                 }
             }
-            .foregroundColor(DS.Colors.textSecondary)
+            .foregroundColor(WispColor.Island.textSecondary)
             .padding(.horizontal, 9)
             .frame(height: 26)
-            .background(Capsule(style: .continuous).fill(Color.white.opacity(0.07)))
+            .background(Capsule(style: .continuous).fill(WispColor.Island.controlFill))
             .contentShape(Capsule())
         }
         .buttonStyle(PressableScaleButtonStyle())
@@ -559,9 +555,9 @@ struct NotchWorkspaceView: View {
         Button(action: perform) {
             Image(systemName: systemImageName)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(DS.Colors.textSecondary)
+                .foregroundColor(WispColor.Island.textSecondary)
                 .frame(width: 24, height: 24)
-                .background(Circle().fill(Color.white.opacity(0.07)))
+                .background(Circle().fill(WispColor.Island.controlFill))
                 .contentShape(Circle())
         }
         .buttonStyle(PressableScaleButtonStyle())
@@ -645,10 +641,10 @@ struct NotchWorkspaceView: View {
         VStack(spacing: 3) {
             Text(isShowingLiveSession ? "Conversation" : "Earlier conversation")
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(DS.Colors.textPrimary)
+                .foregroundColor(WispColor.Island.textPrimary)
             Text(chatHeaderSubtitle)
                 .font(.system(size: 10.5))
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(WispColor.Island.textTertiary)
                 .lineLimit(1)
         }
         .padding(.bottom, 4)
@@ -671,10 +667,10 @@ struct NotchWorkspaceView: View {
             WispMark(state: .idle, size: 34)
             Text("Ask me anything")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(DS.Colors.textPrimary)
+                .foregroundColor(WispColor.Island.textPrimary)
             Text("Hold \(bindingStore.primaryHoldChord.displayText) to talk, or type below. I can see the screen behind this panel.")
                 .font(.system(size: 11.5))
-                .foregroundColor(DS.Colors.textSecondary)
+                .foregroundColor(WispColor.Island.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
             Spacer()
@@ -691,11 +687,11 @@ struct NotchWorkspaceView: View {
                     if !exchange.isUsersOwnQuestion {
                         Image(systemName: "bolt.fill")
                             .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundColor(WispColor.Brand.sage)
+                            .foregroundColor(WispColor.Island.textSecondary)
                     }
                     Text(exchange.title)
                         .font(.system(size: 12.5))
-                        .foregroundColor(DS.Colors.textPrimary)
+                        .foregroundColor(WispColor.Island.textPrimary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -703,7 +699,7 @@ struct NotchWorkspaceView: View {
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(WispColor.Brand.sage.opacity(0.24))
+                        .fill(WispColor.Island.controlFillHovered)
                 )
             }
 
@@ -712,13 +708,13 @@ struct NotchWorkspaceView: View {
                     answerBody(exchange)
                     Text(exchange.startedAt.formatted(date: .omitted, time: .shortened))
                         .font(.system(size: 9.5))
-                        .foregroundColor(DS.Colors.textTertiary)
+                        .foregroundColor(WispColor.Island.textTertiary)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white.opacity(0.07))
+                        .fill(WispColor.Island.controlFill)
                 )
                 Spacer(minLength: 60)
             }
@@ -738,7 +734,7 @@ struct NotchWorkspaceView: View {
                         ? (exchange.steps.last?.summary ?? "Thinking…")
                         : companionManager.browserActivityText))
                     .font(.system(size: 12))
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundColor(WispColor.Island.textSecondary)
                     .lineLimit(2)
             }
         case .failed(let failureReason):
@@ -750,11 +746,11 @@ struct NotchWorkspaceView: View {
         case .cancelled, .interrupted:
             Text(exchange.status == .interrupted ? "Interrupted — Wisp quit while this was running." : "Stopped.")
                 .font(.system(size: 12))
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(WispColor.Island.textTertiary)
         case .succeeded:
             Text(answerText.isEmpty ? "Done." : answerText)
                 .font(.system(size: 12.5))
-                .foregroundColor(DS.Colors.textPrimary)
+                .foregroundColor(WispColor.Island.textPrimary)
                 .lineSpacing(2)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -803,7 +799,7 @@ struct NotchWorkspaceView: View {
                 .lineLimit(1)
                 .truncationMode(isListening ? .head : .tail)
         }
-        .foregroundColor(DS.Colors.textPrimary)
+        .foregroundColor(WispColor.Island.textPrimary)
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
         .frame(height: 38)
@@ -824,18 +820,18 @@ struct NotchWorkspaceView: View {
         HStack(spacing: 7) {
             Image(systemName: "keyboard")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(WispColor.Island.textTertiary)
             TextField("Type…", text: $typedQuestionText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
-                .foregroundColor(DS.Colors.textPrimary)
+                .foregroundColor(WispColor.Island.textPrimary)
                 .focused($isTypeFieldFocused)
                 .onSubmit(sendTypedQuestion)
             if !typedQuestionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button(action: sendTypedQuestion) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 17))
-                        .foregroundColor(WispColor.Brand.sage)
+                        .foregroundColor(WispColor.Island.textSecondary)
                 }
                 .buttonStyle(.plain)
                 .pointerCursor()
@@ -846,11 +842,11 @@ struct NotchWorkspaceView: View {
         .frame(width: 230, height: 38)
         .background(
             Capsule(style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(WispColor.Island.controlFill)
         )
         .overlay(
             Capsule(style: .continuous)
-                .strokeBorder(isTypeFieldFocused ? WispColor.Brand.sage.opacity(0.7) : DS.Colors.borderSubtle, lineWidth: 1)
+                .strokeBorder(isTypeFieldFocused ? WispColor.Island.textTertiary : WispColor.Island.separator, lineWidth: 1)
         )
         .animation(.easeOut(duration: 0.15), value: isTypeFieldFocused)
     }
@@ -892,8 +888,10 @@ struct NotchWorkspaceView: View {
     }
 }
 
-/// The notch's General page: the switches for how Wisp sounds.
+/// The notch's General page: the switches for how Wisp sounds and how the
+/// island looks.
 private struct NotchGeneralSettingsPage: View {
+    @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
     @ObservedObject private var announcementPreferences = AnnouncementPreferences.shared
@@ -901,6 +899,29 @@ private struct NotchGeneralSettingsPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                DashboardCard(title: "Island") {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Surface")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(WispColor.Island.textPrimary)
+                            Text("Black blends into the notch, like the iPhone's Dynamic Island. Liquid Glass lets the desktop show through.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(WispColor.Island.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                        Picker("", selection: $islandStylePreference.surfaceStyle) {
+                            ForEach(NotchIslandSurfaceStyle.allCases) { surfaceStyle in
+                                Text(surfaceStyle.displayName).tag(surfaceStyle)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .pointerCursor()
+                    }
+                }
                 DashboardCard(title: "Voice") {
                     VStack(alignment: .leading, spacing: 12) {
                         settingToggleRow(
@@ -940,10 +961,10 @@ private struct NotchGeneralSettingsPage: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DS.Colors.textPrimary)
+                    .foregroundStyle(WispColor.Island.textPrimary)
                 Text(detail)
                     .font(.system(size: 11))
-                    .foregroundStyle(DS.Colors.textSecondary)
+                    .foregroundStyle(WispColor.Island.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
