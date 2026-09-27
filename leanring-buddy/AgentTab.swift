@@ -17,6 +17,7 @@ struct AgentTab: View {
     @ObservedObject private var shortcutsBridge = ShortcutsBridge.shared
     @ObservedObject private var announcementPreferences = AnnouncementPreferences.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
+    @ObservedObject private var chromeExtensionBridge = ChromeExtensionBridge.shared
 
     var body: some View {
         ScrollView {
@@ -28,6 +29,7 @@ struct AgentTab: View {
                 approvalsCard
                 announcementsCard
                 appleShortcutsCard
+                chromeTabsCard
                 permissionsCard
             }
             .padding(16)
@@ -315,6 +317,83 @@ struct AgentTab: View {
         case .unavailable(let reason):
             return reason
         }
+    }
+
+    // MARK: - Chrome tabs
+
+    /// Whether the Wisp Tabs Chrome extension is connected, and how to
+    /// install it when it isn't.
+    private var chromeTabsCard: some View {
+        DashboardCard(title: "Chrome Tabs") {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(chromeExtensionBridge.isExtensionConnected ? DS.Colors.success : DS.Colors.warning)
+                    .frame(width: 7, height: 7)
+                    .padding(.top, 5)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(chromeTabsStatusTitle)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text(chromeTabsStatusDetail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if !chromeExtensionBridge.isExtensionConnected {
+                    Button {
+                        openChromeExtensionsPage()
+                    } label: {
+                        Text("Open Extensions")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                                    .fill(DS.Colors.surface3)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                    .nativeTooltip("Open chrome://extensions to load the Wisp Tabs extension")
+                }
+            }
+        }
+    }
+
+    private var chromeTabsStatusTitle: String {
+        switch chromeExtensionBridge.connectionState {
+        case .notStarted, .waitingForExtension:
+            return "Extension not connected"
+        case .connected(_, let browserName):
+            return "Connected to \(browserName)"
+        case .failed:
+            return "Couldn't start the tab bridge"
+        }
+    }
+
+    private var chromeTabsStatusDetail: String {
+        switch chromeExtensionBridge.connectionState {
+        case .notStarted, .waitingForExtension:
+            return "In Chrome, turn on Developer mode in chrome://extensions, choose Load unpacked, and pick the chrome-extension folder in Wisp's source. It connects to Wisp on this Mac only (127.0.0.1)."
+        case .connected:
+            return "Say \"organize my tabs\", \"group my tabs by site\" or \"close duplicate tabs\". Only loose tabs are grouped — pinned tabs and your own groups stay put."
+        case .failed(let reason):
+            return reason
+        }
+    }
+
+    /// chrome:// pages have no URL handler of their own, so the address is
+    /// handed to Chrome directly.
+    private func openChromeExtensionsPage() {
+        guard let chromeApplicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome"),
+              let extensionsPageURL = URL(string: "chrome://extensions") else { return }
+        NSWorkspace.shared.open(
+            [extensionsPageURL],
+            withApplicationAt: chromeApplicationURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        )
     }
 
     // MARK: - Permissions

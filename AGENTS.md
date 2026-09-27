@@ -299,6 +299,24 @@ cloud dependency to the local path, without asking.
   `BrowserCursorGuide` (implemented by `CompanionManager`, which converts the element's global
   screen point into a `.marker` `ScreenAnnotation` on that display). Element
   screen coordinates come from `BrowserController.screenPoint(ofElementID:)`.
+- **Chrome tab organizing** (the **Wisp Tabs** extension, `chrome-extension/` at the repo root,
+  loaded unpacked): AppleScript can't reach `chrome.tabGroups`, so a thin MV3 extension exposes tab
+  primitives (`getTabs`/`groupTabs`/`ungroupTabs`/`closeTabs`) and Wisp does all the deciding.
+  `ChromeExtensionBridge` listens on a WebSocket bound to **127.0.0.1:47823** (Network.framework;
+  `requiredInterfaceType = .loopback` still bound `*`, so it uses `requiredLocalEndpoint`) and
+  **rejects any handshake whose `Origin` isn't `chrome-extension://kpblnefdnmlodeagdnfodnbbdbkacnce`**.
+  That ID is pinned by the `key` in the manifest, and a web page can't forge `Origin`. The extension
+  dials in (a service worker can't listen), pings every 20s to stay alive, and an alarm retries every
+  30s. `ChromeTabOrganizer` plans per window and only touches **loose, unpinned tabs** (a tab joins an
+  existing group only when it has the exact same name, so re-running is incremental). It groups by site
+  (`ChromeSiteNamer`, deterministic) or by topic (one text-only model call listing tabs as 1…N, since
+  page titles are untrusted and the parsed reply can only name listed numbers; falls back to site). It
+  also closes duplicates (`ChromeDuplicateTabFinder`: keeps the showing tab, never closes pinned or
+  audible tabs). Plain commands ("organize my tabs", "group my tabs by site", "close duplicate tabs",
+  "ungroup my tabs") are recognised by `ChromeTabCommandRouter` inside `BrowserCommandRouter`
+  (`.chromeTabs`) and run without the model's tool choice, like tab commands and without agent mode. The
+  agent gets `chrome_list_tabs`/`chrome_organize_tabs`/`chrome_close_duplicate_tabs`/`chrome_close_tabs`/
+  `chrome_ungroup_tabs` (browser scope). Status and install help live in the Agent tab's Chrome Tabs card.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -504,6 +522,9 @@ Grouped by what they do. Line counts are approximate.
 |------|-------|---------|
 | `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
+| `ChromeExtensionBridge.swift` | ~330 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts, `connectionState` for the Agent tab. |
+| `ChromeTabOrganizer.swift` | ~600 | Tab organizing: `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per-window plans, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered prompt + strict reply parsing), `ChromeTabCommand`, and `ChromeTabOrganizer` (runs a plan through the bridge). |
+| `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserAgentLoop.swift` | ~720 | Long-horizon browser agent for cloud providers: observe→act loop (cap 30), line-grammar actions incl. batched form fills, stuck detection, untrusted-page prompt rules. Also `BrowserActionSafety` (which clicks/sends need the always-ask confirmation). |
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
 | `AgentToolRegistry.swift` | ~640 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |

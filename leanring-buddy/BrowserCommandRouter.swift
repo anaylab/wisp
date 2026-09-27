@@ -55,11 +55,19 @@ enum BrowserCommandRouter {
         /// A web task, already rephrased where that lets the deterministic
         /// planner take it ("search for x" → "search google for x").
         case browserTask(request: String)
+        /// Organizing tabs through the Wisp Tabs Chrome extension — grouping
+        /// and closing duplicates need `chrome.tabGroups`, which AppleScript
+        /// can't reach.
+        case chromeTabs(ChromeTabCommand)
     }
 
     static func route(_ transcript: String) -> Route? {
         let text = normalize(transcript)
         guard !text.isEmpty else { return nil }
+
+        if let chromeTabCommand = ChromeTabCommandRouter.command(for: transcript) {
+            return .chromeTabs(chromeTabCommand)
+        }
 
         if let tabCommand = tabCommand(in: text) {
             return .tabCommand(tabCommand)
