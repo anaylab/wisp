@@ -14,12 +14,14 @@ import Foundation
 import Speech
 
 enum BuddyPushToTalkShortcut {
-    enum ShortcutOption {
+    enum ShortcutOption: String, CaseIterable, Identifiable {
         case shiftFunction
         case controlOption
         case shiftControl
         case controlOptionSpace
         case shiftControlSpace
+
+        var id: String { rawValue }
 
         var displayText: String {
             switch self {
@@ -80,11 +82,59 @@ enum BuddyPushToTalkShortcut {
         }
     }
 
-    enum ShortcutTransition {
-        case none
-        case pressed
-        case released
+    /// What holding the chord means this time.
+    ///
+    /// Adding shift to the existing chord rather than inventing a second one:
+    /// the mental model stays "same keys, shift means type it instead of say
+    /// it", and there is no new combination to learn or collide with.
+    enum InvocationMode: Sendable, Equatable {
+        /// Ctrl+Option — ask a question, hear an answer.
+        case assistant
+        /// Ctrl+Option+Shift — dictate into whatever has focus.
+        case dictation
     }
+
+    /// A double-tap gesture other than a hold — currently only the double-tap
+    /// that toggles hands-free dictation.
+    enum DoubleTapAction: Sendable, Equatable {
+        case handsFreeDictate
+    }
+
+    /// A quick tap (press and release) of the hold chord, as opposed to holding
+    /// it. Currently only opens the text composer.
+    enum TapAction: Sendable, Equatable {
+        case textComposer
+    }
+
+    /// A hold shorter than this is treated as a tap, not a held press. Short
+    /// enough that a real "hold to talk" is never mistaken for a tap (speech does
+    /// not start this fast), long enough to catch a deliberate quick tap.
+    static let tapMaxDuration: TimeInterval = 0.22
+
+    enum ShortcutTransition: Equatable {
+        case none
+        case pressed(InvocationMode)
+        /// A quick tap of the hold chord (e.g. tap Ctrl+Option to type).
+        case tapped(TapAction)
+        /// A recognised double-tap of a bare modifier (e.g. Control twice).
+        case doubleTapped(DoubleTapAction)
+        /// Shift landed a moment after the chord did.
+        ///
+        /// Nobody presses three modifiers simultaneously. Ctrl+Option is
+        /// satisfied the instant option goes down, which is typically tens of
+        /// milliseconds before shift arrives, so deciding the mode at that
+        /// instant reads every dictation attempt as a question. The mode is
+        /// therefore allowed to settle briefly after the press.
+        case modeChanged(InvocationMode)
+        case released(InvocationMode)
+    }
+
+    /// How long after the chord is first satisfied the mode may still change.
+    ///
+    /// Long enough to cover human stagger between modifier keys, short enough
+    /// that it cannot flip part-way through a sentence — speech does not begin
+    /// this quickly.
+    static let invocationModeSettlingWindow: TimeInterval = 0.3
 
     private enum ShortcutEventType {
         case flagsChanged
@@ -92,10 +142,24 @@ enum BuddyPushToTalkShortcut {
         case keyUp
     }
 
-    static let currentShortcutOption: ShortcutOption = .controlOption
+    /// The hold chord for Talk (and, with Shift added, Dictate). Now a `var` so
+    /// `ShortcutBindingStore` can rebind it at runtime; only ever read/written on
+    /// the main thread (the CGEvent tap callback runs on the main run loop), so
+    /// `nonisolated(unsafe)` is accurate rather than a hazard.
+    nonisolated(unsafe) static var currentShortcutOption: ShortcutOption = .controlOption
+
+    /// The bare modifier whose double-tap toggles hands-free dictation, or nil
+    /// when hands-free is disabled. Same main-thread-only contract as above.
+    nonisolated(unsafe) static var handsFreeDoubleTapModifier: NSEvent.ModifierFlags? = .control
+
+    /// A tap in a double-tap must be at least this quick; a slower press is a hold.
+    static let doubleTapMaxTapDuration: TimeInterval = 0.30
+    /// The two taps of a double-tap must fall within this window of each other.
+    static let doubleTapBetweenTapsInterval: TimeInterval = 0.40
+
     static let pushToTalkKeyCode: UInt16 = 49 // Space
-    static let pushToTalkDisplayText = currentShortcutOption.displayText
-    static let pushToTalkTooltipText = "push to talk (\(pushToTalkDisplayText))"
+    static var pushToTalkDisplayText: String { currentShortcutOption.displayText }
+    static var pushToTalkTooltipText: String { "push to talk (\(pushToTalkDisplayText))" }
 
     static func shortcutTransition(
         for event: NSEvent,
@@ -166,11 +230,19 @@ enum BuddyPushToTalkShortcut {
             let isShortcutCurrentlyPressed = modifierFlags.contains(modifierOnlyFlags)
 
             if isShortcutCurrentlyPressed && !wasShortcutPreviouslyPressed {
-                return .pressed
+                // Shift has to be checked explicitly. The base test is
+                // `contains`, so Ctrl+Option+Shift satisfies Ctrl+Option too
+                // and would otherwise silently start the assistant when the
+                // user meant to dictate.
+                let mode: InvocationMode = modifierFlags.contains(.shift) ? .dictation : .assistant
+                return .pressed(mode)
             }
 
             if !isShortcutCurrentlyPressed && wasShortcutPreviouslyPressed {
-                return .released
+                // The mode is decided at press time and carried by the caller,
+                // so adding or dropping shift mid-hold cannot switch modes
+                // halfway through an utterance.
+                return .released(.assistant)
             }
 
             return .none
@@ -186,13 +258,13 @@ enum BuddyPushToTalkShortcut {
             && keyCode == pushToTalkKeyCode
             && matchesModifierFlags
             && !wasShortcutPreviouslyPressed {
-            return .pressed
+            return .pressed(modifierFlags.contains(.shift) ? .dictation : .assistant)
         }
 
         if shortcutEventType == .keyUp
             && keyCode == pushToTalkKeyCode
             && wasShortcutPreviouslyPressed {
-            return .released
+            return .released(.assistant)
         }
 
         return .none
@@ -519,6 +591,7 @@ final class BuddyDictationManager: NSObject, ObservableObject {
 
         let activeTranscriptionSession = try await transcriptionProvider.startStreamingSession(
             keyterms: buildTranscriptionKeyterms(),
+            localeIdentifier: DictationSettingsStore.shared.selectedLanguageLocaleIdentifier,
             onTranscriptUpdate: { [weak self] transcriptText in
                 Task { @MainActor in
                     self?.latestRecognizedText = transcriptText
@@ -664,7 +737,7 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             "localhost"
         ]
 
-        let combinedKeyterms = baseKeyterms + contextualKeyterms
+        let combinedKeyterms = baseKeyterms + contextualKeyterms + DictationSettingsStore.shared.customDictionaryWords
         var uniqueNormalizedKeyterms = Set<String>()
         var orderedKeyterms: [String] = []
 

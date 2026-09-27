@@ -4,17 +4,39 @@
 <dict>
 	<key>LSUIElement</key>
 	<true/>
-	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/julianjear/makesomething-mac-app/main/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>/l3d2rw5ZZFRU3AadP/w2Zf8FHfhA6bKv16BQOV5OSk=</string>
 	<key>VoiceTranscriptionProvider</key>
-	<string>assemblyai</string>
+	<string>apple</string>
+	<key>VoiceTTSProvider</key>
+	<string>apple</string>
+	<key>ChatterboxTTSServerURL</key>
+	<string>http://localhost:8004</string>
+	<key>ChatProvider</key>
+	<string>ollama</string>
+	<key>CodeProjectDirectory</key>
+	<string>~/Downloads/clicky</string>
+	<key>AgentModeEnabled</key>
+	<string>true</string>
+	<key>OllamaModel</key>
+	<string>qwen2.5vl:3b</string>
+	<key>OllamaBaseURL</key>
+	<string>http://localhost:11434</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Clicky uses your microphone so you can talk to it</string>
+	<string>Wisp listens while you hold the hotkey so you can talk to it. Your voice is transcribed on this Mac and never leaves it.</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Clicky needs screen recording access to see your screen and help you.</string>
+	<string>Wisp looks at your screen to answer questions about what you are seeing. Screenshots are read by a model running on this Mac and are never uploaded.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Clicky uses speech recognition to transcribe your voice when you talk to it</string>
+	<string>Wisp turns your speech into text using on-device recognition. Nothing you say is sent anywhere.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Wisp reads your upcoming events on this Mac to show them in the notch. Your calendar is read on-device and never uploaded.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Wisp reads your upcoming events on this Mac to show them in the notch. Your calendar is read on-device and never uploaded.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Wisp reads your reminders on this Mac to show them in the notch, and adds a reminder when you ask it to. Your reminders are read on-device and never uploaded by Wisp.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Wisp reads your reminders on this Mac to show them in the notch, and adds a reminder when you ask it to. Your reminders are read on-device and never uploaded by Wisp.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Wisp controls your web browser (Chrome or Safari) when you ask it to — opening tabs, going to sites and working through pages — and asks Music or Spotify what is currently playing to show it in the notch.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Wisp uses your location to find places near you — like coffee or restaurants — when you ask. Your location is used on this Mac to search Apple Maps and is never uploaded by Wisp.</string>
 </dict>
 </plist>

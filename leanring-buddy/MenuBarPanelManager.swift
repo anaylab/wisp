@@ -15,7 +15,13 @@ import AppKit
 import SwiftUI
 
 extension Notification.Name {
-    static let clickyDismissPanel = Notification.Name("clickyDismissPanel")
+    static let wispDismissPanel = Notification.Name("wispDismissPanel")
+    /// Posted by the panel's Dashboard button. The app delegate owns the
+    /// dashboard window, so the request travels by notification rather than
+    /// threading a controller reference down through the SwiftUI view.
+    static let wispOpenDashboard = Notification.Name("wispOpenDashboard")
+    /// Closes the chat/settings workspace in the notch, if it's open.
+    static let wispCloseNotchWorkspace = Notification.Name("wispCloseNotchWorkspace")
 }
 
 /// Custom NSPanel subclass that can become the key window even with
@@ -41,7 +47,7 @@ final class MenuBarPanelManager: NSObject {
         createStatusItem()
 
         dismissPanelObserver = NotificationCenter.default.addObserver(
-            forName: .clickyDismissPanel,
+            forName: .wispDismissPanel,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -65,15 +71,15 @@ final class MenuBarPanelManager: NSObject {
 
         guard let button = statusItem?.button else { return }
 
-        button.image = makeClickyMenuBarIcon()
+        button.image = makeWispMenuBarIcon()
         button.image?.isTemplate = true
         button.action = #selector(statusItemClicked)
         button.target = self
     }
 
-    /// Draws the clicky triangle as a menu bar icon. Uses the same shape
+    /// Draws the wisp triangle as a menu bar icon. Uses the same shape
     /// and rotation as the in-app cursor so the menu bar icon matches.
-    private func makeClickyMenuBarIcon() -> NSImage {
+    private func makeWispMenuBarIcon() -> NSImage {
         let iconSize: CGFloat = 18
         let image = NSImage(size: NSSize(width: iconSize, height: iconSize))
         image.lockFocus()
@@ -144,8 +150,14 @@ final class MenuBarPanelManager: NSObject {
     }
 
     private func createPanel() {
+        // The menu-bar panel is a dark glass HUD surface like the notch, so it
+        // pins a dark colour scheme regardless of the system appearance — its
+        // adaptive tokens then resolve to their dark values and its near-white
+        // text stays legible over any desktop (the dashboard is the surface that
+        // follows light/dark).
         let companionPanelView = CompanionPanelView(companionManager: companionManager)
             .frame(width: panelWidth)
+            .environment(\.colorScheme, .dark)
 
         let hostingView = NSHostingView(rootView: companionPanelView)
         hostingView.frame = NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight)
@@ -224,7 +236,7 @@ final class MenuBarPanelManager: NSObject {
                 guard panel.isVisible else { return }
 
                 // If permissions aren't all granted yet, a system dialog
-                // may have focus — don't dismiss during onboarding.
+                // may have focus — don't dismiss while it is up.
                 if !self.companionManager.allPermissionsGranted && !NSApp.isActive {
                     return
                 }

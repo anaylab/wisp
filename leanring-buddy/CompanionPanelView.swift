@@ -12,7 +12,8 @@ import SwiftUI
 
 struct CompanionPanelView: View {
     @ObservedObject var companionManager: CompanionManager
-    @State private var emailInput: String = ""
+    @ObservedObject private var stackReadout = ActiveStackReadout.shared
+    @ObservedObject private var toolRegistry = AgentToolRegistry.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -21,16 +22,30 @@ struct CompanionPanelView: View {
                 .background(DS.Colors.borderSubtle)
                 .padding(.horizontal, 16)
 
+            if companionManager.allPermissionsGranted {
+                voiceAffordanceSection
+                    .padding(.top, 14)
+                    .padding(.horizontal, 16)
+            }
+
             permissionsCopySection
                 .padding(.top, 16)
                 .padding(.horizontal, 16)
 
-            if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
+            if companionManager.allPermissionsGranted {
                 Spacer()
-                    .frame(height: 12)
+                    .frame(height: 14)
 
-                modelPickerRow
+                activeStackSection
                     .padding(.horizontal, 16)
+
+                if CompanionManager.isAgentModeEnabled {
+                    Spacer()
+                        .frame(height: 8)
+
+                    agentModeRow
+                        .padding(.horizontal, 16)
+                }
             }
 
             if !companionManager.allPermissionsGranted {
@@ -41,28 +56,27 @@ struct CompanionPanelView: View {
                     .padding(.horizontal, 16)
             }
 
-            if !companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
+            if companionManager.allPermissionsGranted {
                 Spacer()
-                    .frame(height: 16)
+                    .frame(height: 8)
 
-                startButton
+                cursorVisibilityToggleRow
                     .padding(.horizontal, 16)
+
+                if !AppleSpeechSynthesisClient.hasHighQualityVoiceInstalled {
+                    Spacer()
+                        .frame(height: 8)
+
+                    voiceUpgradeHint
+                        .padding(.horizontal, 16)
+                }
             }
 
-            // Show Clicky toggle — hidden for now
-            // if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
-            //     Spacer()
-            //         .frame(height: 16)
-            //
-            //     showClickyCursorToggleRow
-            //         .padding(.horizontal, 16)
-            // }
-
-            if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
+            if companionManager.allPermissionsGranted {
                 Spacer()
-                    .frame(height: 16)
+                    .frame(height: 8)
 
-                dmFarzaButton
+                localAssuranceCard
                     .padding(.horizontal, 16)
             }
 
@@ -78,7 +92,16 @@ struct CompanionPanelView: View {
                 .padding(.vertical, 12)
         }
         .frame(width: 320)
-        .background(panelBackground)
+        .onAppear { stackReadout.startPolling() }
+        .onDisappear { stackReadout.stopPolling() }
+        // Liquid Glass surface so the panel refracts the desktop behind it and
+        // reads as the same material as the notch HUD, instead of a flat dark
+        // fill. The window itself is already clear/non-opaque, so the glass shows
+        // through; the shadow keeps it lifted off the desktop.
+        .wispGlassSurface(cornerRadius: 14)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
+        .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Header
@@ -92,7 +115,7 @@ struct CompanionPanelView: View {
                     .frame(width: 8, height: 8)
                     .shadow(color: statusDotColor.opacity(0.6), radius: 4)
 
-                Text("Clicky")
+                Text("Wisp")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(DS.Colors.textPrimary)
             }
@@ -104,7 +127,7 @@ struct CompanionPanelView: View {
                 .foregroundColor(DS.Colors.textTertiary)
 
             Button(action: {
-                NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
+                NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
             }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
@@ -126,34 +149,30 @@ struct CompanionPanelView: View {
 
     @ViewBuilder
     private var permissionsCopySection: some View {
-        if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
-            Text("Hold Control+Option to talk.")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(DS.Colors.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else if companionManager.allPermissionsGranted && !companionManager.hasSubmittedEmail {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Drop your email to get started.")
+        if companionManager.allPermissionsGranted {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Hold Control+Option to talk.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(DS.Colors.textSecondary)
-                Text("If I keep building this, I'll keep you in the loop.")
+                // Same chord plus shift, so there is one thing to remember
+                // rather than two unrelated shortcuts.
+                Text("Add Shift to dictate into whatever you're typing in.")
                     .font(.system(size: 11))
                     .foregroundColor(DS.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else if companionManager.allPermissionsGranted {
-            Text("You're all set. Hit Start to meet Clicky.")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(DS.Colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        } else if companionManager.hasCompletedOnboarding {
-            // Permissions were revoked after onboarding — tell user to re-grant
+        } else if companionManager.hasEverHadAllPermissions {
+            // Granted once and later revoked — ask for them back rather than
+            // showing the first-run copy again.
             VStack(alignment: .leading, spacing: 6) {
                 Text("Permissions needed")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(DS.Colors.textSecondary)
 
-                Text("Some permissions were revoked. Grant all four below to keep using Clicky.")
+                Text("Some permissions were revoked. Grant all four below to keep using Wisp.")
                     .font(.system(size: 11))
                     .foregroundColor(DS.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -161,16 +180,16 @@ struct CompanionPanelView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Hi, I'm Farza. This is Clicky.")
+                Text("This is Wisp.")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(DS.Colors.textSecondary)
 
-                Text("A side project I made for fun to help me learn stuff as I use my computer.")
+                Text("A companion that watches your screen and talks back — running entirely on this Mac.")
                     .font(.system(size: 11))
                     .foregroundColor(DS.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Nothing runs in the background. Clicky will only take a screenshot when you press the hot key. So, you can give that permission in peace. If you are still sus, eh, I can't do much there champ.")
+                Text("Nothing runs in the background. Wisp only takes a screenshot while you hold the hotkey, and the models that read it run on this Mac — so the screenshot never leaves the machine.")
                     .font(.system(size: 11))
                     .foregroundColor(Color(red: 0.9, green: 0.4, blue: 0.4))
                     .fixedSize(horizontal: false, vertical: true)
@@ -179,66 +198,6 @@ struct CompanionPanelView: View {
         }
     }
 
-    // MARK: - Email + Start Button
-
-    @ViewBuilder
-    private var startButton: some View {
-        if !companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
-            if !companionManager.hasSubmittedEmail {
-                VStack(spacing: 8) {
-                    TextField("Enter your email", text: $emailInput)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .foregroundColor(DS.Colors.textPrimary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                                .fill(Color.white.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                                .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
-                        )
-
-                    Button(action: {
-                        companionManager.submitEmail(emailInput)
-                    }) {
-                        Text("Submit")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(DS.Colors.textOnAccent)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: DS.CornerRadius.large, style: .continuous)
-                                    .fill(emailInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                          ? DS.Colors.accent.opacity(0.4)
-                                          : DS.Colors.accent)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .pointerCursor()
-                    .disabled(emailInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            } else {
-                Button(action: {
-                    companionManager.triggerOnboarding()
-                }) {
-                    Text("Start")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(DS.Colors.textOnAccent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.CornerRadius.large, style: .continuous)
-                                .fill(DS.Colors.accent)
-                        )
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-            }
-        }
-    }
 
     // MARK: - Permissions
 
@@ -545,9 +504,9 @@ struct CompanionPanelView: View {
 
 
 
-    // MARK: - Show Clicky Cursor Toggle
+    // MARK: - Show Wisp Cursor Toggle
 
-    private var showClickyCursorToggleRow: some View {
+    private var cursorVisibilityToggleRow: some View {
         HStack {
             HStack(spacing: 8) {
                 Image(systemName: "cursorarrow")
@@ -555,16 +514,26 @@ struct CompanionPanelView: View {
                     .foregroundColor(DS.Colors.textTertiary)
                     .frame(width: 16)
 
-                Text("Show Clicky")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Keep cursor on screen")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+                    // Says what the off state does, because that is the
+                    // default and a toggle whose unset state is unexplained
+                    // reads as a feature being withheld.
+                    Text(companionManager.isCursorAlwaysVisible
+                         ? "Always visible, follows your pointer"
+                         : "Appears only while you're talking to it")
+                        .font(.system(size: 10))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
             }
 
             Spacer()
 
             Toggle("", isOn: Binding(
-                get: { companionManager.isClickyCursorEnabled },
-                set: { companionManager.setClickyCursorEnabled($0) }
+                get: { companionManager.isCursorAlwaysVisible },
+                set: { companionManager.setCursorAlwaysVisible($0) }
             ))
             .toggleStyle(.switch)
             .labelsHidden()
@@ -596,86 +565,216 @@ struct CompanionPanelView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Model Picker
+    // MARK: - Active stack
 
-    private var modelPickerRow: some View {
-        HStack {
-            Text("Model")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(DS.Colors.textSecondary)
+    /// What is running, in place of a picker that chose nothing.
+    ///
+    /// The model row leads and carries a residency dot, because whether the
+    /// model is warm is the difference between a reply in about a second and
+    /// one that pays several seconds to load first — the thing a user is
+    /// actually trying to predict when they open this panel mid-conversation.
+    // MARK: - Voice affordance
 
-            Spacer()
-
-            HStack(spacing: 0) {
-                modelOptionButton(label: "Sonnet", modelID: "claude-sonnet-4-6")
-                modelOptionButton(label: "Opus", modelID: "claude-opus-4-6")
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
-            )
-        }
-        .padding(.vertical, 4)
+    /// The same living waveform used in the notch HUD, so the menu bar panel and
+    /// the dynamic island show one shared voice element rather than each having
+    /// its own status readout.
+    private var voiceAffordanceSection: some View {
+        WispVoiceAffordance(
+            voiceState: companionManager.voiceState,
+            audioPowerLevel: companionManager.currentAudioPowerLevel,
+            accentColor: CursorAppearanceStore.shared.color
+        )
     }
 
-    private func modelOptionButton(label: String, modelID: String) -> some View {
-        let isSelected = companionManager.selectedModel == modelID
-        return Button(action: {
-            companionManager.setSelectedModel(modelID)
-        }) {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(isSelected ? DS.Colors.textPrimary : DS.Colors.textTertiary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
-                )
-        }
-        .buttonStyle(.plain)
-        .pointerCursor()
-    }
+    private var activeStackSection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(residencyColor)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: residencyColor.opacity(0.6), radius: 3)
 
-    // MARK: - DM Farza Button
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(stackReadout.chatModelName)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
-    private var dmFarzaButton: some View {
-        Button(action: {
-            if let url = URL(string: "https://x.com/farzatv") {
-                NSWorkspace.shared.open(url)
-            }
-        }) {
-            HStack(spacing: 8) {
-                Image(systemName: "bubble.left.fill")
-                    .font(.system(size: 12, weight: .medium))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Got feedback? DM me")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Bugs, ideas, anything — I read every message.")
+                    Text(residencyDescription)
                         .font(.system(size: 10))
                         .foregroundColor(DS.Colors.textTertiary)
+                        .lineLimit(1)
                 }
+
+                Spacer(minLength: 0)
             }
-            .foregroundColor(DS.Colors.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+
+            Divider().background(DS.Colors.borderSubtle)
+
+            stackRow(label: "Speech", value: stackReadout.speechProviderName)
+            stackRow(label: "Voice", value: stackReadout.voiceProviderName)
+        }
+        .wispGlassCard(cornerRadius: DS.CornerRadius.medium)
+    }
+
+    private func stackRow(label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundColor(DS.Colors.textTertiary)
+                .frame(width: 44, alignment: .leading)
+
+            Text(value)
+                .font(.system(size: 11))
+                .foregroundColor(DS.Colors.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+
+    private var residencyColor: Color {
+        switch stackReadout.residency {
+        case .resident: return DS.Colors.success
+        case .notLoaded: return DS.Colors.warning
+        case .unreachable: return DS.Colors.destructive
+        }
+    }
+
+    private var residencyDescription: String {
+        switch stackReadout.residency {
+        case .resident(_, let sizeText):
+            return "\(stackReadout.chatProviderName) · \(sizeText) loaded"
+        case .notLoaded:
+            // Named as a delay rather than a state: "not loaded" invites the
+            // reading that something is broken, when it only means the next
+            // question pays the load cost once.
+            return "\(stackReadout.chatProviderName) · cold, first reply is slower"
+        case .unreachable:
+            return "Ollama is not running"
+        }
+    }
+
+    // MARK: - Agent mode
+
+    /// Shown only when agent mode is on.
+    ///
+    /// It changes what a request can do — several model calls, tools, work
+    /// that outlives the conversation — so it belongs where the user can see
+    /// it, and absent rather than greyed out when off.
+    private var agentModeRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(DS.Colors.accentText)
+
+            Text("Agent mode on")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+
+            Spacer(minLength: 0)
+
+            Text("\(toolRegistry.definitions.count) tools")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(DS.Colors.textTertiary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(DS.Colors.accentSubtle)
+        )
+    }
+
+    // MARK: - Voice quality
+
+    /// Shown only while the installed voices are the robotic ones.
+    ///
+    /// macOS ships compact voices and says nothing about the better ones being
+    /// a free download, so someone hearing this app for the first time
+    /// reasonably concludes it just sounds like that. Opening the right pane
+    /// directly matters more than the words — the setting is four levels deep
+    /// and almost nobody finds it by looking.
+    private var voiceUpgradeHint: some View {
+        Button(action: {
+            let url = URL(string: "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent")
+            if let url { NSWorkspace.shared.open(url) }
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(DS.Colors.warningText)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Wisp sounds robotic")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+                    Text("Only basic voices are installed. Get a natural one free →")
+                        .font(.system(size: 10))
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(DS.Colors.warning.opacity(0.10))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                    .stroke(DS.Colors.warning.opacity(0.25), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
         .pointerCursor()
+    }
+
+    // MARK: - Local assurance
+
+    /// Replaces the upstream "DM the author" button.
+    ///
+    /// That button pointed at the original author's social account, which in a
+    /// fork misdirects bug reports about changes they did not write. What earns
+    /// the space instead is the thing that actually distinguishes this build:
+    /// every model runs on this machine, so nothing said or seen leaves it.
+    private var localAssuranceCard: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.laptopcomputer")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(DS.Colors.success)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(stackReadout.isEntirelyLocal ? "Runs entirely on this Mac" : "Partly using cloud services")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(DS.Colors.textSecondary)
+                Text(stackReadout.isEntirelyLocal
+                    ? "Speech, vision and voice are all local. Nothing you say or show it is sent anywhere."
+                    : "One or more stages are configured to use a cloud service, so some of what you say or show it leaves this Mac.")
+                    .font(.system(size: 10))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(DS.Colors.success.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .stroke(DS.Colors.success.opacity(0.25), lineWidth: 0.5)
+        )
     }
 
     // MARK: - Footer
@@ -688,7 +787,7 @@ struct CompanionPanelView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "power")
                         .font(.system(size: 11, weight: .medium))
-                    Text("Quit Clicky")
+                    Text("Quit Wisp")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundColor(DS.Colors.textTertiary)
@@ -696,34 +795,26 @@ struct CompanionPanelView: View {
             .buttonStyle(.plain)
             .pointerCursor()
 
-            if companionManager.hasCompletedOnboarding {
-                Spacer()
+            Spacer()
 
-                Button(action: {
-                    companionManager.replayOnboarding()
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.circle")
-                            .font(.system(size: 11, weight: .medium))
-                        Text("Watch Onboarding Again")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundColor(DS.Colors.textTertiary)
+            Button(action: {
+                NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chart.bar.doc.horizontal")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("Dashboard")
+                        .font(.system(size: 12, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .pointerCursor()
+                .foregroundColor(DS.Colors.textTertiary)
             }
+            .buttonStyle(.plain)
+            .pointerCursor()
+
         }
     }
 
     // MARK: - Visual Helpers
-
-    private var panelBackground: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(DS.Colors.background)
-            .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
-            .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
-    }
 
     private var statusDotColor: Color {
         if !companionManager.isOverlayVisible {
@@ -740,7 +831,7 @@ struct CompanionPanelView: View {
     }
 
     private var statusText: String {
-        if !companionManager.hasCompletedOnboarding || !companionManager.allPermissionsGranted {
+        if !companionManager.allPermissionsGranted {
             return "Setup"
         }
         if !companionManager.isOverlayVisible {

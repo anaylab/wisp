@@ -1,162 +1,111 @@
-Update: April 27, 2026.
+# Wisp
 
-Hi there! I'm Farza, the guy that made Clicky.
+An AI companion that lives next to your cursor on macOS. Hold a hotkey, talk to it,
+and it answers out loud — looking at your screen when the question is about your
+screen, and flying a small blue cursor over to point at whatever it is talking about.
 
-The existing codebase remains open source. Tinker with it, make it yours, start a company out of it, do whatever you want I don't mind. But, for all the new stuff I'm hacking on, gonna keep it private. To get the latest Clicky, you can go [here](https://www.heyclicky.com/).
+**Everything runs on your own machine.** No API keys, no account, no analytics, and
+no network traffic except to `localhost`. Nothing you say or show it leaves the Mac
+it is running on.
 
-I also tweeted about this [here](https://x.com/FarzaTV/status/2043402737828962489).
+---
 
-Go crazy with this repo!! It's an MIT license.
+## What it uses
 
-# Hi, this is Clicky.
-It's an AI teacher that lives as a buddy next to your cursor. It can see your screen, talk to you, and even point at stuff. Kinda like having a real teacher next to you.
+| Stage | What runs it | Where |
+|---|---|---|
+| Speech to text | Apple Speech framework | on-device |
+| Answering and vision | Ollama `qwen2.5vl:7b` | `localhost:11434` |
+| Speaking | `AVSpeechSynthesizer` | on-device |
 
-Download it [here](https://www.clicky.so/) for free.
+The model is held in memory while you are talking to it and released after five
+minutes of quiet, so it is not sitting on six gigabytes of RAM while you work.
 
-Here's the [original tweet](https://x.com/FarzaTV/status/2041314633978659092) that kinda blew up for a demo for more context.
+**Voice quality is worth one minute of setup.** macOS ships compact voices that
+sound robotic. Enhanced and premium voices are a free download under
+**System Settings → Accessibility → Spoken Content → System Voice → Manage Voices**,
+and Wisp automatically picks the highest-quality English voice you have installed.
 
-![Clicky — an ai buddy that lives on your mac](clicky-demo.gif)
+---
 
-This is the open-source version of Clicky for those that want to hack on it, build their own features, or just see how it works under the hood.
+## Requirements
 
-## Get started with Claude Code
+- Apple-silicon Mac, macOS 14.2+
+- 16GB RAM recommended
+- [Ollama](https://ollama.com/download)
+- Xcode
 
-The fastest way to get this running is with [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
-
-Once you get Claude running, paste this:
-
-```
-Hi Claude.
-
-Clone https://github.com/farzaa/clicky.git into my current directory.
-
-Then read the CLAUDE.md. I want to get Clicky running locally on my Mac.
-
-Help me set up everything — the Cloudflare Worker with my own API keys, the proxy URLs, and getting it building in Xcode. Walk me through it.
-```
-
-That's it. It'll clone the repo, read the docs, and walk you through the whole setup. Once you're running you can just keep talking to it — build features, fix bugs, whatever. Go crazy.
-
-## Manual setup
-
-If you want to do it yourself, here's the deal.
-
-### Prerequisites
-
-- macOS 14.2+ (for ScreenCaptureKit)
-- Xcode 15+
-- Node.js 18+ (for the Cloudflare Worker)
-- A [Cloudflare](https://cloudflare.com) account (free tier works)
-- API keys for: [Anthropic](https://console.anthropic.com), [AssemblyAI](https://www.assemblyai.com), [ElevenLabs](https://elevenlabs.io)
-
-### 1. Set up the Cloudflare Worker
-
-The Worker is a tiny proxy that holds your API keys. The app talks to the Worker, the Worker talks to the APIs. This way your keys never ship in the app binary.
+## Setup
 
 ```bash
-cd worker
-npm install
+ollama pull qwen2.5vl:7b
 ```
-
-Now add your secrets. Wrangler will prompt you to paste each one:
-
-```bash
-npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put ASSEMBLYAI_API_KEY
-npx wrangler secret put ELEVENLABS_API_KEY
-```
-
-For the ElevenLabs voice ID, open `wrangler.toml` and set it there (it's not sensitive):
-
-```toml
-[vars]
-ELEVENLABS_VOICE_ID = "your-voice-id-here"
-```
-
-Deploy it:
-
-```bash
-npx wrangler deploy
-```
-
-It'll give you a URL like `https://your-worker-name.your-subdomain.workers.dev`. Copy that.
-
-### 2. Run the Worker locally (for development)
-
-If you want to test changes to the Worker without deploying:
-
-```bash
-cd worker
-npx wrangler dev
-```
-
-This starts a local server (usually `http://localhost:8787`) that behaves exactly like the deployed Worker. You'll need to create a `.dev.vars` file in the `worker/` directory with your keys:
-
-```
-ANTHROPIC_API_KEY=sk-ant-...
-ASSEMBLYAI_API_KEY=...
-ELEVENLABS_API_KEY=...
-ELEVENLABS_VOICE_ID=...
-```
-
-Then update the proxy URLs in the Swift code to point to `http://localhost:8787` instead of the deployed Worker URL while developing. Grep for `clicky-proxy` to find them all.
-
-### 3. Update the proxy URLs in the app
-
-The app has the Worker URL hardcoded in a few places. Search for `your-worker-name.your-subdomain.workers.dev` and replace it with your Worker URL:
-
-```bash
-grep -r "clicky-proxy" leanring-buddy/
-```
-
-You'll find it in:
-- `CompanionManager.swift` — Claude chat + ElevenLabs TTS
-- `AssemblyAIStreamingTranscriptionProvider.swift` — AssemblyAI token endpoint
-
-### 4. Open in Xcode and run
 
 ```bash
 open leanring-buddy.xcodeproj
 ```
 
-In Xcode:
-1. Select the `leanring-buddy` scheme (yes, the typo is intentional, long story)
-2. Set your signing team under Signing & Capabilities
-3. Hit **Cmd + R** to build and run
+Select the `leanring-buddy` scheme and press Cmd+R. The app appears in the menu bar
+with no Dock icon. Grant the four permissions it asks for, then hold
+**Control + Option** and talk.
 
-The app will appear in your menu bar (not the dock). Click the icon to open the panel, grant the permissions it asks for, and you're good.
+> The Xcode project and scheme keep their original names, typo included. Only the
+> app is called Wisp.
 
-### Permissions the app needs
+### Running it outside Xcode
 
-- **Microphone** — for push-to-talk voice capture
-- **Accessibility** — for the global keyboard shortcut (Control + Option)
-- **Screen Recording** — for taking screenshots when you use the hotkey
-- **Screen Content** — for ScreenCaptureKit access
-
-## Architecture
-
-If you want the full technical breakdown, read `CLAUDE.md`. But here's the short version:
-
-**Menu bar app** (no dock icon) with two `NSPanel` windows — one for the control panel dropdown, one for the full-screen transparent cursor overlay. Push-to-talk streams audio over a websocket to AssemblyAI, sends the transcript + screenshot to Claude via streaming SSE, and plays the response through ElevenLabs TTS. Claude can embed `[POINT:x,y:label:screenN]` tags in its responses to make the cursor fly to specific UI elements across multiple monitors. All three APIs are proxied through a Cloudflare Worker.
-
-## Project structure
-
-```
-leanring-buddy/          # Swift source (yes, the typo stays)
-  CompanionManager.swift    # Central state machine
-  CompanionPanelView.swift  # Menu bar panel UI
-  ClaudeAPI.swift           # Claude streaming client
-  ElevenLabsTTSClient.swift # Text-to-speech playback
-  OverlayWindow.swift       # Blue cursor overlay
-  AssemblyAI*.swift         # Real-time transcription
-  BuddyDictation*.swift     # Push-to-talk pipeline
-worker/                  # Cloudflare Worker proxy
-  src/index.ts              # Three routes: /chat, /tts, /transcribe-token
-CLAUDE.md                # Full architecture doc (agents read this)
+```bash
+open -a /path/to/Wisp.app
 ```
 
-## Contributing
+Use `open`, not the binary directly. Launching `Wisp.app/Contents/MacOS/Wisp` from a
+shell skips LaunchServices registration, which stops macOS attributing the speech
+recognition request to the app bundle — it then aborts on the first push-to-talk with
+a misleading message about a missing usage description.
 
-PRs welcome. If you're using Claude Code, it already knows the codebase — just tell it what you want to build and point it at `CLAUDE.md`.
+---
 
-Got feedback? DM me on X [@farzatv](https://x.com/farzatv).
+## Features
+
+- **Pointing.** The model tags answers with screen coordinates and the blue cursor
+  flies there.
+- **Annotation.** Boxes, arrows and highlights drawn over the live screen.
+- **Dashboard.** Activity timeline, full conversation transcript, connected tools and
+  MCP servers, per-turn timing breakdowns, and a live memory readout.
+- **Agent mode.** Off by default behind `AgentModeEnabled` in `Info.plist`. When on,
+  the model can call tools, including work that runs in the background and notifies
+  you when it finishes. Anything that acts rather than reads asks permission first —
+  out loud, and on screen with approve and deny buttons.
+- **MCP.** Point `~/.wisp/mcp.json` at any stdio MCP server, using the same format
+  Claude Desktop uses.
+
+---
+
+## Configuration
+
+Everything is in `leanring-buddy/Info.plist`:
+
+| Key | Default | Notes |
+|---|---|---|
+| `ChatProvider` | `ollama` | |
+| `OllamaModel` | `qwen2.5vl:7b` | Smaller models are faster but stop emitting the coordinate tags the cursor depends on |
+| `OllamaBaseURL` | `http://localhost:11434` | |
+| `VoiceTranscriptionProvider` | `apple` | |
+| `VoiceTTSProvider` | `apple` | |
+| `AgentModeEnabled` | `false` | |
+
+---
+
+## Credits
+
+Wisp began as a fork of [Clicky](https://github.com/farzaa/clicky) by
+[Farza](https://github.com/farzaa), and is MIT licensed accordingly. The original
+sends voice, screenshots and conversations to cloud services through a Cloudflare
+Worker; this version replaces all of that with models running locally, and adds the
+dashboard, screen annotation, agent loop, tool confirmation and MCP client.
+
+Bugs and questions about *this* version belong here, not with the original author.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

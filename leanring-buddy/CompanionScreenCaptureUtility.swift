@@ -72,7 +72,7 @@ enum CompanionScreenCaptureUtility {
         for (displayIndex, display) in sortedDisplays.enumerated() {
             // Use NSScreen.frame (AppKit coordinates, bottom-left origin) so
             // displayFrame is in the same coordinate system as NSEvent.mouseLocation
-            // and the overlay window's screenFrame in BlueCursorView.
+            // and the overlay window's screenFrame in OverlayContentView.
             let displayFrame = nsScreenByDisplayID[display.displayID]?.frame
                 ?? CGRect(x: display.frame.origin.x, y: display.frame.origin.y,
                           width: CGFloat(display.width), height: CGFloat(display.height))
@@ -81,7 +81,14 @@ enum CompanionScreenCaptureUtility {
             let filter = SCContentFilter(display: display, excludingWindows: ownAppWindows)
 
             let configuration = SCStreamConfiguration()
-            let maxDimension = 1280
+            // Vision-model prompt evaluation dominates local inference and
+            // scales with image area, not file size. Measured against
+            // qwen2.5-vl on an M3 Pro: a 1280px capture costs 4049 image
+            // tokens and ~33s to encode, while 896px costs 1095 tokens and
+            // ~7s. Below 896px the token count stops falling (Ollama floors
+            // at its --image-min-tokens setting), so 896 is the point where
+            // the image is as large as it can be without costing extra time.
+            let maxDimension = 896
             let aspectRatio = CGFloat(display.width) / CGFloat(display.height)
             if display.width >= display.height {
                 configuration.width = maxDimension
@@ -96,10 +103,37 @@ enum CompanionScreenCaptureUtility {
                 configuration: configuration
             )
 
-            guard let jpegData = NSBitmapImageRep(cgImage: cgImage)
+            guard let freshJPEGData = NSBitmapImageRep(cgImage: cgImage)
                     .representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else {
                 continue
             }
+
+            // Hand back the previous frame's bytes when the screen has not
+            // changed. Ollama keys its encoded-image cache on the exact bytes,
+            // and a fresh capture of an unchanged screen is never byte-identical
+            // — JPEG noise and a ticking clock are enough — so without this a
+            // follow-up question re-encodes the same picture for 6.4s.
+            let (jpegData, didReuse) = await MainActor.run {
+                ScreenshotReuseCache.bytesToSend(
+                    forDisplay: display.displayID,
+                    freshData: freshJPEGData,
+                    freshImage: cgImage
+                )
+            }
+            if didReuse {
+                print("🖼️ Screen unchanged — reusing the cached frame (skips ~6s of image encoding)")
+            }
+
+            // Start on-device OCR of this frame now, off the main actor, so it
+            // is usually finished by the time the turn wants it — the
+            // push-to-talk capture runs while the user is still speaking.
+            // Keyed on the bytes actually sent, so an unchanged (reused) frame
+            // is never recognised twice. See `ScreenTextRecognizer`.
+            ScreenTextRecognizer.shared.beginRecognitionIfNeeded(
+                forDisplay: display.displayID,
+                imageData: jpegData,
+                screenshotImage: cgImage
+            )
 
             let screenLabel: String
             if sortedDisplays.count == 1 {

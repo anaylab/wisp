@@ -9,7 +9,6 @@
 
 import ServiceManagement
 import SwiftUI
-import Sparkle
 
 @main
 struct leanring_buddyApp: App {
@@ -30,31 +29,53 @@ struct leanring_buddyApp: App {
 @MainActor
 final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarPanelManager: MenuBarPanelManager?
+    private var notchWindowController: NotchWindowController?
     private let companionManager = CompanionManager()
-    private var sparkleUpdaterController: SPUStandardUpdaterController?
+    private var dashboardWindowController: DashboardWindowController?
+    private var openDashboardObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("🎯 Clicky: Starting...")
-        print("🎯 Clicky: Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
+        print("🎯 Wisp: Starting...")
+        print("🎯 Wisp: Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
 
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 0])
 
-        ClickyAnalytics.configure()
-        ClickyAnalytics.trackAppOpened()
+        WispAnalytics.configure()
+        WispAnalytics.trackAppOpened()
 
         menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
+
+        // The notch HUD is the resident primary surface. It shows on launch and
+        // stays put; the menu bar item remains as the settings entry point.
+        notchWindowController = NotchWindowController(companionManager: companionManager)
+        notchWindowController?.show()
+
+        let dashboardController = DashboardWindowController(companionManager: companionManager)
+        dashboardWindowController = dashboardController
+        openDashboardObserver = NotificationCenter.default.addObserver(
+            forName: .wispOpenDashboard,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+                dashboardController.showDashboard()
+            }
+        }
+
         companionManager.start()
-        // Auto-open the panel if the user still needs to do something:
-        // either they haven't onboarded yet, or permissions were revoked.
-        if !companionManager.hasCompletedOnboarding || !companionManager.allPermissionsGranted {
+        // Auto-open the panel only when the user still needs to do something,
+        // which now means one of the permissions is missing.
+        if !companionManager.allPermissionsGranted {
             menuBarPanelManager?.showPanelOnLaunch()
         }
         registerAsLoginItemIfNeeded()
-        // startSparkleUpdater()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         companionManager.stop()
+        // After stop(), so any task it cancelled is saved in its final state.
+        AgentTaskRegistry.shared.saveHistoryImmediately()
     }
 
     /// Registers the app as a login item so it launches automatically on
@@ -65,25 +86,11 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         if loginItemService.status != .enabled {
             do {
                 try loginItemService.register()
-                print("🎯 Clicky: Registered as login item")
+                print("🎯 Wisp: Registered as login item")
             } catch {
-                print("⚠️ Clicky: Failed to register as login item: \(error)")
+                print("⚠️ Wisp: Failed to register as login item: \(error)")
             }
         }
     }
 
-    private func startSparkleUpdater() {
-        let updaterController = SPUStandardUpdaterController(
-            startingUpdater: false,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
-        self.sparkleUpdaterController = updaterController
-
-        do {
-            try updaterController.updater.start()
-        } catch {
-            print("⚠️ Clicky: Sparkle updater failed to start: \(error)")
-        }
-    }
 }
