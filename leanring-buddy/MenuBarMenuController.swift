@@ -3,7 +3,7 @@
 //  leanring-buddy
 //
 //  The menu bar icon and its menu. Wisp is notch-first, so the menu bar item is
-//  a plain native menu — status, a way to ask, the handful of switches people
+//  a plain native menu — status, a way to ask, pausing, the handful of switches people
 //  flip often, and the way into the Wisp window — rather than the large custom
 //  panel it used to open, which duplicated the dashboard's settings.
 //
@@ -12,6 +12,7 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -19,11 +20,19 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let companionManager: CompanionManager
     private let statusMenu = NSMenu()
+    private var listeningPausedCancellable: AnyCancellable?
 
     init(companionManager: CompanionManager) {
         self.companionManager = companionManager
         super.init()
         createStatusItem()
+        // A paused Wisp dims its menu bar icon, the standard macOS cue for a
+        // status item that's switched off, so the pause is visible at a glance.
+        listeningPausedCancellable = companionManager.$isListeningPaused
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isListeningPaused in
+                self?.statusItem?.button?.appearsDisabled = isListeningPaused
+            }
     }
 
     // MARK: - Status item
@@ -66,7 +75,9 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
         menu.addItem(disabledItem(title: statusTitle))
         menu.addItem(disabledItem(
-            title: "Hold \(ShortcutBindingStore.shared.primaryHoldChord.displayText) to talk"
+            title: companionManager.isListeningPaused
+                ? "The talk shortcut is ignored until you resume"
+                : "Hold \(ShortcutBindingStore.shared.primaryHoldChord.displayText) to talk"
         ))
         menu.addItem(.separator())
 
@@ -83,6 +94,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         menu.addItem(actionItem(title: "Buddies", action: #selector(openBuddies)))
         menu.addItem(.separator())
 
+        let pauseListeningItem = actionItem(title: "Pause Listening", action: #selector(togglePauseListening))
+        pauseListeningItem.state = companionManager.isListeningPaused ? .on : .off
+        menu.addItem(pauseListeningItem)
+
         let speakRepliesItem = actionItem(title: "Speak Replies", action: #selector(toggleSpeakReplies))
         speakRepliesItem.state = VoiceOutputPreference.shared.isReplySpeechEnabled ? .on : .off
         menu.addItem(speakRepliesItem)
@@ -96,10 +111,13 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         menu.addItem(actionItem(title: "Quit Wisp", action: #selector(quitWisp), keyEquivalent: "q"))
     }
 
-    /// "Wisp — Ready", "Wisp — Listening…", "Wisp — Needs setup".
+    /// "Wisp — Ready", "Wisp — Listening…", "Wisp — Paused", "Wisp — Needs setup".
     private var statusTitle: String {
         if !companionManager.allPermissionsGranted {
             return "Wisp — Needs setup"
+        }
+        if companionManager.isListeningPaused {
+            return "Wisp — Paused"
         }
         let islandState = companionManager.islandState
         return islandState.isActive ? "Wisp — \(islandState.label)" : "Wisp — Ready"
@@ -142,6 +160,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
     @objc private func openSettings() {
         WispWindowNavigator.open(.general)
+    }
+
+    @objc private func togglePauseListening() {
+        companionManager.setListeningPaused(!companionManager.isListeningPaused)
     }
 
     @objc private func toggleSpeakReplies() {

@@ -557,15 +557,41 @@ final class CompanionManager: ObservableObject {
             .shortcutTransitionPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] transition in
-                self?.handleShortcutTransition(transition)
+                guard let self, !self.isListeningPaused else { return }
+                self.handleShortcutTransition(transition)
             }
 
         routineShortcutCancellable = globalPushToTalkShortcutMonitor
             .routineShortcutPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] routineDigit in
-                self?.handleRoutineShortcut(digit: routineDigit)
+                guard let self, !self.isListeningPaused else { return }
+                self.handleRoutineShortcut(digit: routineDigit)
             }
+    }
+
+    // MARK: - Pause listening
+
+    /// While paused, every talk gesture — hold to talk or dictate, tap to type,
+    /// the hands-free double-tap and routine digits — is ignored, so Wisp can't
+    /// be triggered by accident during a presentation, a game, or while another
+    /// app needs the chord. Typed questions (Today, Chat, the menu's Ask Wisp…)
+    /// still work: they're deliberate. Not persisted, so a relaunch always comes
+    /// back listening and a pause can't be forgotten indefinitely.
+    @Published private(set) var isListeningPaused = false
+
+    func setListeningPaused(_ shouldPause: Bool) {
+        guard shouldPause != isListeningPaused else { return }
+        isListeningPaused = shouldPause
+        // Pausing mid-hold would otherwise leave the recording running, since
+        // the release that ends it is now ignored.
+        if shouldPause && buddyDictationManager.isDictationInProgress {
+            pendingKeyboardShortcutStartTask?.cancel()
+            pendingKeyboardShortcutStartTask = nil
+            buddyDictationManager.cancelCurrentDictation(preserveDraftText: false)
+            voiceState = .idle
+            setActiveCommandMode(nil)
+        }
     }
 
     /// Whether the hold in progress is dictation rather than a question.
