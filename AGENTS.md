@@ -31,8 +31,12 @@ cloud dependency to the local path, without asking.
   activation policy to `.regular` while open, and drops back to `.accessory` on close.
 - **Surfaces (notch-first layout)**: the **notch** is where Wisp is *used* (answers, cards, quick
   panel, quick chat); the **Wisp window** is where it's *managed*; the **menu bar item** is a plain
-  native `NSMenu` (`MenuBarMenuController`: status, Ask Wisp…, Open Wisp, Chat, Buddies, Speak
-  Replies / Sound Cues checkmarks, Settings…, Quit — rebuilt in `menuNeedsUpdate`). The window
+  native `NSMenu` (`MenuBarMenuController`: status, Ask Wisp…, Open Wisp, Chat, Buddies, Pause
+  Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit — rebuilt in `menuNeedsUpdate`).
+  **Pause listening** (`CompanionManager.isListeningPaused` / `setListeningPaused`) drops every talk
+  gesture and routine digit at the shortcut sinks (cancelling a hold in progress); typed questions
+  still work. It isn't persisted, dims the menu bar icon (`appearsDisabled`), and shows a Resume
+  banner on Today and "Listening paused" in the notch chat's talk pill. The window
   (`WispWindow/`) replaced the old dashboard, the pop-out conversation window, the notch's own
   settings pages and the big menu bar panel, so every setting has exactly one home. It is a stock
   `NavigationSplitView` in an `NSWindow` whose `NSHostingController` bridges title + toolbar
@@ -678,7 +682,7 @@ Grouped by what they do. Line counts are approximate.
 | `MarketplaceTab.swift` | ~700 | Connections → Marketplace: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
 | `ShortcutsTab.swift` | ~250 | Settings → Shortcuts: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
 | `ActiveStackReadout.swift` | ~100 | "What's running": configured model/STT/TTS names from Info.plist plus Ollama residency, for the Wisp window's sidebar footer and Settings → General's What's running card. Also labels perf timings and "Asking …" steps. |
-| `MenuBarMenuController.swift` | ~165 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Speak Replies / Sound Cues checkmarks, Settings…, Quit). |
+| `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |

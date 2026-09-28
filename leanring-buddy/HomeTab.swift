@@ -318,6 +318,17 @@ struct HomeTab: View {
     private var needsYouAlerts: [NeedsYouAlert] {
         var alerts: [NeedsYouAlert] = []
 
+        if companionManager.isListeningPaused {
+            alerts.append(NeedsYouAlert(
+                id: "listening-paused",
+                symbolName: "pause.circle",
+                title: "Listening is paused",
+                detail: "The talk shortcut is off until you resume.",
+                actionTitle: "Resume",
+                action: { companionManager.setListeningPaused(false) }
+            ))
+        }
+
         if localServicesHealth.isLocalModelUnreachable {
             alerts.append(NeedsYouAlert(
                 id: "ollama",

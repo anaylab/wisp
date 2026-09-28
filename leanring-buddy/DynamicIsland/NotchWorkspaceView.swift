@@ -645,7 +645,9 @@ struct NotchWorkspaceView: View {
         case .responding:
             return "Responding…"
         case .idle:
-            return "Hold \(bindingStore.primaryHoldChord.displayText) to talk"
+            return companionManager.isListeningPaused
+                ? "Listening paused — type instead"
+                : "Hold \(bindingStore.primaryHoldChord.displayText) to talk"
         }
     }
 
