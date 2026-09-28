@@ -20,6 +20,8 @@ SOURCES=(
   leanring-buddy/StructuredTextToolProtocol.swift
   leanring-buddy/SpokenSentenceStreamer.swift
   leanring-buddy/AppBundleConfiguration.swift
+  leanring-buddy/SkillManager.swift
+  leanring-buddy/SkillIndex.swift
 )
 
 BUILD_DIR="$(mktemp -d)"

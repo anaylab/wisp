@@ -86,7 +86,10 @@ final class LocalOllamaAPI: BuddyVisionChatClient {
         // for the first request after the model loads into memory.
         config.timeoutIntervalForRequest = 180
         config.timeoutIntervalForResource = 300
-        config.waitsForConnectivity = true
+        // Ollama is on localhost, so there is no network to wait for: a
+        // refused connection means it isn't running. Waiting for connectivity
+        // turned that into a silent 300s hang before the turn failed.
+        config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
     }
 

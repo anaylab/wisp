@@ -25,25 +25,29 @@ public final class PostHogSDK {
 }
 STUB
 # Built as a real object as well as a module, so the final link resolves.
-swiftc -emit-module -module-name PostHog -target arm64-apple-macos14.0 \
+swiftc -emit-module -module-name PostHog -target arm64-apple-macos26.0 \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
   "$BUILD_DIR/stub/PostHog.swift" \
   -emit-module-path "$BUILD_DIR/stub/PostHog.swiftmodule"
-swiftc -c -parse-as-library -module-name PostHog -target arm64-apple-macos14.0 \
+swiftc -c -parse-as-library -module-name PostHog -target arm64-apple-macos26.0 \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
   "$BUILD_DIR/stub/PostHog.swift" -o "$BUILD_DIR/stub/PostHog.o"
 
+# Every Swift file under leanring-buddy/, subfolders included (DesignSystem/,
+# Components/, DynamicIsland/, WispWindow/, …). The agent runtime reaches
+# CompanionManager, which reaches most of the app, so a hand-picked list would
+# be nearly the whole target anyway and would go stale on every new file.
 APP_SOURCES=()
-for file in leanring-buddy/*.swift; do
+while IFS= read -r file; do
   [[ "$file" == *"leanring_buddyApp.swift" ]] && continue
   APP_SOURCES+=("$file")
-done
+done < <(find leanring-buddy -name '*.swift' | sort)
 
 # Flags mirror the app target's own settings (SWIFT_VERSION,
 # SWIFT_DEFAULT_ACTOR_ISOLATION, MemberImportVisibility) so the suite compiles
 # the code the same way Xcode does. Without -default-isolation MainActor,
 # bare swiftc reports actor-isolation errors the real build does not have.
-swiftc -target arm64-apple-macos14.0 \
+swiftc -target arm64-apple-macos26.0 \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
   -swift-version 5 \
   -default-isolation MainActor \

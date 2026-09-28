@@ -741,6 +741,20 @@ logs via `log stream --predicate 'process == "Wisp"'`.
 
 **Do NOT run `xcodebuild` from the terminal** — it invalidates TCC (Transparency, Consent, and Control) permissions and the app will need to re-request screen recording, accessibility, etc.
 
+**Standalone test suites** (plain `swiftc`, no Xcode build, no TCC reset; nothing needs to be
+running):
+
+```bash
+./Tests/ModelProviderContract/run.sh     # provider layer, ~10s
+./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
+```
+
+`ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a
+dependency on another source file, add that file to the list or the suite stops compiling.
+`AgentRuntimeIntegration` compiles every `.swift` file under `leanring-buddy/` (recursively,
+minus the `@main` entry point) with PostHog stubbed, because the agent runtime reaches
+`CompanionManager` and through it most of the app; a new third-party import needs a stub there.
+
 ## Local services
 
 With the default configuration only Ollama must be running (speech in and out is on-device):
