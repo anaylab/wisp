@@ -65,6 +65,13 @@ enum DictatedTextInserter {
 
         let focused = element as! AXUIElement
 
+        // Web content (Chrome, Electron apps like Claude or Slack, web views)
+        // must paste. Chromium reports selected text as settable there and the
+        // set returns success, but rich editors drop the change — so the text
+        // never appears and, because the call "succeeded", the paste fallback
+        // never runs either.
+        if isWebContentElement(focused) { return false }
+
         // Only attempt this on something that actually accepts text. Writing
         // selected text into a button or a list does nothing useful and, worse,
         // can report success.
@@ -76,6 +83,17 @@ enum DictatedTextInserter {
         return AXUIElementSetAttributeValue(
             focused, kAXSelectedTextAttribute as CFString, text as CFTypeRef
         ) == .success
+    }
+
+    /// Whether the element belongs to a web page rather than a native control.
+    /// Chromium and WebKit expose DOM attributes on web elements; native Cocoa
+    /// fields never do.
+    private static func isWebContentElement(_ element: AXUIElement) -> Bool {
+        var attributeNamesArray: CFArray?
+        guard AXUIElementCopyAttributeNames(element, &attributeNamesArray) == .success,
+              let attributeNames = attributeNamesArray as? [String] else { return false }
+        let webOnlyAttributeNames: Set<String> = ["AXDOMIdentifier", "AXDOMClassList", "ChromeAXNodeId"]
+        return attributeNames.contains { webOnlyAttributeNames.contains($0) }
     }
 
     // MARK: - Paste

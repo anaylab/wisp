@@ -35,7 +35,9 @@
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Wisp reads your reminders on this Mac to show them in the notch, and adds a reminder when you ask it to. Your reminders are read on-device and never uploaded by Wisp.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Wisp controls your web browser (Chrome or Safari) when you ask it to — opening tabs, going to sites and working through pages — and asks Music or Spotify what is currently playing to show it in the notch.</string>
+	<string>Wisp controls your web browser (Chrome or Safari) when you ask it to — opening tabs, going to sites and working through pages — asks Music or Spotify what is currently playing to show it in the notch, and sends a message from Messages when you ask it to text someone (always after you confirm).</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Wisp looks up the person you ask it to text — like "mom" or "sarah" — in your contacts on this Mac. Your contacts are read on-device and never uploaded by Wisp.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Wisp uses your location to find places near you — like coffee or restaurants — when you ask. Your location is used on this Mac to search Apple Maps and is never uploaded by Wisp.</string>
 </dict>

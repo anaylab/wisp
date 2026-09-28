@@ -1136,7 +1136,13 @@ final class CompanionManager: ObservableObject {
     /// `historyTitle` names the turn in History when the prompt itself would read
     /// badly there — a routine or skill run is listed by its name, not its whole
     /// instruction. Nil uses the transcript.
-    private func sendTranscriptToClaudeWithScreenshot(transcript: String, historyTitle: String? = nil) {
+    /// `skipsMessageCommandRouting` is set when a "text …" command turned out
+    /// not to name a contact and is being handed on as an ordinary turn.
+    private func sendTranscriptToClaudeWithScreenshot(
+        transcript: String,
+        historyTitle: String? = nil,
+        skipsMessageCommandRouting: Bool = false
+    ) {
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
 
@@ -1190,6 +1196,20 @@ final class CompanionManager: ObservableObject {
                     self.scheduleTransientHideIfNeeded()
                 }
             }
+            return
+        }
+
+        // "text mom i'm running late" goes straight to Messages, like Siri —
+        // not through the model's tool choice, which the local model is
+        // unreliable at. Not behind agent mode: the send is always put to the
+        // user on the confirmation card first, whatever else is switched on.
+        if !skipsMessageCommandRouting,
+           let messageCommandCandidates = MessageCommandParser.candidates(from: transcript) {
+            runDirectMessageCommand(
+                messageCommandCandidates,
+                transcript: transcript,
+                historyTitle: historyTitle
+            )
             return
         }
 
@@ -2522,6 +2542,122 @@ extension CompanionManager {
         }
         islandFlashClearWorkItem = clearWorkItem
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: clearWorkItem)
+    }
+}
+
+// MARK: - Direct message commands
+
+extension CompanionManager {
+    /// Sends a message recognised by `MessageCommandParser`: finds the contact,
+    /// shows the "New Message" confirmation card (always — session auto-approve
+    /// never skips a send), and only on a yes hands it to Messages.
+    ///
+    /// A command whose recipient was only guessed and names nobody in Contacts
+    /// ("text size bigger") is not a message after all, and is sent on as an
+    /// ordinary turn.
+    fileprivate func runDirectMessageCommand(
+        _ messageCommandCandidates: [MessageCommandCandidate],
+        transcript: String,
+        historyTitle: String?
+    ) {
+        PerfMetricsRecorder.shared.abandonTurn()
+        voiceState = .processing
+        currentReplyText = ""
+        let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
+
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            let recipientResolution = await MessageRecipientResolver.resolve(candidates: messageCommandCandidates)
+            guard !Task.isCancelled else { return }
+
+            if case .notAMessageCommand = recipientResolution {
+                self.voiceState = .idle
+                self.sendTranscriptToClaudeWithScreenshot(
+                    transcript: transcript,
+                    historyTitle: historyTitle,
+                    skipsMessageCommandRouting: true
+                )
+                return
+            }
+
+            let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+            let startedAt = Date()
+            let replyText: String
+            let didSucceed: Bool
+            var wasDeclinedByUser = false
+
+            switch recipientResolution {
+            case .resolved(let resolvedOutgoingMessage):
+                let preparedToolInput = AgentToolRegistry.sendIMessageToolInput(for: resolvedOutgoingMessage)
+                let decision = await ToolConfirmationCoordinator.shared.requestApproval(
+                    toolName: MessagingToolNames.sendIMessage,
+                    toolInput: preparedToolInput
+                )
+                guard !Task.isCancelled else {
+                    AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+                    return
+                }
+                if decision.isApproved {
+                    do {
+                        try MessagesAppSender.send(
+                            messageText: resolvedOutgoingMessage.messageText,
+                            to: resolvedOutgoingMessage.recipientHandle
+                        )
+                        replyText = "sent to \(resolvedOutgoingMessage.recipientDisplayName.lowercased())."
+                        didSucceed = true
+                    } catch {
+                        replyText = error.localizedDescription
+                        didSucceed = false
+                    }
+                } else {
+                    replyText = "okay, i didn't send it."
+                    didSucceed = false
+                    wasDeclinedByUser = true
+                }
+
+            case .cannotSend(let reason):
+                replyText = reason
+                didSucceed = false
+
+            case .notAMessageCommand:
+                return
+            }
+
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(
+                    kind: .tool(name: MessagingToolNames.sendIMessage),
+                    summary: didSucceed ? "Sent through Messages — no model call" : "Messages: \(replyText)",
+                    startedAt: startedAt,
+                    durationSeconds: Date().timeIntervalSince(startedAt),
+                    isError: !didSucceed && !wasDeclinedByUser
+                ),
+                to: taskID
+            )
+            // Declining is the user's choice, not a failure worth flagging in History.
+            AgentTaskRegistry.shared.finishTask(
+                taskID,
+                status: didSucceed || wasDeclinedByUser ? .succeeded : .failed(replyText),
+                finalText: replyText
+            )
+
+            self.conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                BuddyChatMessage(role: .user, text: transcript),
+                BuddyChatMessage(role: .assistant, text: replyText),
+            ]))
+            self.conversationTranscript.trimToRecentTurns(10)
+
+            self.currentReplyText = replyText
+            if !wasDeclinedByUser { self.flashIsland(didSucceed ? .success : .error) }
+
+            if isReplySpeechEnabled {
+                self.voiceState = .responding
+                try? await self.ttsProvider.speakText(replyText)
+            }
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
     }
 }
 

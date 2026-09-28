@@ -33,6 +33,9 @@ enum AgentToolScope: String, CaseIterable {
     /// because "remember that…" shares no vocabulary with the others, and
     /// without it the two tools would surface only on lexical luck.
     case memory
+    /// Texting someone and looking them up in Contacts (`send_imessage`,
+    /// `find_contact`).
+    case messaging
     case general
 
     /// Words that indicate this scope, weighted equally.
@@ -57,6 +60,10 @@ enum AgentToolScope: String, CaseIterable {
             // Not "memory": "how much memory is free" is about RAM, and should
             // stay in the general scope.
             return ["remember", "forget", "memorize", "keep in mind", "note that"]
+        case .messaging:
+            // Not bare "text": "the text on screen" is a screen question.
+            return ["message", "imessage", "sms", "send a text", "text message",
+                    "contact", "phone number", "email address", "whose number"]
         case .general:
             return []
         }
@@ -99,6 +106,8 @@ enum AgentToolScope: String, CaseIterable {
                 if text.contains(term) { total += 1 }
             }
             if scope == .browser && namesAWebDestination { score += 2 }
+            // "text sam …" — the verb leading the request is the clearest sign.
+            if scope == .messaging && text.hasPrefix("text ") { score += 1 }
             if score > bestScore {
                 bestScore = score
                 bestScope = scope
@@ -122,6 +131,8 @@ enum AgentToolScope: String, CaseIterable {
             return name == "delegate_coding_task" || name.hasPrefix("filesystem__")
         case .memory:
             return name == "remember" || name == "forget"
+        case .messaging:
+            return name == MessagingToolNames.sendIMessage || name == MessagingToolNames.findContact
         case .general:
             // What a conversation plausibly reaches for: the things that
             // answer a question about the user's own machine right now.
