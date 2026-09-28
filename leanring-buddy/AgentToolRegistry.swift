@@ -593,6 +593,7 @@ final class AgentToolRegistry: ObservableObject {
         registerReminderTools()
         registerScreenTextTools()
         registerShortcutsTools()
+        registerChromeTabTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

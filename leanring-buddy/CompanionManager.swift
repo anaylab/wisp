@@ -323,6 +323,8 @@ final class CompanionManager: ObservableObject {
         // The browser step loop marks what it acts on; this is how it reaches
         // the overlay this object owns.
         AgentToolRegistry.shared.browserCursorGuide = self
+        // Loopback only; the Wisp Tabs extension dials in whenever Chrome runs.
+        ChromeExtensionBridge.shared.start()
         restoreRecentConversationHistory()
         connectMCPServersIfAgentModeEnabled()
         bindVoiceStateObservation()
@@ -1195,11 +1197,15 @@ final class CompanionManager: ObservableObject {
         // measured calling no tool at all for "open a new tab", "open youtube"
         // or "go to github.com" — it said "sure" and did nothing — so a plain
         // instruction must not depend on it choosing to act. Tab commands are
-        // like the fast commands above and always allowed; a web task drives
-        // pages, so it stays behind the same agent-mode switch as the tools.
+        // like the fast commands above and always allowed, as is organizing
+        // tabs (it only rearranges them); a web task drives pages, so it stays
+        // behind the same agent-mode switch as the tools.
         if let browserRoute = BrowserCommandRouter.route(transcript) {
             let isTabCommand: Bool
-            if case .tabCommand = browserRoute { isTabCommand = true } else { isTabCommand = false }
+            switch browserRoute {
+            case .tabCommand, .chromeTabs: isTabCommand = true
+            case .browserTask: isTabCommand = false
+            }
             if isTabCommand || Self.isAgentModeEnabled {
                 runDirectBrowserRoute(browserRoute, transcript: transcript)
                 return
@@ -2557,6 +2563,11 @@ extension CompanionManager {
 
             case .browserTask(let request):
                 (replyText, didSucceed) = await self.runDirectBrowserTask(request: request, controller: controller)
+
+            case .chromeTabs(let chromeTabCommand):
+                (replyText, didSucceed) = await ChromeTabOrganizer.perform(
+                    chromeTabCommand, modelProvider: self.selectedModelProvider
+                )
             }
 
             guard !Task.isCancelled else {
