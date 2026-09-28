@@ -52,13 +52,13 @@ Cloud models are strictly opt-in, bring-your-own-key, and labelled as such.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/assets/screenshots/dashboard.png" alt="The Wisp dashboard's Today page with an ask bar, upcoming meetings and one-click routines" width="100%">
-  <br><sub><b>Dashboard.</b> Ask anything, see what's next, and run routines in one click.</sub>
+  <img src="docs/assets/screenshots/window-today.png" alt="The Wisp window's Today page with a native sidebar, an ask bar, upcoming meetings and one-click routines" width="100%">
+  <br><sub><b>The Wisp window.</b> One native Mac window for everything you manage: today, chat, buddies, routines, history, connections and settings.</sub>
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshots/menu-bar-and-settings.png" alt="The Wisp menu bar panel, the quick-type composer and the shortcut settings" width="100%">
-  <br><sub><b>Menu bar panel, quick composer and settings.</b> Tap <kbd>⌃</kbd><kbd>⌥</kbd> to type instead of talk; every model, voice and shortcut is shown and configurable.</sub>
+  <img src="docs/assets/screenshots/menu-and-settings.png" alt="Wisp's native menu bar menu next to Settings → General with permissions and what's running" width="100%">
+  <br><sub><b>Menu bar and settings.</b> A plain native menu for the quick stuff; Settings shows every permission, the model that's answering and whether anything leaves your Mac.</sub>
 </p>
 
 ## Features
@@ -185,12 +185,13 @@ in **Sources**.
 
 ## Configuration
 
-Most things live in the dashboard (click the menu bar icon → **Manage**). Shipped defaults are
+Most things live in the Wisp window (menu bar icon → **Open Wisp**, or **Open Wisp** in the
+notch). Shipped defaults are
 in [`leanring-buddy/Info.plist`](leanring-buddy/Info.plist):
 
 | Key | Default | Notes |
 |---|---|---|
-| `ChatProvider` | `ollama` | Default hint only — pick a provider in the dashboard |
+| `ChatProvider` | `ollama` | Default hint only — pick a provider in Settings → Model |
 | `OllamaModel` | `qwen2.5vl:3b` | Bigger models point more accurately but answer slower |
 | `OllamaBaseURL` | `http://localhost:11434` | |
 | `VoiceTranscriptionProvider` | `apple` | |
@@ -247,7 +248,7 @@ issues go through [SECURITY.md](SECURITY.md), not public issues.
 Wisp began as a fork of [Clicky](https://github.com/farzaa/clicky) by
 [Farza](https://github.com/farzaa) and is MIT licensed accordingly. The original sends
 voice, screenshots and conversations to cloud services through a Cloudflare Worker; Wisp
-replaces all of that with models running on your Mac, and adds the notch island, dashboard,
+replaces all of that with models running on your Mac, and adds the notch island, the Wisp window,
 screen annotation, agent loop, browser control, buddies, glance cards and MCP client.
 
 Questions and bugs about Wisp belong here, not with the original author.

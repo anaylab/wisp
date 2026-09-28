@@ -13,8 +13,8 @@ marker, and can draw boxes, arrows and highlights on screen.
 **Local-first and private by default.** Out of the box everything runs on this machine: the
 local Ollama model, on-device speech, and the local TTS server, with the only network
 traffic being HTTP to `localhost` (Ollama on 11434, Chatterbox TTS on 8004) — no Cloudflare
-Worker and no analytics. The model backend is now *selectable*: a user can opt in, in the
-dashboard, to a bring-your-own-key cloud provider (`ModelProviderFactory` /
+Worker and no analytics. The model backend is now *selectable*: a user can opt in, in
+Settings → Model, to a bring-your-own-key cloud provider (`ModelProviderFactory` /
 `BuddyChatProviderSelection`, key in the Keychain via `ProviderKeychainStore`), which sends
 screenshots and the transcript off this machine and is labelled as such. Local remains the
 default and the private path — do not make a cloud provider the default, and do not add a
@@ -22,10 +22,25 @@ cloud dependency to the local path, without asking.
 
 ## Architecture
 
-- **App Type**: Menu bar-only (`LSUIElement=true`), no dock icon. The dashboard raises the
+- **App Type**: Menu bar-only (`LSUIElement=true`), no dock icon. The Wisp window raises the
   activation policy to `.regular` while open, and drops back to `.accessory` on close.
-- **Framework**: SwiftUI (macOS native) with AppKit bridging for menu bar panel, cursor
-  overlay, and dashboard window
+- **Surfaces (notch-first layout)**: the **notch** is where Wisp is *used* (answers, cards, quick
+  panel, quick chat); the **Wisp window** is where it's *managed*; the **menu bar item** is a plain
+  native `NSMenu` (`MenuBarMenuController`: status, Ask Wisp…, Open Wisp, Chat, Buddies, Speak
+  Replies / Sound Cues checkmarks, Settings…, Quit — rebuilt in `menuNeedsUpdate`). The window
+  (`WispWindow/`) replaced the old dashboard, the pop-out conversation window, the notch's own
+  settings pages and the big menu bar panel, so every setting has exactly one home. It is a stock
+  `NavigationSplitView` in an `NSWindow` whose `NSHostingController` bridges title + toolbar
+  (`sceneBridgingOptions`); sidebar sections are `WispSection` (Today, Chat, Buddies, Routines,
+  History · Manage: Connections, Settings) and a multi-page section switches pages with a segmented
+  control in the toolbar (`WispPage`). Anything opens it at a page with
+  `WispWindowNavigator.open(_:)` (closes the notch workspace + quick panel first). On launch with a
+  permission missing, the window opens on Today, which leads with the `PermissionsChecklist`.
+  Look: native macOS (system sidebar, unified toolbar, `WispColor.windowBackground` /
+  `groupedCardBackground` / `cardSeparator` system colours, native `.bordered` /
+  `.borderedProminent` controls), Wisp colours only as the accent (`.tint(WispColor.accentText)`).
+- **Framework**: SwiftUI (macOS native) with AppKit bridging for the notch, cursor overlay, menu
+  bar item and the Wisp window
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
 - **Chat / Vision**: a pluggable `ModelProvider`, chosen at runtime via
   `BuddyChatProviderSelection` and built by `ModelProviderFactory`. Default is local Ollama
@@ -62,7 +77,7 @@ cloud dependency to the local path, without asking.
   Reusable components live in `Components/` (`WispGlassPanel`/`WispGlassButtonStyle`/`WispGlassIcon`,
   `WispGlassInput`, `WispMark`, `WispIcon`). **Do not reintroduce hardcoded hex** — reference the
   tokens.
-- **Light/dark**: the **dashboard follows the system appearance** (its `WispColor` tokens resolve
+- **Light/dark**: the **Wisp window follows the system appearance** (its `WispColor` tokens resolve
   light or dark). The **notch HUD, on-screen overlay, and menu-bar panel stay a dark glass
   material in every appearance** — they pin `.environment(\.colorScheme, .dark)` so their adaptive
   tokens resolve dark, keeping near-white text legible over any wallpaper. `wispGlassSurface` /
@@ -80,7 +95,7 @@ cloud dependency to the local path, without asking.
   a static mode, and a paused `TimelineView` clock while at rest. It replaced the old rotated
   `Triangle` glyph in the notch. The app icon (`Assets.xcassets/AppIcon.appiconset`) is the same ribbon on a
   dark squircle, and the menu bar status icon (a template image drawn from `WispRibbonShape`), the
-  dashboard sidebar header and the text composer all use the mark too; the README banner, icon and
+  text composer and sidebar status use the mark too; the README banner, icon and
   screenshots live in `docs/assets/`. Icons are the single-stroke **Liquid Icon System**
   (`Components/WispIcon.swift`): bespoke glyphs for the high-value actions (message, search, mic,
   send, voice, files, calendar, gear-free settings) with an SF-Symbol fallback for the long tail.
@@ -112,8 +127,9 @@ cloud dependency to the local path, without asking.
   sounds, default on, muted from the notch header's bell toggle): listening onset, thinking (turn
   start), reply landed, and success/error (from `flashIsland`). The notch glass is
   **non-interactive** (`wispNotchGlassSurface`) so the surface animates cheaply.
-- **Chat & settings in the notch** (HeyClicky-style workspace): the quick panel's footer **Chat**
-  button and header gear open `NotchWorkspaceView` (760×480) hanging from the notch —
+- **Chat in the notch** (HeyClicky-style workspace): the quick panel's footer **Chat** button
+  opens `NotchWorkspaceView` (760×480) hanging from the notch (the header gear and the footer's
+  **Open Wisp** open the Wisp window instead) —
   `NotchViewModel.workspacePage` + `requestWorkspacePage`. Opening it is a click, not a hover, so
   `NotchWindowController.setWorkspacePage` may resize the window (grow before the morph, shrink
   0.4s after the collapse) without the old resize-on-hover feedback loop; the SwiftUI root fills
@@ -123,8 +139,8 @@ cloud dependency to the local path, without asking.
   being edited, a turn is listening, or a button is held; otherwise closes after 0.6s outside, on
   Esc (`NotchPanel.cancelOperation`), the ✕, or `.wispCloseNotchWorkspace`. `.wispDismissPanel`
   (push-to-talk start) does not close it, and reply/card/morning-banner auto-present is skipped while
-  it's open (the chat shows the answer). Settings pages reuse the dashboard tabs (`PerformanceTab`
-  is internal for this). The quick panel's middle sections scroll within the fixed window so its
+  it's open (the chat shows the answer). The workspace has no settings pages any more — its
+  Settings button opens the window's Settings. The quick panel's middle sections scroll within the fixed window so its
   footer stays reachable. `nativeTooltip`'s overlay view returns nil from `hitTest` — before, it
   swallowed clicks on the button beneath it.
 - **Buddies** (HeyClicky's "Clickys"): named, coloured agents that each own one job, listed under
@@ -182,7 +198,7 @@ cloud dependency to the local path, without asking.
   Network kinds are gated by
   `GlanceCardDataPreference` (default on) and labelled "Live · source"; on-device kinds are
   gated only by their macOS permission (`places` is both — network-gated *and* it requests
-  Location permission on first use). Managed in the dashboard's **Sources tab**. Adding an
+  Location permission on first use). Managed in the Wisp window's **Connections → Sources** page. Adding an
   app = one data provider + one template.
 - **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor, downscaled to 896px
 - **Element Pointing**: the model embeds `[POINT:x,y:label:screenN]` tags; `CompanionManager`
@@ -229,7 +245,7 @@ cloud dependency to the local path, without asking.
   user-chosen colour from `CursorAppearanceStore` (Cursor tab: blue/red/yellow/green).
 - **Agent loop**: off by default behind `AgentModeEnabled` in Info.plist. When on, tools
   are called via structured `[TOOL:name:{json}]` tags rather than native tool_calls, since
-  the local model is unreliable at the latter. Surfaced in the dashboard's Agent tab: the
+  the local model is unreliable at the latter. Surfaced in Settings → Agent: the
   **working folder** (`AgentSettingsStore`, read by the tool registry; defaults to
   `CodeProjectDirectory`), a **session auto-approve** toggle (`ToolConfirmationCoordinator.autoApproveThisSession`
   — short-circuits the confirmation prompt, reset every launch), and **permission** rows with
@@ -348,7 +364,7 @@ cloud dependency to the local path, without asking.
   `docs/mcp-marketplace-architecture.md`. Remote servers now work: a `~/.wisp/mcp.json` entry
   with a `url` (and optional `headers` for auth) connects over `MCPStreamableHTTPTransport`
   (`MCPStreamableHTTPTransport.swift`); an entry with a `command` is stdio as before. The
-  dashboard's **Marketplace tab** (`MarketplaceTab.swift`) browses a bundled curated registry
+  **Connections → Marketplace** page (`MarketplaceTab.swift`) browses a bundled curated registry
   (`curated-mcp-registry.json`) and installs/removes/enables servers via `InstalledMCPServerStore`,
   which owns `~/.wisp/mcp.json` (preserving unknown keys) and reloads the manager live. Installing
   is separate from exposing: `MCPManager` registers **all** allowed tools (the per-server
@@ -371,7 +387,7 @@ cloud dependency to the local path, without asking.
   actor on a dispatch queue, a 120s run timeout (`ShortcutsBridge.runTimeoutSeconds`; the process
   is terminated on timeout *or* task cancellation), input/output through per-run temp files,
   output capped at 2000 chars. The list (`shortcuts list --show-identifiers`) is cached 5 min and
-  refreshed on demand (dashboard button, or a name miss). `run_shortcut` resolves only an exact
+  refreshed on demand (Settings → Agent button, or a name miss). `run_shortcut` resolves only an exact
   name (case/punctuation-insensitive, unique) — never fuzzy, because the user approved that name.
   It is declared with worst-case metadata (write + destructive + external) **and** listed in
   `ToolCallSafety.alwaysAskBareToolNames`, so it asks **even under session auto-approve** (what a
@@ -405,18 +421,17 @@ cloud dependency to the local path, without asking.
   `MemoryStore.shared.promptInstructions()`, so it applies with or without agent mode. In agent
   mode the model can call `remember` (`.writing`) and `forget` (destructive; refuses a vague
   query matching >3 facts) — both confirm, since the file shapes every later prompt; the
-  `.memory` `AgentToolScope` routes "remember that…"/"forget…" to them. The dashboard's
-  **Memory tab** lists facts with delete buttons, reveals memory.md, and clears conversation
+  `.memory` `AgentToolScope` routes "remember that…"/"forget…" to them. History → **Memory** lists facts with delete buttons, reveals memory.md, and clears conversation
   history (which also empties the live transcript via `onConversationHistoryCleared`).
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 
 ### Key Architecture Decisions
 
-**Menu Bar Panel Pattern**: The companion panel uses `NSStatusItem` for the menu bar icon
-and a custom borderless `NSPanel` for the floating control panel. This gives full control
-over appearance and avoids standard macOS menu/popover chrome. The panel is non-activating
-so it doesn't steal focus.
+**Menu Bar Menu**: The menu bar item is an `NSStatusItem` with a native `NSMenu`
+(`MenuBarMenuController`). It used to open a large custom `NSPanel` that duplicated the
+dashboard's settings; with the notch as the primary surface, the menu bar only needs status,
+a way to ask, two switches and the way into the Wisp window.
 
 **Screen Overlay**: A full-screen transparent `NSPanel` (one per screen) hosts the
 assistant's on-screen surfaces — the tool-confirmation card and the drawn markers, boxes,
@@ -442,7 +457,7 @@ bar on non-notch Macs. The menu bar `NSStatusItem` remains, now as the settings 
 **Global Push-To-Talk Shortcut**: Uses a listen-only `CGEvent` tap rather than an AppKit
 global monitor, so modifier-based shortcuts like ctrl+option are detected reliably in the
 background. Bindings are data-driven via `ShortcutBindingStore` (the source of truth for the
-notch cheat-sheet and the dashboard's Shortcuts tab), which pushes live values into the plain
+notch cheat-sheet and Settings → Shortcuts), which pushes live values into the plain
 statics the tap reads on the main thread (`BuddyPushToTalkShortcut.currentShortcutOption` /
 `.handsFreeDoubleTapModifier`). The tap recognises three gestures: **hold** the chord
 (Talk; Dictate = hold + Shift; action on release), **tap** the chord (a release shorter than
@@ -498,11 +513,11 @@ Grouped by what they do. Line counts are approximate.
 | `ShortcutBindingStore.swift` | ~150 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier. Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
 | `TextComposerWindowController.swift` | ~230 | The tap-to-type text composer: a keyable floating panel (activates the app for typing, Return to send, Esc to dismiss) whose typed question runs through the normal screenshot turn. |
 | `DictationSettingsStore.swift` | ~110 | Source of truth for dictation language + custom dictionary. Persists to UserDefaults; read by `BuddyDictationManager` when starting a session. |
-| `DictationTab.swift` | ~200 | Dashboard Dictation tab: language picker (Automatic + on-device locales) and a removable-chip custom dictionary editor. |
+| `DictationTab.swift` | ~200 | Settings → Dictation: language picker (Automatic + on-device locales) and a removable-chip custom dictionary editor. |
 | `CursorAppearanceStore.swift` | ~90 | Source of truth for the cursor/annotation colour (blue/red/yellow/green). Observed by the overlay, annotation layer, and brand glyphs so a change applies live. |
-| `CursorTab.swift` | ~110 | Dashboard Cursor tab: dock-cursor toggle (shared with the notch) and the colour swatches. |
+| `CursorTab.swift` | ~110 | Settings → Cursor: dock-cursor toggle (shared with the notch) and the colour swatches. |
 | `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
-| `AgentTab.swift` | ~325 | Dashboard Agent tab: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`), and permission rows with System Settings deep-links. |
+| `AgentTab.swift` | ~325 | Settings → Agent: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), announcements, an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`) and the Chrome Tabs card. Permissions moved to Settings → General. |
 | `CompanionScreenCaptureUtility.swift` | ~150 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. Starts OCR (`ScreenTextRecognizer`) on each captured frame. |
 
 ### Local model stack
@@ -571,8 +586,8 @@ Grouped by what they do. Line counts are approximate.
 | `MCPManager.swift` | ~270 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `RoutineStore.swift` | ~270 | Routines: user-fired saved instructions (`WispRoutine`: name, instruction, symbol, optional chord+digit shortcut, suggested app bundle ids, pinned-in-notch). Persists to `~/Library/Application Support/Wisp/routines.json`; seeds 4 starters when the file is absent. `notchSuggestions(forAppBundleIdentifier:)` powers the notch's app-aware section. Distinct from skills (model-loaded reference). |
-| `FrontmostAppTracker.swift` | ~55 | Last frontmost app that isn't Wisp (NSWorkspace activation notifications), so suggestions survive opening the dashboard/composer. |
-| `RoutinesTab.swift` | ~450 | Dashboard Routines tab: list + auto-saving editor (name, instruction, icon, shortcut digit with "used by" warnings, suggested apps from running apps or /Applications, pin toggle, Run now — closes the dashboard first so the screenshot sees the user's work). |
+| `FrontmostAppTracker.swift` | ~55 | Last frontmost app that isn't Wisp (NSWorkspace activation notifications), so suggestions survive opening the Wisp window/composer. |
+| `RoutinesTab.swift` | ~450 | Routines page: list + auto-saving editor (name, instruction, icon, shortcut digit with "used by" warnings, suggested apps from running apps or /Applications, pin toggle, Run now — closes the Wisp window first so the screenshot sees the user's work). |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
 | `ShortcutsBridge.swift` | ~455 | Apple Shortcuts via `/usr/bin/shortcuts`: `ShortcutsListParser` (`list --show-identifiers` → name + UUID), `ShortcutsCommandLine` (argument arrays; name after `--`), `ShortcutsProcessRunner` (off-main `Process`, both pipes drained, timeout + cancellation terminate), `ShortcutRunResultFormatter` (capped text for the model), and the `ShortcutsBridge` ObservableObject (5-min cached list, availability, `runShortcut(named:textInput:)` with exact-name resolution and temp-file I/O). |
 | `ShortcutsAgentTools.swift` | ~280 | `ShortcutNameMatcher` (request → matching shortcut names; exact-name resolution), `ShortcutsToolRouting` (boost hints + per-turn `run_shortcut` description naming ≤3 matches; the `list_shortcuts`/`run_shortcut` definitions), and `AgentToolRegistry.registerShortcutsTools()`. |
@@ -584,7 +599,7 @@ Grouped by what they do. Line counts are approximate.
 | `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules, and `alwaysAskBareToolNames` (`run_shortcut`). |
 | `ToolConfirmationCardBuilder.swift` | ~520 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
-| `AgentTaskRegistry.swift` | ~165 | Task and step records backing the dashboard's Activity tab. Loads saved history on launch and saves it (debounced) on every change. |
+| `AgentTaskRegistry.swift` | ~165 | Task and step records backing History → Timeline. Loads saved history on launch and saves it (debounced) on every change. |
 | `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
 
 ### Voice modes, glance cards & sources
@@ -592,7 +607,6 @@ Grouped by what they do. Line counts are approximate.
 |------|-------|---------|
 | `VoiceOutputPreference.swift` | ~50 | Source of truth for voice/silent mode (reply speech on/off). Persists; defaults on. |
 | `WispSoundPlayer.swift` | ~120 | The Dynamic Island's interaction sound cues (listening / thinking / reply / success / error), played as built-in macOS system sounds at low volume. `WispSoundPreference` is the UserDefaults-backed on/off gate (default on), toggled from the notch header's bell button. Separate from reply speech (`VoiceOutputPreference`). |
-| `WispVoiceAffordance.swift` | ~200 | Shared VoiceOS-style voice affordance: a Liquid Glass waveform reflecting `voiceState` and the live mic level (`currentAudioPowerLevel`). Used in the menu bar panel (removed from the notch panel, where it took too much room). Self-animates via a `TimelineView` clock that pauses while idle (no redraws on a resident app). |
 | `SpokenLineParser.swift` | ~90 | Parses/strips the `[SAY: …]` tag — the model's per-reply "speak this" line. |
 | `GlanceCard.swift` | ~655 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`, incl. `RemindersCardRequest`/`TimerCardRequest`) and the generic block card. |
 | `FastCommandRouter.swift` | ~520 | Model-free handling of rigid commands (mute/volume, open an app, and "set a timer for …" via `TimerCommandParser`, whose `Outcome.glanceCardRequest` CompanionManager resolves like a `[CARD:]` tag). Biased toward not matching. |
@@ -605,26 +619,29 @@ Grouped by what they do. Line counts are approximate.
 | `RemindersSnapshot.swift` / `RemindersDataProvider.swift` / `RemindersCardView.swift` | ~210/~215/~240 | `reminders` kind: EventKit on-device read → incomplete-reminders card (rows open Reminders.app). The snapshot file also holds the pure `RemindersSelection` (overdue/today/all filtering + ordering) and `ReminderDueDateParser` (ISO 8601 variants for `create_reminder`); the provider also saves reminders for the confirmation-gated `create_reminder` tool. Needs Reminders permission (`NSRemindersFullAccessUsageDescription`). |
 | `WispTimerStore.swift` / `TimerCardView.swift` | ~235/~225 | `timer` kind: the main-actor store that owns countdowns (completion task, scheduled `UNUserNotification`, finish callback) independent of any card, plus `WispTimerDurationFormatter`; the card is a live countdown (`CountdownSecondTickSchedule`, paused when off-screen) with a Cancel button. |
 | `ConfiguredSourceStore.swift` / `RESTSourceDataProvider.swift` / `SourceCardView.swift` | ~90/~140/~90 | `source` kind: user endpoints in `~/.wisp/sources.json`, fetched over HTTPS and mapped to generic blocks. |
-| `SourcesTab.swift` | ~150 | Dashboard Sources tab: the live-card-data master toggle + the configured-source list. |
-| `MemoryTab.swift` | ~185 | Dashboard Memory tab: remembered facts with per-row delete, reveal/reload memory.md, and the saved-conversation summary with "Clear conversation history" (confirmation dialog). |
+| `SourcesTab.swift` | ~150 | Connections → Sources: the live-card-data master toggle + the configured-source list. |
+| `MemoryTab.swift` | ~185 | History → Memory: remembered facts with per-row delete, reveal/reload memory.md, and the saved-conversation summary with "Clear conversation history" (confirmation dialog). |
 
-### Dashboard and UI
+### Wisp window, notch and UI
 | File | Lines | Purpose |
 |------|-------|---------|
-| `DashboardWindowController.swift` | ~109 | Real `NSWindow` host. Raises activation policy to `.regular` while open. |
-| `DashboardView.swift` | ~960 | Sidebar shell. The sidebar has five **sections** (`DashboardSection`): Today (Home), History (Timeline · Conversation · Memory), Routines, Connections (Marketplace · Servers & Tools · Sources), Settings (Shortcuts · Dictation · Cursor · Agent · Model). Multi-page sections show their pages (`DashboardTab`) as pill sub-tabs in the content header; each section remembers its last page. Pages are unchanged views, so deep links (`HomeTab`'s quick actions) still target a `DashboardTab`. Plus the live memory footer; content follows the system appearance. |
-| `HistoryTab.swift` | ~480 | The History **Timeline** page (the `.activity` `DashboardTab`): search (title/answer/steps), filters (All · Answers · Browser · Tools · Needs attention), day-grouped list, and a detail pane — answer, failure reason, "What Wisp did" steps, and actions: Stop, Copy answer, Ask again (closes the dashboard first) and **Save as routine** (creates a `WispRoutine` and hands it to the Routines editor via `RoutineStore.routineIDToOpenInEditor`). Routine, skill and dictation runs are titled with `AgentTaskRecord.routineRunTitlePrefix`/`skillRunTitlePrefix`/`dictationTitlePrefix` (set via `sendTranscriptToClaudeWithScreenshot(transcript:historyTitle:)`), and `isUsersOwnQuestion` hides re-ask/save for them. |
-| `HomeTab.swift` | ~720 | The dashboard's **Today** page: greeting + voice/silent toggle; an ask bar (typed question via `CompanionManager.askTypedQuestion`, or `/` to filter and run routines); "Needs you" alerts with fixes (missing permission, Ollama/Chatterbox unreachable — localhost checks every 30s, only for services in use — pending confirmation, a failed/interrupted task in the last 2h); Running now (per-task Stop); Up next (Calendar, requests access only from its Connect button); Routines tiles; Recent answers with Copy. Anything it runs closes the dashboard first so the screenshot shows the user's work. |
-| `ConversationWindowController.swift` | ~110 | The pop-out conversation window (resizable, full-screen capable), opened by `CompanionManager.openConversationWindow()` from the notch reply's expand button or Today's Conversation button. Also `WispWindowActivation`, the shared `.regular`/`.accessory` rule for Wisp's real windows: closing the dashboard or this window only drops back to menu-bar-only mode when no other titled, non-panel window is open. |
+| `WispWindow/WispNavigation.swift` | ~175 | `WispSection` (sidebar destinations, grouped use/manage) + `WispPage` (every page and its section), `WispWindowRouter` (shared selection, last page per section) and `WispWindowNavigator.open(_:)`. Also the `.wispDismissPanel` / `.wispCloseNotchWorkspace` notification names. |
+| `WispWindow/WispWindowController.swift` | ~125 | The Wisp window: `NSWindow` + `NSHostingController` with title/toolbar bridging, unified toolbar, frame autosave, full-screen capable. `WispWindowActivation` raises `.regular` while a titled window is open and drops back to `.accessory` after. |
+| `WispWindow/WispWindowView.swift` | ~200 | The shell: `NavigationSplitView` with a system sidebar (badges: running tasks on History, working buddies on Buddies, a missing permission on Settings), the page switch, the toolbar's segmented page picker, and a sidebar status footer (model + warm/cold + local). |
+| `WispWindow/ChatPage.swift` | ~440 | Chat: the last 6 hours of interactive exchanges as a thread (running turns show the live browser step + Stop, answers have Copy), a follow-up box (`askTypedQuestion`; capture excludes Wisp's own windows), and a side column of running and recently finished tasks. Opened by the notch's expand button via `openConversationWindow()`. |
+| `WispWindow/BuddiesPage.swift` | ~150 | Buddies: a list of buddies + the selected one's `BuddyDetailView` or `NewBuddyForm`; a single invitation when there are none. |
+| `WispWindow/GeneralSettingsPage.swift` | ~330 | Settings → General: `PermissionsChecklist` (mic / accessibility / screen recording / screen content with Grant buttons — also shown on Today until granted), `ActiveStackCard` (model + residency, speech, voice, agent mode, local-only assurance), island surface, speak replies, sound cues and `VoiceUpgradeHint`. `SettingRow` is the shared title/detail/control row. |
+| `WispWindow/ModelSettingsPage.swift` | ~390 | Settings → Model (`PerformanceTab`: provider choice + API key, system readouts, timings) and the shared `DashboardCard` (native grouped card) and `DashboardEmptyState` (`ContentUnavailableView`). |
+| `HistoryTab.swift` | ~480 | The History **Timeline** page (`WispPage.timeline`): search (title/answer/steps), filters (All · Answers · Browser · Tools · Needs attention), day-grouped list, and a detail pane — answer, failure reason, "What Wisp did" steps, and actions: Stop, Copy answer, Ask again (closes the Wisp window first) and **Save as routine** (creates a `WispRoutine` and hands it to the Routines editor via `RoutineStore.routineIDToOpenInEditor`). Routine, skill and dictation runs are titled with `AgentTaskRecord.routineRunTitlePrefix`/`skillRunTitlePrefix`/`dictationTitlePrefix` (set via `sendTranscriptToClaudeWithScreenshot(transcript:historyTitle:)`), and `isUsersOwnQuestion` hides re-ask/save for them. |
+| `HomeTab.swift` | ~720 | The Wisp window's **Today** page: a setup card with the permission checklist until everything is granted; greeting + voice/silent toggle; an ask bar (typed question via `CompanionManager.askTypedQuestion`, or `/` to filter and run routines); "Needs you" alerts with fixes (Ollama/Chatterbox unreachable — localhost checks every 30s, only for services in use — pending confirmation, a failed/interrupted task in the last 2h); Running now (per-task Stop); Up next (Calendar, requests access only from its Connect button); Routines tiles; Recent answers with Copy. Anything it runs closes the Wisp window first so the screenshot shows the user's work. |
 | `ConversationWindowView.swift` | ~430 | The window's content: the last 6 hours of interactive exchanges as a thread (from `AgentTaskRegistry`; running turns show the live browser step + Stop, answers have Copy), a follow-up box (`askTypedQuestion`; capture already excludes Wisp's own windows, so the turn sees the work behind the window), and a sidebar of running tasks (Stop) and recently finished ones. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
-| `MarketplaceTab.swift` | ~700 | Dashboard Marketplace tab: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
-| `ShortcutsTab.swift` | ~250 | Dashboard Shortcuts tab: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
-| `MenuBarPanelManager.swift` | ~247 | `NSStatusItem` + floating `NSPanel` lifecycle. |
+| `MarketplaceTab.swift` | ~700 | Connections → Marketplace: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
+| `ShortcutsTab.swift` | ~250 | Settings → Shortcuts: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
+| `MenuBarMenuController.swift` | ~165 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Speak Replies / Sound Cues checkmarks, Settings…, Quit). |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1620 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
-| `CompanionPanelView.swift` | ~775 | The menu bar panel's SwiftUI content. |
 | `DesignSystem.swift` | ~940 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
 | `SystemReadouts.swift` | ~143 | Memory via `host_statistics64`; Ollama residency via `/api/ps`. |
@@ -649,7 +666,7 @@ names forward here.
 | `Components/WispMark.swift` | ~180 | The liquid-ribbon logo. `WispMarkState` drives per-state motion; static mode; clock paused at rest. `CompanionVoiceState.markState` maps to it. |
 | `Components/WispIcon.swift` | ~200 | The Liquid Icon System: `WispIconSymbol` (bespoke single-stroke glyphs + `.system` SF-Symbol fallback), `WispIconState`, rendered by `WispIcon`. |
 | `DynamicIsland/WispIslandState.swift` | ~120 | The 9-state island vocabulary + its mark/label/accent mapping. Derived, not stored — see `CompanionManager.islandState`, which now also drives `.executing` (a browser task reporting progress; step list + Stop in the hover panel, spinner + step count in the right flank) and `.processing` (idle with background tasks running). |
-| `DynamicIsland/NotchWorkspaceView.swift` | ~960 | The notch's large surface: `NotchWorkspacePage` (.chat / .settings(section)), `NotchSettingsSection`, and the view — chat (conversation sidebar with search, thread bubbles, talk pill, Type field → `askTypedQuestion`) and settings (section list whose pages are the dashboard's own tab views, plus a small General page). |
+| `DynamicIsland/NotchWorkspaceView.swift` | ~725 | The notch's quick chat: `NotchWorkspacePage` (.chat), a sidebar of buddies and searchable conversations (Settings / Open Wisp buttons open the window), thread bubbles, the talk pill and a Type field → `askTypedQuestion`. |
 | `DynamicIsland/NotchIslandStyle.swift` | ~125 | `NotchIslandSurfaceStyle` (black default / Liquid Glass), the persisted `NotchIslandStylePreference`, the `wispNotchIslandSurface(in:style:)` modifier, and `WispIslandButtonStyle` (flat subtle fill / white prominent capsule). |
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
 | `Buddies/BuddyStore.swift` | ~390 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy`, `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/reschedule/delete). |

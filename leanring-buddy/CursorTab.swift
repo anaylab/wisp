@@ -22,7 +22,7 @@ struct CursorTab: View {
             }
             .padding(16)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
     }
 
     // MARK: - Visibility

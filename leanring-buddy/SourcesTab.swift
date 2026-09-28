@@ -25,7 +25,7 @@ struct SourcesTab: View {
             }
             .padding(16)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
         .onAppear { sourceStore.reload() }
     }
 

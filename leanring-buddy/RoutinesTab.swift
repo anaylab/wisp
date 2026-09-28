@@ -30,7 +30,7 @@ struct RoutinesTab: View {
             editorPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
         .onAppear {
             if !openRoutineHandedOverByAnotherScreen() && selectedRoutineID == nil {
                 selectRoutine(routineStore.routines.first?.id)

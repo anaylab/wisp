@@ -21,7 +21,7 @@ struct DictationTab: View {
             }
             .padding(16)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
     }
 
     // MARK: - Language

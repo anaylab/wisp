@@ -1018,8 +1018,13 @@ struct NotchHUDView: View {
     // MARK: Answer surface (reply + glance card)
 
     /// The tallest the answer region may grow before it starts scrolling
-    /// internally, keeping the whole panel inside the fixed window.
-    private let answerMaxHeight: CGFloat = 206
+    /// internally, keeping the whole panel inside the fixed window. A glance
+    /// card gets more room: cards are laid out to be seen whole (the weather
+    /// card's hourly row sat below the fold at the text-only limit), and the
+    /// quick panel's middle sections scroll if other sections need space too.
+    private var answerMaxHeight: CGFloat {
+        companionManager.resolvedGlanceCard == nil ? 206 : 296
+    }
 
     private var answerSurface: some View {
         let hasReply = !companionManager.currentReplyText
@@ -1266,7 +1271,7 @@ struct NotchHUDView: View {
                 soundCuesToggle
                 voiceOutputToggle
                 Button {
-                    viewModel.requestWorkspacePage?(.settings(.general))
+                    WispWindowNavigator.open(.general)
                 } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 12, weight: .medium))
@@ -1276,7 +1281,7 @@ struct NotchHUDView: View {
                 }
                 .buttonStyle(.plain)
                 .pointerCursor()
-                .nativeTooltip("Settings, right here in the notch")
+                .nativeTooltip("Settings")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.trailing, 12)
@@ -1327,7 +1332,7 @@ struct NotchHUDView: View {
 
     // MARK: Footer
 
-    /// A single quiet row: Chat (the notch workspace) and Manage (the dashboard),
+    /// A single quiet row: Chat (the notch workspace) and Open Wisp (the window),
     /// right-aligned. The integrations count and cursor-dock toggle that used to
     /// sit here live in the dashboard (Connections, Cursor).
     private var footer: some View {
@@ -1355,9 +1360,9 @@ struct NotchHUDView: View {
             .pointerCursor()
             .nativeTooltip("Open the chat in the notch — your conversations, talk or type")
             Button {
-                NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
+                WispWindowNavigator.open(.home)
             } label: {
-                Text("Manage")
+                Text("Open Wisp")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(WispColor.Island.textSecondary)
                     .padding(.horizontal, 10)
@@ -1370,7 +1375,7 @@ struct NotchHUDView: View {
             }
             .buttonStyle(.plain)
             .pointerCursor()
-            .nativeTooltip("Manage integrations & settings")
+            .nativeTooltip("Open the Wisp window — today, buddies, routines, history and settings")
         }
     }
 

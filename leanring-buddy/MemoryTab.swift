@@ -28,7 +28,7 @@ struct MemoryTab: View {
             }
             .padding(16)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
         // Pick up hand edits made in a text editor since the tab was last shown.
         .onAppear { memoryStore.reloadIfFileChanged() }
     }

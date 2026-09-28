@@ -1,10 +1,11 @@
 //
-//  ConversationWindowView.swift
+//  ChatPage.swift
 //  leanring-buddy
 //
-//  The pop-out conversation window's content: the recent back-and-forth as a
-//  thread, a box to type follow-ups, and a side panel of the tasks Wisp is
-//  working on (live step + Stop) and has recently finished.
+//  The Wisp window's Chat page: the recent back-and-forth as a thread, a box to
+//  type follow-ups, and a side panel of the tasks Wisp is working on (live step
+//  + Stop) and has recently finished. It replaced the separate pop-out
+//  conversation window; the notch's expand button now opens this page.
 //
 //  The thread is built from `AgentTaskRegistry` (question = record title, answer
 //  = final text), limited to the last few hours — roughly what the model itself
@@ -17,7 +18,7 @@
 import AppKit
 import SwiftUI
 
-struct ConversationWindowView: View {
+struct ChatPage: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject var taskRegistry: AgentTaskRegistry
     @ObservedObject private var bindingStore = ShortcutBindingStore.shared
@@ -39,7 +40,6 @@ struct ConversationWindowView: View {
             tasksSidebar
                 .frame(width: 240)
         }
-        .background(DS.Colors.background)
         .onAppear {
             isFollowUpFieldFocused = true
         }
@@ -68,7 +68,6 @@ struct ConversationWindowView: View {
 
     private var threadColumn: some View {
         VStack(spacing: 0) {
-            threadHeader
             if threadRecords.isEmpty {
                 emptyThread
             } else {
@@ -98,28 +97,6 @@ struct ConversationWindowView: View {
             Divider().background(DS.Colors.borderSubtle)
             followUpComposer
         }
-    }
-
-    private var threadHeader: some View {
-        HStack(spacing: 9) {
-            WispMark(state: companionManager.islandState.markState, size: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Conversation")
-                    .font(WispFont.headline)
-                    .foregroundStyle(DS.Colors.textPrimary)
-                Text(companionManager.islandState.isActive
-                     ? companionManager.islandState.label
-                     : "Follow-ups remember the last few exchanges")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DS.Colors.textSecondary)
-            }
-            Spacer()
-        }
-        // The window's content runs under its transparent title bar; clear the
-        // traffic lights.
-        .padding(.top, 34)
-        .padding(.horizontal, 22)
-        .padding(.bottom, 10)
     }
 
     private var emptyThread: some View {
@@ -315,13 +292,21 @@ struct ConversationWindowView: View {
                                   lineWidth: 1)
             )
 
-            Text("Return to send · Wisp looks at your screen behind this window · or hold \(bindingStore.primaryHoldChord.displayText) to talk")
+            Text(chatStatusLine)
                 .font(.system(size: 10.5))
                 .foregroundStyle(DS.Colors.textTertiary)
                 .padding(.horizontal, 4)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
+    }
+
+    /// What Wisp is doing right now while a turn runs; otherwise how to talk.
+    private var chatStatusLine: String {
+        if companionManager.islandState.isActive {
+            return companionManager.islandState.label
+        }
+        return "Return to send · Wisp looks at your screen behind this window · or hold \(bindingStore.primaryHoldChord.displayText) to talk"
     }
 
     private var isFollowUpEmpty: Bool {
@@ -379,11 +364,11 @@ struct ConversationWindowView: View {
 
             Spacer()
         }
-        .padding(.top, 40)
+        .padding(.top, 16)
         .padding(.horizontal, 14)
         .padding(.bottom, 14)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(DS.Colors.surface1.opacity(0.5))
+        .background(WispColor.groupedCardBackground.opacity(0.6))
     }
 
     private func sidebarLabel(_ text: String) -> some View {

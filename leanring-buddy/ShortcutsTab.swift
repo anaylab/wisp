@@ -24,7 +24,7 @@ struct ShortcutsTab: View {
             }
             .padding(16)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
     }
 
     // MARK: - Voice / silent mode

@@ -2,9 +2,9 @@
 //  leanring_buddyApp.swift
 //  leanring-buddy
 //
-//  Menu bar-only companion app. No dock icon, no main window — just an
-//  always-available status item in the macOS menu bar. Clicking the icon
-//  opens a floating panel with companion voice controls.
+//  Menu bar-only companion app. No Dock icon by default: Wisp lives in the
+//  notch (where you use it), a menu bar menu, and the Wisp window (where you
+//  manage it), which gives the app a Dock icon only while it's open.
 //
 
 import ServiceManagement
@@ -15,7 +15,7 @@ struct leanring_buddyApp: App {
     @NSApplicationDelegateAdaptor(CompanionAppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // The app lives entirely in the menu bar panel managed by the AppDelegate.
+        // The app's surfaces (notch, menu, Wisp window) are managed by the AppDelegate.
         // This empty Settings scene satisfies SwiftUI's requirement for at least
         // one scene but is never shown (LSUIElement=true removes the app menu).
         Settings {
@@ -24,15 +24,14 @@ struct leanring_buddyApp: App {
     }
 }
 
-/// Manages the companion lifecycle: creates the menu bar panel and starts
-/// the companion voice pipeline on launch.
+/// Manages the companion lifecycle: creates the notch, the menu bar menu and
+/// the Wisp window, and starts the companion voice pipeline on launch.
 @MainActor
 final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
-    private var menuBarPanelManager: MenuBarPanelManager?
+    private var menuBarMenuController: MenuBarMenuController?
     private var notchWindowController: NotchWindowController?
     private let companionManager = CompanionManager()
-    private var dashboardWindowController: DashboardWindowController?
-    private var openDashboardObserver: NSObjectProtocol?
+    private var wispWindowController: WispWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("🎯 Wisp: Starting...")
@@ -43,31 +42,21 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         WispAnalytics.configure()
         WispAnalytics.trackAppOpened()
 
-        menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
+        menuBarMenuController = MenuBarMenuController(companionManager: companionManager)
 
         // The notch HUD is the resident primary surface. It shows on launch and
-        // stays put; the menu bar item remains as the settings entry point.
+        // stays put.
         notchWindowController = NotchWindowController(companionManager: companionManager)
         notchWindowController?.show()
 
-        let dashboardController = DashboardWindowController(companionManager: companionManager)
-        dashboardWindowController = dashboardController
-        openDashboardObserver = NotificationCenter.default.addObserver(
-            forName: .wispOpenDashboard,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task { @MainActor in
-                NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
-                dashboardController.showDashboard()
-            }
-        }
+        // Reached through `WispWindowNavigator.open(_:)`.
+        wispWindowController = WispWindowController(companionManager: companionManager)
 
         companionManager.start()
-        // Auto-open the panel only when the user still needs to do something,
-        // which now means one of the permissions is missing.
+        // Open the window only when the user still needs to do something, which
+        // means one of the permissions is missing; Today leads with the checklist.
         if !companionManager.allPermissionsGranted {
-            menuBarPanelManager?.showPanelOnLaunch()
+            WispWindowNavigator.open(.home)
         }
         registerAsLoginItemIfNeeded()
     }

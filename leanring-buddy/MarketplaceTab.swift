@@ -44,7 +44,7 @@ struct MarketplaceTab: View {
             }
             .padding(16)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
         .task { await loadCatalog() }
         .sheet(item: $entryBeingInstalled) { entry in
             InstallSheet(entry: entry) { values in
@@ -681,7 +681,7 @@ private struct InstallSheet: View {
         }
         .padding(20)
         .frame(width: 380)
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
     }
 
     @ViewBuilder
