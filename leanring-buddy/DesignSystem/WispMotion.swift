@@ -29,9 +29,6 @@ enum WispMotion {
     /// enough life to feel liquid, tuned to not overshoot into a bounce.
     static let island = Animation.spring(response: 0.34, dampingFraction: 0.86)
 
-    /// A softer spring for element-level appearance (a card sliding in).
-    static let springSoft = Animation.spring(response: 0.45, dampingFraction: 0.82)
-
     /// A slow, self-reversing breath for ambient "alive" states (the idle logo,
     /// a resting glow). Long period so it reads as breathing, not pulsing.
     static let breath = Animation.easeInOut(duration: 2.6).repeatForever(autoreverses: true)
@@ -43,15 +40,5 @@ enum WispMotion {
     /// `@Environment(\.accessibilityReduceMotion)` value, which updates live.
     static var prefersReducedMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    }
-
-    /// Returns `animation` normally, or a plain fade when reduce-motion is on,
-    /// so callers can degrade a liquid morph to a fade in one place.
-    static func respectingReduceMotion(
-        _ animation: Animation,
-        reduceMotion: Bool,
-        fade: Animation = .easeInOut(duration: 0.2)
-    ) -> Animation {
-        reduceMotion ? fade : animation
     }
 }

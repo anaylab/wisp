@@ -63,7 +63,7 @@ cloud dependency to the local path, without asking.
   is retired. Confirmation/failure speech is unaffected.
 - **Deployment target**: macOS 26 (raised from 14.2) so the notch HUD can use real SwiftUI
   **Liquid Glass** (`.glassEffect` / `GlassEffectContainer`), dark-tinted for legibility
-  (`DS.Colors.notchGlassTint`, `View.wispNotchGlassSurface(in:)`).
+  (`WispColor.OnGlass.tint`, `View.wispNotchGlassSurface(in:)`).
 - **Design system**: the Wisp visual identity ("quiet intelligence × organic × native macOS")
   lives in `DesignSystem/` — `WispColor` (sage/ink/cloud palette; a **sage** brand accent, a
   **lavender** AI-activity accent, muted-terracotta errors), `WispFont`, `WispSpacing`,
@@ -75,7 +75,7 @@ cloud dependency to the local path, without asking.
   text, flat white-alpha control fills, a white prominent capsule) for the notch. The legacy `DS.*` API is a thin facade that **forwards to these tokens**,
   so `DS.Colors.background` etc. are now adaptive and the whole app reskins from one place.
   Reusable components live in `Components/` (`WispGlassPanel`/`WispGlassButtonStyle`/`WispGlassIcon`,
-  `WispGlassInput`, `WispMark`, `WispIcon`). **Do not reintroduce hardcoded hex** — reference the
+  `WispMark`, `WispIcon`). **Do not reintroduce hardcoded hex** — reference the
   tokens.
 - **Light/dark**: the **Wisp window follows the system appearance** (its `WispColor` tokens resolve
   light or dark). The **notch HUD, on-screen overlay, and menu-bar panel stay a dark glass
@@ -535,7 +535,6 @@ Grouped by what they do. Line counts are approximate.
 | `LocalChatterboxTTSClient.swift` | ~231 | Sentence-by-sentence local TTS: synthesises sentence N+1 while N is playing. |
 | `BuddyTTSProvider.swift` | ~53 | TTS protocol and factory, keyed off `VoiceTTSProvider`. |
 | `AppleSpeechTranscriptionProvider.swift` | ~147 | On-device STT via the Speech framework. The active provider. |
-| `FluidAudioTranscriptionProvider.swift` | ~212 | Parakeet STT via CoreML. Built and working, currently unused. |
 | `ModelAccessGate.swift` | ~104 | Actor serialising all model calls, with interactive priority, so background work never evicts the prefix cache a live turn depends on. |
 
 ### Overlay and annotation
@@ -551,8 +550,6 @@ Grouped by what they do. Line counts are approximate.
 | `ScreenTextRecognizer.swift` | ~265 | Runs Vision `RecognizeTextRequest` off the main actor for each capture, caches the tasks, and builds a turn's `ScreenTextSnapshot` within a wait budget. Also `CompanionManager.resolveScreenElementRegion` (the shared `a`/`t` id resolver). |
 | `ScreenTextReadingTool.swift` | ~60 | The read-only `read_screen_text` agent tool: captures the screen and returns its OCR text. |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
-| `CompanionResponseOverlay.swift` | ~217 | Response bubble and waveform next to the cursor. |
-| `ElementLocationDetector.swift` | ~335 | Locates UI elements in screenshots for pointing. |
 
 ### Agent, tools and MCP
 | File | Lines | Purpose |
@@ -642,7 +639,7 @@ Grouped by what they do. Line counts are approximate.
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1620 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
-| `DesignSystem.swift` | ~940 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
+| `DesignSystem.swift` | ~480 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
 | `SystemReadouts.swift` | ~143 | Memory via `host_statistics64`; Ollama residency via `/api/ps`. |
 | `WindowPositionManager.swift` | ~262 | Window placement and permission helpers. |
@@ -655,14 +652,13 @@ names forward here.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `DesignSystem/WispColors.swift` | ~180 | The palette: raw brand hexes (`WispColor.Brand.*` — sage/lavender/moss/ink/cloud/bone), **adaptive** semantic tokens (`.background`/`.textPrimary`/`.accent`/… resolve light/dark via a dynamic `NSColor`), a fixed **on-glass** set (`OnGlass.*`) for always-dark surfaces, and adaptive glass tints. `adaptive(light:dark:)` is the helper. |
-| `DesignSystem/WispTypography.swift` | ~60 | `WispFont` scale (SF Pro/rounded + SF Mono), the lowercase `wisp` wordmark, and `wispSectionLabel()`. |
+| `DesignSystem/WispTypography.swift` | ~60 | `WispFont` scale (SF Pro/rounded + SF Mono) and the lowercase `wisp` wordmark. |
 | `DesignSystem/WispMetrics.swift` | ~50 | `WispSpacing` + `WispRadius` scales (softer/rounder; hero input = 22). |
 | `DesignSystem/WispShadows.swift` | ~35 | `WispShadow` (`.ambient`/`.floating`/`.island`) + `wispShadow(_:)`. Soft, low-opacity only. |
 | `DesignSystem/WispGradients.swift` | ~55 | The single signature gradient (sage→mist→lavender) and its animated variants. Use sparingly. |
-| `DesignSystem/WispMotion.swift` | ~55 | Named animation curves (`quick`/`smooth`/`gentle`/`island`/`springSoft`/`breath`) + reduce-motion helpers. |
+| `DesignSystem/WispMotion.swift` | ~55 | Named animation curves (`quick`/`smooth`/`gentle`/`island`/`breath`) + the reduce-motion check. |
 | `Components/WispGlassComponents.swift` | ~200 | `WispGlassPanel` container, `WispGlassButtonStyle` (subtle/prominent), `WispGlassIcon`, and `PressableScaleButtonStyle`. |
 | `Components/WispLiquidRim.swift` | ~185 | The Liquid Glass rim: `.wispLiquidRim(in:light:highlightEdge:)` adds a `.plusLighter` specular edge highlight plus state light (`WispLiquidRimLight`: resting / flowing arc / even glow). `WispIslandState.rimLight` maps AI activity → flowing lavender, confirmation/success/error → glow. Used by the notch surface and `WispGlassPanel`; the flowing clock only exists while flowing, and Reduce Motion swaps it for a steady glow. |
-| `Components/WispGlassInput.swift` | ~90 | The floating "Ask Wisp anything…" field; the signature gradient blooms into the border on focus. |
 | `Components/WispMark.swift` | ~180 | The liquid-ribbon logo. `WispMarkState` drives per-state motion; static mode; clock paused at rest. `CompanionVoiceState.markState` maps to it. |
 | `Components/WispIcon.swift` | ~200 | The Liquid Icon System: `WispIconSymbol` (bespoke single-stroke glyphs + `.system` SF-Symbol fallback), `WispIconState`, rendered by `WispIcon`. |
 | `DynamicIsland/WispIslandState.swift` | ~120 | The 9-state island vocabulary + its mark/label/accent mapping. Derived, not stored — see `CompanionManager.islandState`, which now also drives `.executing` (a browser task reporting progress; step list + Stop in the hover panel, spinner + step count in the right flank) and `.processing` (idle with background tasks running). |
@@ -677,13 +673,6 @@ names forward here.
 | `DynamicIsland/FinishedWorkInbox.swift` | ~55 | Unseen finished background task ids behind the notch's "N new" badge and NEW section (in-memory, cap 5). |
 | `DynamicIsland/AnnouncementPreferences.swift` | ~50 | UserDefaults switches for morning suggestions and quiet-on-calls (both default on). |
 | `DynamicIsland/UpcomingEventMonitor.swift` | ~85 | Ambient next-meeting countdown: polls EventKit every 30s via `CalendarDataProvider.imminentTimedEventIfAuthorized` (never prompts — nil without access) for a timed event starting within 15 min; the notch's right flank shows `12m`, and the island stays visible at idle while one is imminent or background work runs. |
-
-### Unused upstream leftovers
-The old cloud client files (`ClaudeAPI.swift`, `OpenAIAPI.swift`, `ElevenLabsTTSClient.swift`,
-`AssemblyAIStreamingTranscriptionProvider.swift`, `OpenAIAudioTranscriptionProvider.swift`)
-have been deleted. Cloud chat is now the bring-your-own-key `ModelProvider` path above, not
-these. Only the `worker/` directory remains as upstream leftover, and it is not used by this
-build — there is no Cloudflare Worker.
 
 ## Build & Run
 
@@ -721,8 +710,7 @@ ollama serve                     # port 11434
 curl -s http://localhost:8004/ -o /dev/null -w "%{http_code}\n"   # Chatterbox TTS health
 ```
 
-There is no Cloudflare Worker. The `worker/` directory is upstream leftover and is not
-used by this build.
+There is no Cloudflare Worker.
 
 ## Code Style & Conventions
 

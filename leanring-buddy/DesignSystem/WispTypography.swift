@@ -52,14 +52,3 @@ enum WispFont {
         .system(size: size, weight: .medium, design: .rounded)
     }
 }
-
-extension View {
-    /// Applies an all-caps section-label treatment (overline font + tracking +
-    /// tertiary colour). Centralises the repeated "SKILLS"/"REPLY" label style.
-    func wispSectionLabel() -> some View {
-        self.font(WispFont.overline)
-            .tracking(0.6)
-            .textCase(.uppercase)
-            .foregroundColor(WispColor.OnGlass.textTertiary)
-    }
-}
