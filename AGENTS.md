@@ -97,9 +97,11 @@ cloud dependency to the local path, without asking.
   camera — the mark's motion plus the indicator (waveform listening / pulsing dots thinking)
   carry the state. A reply **auto-presents as a compact message card** that drops below the notch
   (`messageContent`, content inset by `notchContentTopInset`; `viewModel.isFullPanel == false`),
-  and a deliberate **hover upgrades it to the full panel** (voice affordance, skills, footer;
-  `isFullPanel == true`) — the surface morphs and the whole thing collapses back to the bare
-  notch when done. Live speech is captured in `CompanionManager.liveTranscript` (fed from the
+  and a deliberate **hover upgrades it to the full panel** (header with the state label, live activity,
+  Chat/Manage footer — no waveform card, no skills/routines chips; `isFullPanel == true`) — the surface morphs and the whole thing collapses back to the bare
+  notch when done. An answer left folded away and untouched for 20s is cleared
+  (`NotchWindowController.expireLingeringAnswerIfStale`; a running timer card is kept), so an old
+  reply doesn't linger in the island or reappear on a later hover — History and the chat keep it. Live speech is captured in `CompanionManager.liveTranscript` (fed from the
   dictation partial-transcript callbacks that used to be discarded, throttled to ~11 Hz); it
   drives the non-notch fallback pill's one-line preview and is available for the wrap. The
   non-notch fallback keeps the old centred floating pill (`floatingPillContent`). The key moments
@@ -566,7 +568,7 @@ Grouped by what they do. Line counts are approximate.
 |------|-------|---------|
 | `VoiceOutputPreference.swift` | ~50 | Source of truth for voice/silent mode (reply speech on/off). Persists; defaults on. |
 | `WispSoundPlayer.swift` | ~120 | The Dynamic Island's interaction sound cues (listening / thinking / reply / success / error), played as built-in macOS system sounds at low volume. `WispSoundPreference` is the UserDefaults-backed on/off gate (default on), toggled from the notch header's bell button. Separate from reply speech (`VoiceOutputPreference`). |
-| `WispVoiceAffordance.swift` | ~200 | Shared VoiceOS-style voice affordance: a Liquid Glass waveform reflecting `voiceState` and the live mic level (`currentAudioPowerLevel`). Used as the notch HUD's centerpiece and in the menu bar panel so both surfaces show one living voice element. Self-animates via a `TimelineView` clock that pauses while idle (no redraws on a resident app). |
+| `WispVoiceAffordance.swift` | ~200 | Shared VoiceOS-style voice affordance: a Liquid Glass waveform reflecting `voiceState` and the live mic level (`currentAudioPowerLevel`). Used in the menu bar panel (removed from the notch panel, where it took too much room). Self-animates via a `TimelineView` clock that pauses while idle (no redraws on a resident app). |
 | `SpokenLineParser.swift` | ~90 | Parses/strips the `[SAY: …]` tag — the model's per-reply "speak this" line. |
 | `GlanceCard.swift` | ~655 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`, incl. `RemindersCardRequest`/`TimerCardRequest`) and the generic block card. |
 | `FastCommandRouter.swift` | ~520 | Model-free handling of rigid commands (mute/volume, open an app, and "set a timer for …" via `TimerCommandParser`, whose `Outcome.glanceCardRequest` CompanionManager resolves like a `[CARD:]` tag). Biased toward not matching. |

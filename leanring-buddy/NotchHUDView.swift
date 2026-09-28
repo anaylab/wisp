@@ -9,8 +9,8 @@
 //   • Collapsed — a black rounded pill that merges with the physical notch (or
 //     floats just under the menu bar on a non-notch Mac), showing the wisp
 //     glyph and a small live state dot.
-//   • Expanded — a quick-panel with the resident controls: a shortcuts
-//     cheat-sheet, skills, active integrations, and the dock-cursor toggle.
+//   • Expanded — a quick-panel: header controls, the answer, live activity,
+//     today's suggestions, and a Chat / Manage footer.
 //
 //  The expanded content is laid out at its full size regardless of the surface
 //  frame and merely clipped/faded while collapsed, so nothing reflows during the
@@ -24,8 +24,6 @@ import SwiftUI
 struct NotchHUDView: View {
     @ObservedObject var viewModel: NotchViewModel
     @ObservedObject var companionManager: CompanionManager
-    @ObservedObject private var skillManager = SkillManager.shared
-    @ObservedObject private var mcpManager = MCPManager.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
     @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
@@ -34,8 +32,6 @@ struct NotchHUDView: View {
     /// property can't tell SwiftUI that on its own.
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var upcomingEventMonitor = UpcomingEventMonitor.shared
-    @ObservedObject private var routineStore = RoutineStore.shared
-    @ObservedObject private var frontmostAppTracker = FrontmostAppTracker.shared
     @ObservedObject private var morningBriefing = MorningBriefingController.shared
     @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
@@ -106,7 +102,7 @@ struct NotchHUDView: View {
             // Both states are always present; only opacity and the surface frame
             // animate. The expanded content is given a fixed width but a NATURAL
             // height, so the glass surface wraps however much content there is —
-            // small when idle (just the affordance, skills and footer) and taller
+            // small when idle (just the header and footer) and taller
             // when an answer is showing. The window itself never resizes; the
             // unused area below simply stays transparent.
             droppedContent
@@ -204,7 +200,7 @@ struct NotchHUDView: View {
     }
 
     /// The compact answer surface: just the reply text and any glance card, sized
-    /// to the message and inset below the notch. No affordance, skills or footer —
+    /// to the message and inset below the notch. No header controls or footer —
     /// those belong to the full panel a hover reveals.
     private var messageContent: some View {
         compactDroppedContent
@@ -957,8 +953,8 @@ struct NotchHUDView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 // Everything between the header and the footer scrolls once it
-                // outgrows the fixed window (an answer + the day's suggestions +
-                // routines + skills can), so the footer — with Chat and Manage —
+                // outgrows the fixed window (an answer + live activity + the
+                // day's suggestions can), so the footer — with Chat and Manage —
                 // always stays reachable.
                 ScrollView {
                     quickPanelScrollingSections
@@ -993,10 +989,6 @@ struct NotchHUDView: View {
 
     private var quickPanelScrollingSections: some View {
             VStack(alignment: .leading, spacing: 10) {
-                // The living centerpiece: a voice waveform that reflects the current
-                // state and, while listening, the real microphone level.
-                voiceAffordanceSection
-
                 // What's in flight right now, with a way to stop it.
                 liveActivitySection
 
@@ -1007,16 +999,10 @@ struct NotchHUDView: View {
                 todaySuggestionsSection
 
                 // Only present when there is an answer, so an idle panel collapses
-                // down to just the affordance, skills and footer.
+                // down to just the header and footer.
                 if hasAnswer {
                     answerSurfaceWithReplyActions
                 }
-
-                // Routines for the app the user is in (plus pinned ones).
-                routineSuggestionsSection
-
-                // Skills stay one click away as a compact sideways-scrolling strip.
-                skillsStrip
             }
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1027,23 +1013,6 @@ struct NotchHUDView: View {
         let hasReply = !companionManager.currentReplyText
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return hasReply || companionManager.resolvedGlanceCard != nil
-    }
-
-    // MARK: Voice affordance
-
-    private var voiceAffordanceSection: some View {
-        VStack(spacing: 6) {
-            WispVoiceAffordance(
-                voiceState: companionManager.voiceState,
-                audioPowerLevel: companionManager.currentAudioPowerLevel,
-                accentColor: CursorAppearanceStore.shared.color
-            )
-            Text(companionManager.islandState.label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(WispColor.Island.textTertiary)
-                .tracking(0.4)
-                .animation(.easeInOut(duration: 0.2), value: companionManager.islandState.label)
-        }
     }
 
     // MARK: Answer surface (reply + glance card)
@@ -1059,15 +1028,12 @@ struct NotchHUDView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if hasReply {
-                    VStack(alignment: .leading, spacing: 6) {
-                        sectionLabel("REPLY")
-                        Text(companionManager.currentReplyText)
-                            .font(.system(size: 12.5))
-                            .foregroundColor(WispColor.Island.textPrimary)
-                            .lineSpacing(2)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    Text(companionManager.currentReplyText)
+                        .font(.system(size: 12.5))
+                        .foregroundColor(WispColor.Island.textPrimary)
+                        .lineSpacing(2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 glanceCardView
             }
@@ -1110,11 +1076,13 @@ struct NotchHUDView: View {
         !companionManager.currentReplyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Icon-only buttons (the tooltips name them), so the row reads as a quiet
+    /// strip under the answer rather than a second block of text.
     private var replyActionRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             replyActionButton(
                 .copy,
-                title: replyActionFeedback == .copied ? "Copied" : "Copy",
+                title: "",
                 systemImageName: replyActionFeedback == .copied ? "checkmark" : "doc.on.doc",
                 tooltip: "Copy this answer to the clipboard",
                 isEnabled: true
@@ -1125,8 +1093,8 @@ struct NotchHUDView: View {
             let insertTargetAppName = insertTargetApplicationName
             replyActionButton(
                 .insert,
-                title: insertButtonTitle,
-                systemImageName: replyActionFeedback == .inserted ? "checkmark" : "text.insert",
+                title: "",
+                systemImageName: insertButtonSymbolName,
                 tooltip: insertTargetAppName.map { "Type this answer at the cursor in \($0)" }
                     ?? "Click into a text field in another app first",
                 isEnabled: insertTargetAppName != nil
@@ -1136,7 +1104,7 @@ struct NotchHUDView: View {
 
             replyActionButton(
                 .followUp,
-                title: "Follow up",
+                title: "",
                 systemImageName: "arrowshape.turn.up.left",
                 tooltip: "Ask a follow-up — Wisp keeps this conversation's context",
                 isEnabled: true
@@ -1144,7 +1112,6 @@ struct NotchHUDView: View {
                 companionManager.beginFollowUpQuestion()
             }
 
-            // Icon-only so the row still fits the compact card's width.
             replyActionButton(
                 .openWindow,
                 title: "",
@@ -1157,11 +1124,11 @@ struct NotchHUDView: View {
         }
     }
 
-    private var insertButtonTitle: String {
+    private var insertButtonSymbolName: String {
         switch replyActionFeedback {
-        case .inserted: return "Inserted"
-        case .insertFailed: return "Couldn't insert"
-        default: return "Insert"
+        case .inserted: return "checkmark"
+        case .insertFailed: return "exclamationmark.triangle"
+        default: return "text.insert"
         }
     }
 
@@ -1276,9 +1243,14 @@ struct NotchHUDView: View {
         HStack(spacing: 0) {
             HStack(spacing: 7) {
                 WispMark(state: companionManager.islandState.markState, size: 16)
-                Text("Wisp")
+                // The state rides beside the name while Wisp is doing something
+                // (the mark's motion carries it too) — this replaced the big
+                // waveform card that used to open the panel.
+                Text(companionManager.islandState.isActive ? companionManager.islandState.label : "Wisp")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(WispColor.Island.textPrimary)
+                    .lineLimit(1)
+                    .animation(.easeInOut(duration: 0.2), value: companionManager.islandState.label)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 14)
@@ -1310,26 +1282,6 @@ struct NotchHUDView: View {
             .padding(.trailing, 12)
         }
         .frame(height: viewModel.hasNotch ? notchContentTopInset : 36)
-    }
-
-    /// Compact cursor-dock toggle in the header. The stored flag is "cursor
-    /// always visible"; docking is its inverse.
-    private var dockCursorToggle: some View {
-        let isDocked = !companionManager.isCursorAlwaysVisible
-        return Button {
-            companionManager.setCursorAlwaysVisible(isDocked)
-        } label: {
-            Image(systemName: isDocked ? "cursorarrow.slash" : "cursorarrow")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(isDocked ? WispColor.Island.textTertiary : WispColor.Island.textPrimary)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .pointerCursor()
-        .nativeTooltip(isDocked
-            ? "Cursor docked — click to let it follow you"
-            : "Dock the cursor (hide it and stop it following you)")
     }
 
     /// Sound-cue toggle in the header. Governs the short interaction sounds
@@ -1373,172 +1325,14 @@ struct NotchHUDView: View {
             : "Silent mode — replies show here only. Click to enable voice.")
     }
 
-    // MARK: Skills — one-click launcher strip
+    // MARK: Footer
 
-    /// Each skill in ~/.wisp/skills becomes a chip that runs the skill on the
-    /// current screen when clicked (screenshot → model → spoken answer → on-screen
-    /// pointing). Demoted to a compact horizontal strip so the voice affordance
-    /// and answer own the panel, but every skill stays one click away.
-    @ViewBuilder
-    private var skillsStrip: some View {
-        if !skillManager.skills.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                sectionLabel("SKILLS")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(skillManager.skills) { skill in
-                            skillChip(skill)
-                        }
-                    }
-                    .padding(.vertical, 1)
-                }
-            }
-        }
-    }
-
-    // MARK: Routines — app-aware suggestions
-
-    /// Routines suggested for the frontmost app, then pinned ones, as a
-    /// two-column grid. Titled "FOR SAFARI" when any are specific to the app,
-    /// so the user can tell they're contextual; "ROUTINES" otherwise.
-    @ViewBuilder
-    private var routineSuggestionsSection: some View {
-        let workingApplication = frontmostAppTracker.lastExternalApplication
-        let suggestedRoutines = routineStore.notchSuggestions(
-            forAppBundleIdentifier: workingApplication?.bundleIdentifier
-        )
-        if !suggestedRoutines.isEmpty {
-            let hasAppSpecificSuggestions = routineStore.hasAppSpecificSuggestions(
-                forAppBundleIdentifier: workingApplication?.bundleIdentifier
-            )
-            let sectionTitle = hasAppSpecificSuggestions
-                ? "FOR \((workingApplication?.displayName ?? "THIS APP").uppercased())"
-                : "ROUTINES"
-            VStack(alignment: .leading, spacing: 6) {
-                sectionLabel(sectionTitle)
-                LazyVGrid(
-                    columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)],
-                    alignment: .leading,
-                    spacing: 6
-                ) {
-                    ForEach(suggestedRoutines) { routine in
-                        routineChip(routine)
-                    }
-                }
-            }
-        }
-    }
-
-    private func routineChip(_ routine: WispRoutine) -> some View {
-        Button {
-            companionManager.runRoutine(withID: routine.id)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: routine.symbolName)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(WispColor.Island.textSecondary)
-                    .frame(width: 14)
-                Text(routine.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(WispColor.Island.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
-                if let shortcutDigit = routine.shortcutDigit {
-                    Text(RoutineStore.shortcutLabel(forDigit: shortcutDigit))
-                        .font(.system(size: 9.5, weight: .medium).monospacedDigit())
-                        .foregroundColor(WispColor.Island.textTertiary)
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(WispColor.Island.controlFill)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(PressableScaleButtonStyle())
-        .pointerCursor()
-        .nativeTooltip(routine.instruction)
-    }
-
-    private func skillChip(_ skill: SkillManager.SkillSummary) -> some View {
-        Button {
-            companionManager.runSkill(named: skill.name)
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: iconName(forSkillNamed: skill.name))
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(WispColor.Island.textSecondary)
-                Text(prettifiedName(fromSkillName: skill.name))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(WispColor.Island.textPrimary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(WispColor.Island.controlFill)
-            )
-            .contentShape(Capsule(style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .pointerCursor()
-        .nativeTooltip(skill.description)
-    }
-
-    /// Turns a kebab/snake skill filename into a readable label, e.g.
-    /// "summarize-screen" → "Summarize screen".
-    private func prettifiedName(fromSkillName skillName: String) -> String {
-        let spaced = skillName
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-        guard let firstCharacter = spaced.first else { return skillName }
-        return firstCharacter.uppercased() + spaced.dropFirst()
-    }
-
-    /// A best-effort icon for a skill, matched on keywords in its name. Falls
-    /// back to a generic bolt so any user-authored skill still gets a glyph.
-    private func iconName(forSkillNamed skillName: String) -> String {
-        let lowercasedName = skillName.lowercased()
-        if lowercasedName.contains("error") || lowercasedName.contains("debug") {
-            return "exclamationmark.triangle"
-        }
-        if lowercasedName.contains("summar") {
-            return "doc.text"
-        }
-        if lowercasedName.contains("task") || lowercasedName.contains("todo") {
-            return "checklist"
-        }
-        if lowercasedName.contains("proof") || lowercasedName.contains("grammar") || lowercasedName.contains("write") {
-            return "text.magnifyingglass"
-        }
-        if lowercasedName.contains("standup") || lowercasedName.contains("update") || lowercasedName.contains("meeting") {
-            return "person.2"
-        }
-        return "bolt.fill"
-    }
-
-    // MARK: Footer — integrations at a glance
-
-    /// A single quiet row: the count of connected integrations on the left and a
-    /// "manage" affordance on the right that opens the dashboard. Folded down
-    /// from the old full-height integrations section so it never competes with
-    /// the answer surface.
+    /// A single quiet row: Chat (the notch workspace) and Manage (the dashboard),
+    /// right-aligned. The integrations count and cursor-dock toggle that used to
+    /// sit here live in the dashboard (Connections, Cursor).
     private var footer: some View {
         HStack(spacing: 8) {
-            Image(systemName: "puzzlepiece.extension.fill")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(WispColor.Island.textTertiary)
-            Text(integrationsSummary)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(WispColor.Island.textSecondary)
-                .lineLimit(1)
             Spacer(minLength: 0)
-            // Moved here from the header so the top-right flank stays uncrowded.
-            dockCursorToggle
             Button {
                 viewModel.requestWorkspacePage?(.chat)
             } label: {
@@ -1577,25 +1371,6 @@ struct NotchHUDView: View {
             .buttonStyle(.plain)
             .pointerCursor()
             .nativeTooltip("Manage integrations & settings")
-        }
-    }
-
-    /// A compact summary like "3 integrations" / "1 integration" / "No integrations".
-    private var integrationsSummary: String {
-        let count = connectedServerNames.count
-        switch count {
-        case 0: return "No integrations connected"
-        case 1: return "1 integration · \(connectedServerNames[0])"
-        default: return "\(count) integrations connected"
-        }
-    }
-
-    private var connectedServerNames: [String] {
-        mcpManager.serverStatuses.compactMap { serverStatus in
-            if case .connected = serverStatus.state {
-                return serverStatus.name
-            }
-            return nil
         }
     }
 

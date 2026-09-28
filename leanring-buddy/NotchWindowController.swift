@@ -31,8 +31,8 @@ import SwiftUI
 @MainActor
 final class NotchViewModel: ObservableObject {
     @Published var isExpanded: Bool = false
-    /// When the island is expanded, whether it shows the FULL panel (voice
-    /// affordance, skills, integrations — a deliberate hover) or the compact
+    /// When the island is expanded, whether it shows the FULL panel (header
+    /// controls, activity, Chat/Manage — a deliberate hover) or the compact
     /// MESSAGE card (just the reply/glance card — an auto-presented answer). The
     /// message form is deliberately small so a short reply doesn't drop a whole
     /// dashboard from the notch.
@@ -92,9 +92,16 @@ final class NotchWindowController {
     /// hover logic; moving away after the hold expires collapses it as usual.
     private var presentationHoldUntil: Date = .distantPast
 
-    /// The expanded panel's fixed size. Kept compact — it holds the voice
-    /// affordance, the scrollable answer surface, the sideways skills strip and
-    /// the footer, and the answer surface scrolls rather than growing the window.
+    /// When the notch last folded away with an answer still lingering in it
+    /// (idle, collapsed, no hold), or nil while the answer is on screen or there
+    /// is none. An answer left alone this long is cleared, so the notch stops
+    /// carrying — and a later hover stops re-showing — a reply to a question
+    /// asked minutes ago. The full thread stays in History and the chat.
+    private var answerLingeringSinceDate: Date?
+    private let lingeringAnswerExpirySeconds: TimeInterval = 20
+
+    /// The expanded panel's fixed size. Kept compact — it holds the scrollable
+    /// answer surface, live activity and the footer, and the answer surface scrolls rather than growing the window.
     private let panelSize = CGSize(width: 360, height: 404)
 
     /// Extra slack added around the panel so a small overshoot at the edge does
@@ -457,6 +464,8 @@ final class NotchWindowController {
     /// around the pill to open and a larger zone around the panel to stay open,
     /// so the state does not flicker at the boundary.
     private func updateHoverFromMousePosition() {
+        expireLingeringAnswerIfStale()
+
         // Respect a brief suspension after a force-collapse so the panel does not
         // snap back open under a cursor that is still sitting over it.
         if Date() < hoverSuspendedUntil { return }
@@ -514,6 +523,39 @@ final class NotchWindowController {
                 performHUDHaptic()
             }
         }
+    }
+
+    /// Clears an answer once it has sat folded away in the notch, untouched, for
+    /// `lingeringAnswerExpirySeconds`. The clock only runs while the answer is
+    /// out of sight (collapsed, idle, past its presentation hold), so reading or
+    /// hovering it never races the expiry. A running timer's card is kept — its
+    /// countdown is still live information.
+    private func expireLingeringAnswerIfStale() {
+        let hasReplyText = !companionManager.currentReplyText
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasAnswer = hasReplyText || companionManager.resolvedGlanceCard != nil
+        let isAnswerOutOfSight = hasAnswer
+            && !viewModel.isExpanded
+            && companionManager.voiceState == .idle
+            && Date() >= presentationHoldUntil
+        guard isAnswerOutOfSight, !isShowingRunningTimerCard else {
+            answerLingeringSinceDate = nil
+            return
+        }
+        guard let answerLingeringSinceDate else {
+            self.answerLingeringSinceDate = Date()
+            return
+        }
+        guard Date().timeIntervalSince(answerLingeringSinceDate) >= lingeringAnswerExpirySeconds else { return }
+        self.answerLingeringSinceDate = nil
+        companionManager.currentReplyText = ""
+        companionManager.resolvedGlanceCard = nil
+    }
+
+    private var isShowingRunningTimerCard: Bool {
+        guard case let .timer(timerCardState) = companionManager.resolvedGlanceCard,
+              let timer = WispTimerStore.shared.timer(withID: timerCardState.timerID) else { return false }
+        return timer.status == .running
     }
 
     /// Opens the panel on its own and holds it open long enough to read the
