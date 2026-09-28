@@ -36,8 +36,24 @@ final class AgentToolRegistry: ObservableObject {
     /// follow plain language far more reliably than a JSON envelope.
     typealias ToolImplementation = @MainActor (JSONValue) async throws -> String
 
+    /// What a tool's input preparation decided.
+    enum ToolInputPreparation {
+        /// Ask about, and then run, this input instead of the model's.
+        case ready(JSONValue)
+        /// The call can't go ahead ("no contact named sam"); this is the result.
+        /// Nothing is asked and the implementation never runs.
+        case finished(String)
+    }
+
+    /// Turns the model's arguments into the concrete ones that will run,
+    /// *before* the user is asked. `send_imessage` needs this: "mom" must be
+    /// resolved to a person and a number first, so the confirmation card shows
+    /// who the message actually goes to rather than the word the model wrote.
+    typealias ToolInputPreparer = @MainActor (JSONValue) async -> ToolInputPreparation
+
     private struct RegisteredTool {
         let definition: BuddyToolDefinition
+        let inputPreparer: ToolInputPreparer?
         let implementation: ToolImplementation
     }
 
@@ -113,8 +129,16 @@ final class AgentToolRegistry: ObservableObject {
         toolsByName[name]?.definition.requiresConfirmation ?? true
     }
 
-    func register(_ definition: BuddyToolDefinition, implementation: @escaping ToolImplementation) {
-        toolsByName[definition.name] = RegisteredTool(definition: definition, implementation: implementation)
+    func register(
+        _ definition: BuddyToolDefinition,
+        preparingInputWith inputPreparer: ToolInputPreparer? = nil,
+        implementation: @escaping ToolImplementation
+    ) {
+        toolsByName[definition.name] = RegisteredTool(
+            definition: definition,
+            inputPreparer: inputPreparer,
+            implementation: implementation
+        )
     }
 
     /// Removes a previously registered tool, if present.
@@ -158,10 +182,22 @@ final class AgentToolRegistry: ObservableObject {
             )
         }
 
+        // Preparation runs first so the approval below — and the card the user
+        // reads — describe the input that will actually run.
+        var inputToRun = input
+        if let inputPreparer = tool.inputPreparer {
+            switch await inputPreparer(input) {
+            case .ready(let preparedInput):
+                inputToRun = preparedInput
+            case .finished(let resultText):
+                return Outcome(content: resultText, isError: false, wasDeclined: false)
+            }
+        }
+
         if tool.definition.metadata.requiresConfirmation {
             let decision = await permissionBroker.requestApproval(
                 toolName: name,
-                toolInput: input
+                toolInput: inputToRun
             )
             guard decision.isApproved else {
                 let reason: String
@@ -175,7 +211,7 @@ final class AgentToolRegistry: ObservableObject {
         }
 
         do {
-            let result = try await tool.implementation(input)
+            let result = try await tool.implementation(inputToRun)
             return Outcome(content: result, isError: false, wasDeclined: false)
         } catch {
             return Outcome(content: error.localizedDescription, isError: true, wasDeclined: false)
@@ -594,6 +630,7 @@ final class AgentToolRegistry: ObservableObject {
         registerScreenTextTools()
         registerShortcutsTools()
         registerChromeTabTools()
+        registerMessagingTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

@@ -80,6 +80,11 @@ enum ToolConfirmationCardBuilder {
         if ToolCallInspection.bareToolName(toolName) == ShortcutsToolRouting.runShortcutToolName {
             return runShortcutCard(toolInput: toolInput)
         }
+        // Its prepared input names the resolved person and handle, which the
+        // generic message shape would show only half of.
+        if ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage {
+            return sendIMessageCard(toolInput: toolInput)
+        }
 
         let inspectedActions = ToolCallInspection.inspectedActions(toolName: toolName, toolInput: toolInput)
 
@@ -346,6 +351,31 @@ enum ToolConfirmationCardBuilder {
         blocks.append(.list(rows: [
             GlanceListRow(text: "Does whatever this shortcut is built to do", iconName: "info.circle", tone: .neutral)
         ]))
+        return GlanceCard(blocks: blocks)
+    }
+
+    // MARK: - Messages
+
+    /// "New Message": the contact's name, the number or address it goes to
+    /// (so a wrong match is visible before it sends), and the message.
+    static func sendIMessageCard(toolInput: JSONValue) -> GlanceCard {
+        var blocks: [GlanceBlock] = [
+            .header(title: "New Message", iconName: "message", trailingText: "Messages")
+        ]
+        var keyValuePairs: [GlanceKeyValuePair] = []
+        let recipientName = ToolCallInspection.stringValue(forAnyOf: ["to"], in: toolInput)
+        let recipientHandleValue = ToolCallInspection.stringValue(forAnyOf: ["handle"], in: toolInput)
+        if let recipientName {
+            keyValuePairs.append(GlanceKeyValuePair(key: "To", value: truncatedFieldValue(recipientName), tone: .neutral))
+        }
+        if let recipientHandleValue, recipientHandleValue != recipientName {
+            let handleKey = recipientHandleValue.contains("@") ? "Email" : "Number"
+            keyValuePairs.append(GlanceKeyValuePair(key: handleKey, value: truncatedFieldValue(recipientHandleValue), tone: .neutral))
+        }
+        if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
+        if let bodyPreviewBlock = bodyPreviewBlock(forAnyOf: ["message"], in: toolInput) {
+            blocks.append(bodyPreviewBlock)
+        }
         return GlanceCard(blocks: blocks)
     }
 

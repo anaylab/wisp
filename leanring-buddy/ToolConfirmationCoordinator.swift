@@ -69,6 +69,9 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         /// no recognisable shape, in which case the panel shows the plain
         /// summary exactly as it always has. Display-only.
         let confirmationCard: GlanceCard?
+        /// Set for a `send_imessage` call: the panel is then drawn as a
+        /// Siri-style message (avatar, bubble, Send) instead of a tool card.
+        var messageDraft: MessageSendDraft? = nil
     }
 
     enum Decision: Equatable {
@@ -163,8 +166,18 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
             argumentSummary: toolInput.compactDescription,
             speak: speakHandler,
             ignoresSessionAutoApprove: mustAskEvenWithSessionAutoApprove,
-            confirmationCard: confirmationCard
+            spokenQuestionOverride: Self.spokenQuestionOverride(forToolNamed: toolName, toolInput: toolInput),
+            confirmationCard: confirmationCard,
+            messageDraft: MessageSendDraft(toolName: toolName, toolInput: toolInput)
         )
+    }
+
+    /// A question worth hearing for tools whose generic "i'd need to run …"
+    /// would hide the one thing to check — for a message, who it goes to.
+    private static func spokenQuestionOverride(forToolNamed toolName: String, toolInput: JSONValue) -> String? {
+        guard ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage,
+              let recipientName = ToolCallInspection.stringValue(forAnyOf: ["to"], in: toolInput) else { return nil }
+        return "send that to \(recipientName.lowercased())?"
     }
 
     /// Asks before a browser action that cannot be taken back — placing an
@@ -193,7 +206,8 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         speak: @MainActor (String) async -> Void,
         ignoresSessionAutoApprove: Bool = false,
         spokenQuestionOverride: String? = nil,
-        confirmationCard: GlanceCard? = nil
+        confirmationCard: GlanceCard? = nil,
+        messageDraft: MessageSendDraft? = nil
     ) async -> Decision {
         // Session auto-approve short-circuits the whole prompt so long tasks can
         // run without stopping to ask on every step — except for the few actions
@@ -214,7 +228,8 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
             spokenQuestion: question,
             argumentSummary: argumentSummary,
             requestedAt: Date(),
-            confirmationCard: confirmationCard
+            confirmationCard: confirmationCard,
+            messageDraft: messageDraft
         )
 
         await speak(question)

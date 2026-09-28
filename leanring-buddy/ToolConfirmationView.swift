@@ -43,6 +43,20 @@ struct ToolConfirmationView: View {
     }
 
     var body: some View {
+        // A message send is shown as the message itself, not as a tool call.
+        if let messageDraft = confirmation.messageDraft {
+            MessageSendConfirmationView(
+                messageDraft: messageDraft,
+                requestedAt: confirmation.requestedAt,
+                onSend: onApprove,
+                onCancel: onDeny
+            )
+        } else {
+            toolCallPanel
+        }
+    }
+
+    private var toolCallPanel: some View {
         WispGlassPanel(cornerRadius: WispRadius.panel, padding: WispSpacing.lg, shadow: .island) {
             VStack(alignment: .leading, spacing: WispSpacing.md) {
                 header

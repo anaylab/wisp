@@ -301,6 +301,23 @@ cloud dependency to the local path, without asking.
   `BrowserCursorGuide` (implemented by `CompanionManager`, which converts the element's global
   screen point into a `.marker` `ScreenAnnotation` on that display). Element
   screen coordinates come from `BrowserController.screenPoint(ofElementID:)`.
+- **Messages & Contacts** (Siri-style texting): "text mom i'm running late" is recognised by
+  `MessageCommandParser` (checked in `sendTranscriptToClaudeWithScreenshot` right after
+  `FastCommandRouter`, before the browser router, **not** behind agent mode). Where the name ends
+  is often unsaid, so the parser offers splits longest-first and `MessageRecipientResolver` keeps
+  the one that is someone in Contacts — a guessed split must match exactly, and if none does the
+  turn goes to the model as normal ("text size bigger"). `ContactsDirectory` reads Contacts
+  on-device (`ContactMatcher` is the pure part: full name/nickname > first name > last
+  name/company > word prefixes, duplicate cards collapse, two different people → ask which, and
+  "mom"/"dad"/"wife" resolve through the Me card's relations). The recipient is resolved
+  **before** consent, so the "New Message" card shows the real person and number; a send
+  **always** asks, even under session auto-approve ("send" is on `ToolCallSafety`'s floor).
+  `MessagesAppSender` drives Messages with AppleScript, passing handle and text as handler
+  parameters (never spliced into source), iMessage first then SMS. The agent gets `send_imessage`
+  (uses the registry's `ToolInputPreparer` hook: resolve → ask with the prepared input → run it)
+  and read-only `find_contact`, in the `.messaging` `AgentToolScope`. Needs
+  `NSContactsUsageDescription` + the `com.apple.security.personal-information.addressbook`
+  entitlement (hardened runtime) and Automation → Messages.
 - **Chrome tab organizing** (the **Wisp Tabs** extension, `chrome-extension/` at the repo root,
   loaded unpacked): AppleScript can't reach `chrome.tabGroups`, so a thin MV3 extension exposes tab
   primitives (`getTabs`/`groupTabs`/`ungroupTabs`/`closeTabs`) and Wisp does all the deciding.
@@ -526,11 +543,15 @@ Grouped by what they do. Line counts are approximate.
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
 | `ChromeExtensionBridge.swift` | ~330 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts, `connectionState` for the Agent tab. |
 | `ChromeTabOrganizer.swift` | ~600 | Tab organizing: `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per-window plans, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered prompt + strict reply parsing), `ChromeTabCommand`, and `ChromeTabOrganizer` (runs a plan through the bridge). |
+| `MessageCommandParser.swift` | ~210 | Pure parsing of spoken message commands ("text X saying Y", "send X a text …", "tell X that Y", unseparated "text X Y" → longest-first splits). Conservative; declines pronouns and noun uses ("text size"). |
+| `ContactsDirectory.swift` | ~330 | `ContactRecord`/`ContactHandle` (preferred handle: mobile → phone → email), the pure `ContactMatcher` (ranked tiers, ambiguity, relation words via the Me card), `DirectMessagingHandleParser`, and `ContactsDirectory` (CNContactStore access + off-main fetch). |
+| `MessagesSender.swift` | ~175 | `MessageRecipientResolver` (candidates → one person + handle, or a reason, or "not a message command") and `MessagesAppSender` (AppleScript handler call to Messages with Apple Event parameters; iMessage then SMS; -1743 → Automation hint). |
+| `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserAgentLoop.swift` | ~720 | Long-horizon browser agent for cloud providers: observe→act loop (cap 30), line-grammar actions incl. batched form fills, stuck detection, untrusted-page prompt rules. Also `BrowserActionSafety` (which clicks/sends need the always-ask confirmation). |
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
-| `AgentToolRegistry.swift` | ~640 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. |
-| `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
+| `AgentToolRegistry.swift` | ~640 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. `register(_:preparingInputWith:)` takes an optional `ToolInputPreparer` that turns the model's arguments into the concrete ones *before* the approval (the card then describes what will really run) or ends the call with a reason. |
+| `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/messaging/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership (or a caller's `boostedToolNames`, e.g. `run_shortcut` when the request names a shortcut) adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~330 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
