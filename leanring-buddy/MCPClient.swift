@@ -86,6 +86,38 @@ struct MCPServerConfiguration: Sendable {
     }
 }
 
+// MARK: - Startup timeouts
+
+/// How long a server gets to answer during startup.
+///
+/// Servers are usually launched through a package runner (`npx -y …`,
+/// `uvx …`), which downloads and installs the package the first time before
+/// the server can answer `initialize`. Measured cold, `uvx mcp-server-fetch`
+/// took ~10s on a fast connection just to install; a slow network, or uv first
+/// fetching a Python interpreter, takes far longer. Every later start is under
+/// a second. So only `initialize` for a package runner gets the long budget —
+/// once it has answered, the server is installed and running, and every other
+/// request keeps the normal timeout.
+enum MCPStartupTimeoutPolicy {
+    static let standardRequestTimeoutSeconds: TimeInterval = 25
+    static let packageRunnerInitializeTimeoutSeconds: TimeInterval = 180
+
+    /// Commands that may download the server before starting it.
+    static let packageRunnerCommandNames: Set<String> = ["npx", "uvx", "bunx", "pnpx", "pipx", "uv"]
+
+    /// True for a package runner given by bare name or absolute path.
+    static func isPackageRunner(command: String) -> Bool {
+        let executableName = (command as NSString).lastPathComponent.lowercased()
+        return packageRunnerCommandNames.contains(executableName)
+    }
+
+    static func initializeTimeoutSeconds(forCommand command: String) -> TimeInterval {
+        isPackageRunner(command: command)
+            ? packageRunnerInitializeTimeoutSeconds
+            : standardRequestTimeoutSeconds
+    }
+}
+
 // MARK: - Errors
 
 enum MCPClientError: LocalizedError {
@@ -137,8 +169,6 @@ actor MCPServerConnection {
     private(set) var discoveredTools: [DiscoveredTool] = []
     private(set) var isConnected = false
 
-    private static let requestTimeoutSeconds: TimeInterval = 25
-
     init(configuration: MCPServerConfiguration) {
         self.configuration = configuration
         self.transport = Self.makeTransport(for: configuration)
@@ -183,7 +213,8 @@ actor MCPServerConnection {
         startReadingLoop()
 
         // MCP's handshake: declare the protocol version and this client, then
-        // confirm with a notification before making any request.
+        // confirm with a notification before making any request. A package
+        // runner may be installing the server first, so it gets longer.
         _ = try await sendRequest(
             method: "initialize",
             parameters: .object([
@@ -193,7 +224,10 @@ actor MCPServerConnection {
                     "name": .string("Wisp"),
                     "version": .string("1.0")
                 ])
-            ])
+            ]),
+            timeoutSeconds: MCPStartupTimeoutPolicy.initializeTimeoutSeconds(
+                forCommand: configuration.command
+            )
         )
 
         // Awaited so it is written before tools/list — some servers require the
@@ -285,7 +319,11 @@ actor MCPServerConnection {
 
     // MARK: JSON-RPC
 
-    private func sendRequest(method: String, parameters: JSONValue) async throws -> JSONValue {
+    private func sendRequest(
+        method: String,
+        parameters: JSONValue,
+        timeoutSeconds: TimeInterval = MCPStartupTimeoutPolicy.standardRequestTimeoutSeconds
+    ) async throws -> JSONValue {
         let requestID = nextRequestID
         nextRequestID += 1
 
@@ -299,7 +337,7 @@ actor MCPServerConnection {
 
         // A server that never answers must not hold a conversation open.
         let timeoutTask = Task { [weak self] in
-            try await Task.sleep(nanoseconds: UInt64(Self.requestTimeoutSeconds * 1_000_000_000))
+            try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
             await self?.failPendingRequest(requestID, with: MCPClientError.timedOut(method: method))
         }
         defer { timeoutTask.cancel() }

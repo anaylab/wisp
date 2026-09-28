@@ -30,6 +30,9 @@ final class MCPManager: ObservableObject {
         enum State: Equatable {
             case disabled
             case connecting
+            /// Still connecting a few seconds in through a package runner
+            /// (npx/uvx), which is almost always a first-run download.
+            case installing
             case connected(toolCount: Int)
             case failed(String)
 
@@ -37,6 +40,7 @@ final class MCPManager: ObservableObject {
                 switch self {
                 case .disabled: return "Disabled"
                 case .connecting: return "Connecting…"
+                case .installing: return "Installing…"
                 case .connected(let count): return "Connected · \(count) tool\(count == 1 ? "" : "s")"
                 case .failed: return "Failed"
                 }
@@ -64,6 +68,16 @@ final class MCPManager: ObservableObject {
     }
 
     private var connections: [String: MCPServerConnection] = [:]
+
+    /// Bumped by every disconnect. A connect that finishes after a reload has
+    /// started compares against it and discards itself, so an overlapping
+    /// reload (the marketplace reloads on every install) can't register a
+    /// stale server's tools or overwrite the fresh statuses.
+    private var connectionGeneration = 0
+
+    /// How long a package-runner server may sit at "Connecting…" before the
+    /// status says it's installing. A warm start answers well inside this.
+    private static let installingStatusDelaySeconds: TimeInterval = 3
 
     /// Namespaced names of every tool this manager has registered, so they can
     /// be unregistered on disconnect or reload rather than lingering as stale
@@ -94,54 +108,106 @@ final class MCPManager: ObservableObject {
             )
         }
 
-        for configuration in configurations where configuration.isEnabled {
-            let connection = MCPServerConnection(configuration: configuration)
-
-            do {
-                try await connection.connect()
-                let offeredTools = await connection.discoveredTools
-                connections[configuration.name] = connection
-
-                // Register every allowed tool (empty allow-list means all).
-                // There is no registration cap: the per-turn router decides which
-                // registered tools the model actually sees, so a large installed
-                // library costs nothing until a request is relevant to it.
-                let allowedTools = configuration.allowedToolNames.isEmpty
-                    ? offeredTools
-                    : offeredTools.filter { configuration.allowedToolNames.contains($0.name) }
-
-                for tool in allowedTools {
-                    registerTool(tool, from: configuration.name, connection: connection)
-                }
-
-                updateStatus(for: configuration.name) { status in
-                    status.state = .connected(toolCount: allowedTools.count)
-                    status.offeredTools = offeredTools.map(\.name)
-                    status.exposedTools = allowedTools.map(\.name)
-                }
-
-                print("🔌 MCP: \(configuration.name) connected with \(allowedTools.count) tool(s)")
-            } catch {
-                // The subprocess is already running by the time a handshake
-                // fails, and nothing else holds a reference to it — without
-                // this, every failed connection leaks a node process that
-                // lives until the user logs out.
-                await connection.disconnect()
-
-                let errorOutput = await connection.recentErrorOutput
-                updateStatus(for: configuration.name) { status in
-                    status.state = .failed(error.localizedDescription)
-                    status.recentErrorOutput = errorOutput
-                }
-                print("⚠️ MCP: \(configuration.name) failed — \(error.localizedDescription)")
-                if !errorOutput.isEmpty {
-                    print("   server said: \(errorOutput.suffix(3).joined(separator: " | "))")
+        // Connected concurrently: one slow or failing server — a first-run
+        // download, a timeout — must not leave every server after it sitting
+        // at "Connecting…" until it resolves.
+        let generation = connectionGeneration
+        await withTaskGroup(of: Void.self) { group in
+            for configuration in configurations where configuration.isEnabled {
+                group.addTask {
+                    await self.connectServer(configuration, generation: generation)
                 }
             }
         }
     }
 
+    /// Connects one server and registers its tools, recording the outcome in
+    /// its status.
+    private func connectServer(_ configuration: MCPServerConfiguration, generation: Int) async {
+        let connection = MCPServerConnection(configuration: configuration)
+
+        let installingStatusTask = showInstallingIfStillConnecting(configuration, generation: generation)
+        defer { installingStatusTask?.cancel() }
+
+        do {
+            try await connection.connect()
+
+            guard generation == connectionGeneration else {
+                // A reload started while this was connecting; its own
+                // connection to this server replaces this one.
+                await connection.disconnect()
+                return
+            }
+
+            let offeredTools = await connection.discoveredTools
+            connections[configuration.name] = connection
+
+            // Register every allowed tool (empty allow-list means all).
+            // There is no registration cap: the per-turn router decides which
+            // registered tools the model actually sees, so a large installed
+            // library costs nothing until a request is relevant to it.
+            let allowedTools = configuration.allowedToolNames.isEmpty
+                ? offeredTools
+                : offeredTools.filter { configuration.allowedToolNames.contains($0.name) }
+
+            for tool in allowedTools {
+                registerTool(tool, from: configuration.name, connection: connection)
+            }
+
+            updateStatus(for: configuration.name) { status in
+                status.state = .connected(toolCount: allowedTools.count)
+                status.offeredTools = offeredTools.map(\.name)
+                status.exposedTools = allowedTools.map(\.name)
+            }
+
+            print("🔌 MCP: \(configuration.name) connected with \(allowedTools.count) tool(s)")
+        } catch {
+            // The subprocess is already running by the time a handshake
+            // fails, and nothing else holds a reference to it — without
+            // this, every failed connection leaks a node process that
+            // lives until the user logs out.
+            await connection.disconnect()
+
+            guard generation == connectionGeneration else { return }
+
+            let errorOutput = await connection.recentErrorOutput
+            let failureMessage = MCPConnectionFailureMessage.compose(
+                errorDescription: error.localizedDescription,
+                recentErrorOutput: errorOutput
+            )
+            updateStatus(for: configuration.name) { status in
+                status.state = .failed(failureMessage)
+                status.recentErrorOutput = errorOutput
+            }
+            print("⚠️ MCP: \(configuration.name) failed — \(error.localizedDescription)")
+            if !errorOutput.isEmpty {
+                print("   server said: \(errorOutput.suffix(3).joined(separator: " | "))")
+            }
+        }
+    }
+
+    /// For a package-runner server, flips "Connecting…" to "Installing…" if
+    /// the handshake is still going after a few seconds, so a first-run
+    /// download doesn't look like a hang. Nil for other servers.
+    private func showInstallingIfStillConnecting(
+        _ configuration: MCPServerConfiguration,
+        generation: Int
+    ) -> Task<Void, Never>? {
+        guard configuration.transport == .stdio,
+              MCPStartupTimeoutPolicy.isPackageRunner(command: configuration.command) else { return nil }
+
+        return Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.installingStatusDelaySeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self, generation == self.connectionGeneration else { return }
+            self.updateStatus(for: configuration.name) { status in
+                if status.state == .connecting { status.state = .installing }
+            }
+        }
+    }
+
     func disconnectAll() {
+        connectionGeneration += 1
+
         for connection in connections.values {
             Task { await connection.disconnect() }
         }
@@ -300,5 +366,32 @@ final class MCPManager: ObservableObject {
         } catch {
             print("⚠️ MCP: couldn't write \(fileURL.path) — \(error.localizedDescription)")
         }
+    }
+}
+
+// MARK: - Failure message
+
+/// The one-line reason a server failed, as the marketplace shows it.
+///
+/// A timeout or "not connected" says nothing about *why*; the server's own
+/// last stderr line usually does ("No module named …", "npm ERR! 404 …"), and
+/// the marketplace row has room only for this string, so the two are joined.
+enum MCPConnectionFailureMessage {
+    static let maximumServerOutputCharacters = 200
+
+    static func compose(errorDescription: String, recentErrorOutput: [String]) -> String {
+        let lastServerLine = recentErrorOutput
+            .reversed()
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+
+        guard let lastServerLine, !errorDescription.contains(lastServerLine) else {
+            return errorDescription
+        }
+
+        let shownServerLine = lastServerLine.count > maximumServerOutputCharacters
+            ? String(lastServerLine.prefix(maximumServerOutputCharacters)) + "…"
+            : lastServerLine
+        return "\(errorDescription) Last server output: \(shownServerLine)"
     }
 }
