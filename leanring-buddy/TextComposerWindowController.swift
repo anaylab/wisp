@@ -131,10 +131,7 @@ struct TextComposerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 9) {
-                Triangle()
-                    .fill(CursorAppearanceStore.shared.color)
-                    .frame(width: 12, height: 12)
-                    .rotationEffect(.degrees(35))
+                WispMark(size: 16, animated: false)
 
                 TextField("Ask Wisp…", text: $typedText)
                     .textFieldStyle(.plain)

@@ -198,12 +198,9 @@ struct DashboardView: View {
 
     private var identityHeader: some View {
         HStack(spacing: 9) {
-            // The same triangle the menu bar and overlay cursor use, so the
+            // The same ribbon mark the menu bar, notch and app icon use, so the
             // window reads as the same app rather than a separate tool.
-            Triangle()
-                .fill(DS.Colors.overlayCursorBlue)
-                .frame(width: 13, height: 15)
-                .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.5), radius: 5)
+            WispMark(size: 22, animated: false)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Wisp")
