@@ -6,15 +6,20 @@ macOS menu bar companion app. Lives entirely in the macOS status bar
 (no dock icon, no main window). Clicking the menu bar icon opens a custom floating panel
 with companion voice controls. Uses push-to-talk (ctrl+option) to capture voice input,
 transcribes it on-device, and sends the transcript + a screenshot to a local model. The
-model responds with text, which is spoken by a local TTS server. A transparent screen
+model responds with text, shown in the notch; speech is optional (voice/silent mode, and in
+voice mode only the short line the model tags with `[SAY: …]` is spoken, by the on-device
+macOS voice by default). A transparent screen
 overlay can mark UI elements the model references on any connected monitor with a pulsing
 marker, and can draw boxes, arrows and highlights on screen.
 
 **Local-first and private by default.** Out of the box everything runs on this machine: the
-local Ollama model, on-device speech, and the local TTS server, with the only network
-traffic being HTTP to `localhost` (Ollama on 11434, Chatterbox TTS on 8004) — no Cloudflare
-Worker and no analytics. The model backend is now *selectable*: a user can opt in, in
-Settings → Model, to a bring-your-own-key cloud provider (`ModelProviderFactory` /
+local Ollama model, on-device speech recognition, and on-device speech synthesis (macOS
+voices), with the model traffic being HTTP to `localhost` (Ollama on 11434; Chatterbox TTS on
+8004 only if opted into) — no Cloudflare Worker and no analytics. The only other default
+network use is live glance-card data (weather, places, configured sources), gated by
+`GlanceCardDataPreference`, which sends a place name or search query (plus, for places, the
+location to Apple Maps), never a screenshot. The model backend is now *selectable*: a user
+can opt in, in Settings → Model, to a bring-your-own-key cloud provider (`ModelProviderFactory` /
 `BuddyChatProviderSelection`, key in the Keychain via `ProviderKeychainStore`), which sends
 screenshots and the transcript off this machine and is labelled as such. Local remains the
 default and the private path — do not make a cloud provider the default, and do not add a
@@ -44,8 +49,9 @@ cloud dependency to the local path, without asking.
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
 - **Chat / Vision**: a pluggable `ModelProvider`, chosen at runtime via
   `BuddyChatProviderSelection` and built by `ModelProviderFactory`. Default is local Ollama
-  `qwen2.5vl:3b` at `http://localhost:11434` (NDJSON streaming); cloud providers such as
-  `GeminiProvider` are bring-your-own-key. The Info.plist `ChatProvider` key is now only a
+  `qwen2.5vl:3b` at `http://localhost:11434` (NDJSON streaming); the cloud providers
+  (`AnthropicProvider`, `OpenAIProvider`, `GeminiProvider`) are bring-your-own-key, picked in
+  Settings → Model. The Info.plist `ChatProvider` key is now only a
   shipped-default hint — the live selection lives in `BuddyChatProviderSelection`.
 - **Speech-to-Text**: Apple Speech framework, on-device. Recognition **language** and a
   **custom dictionary** are user-configurable via `DictationSettingsStore` (Dictation tab):
@@ -53,7 +59,13 @@ cloud dependency to the local path, without asking.
   `SFSpeechAudioBufferRecognitionRequest.contextualStrings` to bias spelling (this was a
   no-op before — the provider accepted keyterms and dropped them). Both are read on the main
   actor by `BuddyDictationManager` and threaded into `startStreamingSession`.
-- **Text-to-Speech**: Chatterbox Nano at `http://localhost:8004`. Reply speech is now
+- **Text-to-Speech**: chosen once at launch by `BuddyTTSProviderFactory` from the Info.plist
+  `VoiceTTSProvider` key, which ships as `apple`: `AppleSpeechSynthesisClient`
+  (`AVSpeechSynthesizer`, the built-in macOS voices — on-device, no server, no resident memory
+  in the app). Setting it to `chatterbox` opts into `LocalChatterboxTTSClient`, a
+  self-hosted Chatterbox server at `ChatterboxTTSServerURL` (default `http://localhost:8004`),
+  which is also the only case where the keep-warm heartbeat and the Today page's health check
+  ping it. There is no runtime TTS switch. Reply speech is now
   **opt-in per reply and gated by a voice/silent mode** (`VoiceOutputPreference`, default on).
   The notch is the primary answer surface: every reply renders there as text
   (`CompanionManager.currentReplyText`) plus an optional glance card. In **silent mode** no
@@ -200,7 +212,7 @@ cloud dependency to the local path, without asking.
   gated only by their macOS permission (`places` is both — network-gated *and* it requests
   Location permission on first use). Managed in the Wisp window's **Connections → Sources** page. Adding an
   app = one data provider + one template.
-- **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor, downscaled to 896px
+- **Screen Capture**: ScreenCaptureKit, multi-monitor, downscaled to 896px
 - **Element Pointing**: the model embeds `[POINT:x,y:label:screenN]` tags; `CompanionManager`
   parses them and turns each into a `.marker` `ScreenAnnotation` (a point in the screenshot's
   pixel space) applied to the correct monitor. There is no flying cursor — the marker is a
@@ -243,9 +255,11 @@ cloud dependency to the local path, without asking.
   several tags appear in one reply they are kept in document order and **auto-numbered** into a
   step-by-step walkthrough (badges drawn per step, cap 8). All annotations draw in the
   user-chosen colour from `CursorAppearanceStore` (Cursor tab: blue/red/yellow/green).
-- **Agent loop**: off by default behind `AgentModeEnabled` in Info.plist. When on, tools
-  are called via structured `[TOOL:name:{json}]` tags rather than native tool_calls, since
-  the local model is unreliable at the latter. Surfaced in Settings → Agent: the
+- **Agent loop**: gated by `AgentModeEnabled` in Info.plist, which ships `true` (set it to
+  `false` and rebuild to get plain answers with no tool calls; the Agent and Tools & Servers
+  pages say so). With the local model, tools are called via structured `[TOOL:name:{json}]`
+  tags rather than native tool_calls, since the local model is unreliable at the latter; the
+  cloud providers use their native tool calling (`ModelCapabilities.supportsNativeToolCalls`). Surfaced in Settings → Agent: the
   **working folder** (`AgentSettingsStore`, read by the tool registry; defaults to
   `CodeProjectDirectory`), a **session auto-approve** toggle (`ToolConfirmationCoordinator.autoApproveThisSession`
   — short-circuits the confirmation prompt, reset every launch), and **permission** rows with
@@ -479,8 +493,10 @@ every screen's edges in a saturated lavender (the AI-activity accent) while `voi
 .listening`, so "is it hearing me?" is answered wherever the user is looking, not just at the
 badge.
 
-**Model residency is the binding constraint.** On 18GB, one 7B vision model plus the TTS
-server leaves almost nothing spare. A second concurrently-resident LLM is not feasible at
+**Model residency is the binding constraint.** On 18GB, a resident local vision model
+(the 3B default, or a 7B) leaves little spare — which is also why the default TTS is the
+system synthesizer rather than the Chatterbox server, whose resident memory grew to several
+gigabytes with use. A second concurrently-resident LLM is not feasible at
 that size. `ModelAccessGate` serialises all model calls so background work never evicts
 the prefix cache an interactive turn is depending on, and the keep-warm heartbeat is
 suspended during agent loops for the same reason.
@@ -507,9 +523,9 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `leanring_buddyApp.swift` | ~105 | Menu bar app entry point. `@NSApplicationDelegateAdaptor` with `CompanionAppDelegate`, which creates `MenuBarPanelManager` and starts `CompanionManager`. |
-| `CompanionManager.swift` | ~2000 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
-| `BuddyDictationManager.swift` | ~866 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
-| `GlobalPushToTalkShortcutMonitor.swift` | ~210 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
+| `CompanionManager.swift` | ~2900 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
+| `BuddyDictationManager.swift` | ~940 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
+| `GlobalPushToTalkShortcutMonitor.swift` | ~270 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
 | `ShortcutBindingStore.swift` | ~150 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier. Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
 | `TextComposerWindowController.swift` | ~230 | The tap-to-type text composer: a keyable floating panel (activates the app for typing, Return to send, Esc to dismiss) whose typed question runs through the normal screenshot turn. |
 | `DictationSettingsStore.swift` | ~110 | Source of truth for dictation language + custom dictionary. Persists to UserDefaults; read by `BuddyDictationManager` when starting a session. |
@@ -517,24 +533,33 @@ Grouped by what they do. Line counts are approximate.
 | `CursorAppearanceStore.swift` | ~90 | Source of truth for the cursor/annotation colour (blue/red/yellow/green). Observed by the overlay, annotation layer, and brand glyphs so a change applies live. |
 | `CursorTab.swift` | ~110 | Settings → Cursor: dock-cursor toggle (shared with the notch) and the colour swatches. |
 | `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
-| `AgentTab.swift` | ~325 | Settings → Agent: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), announcements, an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`) and the Chrome Tabs card. Permissions moved to Settings → General. |
+| `AgentTab.swift` | ~395 | Settings → Agent: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), announcements, an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`) and the Chrome Tabs card. Permissions moved to Settings → General. |
+| `BuddyChatTypes.swift` | ~685 | Shared value types: `JSONValue`, `BuddyContentBlock`, `BuddyChatMessage`/`BuddyChatTurn`, `BuddyToolDefinition`, `ConversationTranscript`, and the `AgentTaskRecord`/`AgentStepRecord` history records. |
+| `AppBundleConfiguration.swift` | ~30 | Reads Info.plist string keys (`VoiceTTSProvider`, `AgentModeEnabled`, `OllamaModel`, …) from the built bundle. |
+| `DictatedTextInserter.swift` | ~135 | Dictate mode's text insertion into the focused field: Accessibility selected-text for native fields, clipboard + synthesised ⌘V for web content and apps where AX does nothing. |
+| `ScreenshotReuseCache.swift` | ~125 | Resends the previous screenshot's exact bytes when the screen hasn't perceptibly changed, so Ollama's image cache hits instead of re-encoding. |
 | `CompanionScreenCaptureUtility.swift` | ~150 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. Starts OCR (`ScreenTextRecognizer`) on each captured frame. |
 
 ### Local model stack
 | File | Lines | Purpose |
 |------|-------|---------|
-| `LocalOllamaAPI.swift` | ~235 | Ollama client: NDJSON streaming, `keep_alive`, per-mode context and token limits, and the heuristic that decides whether a prompt needs a screenshot at all. |
+| `LocalOllamaAPI.swift` | ~350 | Ollama client: NDJSON streaming, `keep_alive`, per-mode context and token limits, and the heuristic that decides whether a prompt needs a screenshot at all. |
 | `ModelProvider.swift` | ~248 | Provider-agnostic runtime: the `ModelProvider` protocol (`streamTurn`), plus `ModelRequest`, `ModelCapabilities`, and `ModelDeployment` (`sendsDataOffThisMachine`, which drives the local-only-machinery gates). |
 | `OllamaProvider.swift` | ~294 | Presents `LocalOllamaAPI` as a `ModelProvider`; owns the `[TOOL:...]` text convention that fakes tool calls for the local model. |
-| `GeminiProvider.swift` | ~300 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. The first bring-your-own-key cloud backend. |
+| `AnthropicProvider.swift` | ~425 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, thinking disabled (the transcript can't replay thinking blocks). |
+| `OpenAIProvider.swift` | ~435 | GPT as a bring-your-own-key `ModelProvider` over Chat Completions: tool results become separate `role:"tool"` messages. |
+| `GeminiProvider.swift` | ~415 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. |
 | `ModelProviderFactory.swift` | ~75 | Builds the `ModelProvider` for the current `BuddyChatProviderSelection`, reading a cloud provider's key from `ProviderKeychainStore`. Used by CompanionManager's turn path. |
 | `BuddyChatProviderKind.swift` | ~65 | The provider enum (local Ollama / Anthropic / OpenAI / Gemini) with `displayName`, `sendsScreenshotsOffThisMachine`, `requiresAPIKey`. |
 | `BuddyChatProviderSelection.swift` | ~50 | The `UserDefaults`-backed live provider selection. Source of truth, defaulting to local. |
 | `ProviderKeychainStore.swift` | ~90 | Per-provider API keys in the login Keychain — never in UserDefaults, Info.plist, or logs. |
 | `BuddyVisionChatClient.swift` | ~47 | Legacy chat-client protocol + factory. Superseded by `ModelProvider` on the main path; still used by `BrowserAgent` for its own local vision. |
-| `LocalChatterboxTTSClient.swift` | ~231 | Sentence-by-sentence local TTS: synthesises sentence N+1 while N is playing. |
-| `BuddyTTSProvider.swift` | ~53 | TTS protocol and factory, keyed off `VoiceTTSProvider`. |
-| `AppleSpeechTranscriptionProvider.swift` | ~147 | On-device STT via the Speech framework. The active provider. |
+| `LocalChatterboxTTSClient.swift` | ~231 | Opt-in TTS (`VoiceTTSProvider = chatterbox`) against a self-hosted Chatterbox server: synthesises sentence N+1 while N is playing. |
+| `BuddyTTSProvider.swift` | ~53 | TTS protocol and factory, keyed off `VoiceTTSProvider`: Chatterbox only when it says `chatterbox`, otherwise the Apple synthesizer (the shipped default). |
+| `AppleSpeechSynthesisClient.swift` | ~205 | The default TTS: `AVSpeechSynthesizer` with the built-in macOS voices — on-device, no server, no resident memory in the app. |
+| `AppleSpeechTranscriptionProvider.swift` | ~147 | On-device STT via the Speech framework. The only provider. |
+| `BuddyTranscriptionProvider.swift` | ~45 | STT protocol (`BuddyTranscriptionProvider` / `BuddyStreamingTranscriptionSession`) and the factory, which always returns the Apple provider. |
+| `SpokenSentenceStreamer.swift` | ~120 | Token stream → speakable sentences (tags held back). Left over from the retired whole-reply streaming: `CompanionManager` still holds an optional instance but never creates one. |
 | `ModelAccessGate.swift` | ~104 | Actor serialising all model calls, with interactive priority, so background work never evicts the prefix cache a live turn depends on. |
 
 ### Overlay and annotation
@@ -554,22 +579,30 @@ Grouped by what they do. Line counts are approximate.
 ### Agent, tools and MCP
 | File | Lines | Purpose |
 |------|-------|---------|
-| `AgentTurnRunner.swift` | ~250 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
+| `AgentTurnRunner.swift` | ~415 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
 | `ChromeExtensionBridge.swift` | ~330 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts, `connectionState` for the Agent tab. |
 | `ChromeTabOrganizer.swift` | ~600 | Tab organizing: `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per-window plans, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered prompt + strict reply parsing), `ChromeTabCommand`, and `ChromeTabOrganizer` (runs a plan through the bridge). |
 | `MessageCommandParser.swift` | ~210 | Pure parsing of spoken message commands ("text X saying Y", "send X a text …", "tell X that Y", unseparated "text X Y" → longest-first splits). Conservative; declines pronouns and noun uses ("text size"). |
-| `ContactsDirectory.swift` | ~330 | `ContactRecord`/`ContactHandle` (preferred handle: mobile → phone → email), the pure `ContactMatcher` (ranked tiers, ambiguity, relation words via the Me card), `DirectMessagingHandleParser`, and `ContactsDirectory` (CNContactStore access + off-main fetch). |
+| `ContactsDirectory.swift` | ~440 | `ContactRecord`/`ContactHandle` (preferred handle: mobile → phone → email), the pure `ContactMatcher` (ranked tiers, ambiguity, relation words via the Me card), `DirectMessagingHandleParser`, and `ContactsDirectory` (CNContactStore access + off-main fetch). |
 | `MessagesSender.swift` | ~175 | `MessageRecipientResolver` (candidates → one person + handle, or a reason, or "not a message command") and `MessagesAppSender` (AppleScript handler call to Messages with Apple Event parameters; iMessage then SMS; -1743 → Automation hint). |
+| `MessageSendConfirmationView.swift` | ~235 | The Siri-style confirmation panel `ToolConfirmationView` shows for `send_imessage` (recipient, message bubble, Cancel / Send); same consent flow underneath. |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
+| `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
+| `AppleScriptBrowserController.swift` | ~1105 | The `BrowserController` for Chrome/Safari: injected JS via AppleScript (one round trip per op, `data-wisp-id` stamping), tab commands, and the dedicated-tab session (`runInTargetTab`). |
+| `BrowserAgent.swift` | ~375 | `BrowserAgent.run`: the tiered entry point (deterministic planner → one model-written plan → tier-2 step loop, or `BrowserAgentLoop` for cloud providers), dedicated tab begin/end, login walls as a dead end. |
+| `BrowserTask.swift` | ~395 | `BrowserStep`/`BrowserTaskPlan`/`BrowserTaskResult`, `BrowserTaskRunner` (executes a plan end to end) and `BrowserTaskPlanner` (tier 0, no model). |
+| `BrowserSiteRegistry.swift` | ~110 | The sites the deterministic planner knows, as data rows. |
+| `BrowserPlanValidator.swift` | ~340 | The browser agent's security boundary: model-written JSON → a `BrowserTaskPlan` of fixed actions with validated arguments, or a refusal. |
+| `BrowserPlanCache.swift` | ~180 | Caches plans by intent (`wikipedia.search` + query), keeping deterministic and model-written plans apart. |
 | `BrowserAgentLoop.swift` | ~720 | Long-horizon browser agent for cloud providers: observe→act loop (cap 30), line-grammar actions incl. batched form fills, stuck detection, untrusted-page prompt rules. Also `BrowserActionSafety` (which clicks/sends need the always-ask confirmation). |
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
-| `AgentToolRegistry.swift` | ~640 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. `register(_:preparingInputWith:)` takes an optional `ToolInputPreparer` that turns the model's arguments into the concrete ones *before* the approval (the card then describes what will really run) or ends the call with a reason. |
+| `AgentToolRegistry.swift` | ~710 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. `register(_:preparingInputWith:)` takes an optional `ToolInputPreparer` that turns the model's arguments into the concrete ones *before* the approval (the card then describes what will really run) or ends the call with a reason. |
 | `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/messaging/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership (or a caller's `boostedToolNames`, e.g. `run_shortcut` when the request names a shortcut) adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
-| `MCPClient.swift` | ~330 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
+| `MCPClient.swift` | ~385 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
 | `MCPStdioTransport.swift` | ~230 | Stdio transport: child process over stdin/stdout as NDJSON, login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
 | `MCPStreamableHTTPTransport.swift` | ~230 | Remote transport: JSON-RPC over MCP Streamable HTTP (one POST per message; parses JSON + SSE replies; `Mcp-Session-Id`, auth headers). |
@@ -577,10 +610,11 @@ Grouped by what they do. Line counts are approximate.
 | `MCPCatalogProvider.swift` | ~55 | `MCPCatalogProvider` protocol + `CuratedRegistryCatalogProvider` (loads the bundled `curated-mcp-registry.json`). Composio's provider will conform here in Phase 3. |
 | `curated-mcp-registry.json` | ~180 | Bundled curated MCP registry (resource): 8 official stdio servers + the hosted GitHub remote server. |
 | `InstalledMCPServerStore.swift` | ~270 | Source of truth over `~/.wisp/mcp.json` (preserves unknown keys). Install/uninstall/enable/allow-list + `installRemoteServer` (Composio); reloads MCPManager on every change. |
-| `ComposioKeychainStore.swift` | ~75 | The Composio `x-api-key` in the login Keychain (mirrors `ProviderKeychainStore`). Never in the config file or logs. |
+| `ComposioKeychainStore.swift` | ~75 | The Composio connect key in the login Keychain (sent as `x-consumer-api-key` at connect time) (mirrors `ProviderKeychainStore`). Never in the config file or logs. |
 | `ComposioClient.swift` | ~110 | Validates the Composio **connect** key by an MCP `initialize` against `https://connect.composio.dev/mcp` (auth header `x-consumer-api-key`). No provisioning — the connect server is a fixed universal endpoint. |
 | `ComposioAccountStore.swift` | ~110 | Composio marketplace state: `connect(apiKey:)` validates the key then installs one remote server (`composio-connect`) over the Phase 1 transport; `disconnect()` removes it. Off-machine/opt-in. |
 | `MCPManager.swift` | ~270 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. |
+| `ClaudeCodeWorker.swift` | ~215 | Runs the `claude` CLI as a background worker for the `delegate_coding_task` tool (parses its event stream into progress + result). Off-machine, only when that tool is called. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `RoutineStore.swift` | ~270 | Routines: user-fired saved instructions (`WispRoutine`: name, instruction, symbol, optional chord+digit shortcut, suggested app bundle ids, pinned-in-notch). Persists to `~/Library/Application Support/Wisp/routines.json`; seeds 4 starters when the file is absent. `notchSuggestions(forAppBundleIdentifier:)` powers the notch's app-aware section. Distinct from skills (model-loaded reference). |
 | `FrontmostAppTracker.swift` | ~55 | Last frontmost app that isn't Wisp (NSWorkspace activation notifications), so suggestions survive opening the Wisp window/composer. |
@@ -593,6 +627,7 @@ Grouped by what they do. Line counts are approximate.
 | `ToolConfirmationCoordinator.swift` | ~320 | Permission requests with a 45s timeout and spoken-affirmative parsing. `requestApproval(toolName:toolInput:)` applies the `ToolCallSafety` floor under session auto-approve and attaches the `ToolConfirmationCardBuilder` card to `PendingConfirmation.confirmationCard`. |
 | `ToolConfirmationView.swift` | ~150 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, the optional confirmation card (`GlanceCardView`), exact call in a chip, Cancel / Allow→, "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
 | `ToolCallInspection.swift` | ~310 | Deterministic reading of a tool call: `server__` namespace stripping, identifier → words (camelCase/underscores), Composio execute-meta-tool unwrapping into `InspectedToolAction`s (tolerates JSON-string arguments), lenient case/underscore-insensitive argument lookup, display text for arrays/objects, path-argument extraction and `..`-safe path containment. |
+| `ToolMetadata.swift` | ~100 | What a tool does (read-only, destructive, external side effect, data source) as data; whether it needs confirmation is computed from it. |
 | `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules, and `alwaysAskBareToolNames` (`run_shortcut`). |
 | `ToolConfirmationCardBuilder.swift` | ~520 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
@@ -630,14 +665,14 @@ Grouped by what they do. Line counts are approximate.
 | `WispWindow/GeneralSettingsPage.swift` | ~330 | Settings → General: `PermissionsChecklist` (mic / accessibility / screen recording / screen content with Grant buttons — also shown on Today until granted), `ActiveStackCard` (model + residency, speech, voice, agent mode, local-only assurance), island surface, speak replies, sound cues and `VoiceUpgradeHint`. `SettingRow` is the shared title/detail/control row. |
 | `WispWindow/ModelSettingsPage.swift` | ~390 | Settings → Model (`PerformanceTab`: provider choice + API key, system readouts, timings) and the shared `DashboardCard` (native grouped card) and `DashboardEmptyState` (`ContentUnavailableView`). |
 | `HistoryTab.swift` | ~480 | The History **Timeline** page (`WispPage.timeline`): search (title/answer/steps), filters (All · Answers · Browser · Tools · Needs attention), day-grouped list, and a detail pane — answer, failure reason, "What Wisp did" steps, and actions: Stop, Copy answer, Ask again (closes the Wisp window first) and **Save as routine** (creates a `WispRoutine` and hands it to the Routines editor via `RoutineStore.routineIDToOpenInEditor`). Routine, skill and dictation runs are titled with `AgentTaskRecord.routineRunTitlePrefix`/`skillRunTitlePrefix`/`dictationTitlePrefix` (set via `sendTranscriptToClaudeWithScreenshot(transcript:historyTitle:)`), and `isUsersOwnQuestion` hides re-ask/save for them. |
-| `HomeTab.swift` | ~720 | The Wisp window's **Today** page: a setup card with the permission checklist until everything is granted; greeting + voice/silent toggle; an ask bar (typed question via `CompanionManager.askTypedQuestion`, or `/` to filter and run routines); "Needs you" alerts with fixes (Ollama/Chatterbox unreachable — localhost checks every 30s, only for services in use — pending confirmation, a failed/interrupted task in the last 2h); Running now (per-task Stop); Up next (Calendar, requests access only from its Connect button); Routines tiles; Recent answers with Copy. Anything it runs closes the Wisp window first so the screenshot shows the user's work. |
-| `ConversationWindowView.swift` | ~430 | The window's content: the last 6 hours of interactive exchanges as a thread (from `AgentTaskRegistry`; running turns show the live browser step + Stop, answers have Copy), a follow-up box (`askTypedQuestion`; capture already excludes Wisp's own windows, so the turn sees the work behind the window), and a sidebar of running tasks (Stop) and recently finished ones. |
+| `HomeTab.swift` | ~855 | The Wisp window's **Today** page: a setup card with the permission checklist until everything is granted; greeting + voice/silent toggle; an ask bar (typed question via `CompanionManager.askTypedQuestion`, or `/` to filter and run routines); "Needs you" alerts with fixes (Ollama/Chatterbox unreachable — localhost checks every 30s, only for services in use — pending confirmation, a failed/interrupted task in the last 2h); Running now (per-task Stop); Up next (Calendar, requests access only from its Connect button); Routines tiles; Recent answers with Copy. Anything it runs closes the Wisp window first so the screenshot shows the user's work. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
 | `MarketplaceTab.swift` | ~700 | Connections → Marketplace: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
 | `ShortcutsTab.swift` | ~250 | Settings → Shortcuts: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
+| `ActiveStackReadout.swift` | ~100 | "What's running": configured model/STT/TTS names from Info.plist plus Ollama residency, for the Wisp window's sidebar footer and Settings → General's What's running card. Also labels perf timings and "Asking …" steps. |
 | `MenuBarMenuController.swift` | ~165 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Speak Replies / Sound Cues checkmarks, Settings…, Quit). |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
-| `NotchHUDView.swift` | ~1620 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
+| `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `DesignSystem.swift` | ~480 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
@@ -651,7 +686,7 @@ names forward here.
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `DesignSystem/WispColors.swift` | ~180 | The palette: raw brand hexes (`WispColor.Brand.*` — sage/lavender/moss/ink/cloud/bone), **adaptive** semantic tokens (`.background`/`.textPrimary`/`.accent`/… resolve light/dark via a dynamic `NSColor`), a fixed **on-glass** set (`OnGlass.*`) for always-dark surfaces, and adaptive glass tints. `adaptive(light:dark:)` is the helper. |
+| `DesignSystem/WispColors.swift` | ~235 | The palette: raw brand hexes (`WispColor.Brand.*` — sage/lavender/moss/ink/cloud/bone), **adaptive** semantic tokens (`.background`/`.textPrimary`/`.accent`/… resolve light/dark via a dynamic `NSColor`), a fixed **on-glass** set (`OnGlass.*`) for always-dark surfaces, and adaptive glass tints. `adaptive(light:dark:)` is the helper. |
 | `DesignSystem/WispTypography.swift` | ~60 | `WispFont` scale (SF Pro/rounded + SF Mono) and the lowercase `wisp` wordmark. |
 | `DesignSystem/WispMetrics.swift` | ~50 | `WispSpacing` + `WispRadius` scales (softer/rounder; hero input = 22). |
 | `DesignSystem/WispShadows.swift` | ~35 | `WispShadow` (`.ambient`/`.floating`/`.island`) + `wispShadow(_:)`. Soft, low-opacity only. |
@@ -667,7 +702,7 @@ names forward here.
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
 | `Buddies/BuddyStore.swift` | ~390 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy`, `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/reschedule/delete). |
 | `Buddies/BuddyAvatar.swift` | ~130 | `BuddyAppearance` (the 8-colour palette) and `BuddyAvatar` (cloud + happy eyes, bobs while working, clock paused at rest). |
-| `Buddies/BuddyViews.swift` | ~560 | `BuddyScheduleEditor`, `BuddyDetailView` (a buddy's thread + Run now/Stop, schedule, rename, delete) and `NewBuddyForm`. |
+| `Buddies/BuddyViews.swift` | ~620 | `BuddyScheduleEditor`, `BuddyDetailView` (a buddy's thread + Run now/Stop, schedule, rename, delete) and `NewBuddyForm`. |
 | `DynamicIsland/MorningBriefing.swift` | ~255 | The morning notch: `MorningSuggestion`, the pure `MorningSuggestionBuilder` and `MorningBriefingSchedule` (once a day, daytime, user present), and `MorningBriefingController` (1-min check, pending suggestions, `presentationSequenceNumber` the notch drops the banner on, `perform`). |
 | `DynamicIsland/QuietModeMonitor.swift` | ~280 | Quiet mode: `QuietModeDetection` (CoreAudio processes capturing input, CoreMediaIO camera running, system-listener filter) and the polling `QuietModeMonitor` publishing `activeQuietReason`. |
 | `DynamicIsland/FinishedWorkInbox.swift` | ~55 | Unseen finished background task ids behind the notch's "N new" badge and NEW section (in-memory, cap 5). |
@@ -700,17 +735,19 @@ logs via `log stream --predicate 'process == "Wisp"'`.
 
 ## Local services
 
-Both must be running for the app to work:
+With the default configuration only Ollama must be running (speech in and out is on-device):
 
 ```bash
 ollama serve                     # port 11434
 ```
 
+Chatterbox is needed only if `VoiceTTSProvider` is set to `chatterbox`:
+
 ```bash
 curl -s http://localhost:8004/ -o /dev/null -w "%{http_code}\n"   # Chatterbox TTS health
 ```
 
-There is no Cloudflare Worker.
+Ollama isn't needed while a cloud provider is selected. There is no Cloudflare Worker.
 
 ## Code Style & Conventions
 
