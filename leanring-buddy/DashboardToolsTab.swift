@@ -199,7 +199,7 @@ private struct ServerRow: View {
     private var indicatorColor: Color {
         switch status.state {
         case .connected: return DS.Colors.success
-        case .connecting: return DS.Colors.warningText
+        case .connecting, .installing: return DS.Colors.warningText
         case .failed: return DS.Colors.destructiveText
         case .disabled: return DS.Colors.textTertiary
         }

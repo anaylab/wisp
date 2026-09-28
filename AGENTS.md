@@ -373,7 +373,15 @@ cloud dependency to the local path, without asking.
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
   while `StdioMCPTransport` (`MCPStdioTransport.swift`) carries the child-process/stdin/stdout
-  path. This split is the foundation for the in-flight **MCP marketplace** (remote Streamable
+  path. **Stdio pipes are read with `readabilityHandler` + `NewlineDelimitedLineBuffer`, never
+  `FileHandle.bytes.lines`**: reading stdout and stderr concurrently through `bytes.lines` stalls,
+  so replies sat unread in the pipe and every stdio server failed with "didn't answer tools/list
+  in time". Startup: `initialize` for a package runner (`npx`/`uvx`/`bunx`/`pnpx`/`pipx`/`uv`) gets
+  180s, since the first run downloads the server (`MCPStartupTimeoutPolicy`), and every other request
+  gets 25s. `MCPManager` connects servers **concurrently**. After 3s still connecting, a package-runner
+  server shows **Installing…**. A failure message carries the server's last stderr line
+  (`MCPConnectionFailureMessage`), and a connect that finishes after a newer reload discards itself
+  (`connectionGeneration`). This split is the foundation for the in-flight **MCP marketplace** (remote Streamable
   HTTP transport + Composio managed-OAuth toolkits + a curated registry) — see
   `docs/mcp-marketplace-architecture.md`. Remote servers now work: a `~/.wisp/mcp.json` entry
   with a `url` (and optional `headers` for auth) connects over `MCPStreamableHTTPTransport`
@@ -602,9 +610,9 @@ Grouped by what they do. Line counts are approximate.
 | `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/messaging/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership (or a caller's `boostedToolNames`, e.g. `run_shortcut` when the request names a shortcut) adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
-| `MCPClient.swift` | ~385 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. |
+| `MCPClient.swift` | ~420 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. `MCPStartupTimeoutPolicy` gives a package runner's `initialize` a long first-run budget. |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
-| `MCPStdioTransport.swift` | ~230 | Stdio transport: child process over stdin/stdout as NDJSON, login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
+| `MCPStdioTransport.swift` | ~300 | Stdio transport: child process over stdin/stdout as NDJSON (pipes read via `readabilityHandler`, framed by the pure `NewlineDelimitedLineBuffer`), login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
 | `MCPStreamableHTTPTransport.swift` | ~230 | Remote transport: JSON-RPC over MCP Streamable HTTP (one POST per message; parses JSON + SSE replies; `Mcp-Session-Id`, auth headers). |
 | `MCPCatalog.swift` | ~90 | Marketplace catalog model: `MCPCatalogEntry` (stdio/remote install template) + `ConfigField` (user-supplied env/header, secret flag) + the bundled-registry file shape. |
 | `MCPCatalogProvider.swift` | ~55 | `MCPCatalogProvider` protocol + `CuratedRegistryCatalogProvider` (loads the bundled `curated-mcp-registry.json`). Composio's provider will conform here in Phase 3. |
@@ -613,7 +621,7 @@ Grouped by what they do. Line counts are approximate.
 | `ComposioKeychainStore.swift` | ~75 | The Composio connect key in the login Keychain (sent as `x-consumer-api-key` at connect time) (mirrors `ProviderKeychainStore`). Never in the config file or logs. |
 | `ComposioClient.swift` | ~110 | Validates the Composio **connect** key by an MCP `initialize` against `https://connect.composio.dev/mcp` (auth header `x-consumer-api-key`). No provisioning — the connect server is a fixed universal endpoint. |
 | `ComposioAccountStore.swift` | ~110 | Composio marketplace state: `connect(apiKey:)` validates the key then installs one remote server (`composio-connect`) over the Phase 1 transport; `disconnect()` removes it. Off-machine/opt-in. |
-| `MCPManager.swift` | ~270 | Reads `~/.wisp/mcp.json`, namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. |
+| `MCPManager.swift` | ~400 | Reads `~/.wisp/mcp.json`, connects servers concurrently (Connecting… → Installing… for slow package runners; stale connects from an overlapping reload discard themselves), namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. `MCPConnectionFailureMessage` appends the server's last stderr line to a failure. |
 | `ClaudeCodeWorker.swift` | ~215 | Runs the `claude` CLI as a background worker for the `delegate_coding_task` tool (parses its event stream into progress + result). Off-machine, only when that tool is called. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `RoutineStore.swift` | ~270 | Routines: user-fired saved instructions (`WispRoutine`: name, instruction, symbol, optional chord+digit shortcut, suggested app bundle ids, pinned-in-notch). Persists to `~/Library/Application Support/Wisp/routines.json`; seeds 4 starters when the file is absent. `notchSuggestions(forAppBundleIdentifier:)` powers the notch's app-aware section. Distinct from skills (model-loaded reference). |
