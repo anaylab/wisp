@@ -1,17 +1,36 @@
-# Release Scripts
+# Scripts
+
+## `install.sh` — Put your dev build in /Applications
+
+Copies the `Wisp.app` you last built in Xcode (Cmd+B) into `/Applications`, keeping its
+permission grants. It deliberately doesn't build: see the comment at the top of the script.
+
+```bash
+./scripts/install.sh
+```
 
 ## `release.sh` — Ship a new version of Wisp
 
-Automates the full release pipeline: build → sign → DMG → notarize → Sparkle appcast → GitHub Release.
+Builds a Developer ID–signed, notarized DMG and publishes it as a GitHub Release on
+[anaylab/wisp](https://github.com/anaylab/wisp/releases):
+archive → export → DMG → notarize + staple → GitHub Release.
+
+Wisp has no auto-updater, so there's no appcast: people download new versions from the
+Releases page (`https://github.com/anaylab/wisp/releases/latest/download/Wisp.dmg`).
 
 ### Quick start
 
 ```bash
-# Auto-bumps version and build number from the latest GitHub Release
+# See what would happen, without building or publishing anything
+./scripts/release.sh --dry-run
+
+# Release for real: auto-bumps version and build from the latest GitHub Release
 ./scripts/release.sh
 ```
 
-The script checks GitHub for the latest release (e.g. `v1.5`, build 6) and automatically bumps to `v1.6`, build 7. You'll see a confirmation prompt before anything runs.
+The script reads the latest release (e.g. `Wisp v1.5 (build 6)`) and bumps to `v1.6`,
+build 7. The first release is `v1.0`, build 1. You'll see a confirmation prompt before
+anything slow or public happens.
 
 ### Override version or build
 
@@ -25,38 +44,65 @@ The script checks GitHub for the latest release (e.g. `v1.5`, build 6) and autom
 
 ### Safety
 
-- **Duplicate detection**: If the tag already exists on GitHub, the script exits with an error and suggests what to do.
-- **Confirmation prompt**: Shows the version, build, and previous release before proceeding. Press `y` to continue.
+- **Preflight checks**: before anything runs, it checks for `create-dmg`, a signed-in `gh`,
+  a "Developer ID Application" identity for team `W2H2SA2F98`, a working notarytool keychain
+  profile, `dmg-background.png`, a clean working tree, and that `HEAD` is pushed to GitHub.
+  Everything missing is listed at once, with the command that fixes it.
+- **Duplicate detection**: if the tag already exists on GitHub, the script exits and
+  suggests what to do.
+- **Confirmation prompt**: shows the version, build, previous release and commit. Press `y`
+  to continue.
+- **Dry run**: `--dry-run` runs the same checks (reporting instead of stopping) and prints
+  every command it would run, without the prompt.
 
 ### What it does
 
-1. Fetches the latest release from GitHub to determine version + build
-2. Archives the app via `xcodebuild`
-3. Exports a signed `.app` with Developer ID
-4. Creates a DMG with the drag-to-Applications background
-5. Notarizes the DMG with Apple (Gatekeeper compliance)
-6. Signs the DMG with the Sparkle EdDSA key
-7. Generates `appcast.xml` for Sparkle auto-updates
-8. Creates a GitHub Release with the DMG attached
-9. Pushes the updated `appcast.xml` to the releases repo
+1. Checks the prerequisites above
+2. Picks the next version + build from the latest GitHub Release
+3. Archives the Release configuration with `xcodebuild archive` into `build/` (with its own
+   DerivedData)
+4. Exports a Developer ID–signed `Wisp.app` and verifies the signature and bundle id
+5. Creates `build/dmg/Wisp.dmg` with `create-dmg` and the drag-to-Applications
+   `dmg-background.png`, then signs the DMG
+6. Notarizes the DMG with Apple, staples the ticket, and checks it with `spctl`
+7. Creates a GitHub Release (`vX.Y`, titled `Wisp vX.Y (build N)`) on the built commit, with
+   the DMG attached and notes generated from merged PRs
+
+Build logs go to `build/logs/`; on failure the script prints the end of the relevant log.
+
+### Does releasing reset my permissions?
+
+The rule "don't run `xcodebuild` from the terminal" is about your **dev copy**. A release
+archive doesn't touch it: everything builds inside `build/`, not Xcode's DerivedData or
+`/Applications/Wisp.app`, and building doesn't touch the TCC database. Your installed copy
+keeps its Accessibility, Screen Recording, Microphone and Speech grants.
+
+**Opening the release build on the same Mac does affect them.** TCC ties each grant to the
+app's signing requirement. Your dev copy is signed "Apple Development", while the release is
+signed "Developer ID Application", with the same bundle id (`com.gluepixel.wisp`). If you run
+the release copy, macOS asks for permissions again, and granting them moves the entries to
+the Developer ID signature. After that, reinstall your dev copy with `./scripts/install.sh`
+and expect to grant permissions once more.
 
 ### One-time setup (prerequisites)
 
-1. **Xcode** with your Developer ID signing certificate
-2. **Homebrew tools**:
+1. **Xcode**, signed in with the Apple Developer account for team `W2H2SA2F98`
+2. **Developer ID Application certificate**: Xcode → Settings → Accounts → Manage
+   Certificates → **+** → Developer ID Application. (Only the Account Holder can create one.)
+3. **Homebrew tools**:
    ```bash
    brew install create-dmg gh
    ```
-3. **GitHub CLI auth**:
+4. **GitHub CLI auth** (with push access to `anaylab/wisp`):
    ```bash
    gh auth login
    ```
-4. **Apple notarization credentials** (stored in Keychain):
+5. **Apple notarization credentials**, stored in the Keychain:
    ```bash
    xcrun notarytool store-credentials "AC_PASSWORD" \
        --apple-id YOUR_APPLE_ID \
-       --team-id YOUR_TEAM_ID
+       --team-id W2H2SA2F98
    ```
-   You'll be prompted for an app-specific password (generate one at [appleid.apple.com](https://appleid.apple.com)).
-5. **Sparkle EdDSA key** — already generated and stored in Keychain (done during initial Sparkle setup)
-6. **Build the project in Xcode at least once** so SPM downloads Sparkle and the Sparkle CLI tools are available
+   You'll be prompted for an app-specific password (generate one at
+   [account.apple.com](https://account.apple.com)). To use a different profile name, set
+   `WISP_NOTARY_PROFILE=<name>` when running the script.
