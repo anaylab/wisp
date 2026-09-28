@@ -77,15 +77,17 @@ enum WispColor {
     // MARK: - 2. Adaptive semantic tokens (light + dark, hand-tuned)
 
     // ── Backgrounds & surfaces ──
-    // In light mode surfaces recede slightly *below* the background (cloud →
-    // bone → deeper bone), which reads as calm paper. In dark mode they rise
-    // (night → lifted moss-greys), the conventional elevation direction.
+    // In light mode surfaces are neutral greys that recede slightly below the
+    // white of a grouped card, matching stock macOS controls — the Wisp window
+    // is a native window, and warm paper tones clashed with the system's own
+    // backgrounds. In dark mode they rise (night → lifted moss-greys), the
+    // conventional elevation direction.
 
     static let background = adaptive(light: Brand.cloud,        dark: Brand.night)
-    static let surface1   = adaptive(light: Brand.bone,         dark: Brand.darkSurface)
-    static let surface2   = adaptive(light: "#E7E4DC",          dark: "#202220")
-    static let surface3   = adaptive(light: "#DEDBD1",          dark: "#272926")
-    static let surface4   = adaptive(light: "#D4D1C5",          dark: "#2E312D")
+    static let surface1   = adaptive(light: "#F4F4F6",          dark: Brand.darkSurface)
+    static let surface2   = adaptive(light: "#EDEDF0",          dark: "#202220")
+    static let surface3   = adaptive(light: "#E4E4E8",          dark: "#272926")
+    static let surface4   = adaptive(light: "#D9D9DE",          dark: "#2E312D")
 
     // ── Borders ──
     static let borderSubtle = adaptive(light: Color.black.opacity(0.08),
@@ -130,6 +132,18 @@ enum WispColor {
     /// Tint for a nested adaptive glass card.
     static let glassCardTint = adaptive(light: Color.white.opacity(0.5),
                                         dark:  Color.black.opacity(0.22))
+
+    // ── Native window surfaces ──
+    // The Wisp window is a standard macOS window, so its page background and
+    // grouped cards use the system's own semantic colours. They track light/dark,
+    // Increase Contrast and the user's accent exactly like System Settings does.
+
+    /// The page background behind grouped cards.
+    static let windowBackground = Color(nsColor: .windowBackgroundColor)
+    /// A grouped card sitting on `windowBackground`.
+    static let groupedCardBackground = Color(nsColor: .controlBackgroundColor)
+    /// The hairline around a grouped card.
+    static let cardSeparator = Color(nsColor: .separatorColor)
 
     // ── Semantic (organic-toned, not neon) ──
     static let success        = adaptive(light: "#4E8A6B", dark: "#6FBF9B")

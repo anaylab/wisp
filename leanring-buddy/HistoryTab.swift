@@ -19,7 +19,7 @@ struct HistoryTab: View {
     @ObservedObject var taskRegistry: AgentTaskRegistry
     let companionManager: CompanionManager
     /// Navigates the dashboard (Save as routine opens the Routines page).
-    let onSelectTab: (DashboardView.DashboardTab) -> Void
+    let onSelectPage: (WispPage) -> Void
 
     @State private var searchText = ""
     @State private var selectedFilter: HistoryFilter = .all
@@ -34,7 +34,7 @@ struct HistoryTab: View {
             detailPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
     }
 
     // MARK: - Filtering
@@ -190,31 +190,17 @@ struct HistoryTab: View {
         )
     }
 
+    /// A native pop-up rather than a wrapping row of chips: five filters don't
+    /// fit this column on one line, and a two-line chip grid read as clutter.
     private var filterChips: some View {
-        // Wraps onto a second line at this column width rather than scrolling
-        // sideways, so every filter stays visible.
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 5)], alignment: .leading, spacing: 5) {
+        Picker("Show", selection: $selectedFilter) {
             ForEach(HistoryFilter.allCases) { filter in
-                let isSelected = selectedFilter == filter
-                Button {
-                    selectedFilter = filter
-                } label: {
-                    Text(filter.rawValue)
-                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? DS.Colors.textOnAccent : DS.Colors.textSecondary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 9)
-                        .frame(height: 22)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(isSelected ? DS.Colors.accent : DS.Colors.surface2)
-                        )
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
+                Text(filter.rawValue).tag(filter)
             }
         }
+        .pickerStyle(.menu)
+        .fixedSize()
+        .pointerCursor()
     }
 
     private func timelineRow(_ record: AgentTaskRecord) -> some View {
@@ -386,7 +372,7 @@ struct HistoryTab: View {
                 } label: {
                     Label("Stop", systemImage: "stop.fill")
                 }
-                .buttonStyle(WispGlassButtonStyle())
+                .buttonStyle(.bordered)
                 .pointerCursor()
             }
             if !answerText.isEmpty {
@@ -402,7 +388,7 @@ struct HistoryTab: View {
                     Label(isAnswerJustCopied ? "Copied" : "Copy answer",
                           systemImage: isAnswerJustCopied ? "checkmark" : "doc.on.doc")
                 }
-                .buttonStyle(WispGlassButtonStyle())
+                .buttonStyle(.bordered)
                 .pointerCursor()
             }
             // Asking again and saving as a routine only make sense for the
@@ -413,7 +399,7 @@ struct HistoryTab: View {
                 } label: {
                     Label("Ask again", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(WispGlassButtonStyle())
+                .buttonStyle(.bordered)
                 .pointerCursor()
                 .nativeTooltip("Close the dashboard and ask this again about what's on screen now")
 
@@ -422,7 +408,7 @@ struct HistoryTab: View {
                 } label: {
                     Label("Save as routine", systemImage: "bolt")
                 }
-                .buttonStyle(WispGlassButtonStyle(prominence: .prominent))
+                .buttonStyle(.borderedProminent)
                 .pointerCursor()
                 .nativeTooltip("Turn this question into a routine you can run in one click")
             }
@@ -486,7 +472,7 @@ struct HistoryTab: View {
             instruction: record.title
         ))
         RoutineStore.shared.routineIDToOpenInEditor = savedRoutine.id
-        onSelectTab(.routines)
+        onSelectPage(.routines)
     }
 
     /// A short routine name from a question: its first few words, capitalised,

@@ -2,18 +2,16 @@
 //  NotchWorkspaceView.swift
 //  leanring-buddy
 //
-//  The notch's large surface, modeled on HeyClicky: chat and settings live
-//  right in the notch instead of a separate window. It opens from the quick
-//  panel's chat and gear buttons and hangs from the notch like the rest of the
-//  island.
+//  The notch's large surface, modeled on HeyClicky: a quick chat right in the
+//  notch. It opens from the quick panel's Chat button and hangs from the notch
+//  like the rest of the island: a sidebar of buddies and conversations
+//  (exchanges grouped by `NotchConversationSessionGrouper`, searchable), the
+//  selected thread, and a bottom bar with the talk pill ("Hold ⌃⌥ to talk",
+//  live while listening) and a Type field that asks through the normal typed
+//  turn.
 //
-//   • Chat — a sidebar of conversations (exchanges grouped by
-//     `NotchConversationSessionGrouper`, searchable), the selected thread, and
-//     a bottom bar with the talk pill ("Hold ⌃⌥ to talk", live while
-//     listening) and a Type field that asks through the normal typed turn.
-//   • Settings — a section list whose pages are the dashboard's own tab views
-//     (Shortcuts, Dictation, Cursor, Agent, Memory, Model) plus a small General
-//     page, so a setting changed here is the same setting everywhere.
+//  Settings used to live here too, duplicating the dashboard's. They now have
+//  one home, the Wisp window; the sidebar's Settings button opens it there.
 //
 //  The window, key focus and hover-out are the controller's job
 //  (`NotchWindowController.setWorkspacePage`); this view only renders a page
@@ -23,47 +21,10 @@
 import AppKit
 import SwiftUI
 
-/// The notch's settings pages.
-enum NotchSettingsSection: String, CaseIterable, Identifiable {
-    case general
-    case shortcuts
-    case dictation
-    case cursor
-    case agent
-    case memory
-    case model
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .general: return "General"
-        case .shortcuts: return "Shortcuts"
-        case .dictation: return "Dictation"
-        case .cursor: return "Cursor"
-        case .agent: return "Agent"
-        case .memory: return "Memory"
-        case .model: return "Model"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .general: return "gearshape"
-        case .shortcuts: return "command"
-        case .dictation: return "text.cursor"
-        case .cursor: return "cursorarrow"
-        case .agent: return "cpu"
-        case .memory: return "brain.head.profile"
-        case .model: return "speedometer"
-        }
-    }
-}
-
-/// What the notch's large surface is showing.
+/// What the notch's large surface is showing. Only the chat today; kept as a
+/// type so the controller's open/close plumbing stays page-shaped.
 enum NotchWorkspacePage: Equatable {
     case chat
-    case settings(NotchSettingsSection)
 }
 
 struct NotchWorkspaceView: View {
@@ -81,7 +42,6 @@ struct NotchWorkspaceView: View {
     @State private var typedQuestionText = ""
     @FocusState private var isTypeFieldFocused: Bool
     @State private var hoveredSessionID: UUID?
-    @State private var hoveredSettingsSection: NotchSettingsSection?
     /// The buddy whose thread is shown instead of a conversation, if any.
     @State private var selectedBuddyID: UUID?
     /// Whether the main area is showing the new-buddy form.
@@ -112,20 +72,10 @@ struct NotchWorkspaceView: View {
         viewModel.hasNotch ? viewModel.collapsedSize.height : 0
     }
 
-    private var isShowingSettings: Bool {
-        if case .settings = page { return true }
-        return false
-    }
-
     // MARK: - Sidebar
 
-    @ViewBuilder
     private var sidebar: some View {
-        if case .settings(let selectedSection) = page {
-            settingsSidebar(selectedSection: selectedSection)
-        } else {
-            chatSidebar
-        }
+        chatSidebar
     }
 
     private var chatSidebar: some View {
@@ -370,96 +320,18 @@ struct NotchWorkspaceView: View {
             sidebarFooterButton(
                 systemImageName: "gearshape",
                 title: "Settings",
-                tooltip: "Settings, right here in the notch"
+                tooltip: "Open Wisp's settings"
             ) {
-                viewModel.requestWorkspacePage?(.settings(.general))
+                WispWindowNavigator.open(.general)
             }
             Spacer(minLength: 0)
             sidebarFooterButton(
                 systemImageName: "macwindow",
                 title: nil,
-                tooltip: "Open the full dashboard (history, routines, connections)"
+                tooltip: "Open the Wisp window (today, buddies, routines, history)"
             ) {
-                openDashboard()
+                WispWindowNavigator.open(.home)
             }
-        }
-    }
-
-    private func settingsSidebar(selectedSection: NotchSettingsSection) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Button {
-                    viewModel.requestWorkspacePage?(.chat)
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Back")
-                            .font(.system(size: 11.5, weight: .medium))
-                    }
-                    .foregroundColor(WispColor.Island.textSecondary)
-                    .padding(.horizontal, 9)
-                    .frame(height: 24)
-                    .background(Capsule(style: .continuous).fill(WispColor.Island.controlFill))
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-                .nativeTooltip("Back to the chat")
-
-                Text("Settings")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(WispColor.Island.textPrimary)
-                Spacer(minLength: 0)
-            }
-            .frame(height: max(notchTopInset, 28))
-
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(NotchSettingsSection.allCases) { section in
-                    settingsSectionRow(section, isSelected: section == selectedSection)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            sidebarFooterButton(
-                systemImageName: "macwindow",
-                title: "All settings",
-                tooltip: "Open the full dashboard (connections, sources, routines)"
-            ) {
-                openDashboard()
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 10)
-    }
-
-    private func settingsSectionRow(_ section: NotchSettingsSection, isSelected: Bool) -> some View {
-        let isHovered = hoveredSettingsSection == section
-        return Button {
-            viewModel.requestWorkspacePage?(.settings(section))
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: section.symbolName)
-                    .font(.system(size: 11, weight: .medium))
-                    .frame(width: 16)
-                Text(section.title)
-                    .font(.system(size: 12, weight: .medium))
-                Spacer(minLength: 0)
-            }
-            .foregroundColor(isSelected ? WispColor.Island.textPrimary : WispColor.Island.textSecondary)
-            .padding(.horizontal, 9)
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(isSelected ? 0.12 : (isHovered ? 0.06 : 0)))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .pointerCursor()
-        .onHover { isHovering in
-            hoveredSettingsSection = isHovering ? section : (hoveredSettingsSection == section ? nil : hoveredSettingsSection)
         }
     }
 
@@ -489,53 +361,43 @@ struct NotchWorkspaceView: View {
         .nativeTooltip(tooltip)
     }
 
-    private func openDashboard() {
-        viewModel.requestWorkspacePage?(nil)
-        NotificationCenter.default.post(name: .wispOpenDashboard, object: nil)
-    }
-
     // MARK: - Main area
 
     @ViewBuilder
     private var mainArea: some View {
-        switch page {
-        case .chat:
-            if isCreatingBuddy {
-                ZStack(alignment: .topTrailing) {
-                    NewBuddyForm(
-                        topInset: notchTopInset,
-                        onCreated: { newBuddyID in
-                            isCreatingBuddy = false
-                            selectedBuddyID = newBuddyID
-                        },
-                        onCancel: { isCreatingBuddy = false }
-                    )
-                    workspaceHeaderControls
-                        .padding(.top, 8)
-                        .padding(.trailing, 12)
-                }
-            } else if let selectedBuddyID, buddyStore.buddy(withID: selectedBuddyID) != nil {
-                ZStack(alignment: .topTrailing) {
-                    BuddyDetailView(buddyID: selectedBuddyID, topInset: notchTopInset)
-                    workspaceHeaderControls
-                        .padding(.top, 8)
-                        .padding(.trailing, 12)
-                }
-            } else {
-                chatArea
+        if isCreatingBuddy {
+            ZStack(alignment: .topTrailing) {
+                NewBuddyForm(
+                    topInset: notchTopInset,
+                    onCreated: { newBuddyID in
+                        isCreatingBuddy = false
+                        selectedBuddyID = newBuddyID
+                    },
+                    onCancel: { isCreatingBuddy = false }
+                )
+                workspaceHeaderControls
+                    .padding(.top, 8)
+                    .padding(.trailing, 12)
             }
-        case .settings(let section):
-            settingsArea(section)
+        } else if let selectedBuddyID, buddyStore.buddy(withID: selectedBuddyID) != nil {
+            ZStack(alignment: .topTrailing) {
+                BuddyDetailView(buddyID: selectedBuddyID, topInset: notchTopInset)
+                workspaceHeaderControls
+                    .padding(.top, 8)
+                    .padding(.trailing, 12)
+            }
+        } else {
+            chatArea
         }
     }
 
     /// The top-right controls, in the notch band to the right of the cutout.
     private var workspaceHeaderControls: some View {
         HStack(spacing: 4) {
-            if !isShowingSettings && selectedBuddyID == nil && !isCreatingBuddy {
+            if selectedBuddyID == nil && !isCreatingBuddy {
                 headerIconButton(
                     systemImageName: "arrow.up.left.and.arrow.down.right",
-                    tooltip: "Open the conversation in its own window"
+                    tooltip: "Open the conversation in the Wisp window"
                 ) {
                     viewModel.requestWorkspacePage?(nil)
                     companionManager.openConversationWindow()
@@ -859,119 +721,5 @@ struct NotchWorkspaceView: View {
         selectedSessionID = nil
         selectedBuddyID = nil
         companionManager.askTypedQuestion(question)
-    }
-
-    // MARK: Settings
-
-    private func settingsArea(_ section: NotchSettingsSection) -> some View {
-        ZStack(alignment: .topTrailing) {
-            settingsPage(section)
-                .padding(.top, notchTopInset)
-            workspaceHeaderControls
-                .padding(.top, 8)
-                .padding(.trailing, 12)
-        }
-    }
-
-    /// The dashboard's own pages, so there is one implementation of each setting.
-    @ViewBuilder
-    private func settingsPage(_ section: NotchSettingsSection) -> some View {
-        switch section {
-        case .general: NotchGeneralSettingsPage()
-        case .shortcuts: ShortcutsTab()
-        case .dictation: DictationTab()
-        case .cursor: CursorTab(companionManager: companionManager)
-        case .agent: AgentTab(companionManager: companionManager)
-        case .memory: MemoryTab()
-        case .model: PerformanceTab(metricsRecorder: PerfMetricsRecorder.shared, companionManager: companionManager)
-        }
-    }
-}
-
-/// The notch's General page: the switches for how Wisp sounds and how the
-/// island looks.
-private struct NotchGeneralSettingsPage: View {
-    @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
-    @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
-    @ObservedObject private var soundPreference = WispSoundPreference.shared
-    @ObservedObject private var announcementPreferences = AnnouncementPreferences.shared
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                DashboardCard(title: "Island") {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Surface")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(WispColor.Island.textPrimary)
-                            Text("Black blends into the notch, like the iPhone's Dynamic Island. Liquid Glass lets the desktop show through.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(WispColor.Island.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
-                        Picker("", selection: $islandStylePreference.surfaceStyle) {
-                            ForEach(NotchIslandSurfaceStyle.allCases) { surfaceStyle in
-                                Text(surfaceStyle.displayName).tag(surfaceStyle)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .fixedSize()
-                        .pointerCursor()
-                    }
-                }
-                DashboardCard(title: "Voice") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        settingToggleRow(
-                            title: "Speak replies",
-                            detail: "On, Wisp says a short line out loud when it helps. Off is silent mode: answers appear only in the notch.",
-                            isOn: $voiceOutputPreference.isReplySpeechEnabled
-                        )
-                        settingToggleRow(
-                            title: "Sound cues",
-                            detail: "Soft chimes as Wisp starts listening, thinks, and replies.",
-                            isOn: $soundPreference.areSoundCuesEnabled
-                        )
-                    }
-                }
-                DashboardCard(title: "Announcements") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        settingToggleRow(
-                            title: "Morning suggestions",
-                            detail: "Once a day the notch offers a few things Wisp can do for you.",
-                            isOn: $announcementPreferences.areMorningSuggestionsEnabled
-                        )
-                        settingToggleRow(
-                            title: "Stay quiet on calls",
-                            detail: "While another app uses the mic or a camera is on, Wisp holds its own announcements.",
-                            isOn: $announcementPreferences.isQuietDuringCallsEnabled
-                        )
-                    }
-                }
-            }
-            .padding(16)
-        }
-        .background(DS.Colors.background)
-    }
-
-    private func settingToggleRow(title: String, detail: String, isOn: Binding<Bool>) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(WispColor.Island.textPrimary)
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(WispColor.Island.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .pointerCursor()
-        }
     }
 }

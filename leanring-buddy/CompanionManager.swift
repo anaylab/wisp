@@ -901,23 +901,22 @@ final class CompanionManager: ObservableObject {
         openTextComposer()
     }
 
-    // MARK: - Conversation window
+    // MARK: - Conversation in the Wisp window
 
-    private var conversationWindowController: ConversationWindowController?
-
-    /// Lifts the conversation out of the notch into its own window — the full
-    /// thread, a follow-up box and the running tasks. Created on first use.
+    /// Lifts the conversation out of the notch into the Wisp window's Chat page —
+    /// the full thread, a follow-up box and the running tasks.
     func openConversationWindow() {
-        if conversationWindowController == nil {
-            conversationWindowController = ConversationWindowController(companionManager: self)
-        }
-        // The notch collapses; the window is now where the conversation lives.
-        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
-        conversationWindowController?.showConversationWindow()
+        WispWindowNavigator.open(.chat)
     }
 
-    /// The dashboard's ask bar: runs a typed question exactly as the text
-    /// composer does. The caller closes the dashboard first so the screenshot
+    /// The menu bar's "Ask Wisp…": the same floating text composer as tapping
+    /// the talk chord.
+    func openAskComposer() {
+        openTextComposer()
+    }
+
+    /// Today's ask bar and the Chat page: runs a typed question exactly as the
+    /// text composer does. Today closes the window first so the screenshot
     /// shows the user's work rather than Wisp's own window.
     func askTypedQuestion(_ typedQuestion: String) {
         submitTextComposerQuery(typedQuestion)

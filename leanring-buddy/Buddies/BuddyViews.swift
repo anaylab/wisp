@@ -216,7 +216,7 @@ struct BuddyDetailView: View {
                     .focused($isNameFieldFocused)
                     .frame(width: 180)
                     .padding(.vertical, 4)
-                    .background(Capsule(style: .continuous).fill(Color.white.opacity(0.1)))
+                    .background(Capsule(style: .continuous).fill(WispColor.surface2))
                     .onSubmit {
                         buddyStore.rename(buddyWithID: buddy.id, to: editedName)
                         isRenaming = false
@@ -237,7 +237,7 @@ struct BuddyDetailView: View {
                     .foregroundColor(DS.Colors.textPrimary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Capsule(style: .continuous).fill(Color.white.opacity(0.08)))
+                    .background(Capsule(style: .continuous).fill(WispColor.surface2))
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -258,7 +258,7 @@ struct BuddyDetailView: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(WispColor.surface2)
             )
     }
 
@@ -395,7 +395,7 @@ struct BuddyDetailView: View {
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white.opacity(0.07))
+                        .fill(WispColor.surface2)
                 )
         case .failed(let failureReason):
             Text(answerText.isEmpty ? failureReason : answerText)
@@ -504,7 +504,7 @@ struct BuddyDetailView: View {
                 .foregroundColor(isConfirmingDeletion ? DS.Colors.destructiveText : DS.Colors.textTertiary)
                 .padding(.horizontal, 9)
                 .frame(height: 26)
-                .background(Capsule(style: .continuous).fill(Color.white.opacity(isConfirmingDeletion ? 0.1 : 0.05)))
+                .background(Capsule(style: .continuous).fill(isConfirmingDeletion ? WispColor.surface3 : WispColor.surface2))
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -570,7 +570,7 @@ struct NewBuddyForm: View {
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(WispColor.surface2)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)

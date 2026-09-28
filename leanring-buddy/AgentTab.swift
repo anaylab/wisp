@@ -2,9 +2,9 @@
 //  AgentTab.swift
 //  leanring-buddy
 //
-//  The dashboard's Agent tab: where the agent works (its folder), how much it
-//  asks before acting (session auto-approve), and which OS permissions it
-//  currently holds, with deep-links to revoke them in System Settings.
+//  Settings → Agent: where the agent works (its folder), how much it asks
+//  before acting (session auto-approve), announcements, Apple Shortcuts and
+//  the Chrome Tabs extension. macOS permissions live in Settings → General.
 //
 
 import AppKit
@@ -30,11 +30,10 @@ struct AgentTab: View {
                 announcementsCard
                 appleShortcutsCard
                 chromeTabsCard
-                permissionsCard
             }
             .padding(16)
         }
-        .background(DS.Colors.background)
+        .background(WispColor.windowBackground)
         .task {
             // Reads the cached list if it is fresh; otherwise lists once so the
             // count shown is current when the tab opens.
@@ -394,90 +393,5 @@ struct AgentTab: View {
             withApplicationAt: chromeApplicationURL,
             configuration: NSWorkspace.OpenConfiguration()
         )
-    }
-
-    // MARK: - Permissions
-
-    private var permissionsCard: some View {
-        DashboardCard(title: "Agent Permissions") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Permissions Wisp currently has. Open a row to change it in System Settings.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DS.Colors.textSecondary)
-
-                permissionRow(
-                    name: "Accessibility",
-                    detail: "Control other apps, insert dictated text",
-                    status: companionManager.hasAccessibilityPermission ? .granted : .missing,
-                    settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-                )
-                Divider().overlay(DS.Colors.borderSubtle)
-                permissionRow(
-                    name: "Screen Recording",
-                    detail: "See the screen to answer and point",
-                    status: companionManager.hasScreenRecordingPermission ? .granted : .missing,
-                    settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-                )
-                Divider().overlay(DS.Colors.borderSubtle)
-                permissionRow(
-                    name: "Files & Folders",
-                    detail: "Read and write in the agent folder",
-                    status: .unknown,
-                    settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders"
-                )
-            }
-        }
-    }
-
-    private enum PermissionStatus {
-        case granted, missing, unknown
-    }
-
-    private func permissionRow(name: String, detail: String, status: PermissionStatus, settingsURL: String) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DS.Colors.textPrimary)
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(DS.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            statusBadge(status)
-            Button {
-                if let url = URL(string: settingsURL) {
-                    NSWorkspace.shared.open(url)
-                }
-            } label: {
-                Image(systemName: "arrow.up.forward.square")
-                    .font(.system(size: 13))
-                    .foregroundStyle(DS.Colors.textSecondary)
-                    .frame(width: 26, height: 26)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .pointerCursor()
-            .nativeTooltip("Open in System Settings")
-        }
-    }
-
-    private func statusBadge(_ status: PermissionStatus) -> some View {
-        let (text, color): (String, Color)
-        switch status {
-        case .granted: (text, color) = ("Granted", DS.Colors.success)
-        case .missing: (text, color) = ("Not granted", DS.Colors.destructiveText)
-        case .unknown: (text, color) = ("Manage", DS.Colors.textTertiary)
-        }
-        return Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                    .fill(color.opacity(0.12))
-            )
     }
 }

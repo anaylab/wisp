@@ -27,8 +27,8 @@ struct HomeTab: View {
     @ObservedObject private var routineStore = RoutineStore.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
 
-    /// Navigates the dashboard to another page (e.g. "All routines").
-    let onSelectTab: (DashboardView.DashboardTab) -> Void
+    /// Moves the Wisp window to another page (e.g. "All routines").
+    let onSelectPage: (WispPage) -> Void
 
     @State private var askBarText = ""
     @State private var localServicesHealth = LocalServicesHealth.unknown
@@ -41,11 +41,11 @@ struct HomeTab: View {
     init(
         taskRegistry: AgentTaskRegistry,
         companionManager: CompanionManager,
-        onSelectTab: @escaping (DashboardView.DashboardTab) -> Void
+        onSelectPage: @escaping (WispPage) -> Void
     ) {
         self.taskRegistry = taskRegistry
         self.companionManager = companionManager
-        self.onSelectTab = onSelectTab
+        self.onSelectPage = onSelectPage
     }
 
     /// How often the page re-checks the local services and the calendar while
@@ -56,6 +56,9 @@ struct HomeTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                if !companionManager.allPermissionsGranted {
+                    setupCard
+                }
                 askBar
                 needsYouSection
                 // Two columns when there is room, one when the window is narrow.
@@ -110,14 +113,13 @@ struct HomeTab: View {
             }
             Spacer(minLength: 8)
             Button {
-                companionManager.openConversationWindow()
+                onSelectPage(.chat)
             } label: {
-                Label("Conversation", systemImage: "bubble.left.and.bubble.right")
-                    .font(WispFont.caption)
+                Label("Chat", systemImage: "bubble.left.and.bubble.right")
             }
-            .buttonStyle(WispGlassButtonStyle())
+            .buttonStyle(.bordered)
             .pointerCursor()
-            .nativeTooltip("Open the conversation in its own window, with follow-ups and running tasks")
+            .nativeTooltip("Open the conversation, with follow-ups and running tasks")
             Button {
                 voiceOutputPreference.isReplySpeechEnabled.toggle()
             } label: {
@@ -125,9 +127,8 @@ struct HomeTab: View {
                     voiceOutputPreference.isReplySpeechEnabled ? "Voice on" : "Silent",
                     systemImage: voiceOutputPreference.isReplySpeechEnabled ? "speaker.wave.2" : "speaker.slash"
                 )
-                .font(WispFont.caption)
             }
-            .buttonStyle(WispGlassButtonStyle())
+            .buttonStyle(.bordered)
             .pointerCursor()
             .nativeTooltip(voiceOutputPreference.isReplySpeechEnabled
                 ? "Replies are spoken. Click for silent mode."
@@ -140,6 +141,26 @@ struct HomeTab: View {
         case 5..<12: return "Good morning"
         case 12..<18: return "Good afternoon"
         default: return "Good evening"
+        }
+    }
+
+    // MARK: - Setup
+
+    /// Until every permission is granted Wisp can't hear or see anything, so
+    /// the checklist leads the page rather than hiding in Settings.
+    private var setupCard: some View {
+        DashboardCard(title: companionManager.hasEverHadAllPermissions
+                      ? "Wisp needs its permissions back"
+                      : "Finish setting up Wisp") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(companionManager.hasEverHadAllPermissions
+                     ? "Some permissions were turned off. Grant them again to keep using Wisp."
+                     : "Wisp only takes a screenshot while you're asking something, and the models that read it run on this Mac.")
+                    .font(.callout)
+                    .foregroundStyle(WispColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                PermissionsChecklist(companionManager: companionManager)
+            }
         }
     }
 
@@ -297,17 +318,6 @@ struct HomeTab: View {
     private var needsYouAlerts: [NeedsYouAlert] {
         var alerts: [NeedsYouAlert] = []
 
-        if !companionManager.allPermissionsGranted {
-            alerts.append(NeedsYouAlert(
-                id: "permissions",
-                symbolName: "lock",
-                title: "Wisp is missing a permission",
-                detail: "It can't see the screen or hear you until it's granted.",
-                actionTitle: "Review",
-                action: { onSelectTab(.agent) }
-            ))
-        }
-
         if localServicesHealth.isLocalModelUnreachable {
             alerts.append(NeedsYouAlert(
                 id: "ollama",
@@ -351,7 +361,7 @@ struct HomeTab: View {
                 title: "Didn't finish: \(recentFailure.title)",
                 detail: failureDetail(for: recentFailure),
                 actionTitle: "See in History",
-                action: { onSelectTab(.activity) }
+                action: { onSelectPage(.timeline) }
             ))
         }
 
@@ -416,7 +426,7 @@ struct HomeTab: View {
             Spacer(minLength: 4)
             if let actionTitle = alert.actionTitle, let action = alert.action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(WispGlassButtonStyle())
+                    .buttonStyle(.bordered)
                     .pointerCursor()
             }
             Button {
@@ -486,7 +496,7 @@ struct HomeTab: View {
                 Label("Stop", systemImage: "stop.fill")
                     .font(WispFont.caption)
             }
-            .buttonStyle(WispGlassButtonStyle())
+            .buttonStyle(.bordered)
             .pointerCursor()
         }
     }
@@ -525,7 +535,7 @@ struct HomeTab: View {
                     Button("Connect Calendar") {
                         Task { await loadCalendar(requestingAccess: true) }
                     }
-                    .buttonStyle(WispGlassButtonStyle(prominence: .prominent))
+                    .buttonStyle(.borderedProminent)
                     .pointerCursor()
                 }
             case .accessDenied:
@@ -619,7 +629,7 @@ struct HomeTab: View {
                     }
                 }
                 Button {
-                    onSelectTab(.routines)
+                    onSelectPage(.routines)
                 } label: {
                     Text(featuredRoutines.isEmpty ? "Create a routine" : "All routines")
                         .font(WispFont.caption)
@@ -709,7 +719,7 @@ struct HomeTab: View {
                     }
                 }
                 Button {
-                    onSelectTab(.activity)
+                    onSelectPage(.timeline)
                 } label: {
                     Text("Open History")
                         .font(WispFont.caption)
