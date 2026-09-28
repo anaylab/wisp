@@ -1,5 +1,11 @@
 <p align="center">
-  <img src="docs/assets/wisp-banner.png" alt="Wisp — a private AI companion that lives in your Mac's notch" width="100%">
+  <img src="docs/assets/wisp-icon-256.png" alt="Wisp logo" width="128" height="128">
+</p>
+
+<h1 align="center">Wisp</h1>
+
+<p align="center">
+  A private AI companion that lives in your Mac's notch.
 </p>
 
 <p align="center">
@@ -12,6 +18,10 @@
 <p align="center">
   <b>Hold <kbd>Control</kbd> + <kbd>Option</kbd>, ask anything, and Wisp answers —<br>
   looking at your screen, pointing at what it means, and doing the busywork for you.</b>
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/notch.png" alt="Wisp answering in the notch with a live weather card and a timer card" width="100%">
 </p>
 
 ---
@@ -28,6 +38,7 @@ Cloud models are strictly opt-in, bring-your-own-key, and labelled as such.
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Quick start](#quick-start)
@@ -37,6 +48,18 @@ Cloud models are strictly opt-in, bring-your-own-key, and labelled as such.
 - [Development](#development)
 - [Contributing](#contributing)
 - [Credits](#credits)
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/assets/screenshots/dashboard.png" alt="The Wisp dashboard's Today page with an ask bar, upcoming meetings and one-click routines" width="100%">
+  <br><sub><b>Dashboard.</b> Ask anything, see what's next, and run routines in one click.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/menu-bar-and-settings.png" alt="The Wisp menu bar panel, the quick-type composer and the shortcut settings" width="100%">
+  <br><sub><b>Menu bar panel, quick composer and settings.</b> Tap <kbd>⌃</kbd><kbd>⌥</kbd> to type instead of talk; every model, voice and shortcut is shown and configurable.</sub>
+</p>
 
 ## Features
 

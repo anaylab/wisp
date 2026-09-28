@@ -79,7 +79,9 @@ cloud dependency to the local path, without asking.
   signature gradient, with subtle per-state motion (idle/listening/thinking/acting/success/error),
   a static mode, and a paused `TimelineView` clock while at rest. It replaced the old rotated
   `Triangle` glyph in the notch. The app icon (`Assets.xcassets/AppIcon.appiconset`) is the same ribbon on a
-  dark squircle; the README banner and icon live in `docs/assets/`. Icons are the single-stroke **Liquid Icon System**
+  dark squircle, and the menu bar status icon (a template image drawn from `WispRibbonShape`), the
+  dashboard sidebar header and the text composer all use the mark too; the README banner, icon and
+  screenshots live in `docs/assets/`. Icons are the single-stroke **Liquid Icon System**
   (`Components/WispIcon.swift`): bespoke glyphs for the high-value actions (message, search, mic,
   send, voice, files, calendar, gear-free settings) with an SF-Symbol fallback for the long tail.
 - **Dynamic Island state**: `DynamicIsland/WispIslandState.swift` is a 9-state vocabulary
