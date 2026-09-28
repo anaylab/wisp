@@ -29,13 +29,6 @@ enum WispGradient {
         endPoint: .bottomTrailing
     )
 
-    /// An angular ("conic") variant, used where the gradient should feel like it
-    /// is slowly circulating — e.g. the "thinking" logo state.
-    static let signatureAngular = AngularGradient(
-        colors: signatureStops + [signatureStops.first!],
-        center: .center
-    )
-
     /// A linear gradient along a custom axis, for the flowing-ribbon logo where
     /// the light should travel along the stroke rather than corner-to-corner.
     static func signatureLinear(

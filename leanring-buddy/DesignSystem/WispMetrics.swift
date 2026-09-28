@@ -11,8 +11,6 @@
 import CoreGraphics
 
 enum WispSpacing {
-    /// 2 — hairline gaps inside a control.
-    static let xxs: CGFloat = 2
     /// 4 — tight, related elements.
     static let xs: CGFloat = 4
     /// 8 — default gap between related controls.
