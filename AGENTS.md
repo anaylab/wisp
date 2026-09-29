@@ -253,6 +253,20 @@ cloud dependency to the local path, without asking.
   ids to the OCR line box (already in screenshot pixels) and `a` ids to the AX path. The read-only
   `read_screen_text` agent tool (`.reading(.localMachine)`, general scope) returns the plain OCR text
   of the current screen (150 lines / 4000 chars).
+- **Fast pointing** ("where is X" / "point at X" / "where do I click to X"): recognised by
+  `PointingRequestParser` in `sendTranscriptToClaudeWithScreenshot` after the browser router, and
+  answered by `CompanionManager.runFastPointingTurn` **without the vision model**. The target is
+  matched (`PointingTargetMatcher`, deterministic) against this turn's Accessibility elements and
+  *uncapped* OCR lines, each already with an exact box; a label on screen more than once gets a
+  marker in each place (≤3; an icon beside its label is one place). Only when that isn't sure does
+  the local model pick an id **as text**, from a ≤15-item shortlist sharing a content word with the
+  target (`PointingModelFallback`, lenient id parsing). A miss on a readable screen (≥12 items)
+  replies "I can't see X on screen" at once; a miss on a near-empty screen (canvas, image) goes on
+  as an ordinary turn with the captures handed back. Why: measured on an M3 Pro, a new screenshot
+  costs ~4s of vision encoding even warm (~9s cold), and the 3B model's pixel guess was wrong 4 of 5
+  times; the fast path lands in ~0.1s (≤0.9s with the model pick, ~0.7s when OCR starts cold for a
+  typed question — it waits up to 1.5s, `FastPointingTiming`). Typed questions make Wisp frontmost,
+  so `AccessibilityElementSnapshotter` reads `FrontmostAppTracker`'s last external app instead.
 - **Screen Annotation**: `[BOX:left,top,right,bottom:label]`, `[HIGHLIGHT:...]` and
   `[ARROW:x,y:label]` tags render through a `Canvas` layer in the overlay, as does the `.marker`
   from a `[POINT:]`. Note the corner format — the model emits corners, not origin+size. When
@@ -535,7 +549,7 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `leanring_buddyApp.swift` | ~105 | Menu bar app entry point. `@NSApplicationDelegateAdaptor` with `CompanionAppDelegate`, which creates `MenuBarPanelManager` and starts `CompanionManager`. |
-| `CompanionManager.swift` | ~2900 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
+| `CompanionManager.swift` | ~3150 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
 | `BuddyDictationManager.swift` | ~940 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
 | `GlobalPushToTalkShortcutMonitor.swift` | ~270 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
 | `ShortcutBindingStore.swift` | ~150 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier. Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
@@ -586,6 +600,7 @@ Grouped by what they do. Line counts are approximate.
 | `ScreenTextSnapshot.swift` | ~360 | Pure, testable side of OCR pointing: recognised-line model, confidence filter, reading order, prompt caps, compact `t`-id rendering + plain text, line-id → region lookup, Vision→screenshot coordinate flip, and `ScreenTextRecognitionCache` (per-display, keyed on screenshot bytes). |
 | `ScreenTextRecognizer.swift` | ~265 | Runs Vision `RecognizeTextRequest` off the main actor for each capture, caches the tasks, and builds a turn's `ScreenTextSnapshot` within a wait budget. Also `CompanionManager.resolveScreenElementRegion` (the shared `a`/`t` id resolver). |
 | `ScreenTextReadingTool.swift` | ~60 | The read-only `read_screen_text` agent tool: captures the screen and returns its OCR text. |
+| `FastPointing.swift` | ~540 | Pure side of fast pointing: `PointingRequestParser` (spoken "where is X" → target + role hint, conservative), `PointingTargetMatcher` (exact/tolerant word scoring, same-place merging, tie → every place, shortlist for the model, connector-word guard) and `PointingModelFallback` (text-only prompt + lenient reply → id). Tested by `Tests/FastPointing`. |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 
 ### Agent, tools and MCP
@@ -751,6 +766,7 @@ running):
 ```bash
 ./Tests/ModelProviderContract/run.sh     # provider layer, ~10s
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
+./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a
