@@ -187,11 +187,30 @@ struct NotchHUDView: View {
                 width: NotchViewModel.workspaceSize.width,
                 height: NotchViewModel.workspaceSize.height
             )
+        } else if viewModel.isFileDragNearby || viewModel.fileDropFeedback != nil {
+            fileDropContent
         } else if viewModel.isFullPanel {
             expandedContent
         } else {
             messageContent
         }
+    }
+
+    /// What the island shows while a file is dragged to it, and briefly after a
+    /// drop: the invitation, then the result.
+    private var fileDropContent: some View {
+        HStack(spacing: 10) {
+            Image(systemName: viewModel.fileDropFeedback == nil ? "tray.and.arrow.down" : "checkmark.circle")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(WispColor.Island.textSecondary)
+            Text(viewModel.fileDropFeedback ?? "Drop to add to your brain")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundColor(WispColor.Island.textPrimary)
+        }
+        .frame(maxWidth: .infinity, minHeight: Self.compactMessageMinimumHeight - 24, alignment: .center)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
+        .padding(.top, notchContentTopInset + 8)
     }
 
     /// The width of the dropped surface — narrow for the compact message so a short

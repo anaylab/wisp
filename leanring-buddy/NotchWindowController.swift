@@ -57,6 +57,11 @@ final class NotchViewModel: ObservableObject {
     static let workspaceSize = CGSize(width: 760, height: 480)
 
     var isWorkspaceOpen: Bool { workspacePage != nil }
+
+    /// A file is being dragged near the notch and would be added to the brain.
+    @Published var isFileDragNearby: Bool = false
+    /// A short result line shown after a drop ("Added 2 files to your brain").
+    @Published var fileDropFeedback: String?
 }
 
 @MainActor
@@ -66,6 +71,8 @@ final class NotchWindowController {
     private let viewModel = NotchViewModel()
     private var clickThroughObserver: AnyCancellable?
     private var hoverPollTimer: Timer?
+    private var fileDragDetector = NotchFileDragDetector()
+    private var fileDropFeedbackClearTask: Task<Void, Never>?
     private var screenParametersObserver: NSObjectProtocol?
     private var dismissObserver: NSObjectProtocol?
 
@@ -218,7 +225,21 @@ final class NotchWindowController {
         notchPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         // Collapsed to begin with, so the transparent window is click-through.
         notchPanel.ignoresMouseEvents = true
-        notchPanel.contentView = hostingView
+        // Dropping a file on the notch adds it to the brain. The drop view is a
+        // sibling above the hosting view (not a wrapper, not SwiftUI's onDrop —
+        // neither received drags on this panel); it ignores clicks.
+        let panelContentContainerView = NSView(frame: NSRect(origin: .zero, size: panelSize))
+        hostingView.frame = panelContentContainerView.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        let fileDropView = NotchFileDropView(frame: panelContentContainerView.bounds)
+        fileDropView.autoresizingMask = [.width, .height]
+        fileDropView.canAcceptFiles = { BrainPreferences.shared.isBrainEnabled }
+        fileDropView.onFilesDropped = { [weak self] droppedFileURLs in
+            self?.addDroppedFilesToBrain(droppedFileURLs) ?? false
+        }
+        panelContentContainerView.addSubview(hostingView)
+        panelContentContainerView.addSubview(fileDropView)
+        notchPanel.contentView = panelContentContainerView
         notchPanel.onEscapePressed = { [weak self] in
             self?.setWorkspacePage(nil)
         }
@@ -473,6 +494,8 @@ final class NotchWindowController {
         guard let geometry = currentGeometry() else { return }
         let mouseLocation = NSEvent.mouseLocation
 
+        if updateFileDragState(geometry: geometry, mouseLocation: mouseLocation) { return }
+
         if viewModel.isWorkspaceOpen {
             updateWorkspaceHover(geometry: geometry, mouseLocation: mouseLocation)
             return
@@ -522,6 +545,89 @@ final class NotchWindowController {
                 viewModel.isFullPanel = true
                 performHUDHaptic()
             }
+        }
+    }
+
+    /// Opens the island under a file being dragged to the notch so it can be
+    /// dropped. Returns true while a drag is handling the panel, so the normal
+    /// hover logic (which ignores a held mouse button) stays out of the way.
+    private func updateFileDragState(geometry: NotchGeometry, mouseLocation: CGPoint) -> Bool {
+        let isFileDragInProgress = fileDragDetector.isFileDragInProgress()
+        if !isFileDragInProgress { exitFileDragPanelMode() }
+        guard isFileDragInProgress, BrainPreferences.shared.isBrainEnabled, !viewModel.isWorkspaceOpen else {
+            if viewModel.isFileDragNearby { viewModel.isFileDragNearby = false }
+            return false
+        }
+        let isNearNotch = fileDragHotZone(geometry).contains(mouseLocation)
+            || (viewModel.isExpanded && expandedHotZone(geometry).contains(mouseLocation))
+        if isNearNotch {
+            viewModel.isFileDragNearby = true
+            viewModel.fileDropFeedback = nil
+            if !viewModel.isExpanded || viewModel.isFullPanel {
+                viewModel.isFullPanel = false
+                viewModel.isExpanded = true
+            }
+            // The panel must not be click-through or the drag goes to whatever
+            // is behind it (the desktop).
+            panel?.ignoresMouseEvents = false
+            enterFileDragPanelMode()
+        } else if viewModel.isFileDragNearby {
+            viewModel.isFileDragNearby = false
+            viewModel.isExpanded = false
+        }
+        return true
+    }
+
+    private var normalPanelLevel: NSWindow.Level?
+
+    /// While a file is dragged near the notch, the panel drops to a window
+    /// level just above the menu bar and may become key. At its normal level
+    /// (above the screen saver) and non-key, macOS never delivered the drag to
+    /// the drop view and the file landed on the desktop behind it. Restored as
+    /// soon as the drag ends.
+    private func enterFileDragPanelMode() {
+        guard let panel, normalPanelLevel == nil else { return }
+        normalPanelLevel = panel.level
+        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
+        panel.allowsBecomingKey = true
+    }
+
+    private func exitFileDragPanelMode() {
+        guard let panel, let normalPanelLevel else { return }
+        panel.level = normalPanelLevel
+        panel.allowsBecomingKey = viewModel.isWorkspaceOpen
+        self.normalPanelLevel = nil
+    }
+
+    /// Queues dropped files for the brain and reports the result in the island.
+    /// Returns whether anything readable was taken.
+    private func addDroppedFilesToBrain(_ droppedFileURLs: [URL]) -> Bool {
+        guard BrainPreferences.shared.isBrainEnabled else { return false }
+        let readableFileURLs = droppedFileURLs.filter {
+            BrainIngestFileRules.isSupported(fileExtension: $0.pathExtension.lowercased())
+        }
+        viewModel.isFileDragNearby = false
+        guard !readableFileURLs.isEmpty else {
+            showFileDropFeedback("Wisp can't read that kind of file")
+            companionManager.flashIsland(.error)
+            return false
+        }
+        for readableFileURL in readableFileURLs {
+            BrainIngestQueue.shared.enqueue(fileURL: readableFileURL)
+        }
+        let fileCountDescription = readableFileURLs.count == 1 ? "1 file" : "\(readableFileURLs.count) files"
+        showFileDropFeedback("Added \(fileCountDescription) to your brain")
+        companionManager.flashIsland(.success)
+        return true
+    }
+
+    private func showFileDropFeedback(_ message: String) {
+        viewModel.fileDropFeedback = message
+        fileDropFeedbackClearTask?.cancel()
+        fileDropFeedbackClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            self?.viewModel.fileDropFeedback = nil
         }
     }
 
@@ -618,6 +724,21 @@ final class NotchWindowController {
         let originX = geometry.screenFrame.midX - width / 2
         let originY = geometry.screenFrame.maxY - height
         return CGRect(x: originX, y: originY, width: width, height: height)
+    }
+
+    /// Where a dragged file opens the island: a generous band across the top
+    /// centre of the screen. A held file sits well below the cursor's hot spot
+    /// and people aim loosely, so the pill's own 34pt hover strip is far too
+    /// small — the drag missed it and the drop went to the desktop.
+    private func fileDragHotZone(_ geometry: NotchGeometry) -> CGRect {
+        let width = panelSize.width
+        let height: CGFloat = 140
+        return CGRect(
+            x: geometry.screenFrame.midX - width / 2,
+            y: geometry.screenFrame.maxY - height,
+            width: width,
+            height: height
+        )
     }
 
     /// The visible panel rect plus a hysteresis margin.
