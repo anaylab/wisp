@@ -89,6 +89,18 @@ enum WispIslandState: Equatable {
         }
     }
 
+    /// The colour of the wash rising from the bottom of the island, for the
+    /// states that are moments rather than ongoing activity: a decision is
+    /// pending, something worked, something failed. Nil for everything else.
+    var washColor: Color? {
+        switch self {
+        case .confirmation: return WispColor.warning
+        case .success:      return WispColor.success
+        case .error:        return WispColor.destructive
+        default:            return nil
+        }
+    }
+
     /// Whether the surface should read as "lit" (active) rather than at rest.
     var isActive: Bool {
         switch self {

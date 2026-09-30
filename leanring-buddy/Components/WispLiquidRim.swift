@@ -194,3 +194,27 @@ extension WispIslandState {
         }
     }
 }
+
+
+// MARK: - State wash
+
+/// A soft radial colour wash rising from the bottom edge of a dark surface.
+/// Used to name the state of a card (pending decision, success, error) without
+/// recolouring the surface itself. Clip it to the surface's shape.
+struct WispStateWash: View {
+    var color: Color?
+    var strength: Double = 0.3
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        RadialGradient(
+            colors: [(color ?? .clear).opacity(strength), .clear],
+            center: .bottom,
+            startRadius: 0,
+            endRadius: 190
+        )
+        .allowsHitTesting(false)
+        .animation(reduceMotion ? nil : WispMotion.gentle, value: color)
+    }
+}
