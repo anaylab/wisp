@@ -308,6 +308,9 @@ final class CompanionManager: ObservableObject {
     }
 
     func start() {
+        // Started now so it has seen the user's app before the first typed
+        // question makes Wisp frontmost (the Accessibility walk reads it then).
+        _ = FrontmostAppTracker.shared
         refreshAllPermissions()
         print("🔑 Wisp start — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission)")
         startPermissionPolling()
@@ -1163,10 +1166,13 @@ final class CompanionManager: ObservableObject {
     /// instruction. Nil uses the transcript.
     /// `skipsMessageCommandRouting` is set when a "text …" command turned out
     /// not to name a contact and is being handed on as an ordinary turn.
+    /// `skipsFastPointing` is set when a "where is X" request couldn't be
+    /// answered from the element list and is being handed on the same way.
     private func sendTranscriptToClaudeWithScreenshot(
         transcript: String,
         historyTitle: String? = nil,
-        skipsMessageCommandRouting: Bool = false
+        skipsMessageCommandRouting: Bool = false,
+        skipsFastPointing: Bool = false
     ) {
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
@@ -1255,6 +1261,17 @@ final class CompanionManager: ObservableObject {
                 runDirectBrowserRoute(browserRoute, transcript: transcript)
                 return
             }
+        }
+
+        // "Where is X" / "point at X" is answered from what Wisp already knows
+        // is on screen — the Accessibility elements and OCR lines, each with an
+        // exact box — instead of asking the vision model to guess pixels. The
+        // guess was measured wrong 4 times in 5, and encoding a new screen
+        // costs ~4s even with the model warm. A request the element list can't
+        // settle comes back here as an ordinary turn.
+        if !skipsFastPointing, let pointingRequest = PointingRequestParser.request(from: transcript) {
+            runFastPointingTurn(pointingRequest, transcript: transcript, historyTitle: historyTitle)
+            return
         }
 
         let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
@@ -1679,6 +1696,216 @@ final class CompanionManager: ObservableObject {
                 scheduleTransientHideIfNeeded()
             }
         }
+    }
+
+    /// Points at the thing a "where is X" request names, without the vision
+    /// model: the target is matched against this turn's Accessibility elements
+    /// and OCR lines (`PointingTargetMatcher`), and only when that isn't sure
+    /// does the local model pick an id from the same list as text — no image,
+    /// ~0.35s instead of ~4s. When neither finds it, the request goes on as an
+    /// ordinary turn with the captures handed back, so nothing is captured twice.
+    private func runFastPointingTurn(
+        _ pointingRequest: PointingRequest,
+        transcript: String,
+        historyTitle: String?
+    ) {
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            voiceState = .processing
+            currentReplyText = ""
+            let fastPointingStartedAt = Date()
+
+            // Same inputs, gathered the same way, as a screen turn: the AX walk
+            // runs beside the capture, and OCR was started when the capture was.
+            let accessibilityElementSnapshotTask = Task {
+                await AccessibilityElementSnapshotter.captureFrontmostApplicationSnapshot()
+            }
+            let screenCaptures = (try? await claimScreenCaptures()) ?? []
+            let accessibilityElementSnapshot = await accessibilityElementSnapshotTask.value
+            let screenTextSnapshot = screenCaptures.isEmpty
+                ? nil
+                : await ScreenTextRecognizer.shared.snapshot(
+                    for: screenCaptures,
+                    waitingAtMost: FastPointingTiming.screenTextWaitBudgetSeconds,
+                    maximumLineCount: FastPointingTiming.maximumMatchedScreenTextLineCount,
+                    maximumCharacterCount: FastPointingTiming.maximumMatchedScreenTextCharacterCount
+                )
+            guard !Task.isCancelled else { return }
+            print("🎯 Fast pointing inputs: \(accessibilityElementSnapshot?.elements.count ?? 0) accessibility elements, \(screenTextSnapshot?.entries.count ?? 0) OCR lines, after \(String(format: "%.2f", Date().timeIntervalSince(fastPointingStartedAt)))s")
+
+            let pointingCandidates = Self.pointingCandidates(
+                accessibilityElementSnapshot: accessibilityElementSnapshot,
+                screenTextSnapshot: screenTextSnapshot,
+                screenCaptures: screenCaptures
+            )
+
+            var chosenCandidates = PointingTargetMatcher.bestPlaces(for: pointingRequest, among: pointingCandidates).map(\.candidate)
+            var didAskModel = false
+
+            // The text-only pick is for the local model, where vision is the
+            // slow, inaccurate part, and only from a shortlist of candidates
+            // sharing a word with the target, so the call stays a few hundred
+            // tokens. A cloud model sees the screenshot well enough that an
+            // unsure match simply becomes its ordinary turn.
+            let modelShortlist = PointingTargetMatcher.shortlist(
+                targetText: pointingRequest.targetText,
+                among: pointingCandidates
+            )
+            if chosenCandidates.isEmpty, isSelectedModelProviderLocal, !modelShortlist.isEmpty {
+                didAskModel = true
+                let elementPickRequest = ModelRequest(
+                    systemPrompt: PointingModelFallback.systemPrompt,
+                    messages: [BuddyChatMessage(
+                        role: .user,
+                        text: PointingModelFallback.userMessageText(
+                            transcript: transcript,
+                            shortlistedCandidates: modelShortlist
+                        )
+                    )],
+                    tools: [],
+                    maxOutputTokens: PointingModelFallback.maximumOutputTokens,
+                    temperature: 0
+                )
+                let selectedModelProvider = self.selectedModelProvider
+                if let elementPickTurn = try? await ModelAccessGate.shared.withAccess(priority: .interactive, operation: {
+                    try await selectedModelProvider.streamTurn(elementPickRequest, onTextDelta: { _ in })
+                }) {
+                    print("🎯 Fast pointing model pick from \(modelShortlist.count): \(elementPickTurn.text)")
+                    if let pickedElementID = PointingModelFallback.elementID(
+                        fromReply: elementPickTurn.text,
+                        candidates: modelShortlist
+                    ), let pickedCandidate = modelShortlist.first(where: { $0.elementID == pickedElementID }),
+                       PointingTargetMatcher.sharesContentWord(targetText: pointingRequest.targetText, candidate: pickedCandidate) {
+                        chosenCandidates = [pickedCandidate]
+                    }
+                }
+            }
+            guard !Task.isCancelled else { return }
+
+            if chosenCandidates.isEmpty,
+               pointingCandidates.count >= FastPointingTiming.minimumCandidatesToTrustAMiss {
+                let notVisibleReplyText = "I can\u{2019}t see \u{201C}\(pointingRequest.targetText)\u{201D} on screen \u{2014} it may be scrolled out of view or in another window."
+                print("🎯 Fast pointing: \"\(pointingRequest.targetText)\" not among \(pointingCandidates.count) on-screen items — said so in \(String(format: "%.2f", Date().timeIntervalSince(fastPointingStartedAt)))s")
+                currentReplyText = notVisibleReplyText
+                WispSoundPlayer.shared.play(.reply)
+                let notVisibleTaskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+                AgentTaskRegistry.shared.appendStep(
+                    AgentStepRecord(kind: .modelCall, summary: "Not found in the on-screen element list"),
+                    to: notVisibleTaskID
+                )
+                AgentTaskRegistry.shared.finishTask(notVisibleTaskID, status: .succeeded, finalText: notVisibleReplyText)
+                conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                    BuddyChatMessage(role: .user, text: transcript),
+                    BuddyChatMessage(role: .assistant, text: notVisibleReplyText),
+                ]))
+                voiceState = .idle
+                scheduleTransientHideIfNeeded()
+                return
+            }
+
+            guard !chosenCandidates.isEmpty else {
+                print("🎯 Fast pointing: no match for \"\(pointingRequest.targetText)\" among \(pointingCandidates.count) items — handing on as a normal turn")
+                if !screenCaptures.isEmpty {
+                    speculativeScreenCaptureTask = Task { screenCaptures }
+                }
+                sendTranscriptToClaudeWithScreenshot(
+                    transcript: transcript,
+                    historyTitle: historyTitle,
+                    skipsMessageCommandRouting: true,
+                    skipsFastPointing: true
+                )
+                return
+            }
+
+            let markerLabel = Self.shortPointingLabel(for: chosenCandidates[0].text)
+            applyAnnotations(
+                chosenCandidates.map { chosenCandidate in
+                    ScreenAnnotation(
+                        style: .marker,
+                        regionInScreenshotPixels: CGRect(
+                            x: chosenCandidate.regionInScreenshotPixels.midX,
+                            y: chosenCandidate.regionInScreenshotPixels.midY,
+                            width: 0,
+                            height: 0
+                        ),
+                        label: Self.shortPointingLabel(for: chosenCandidate.text),
+                        screenNumber: chosenCandidate.screenNumber
+                    )
+                },
+                from: screenCaptures
+            )
+            let elapsedSeconds = Date().timeIntervalSince(fastPointingStartedAt)
+            print("🎯 Fast pointing: \(chosenCandidates.map(\.elementID).joined(separator: ",")) \"\(markerLabel)\" in \(String(format: "%.2f", elapsedSeconds))s\(didAskModel ? " (text-only model pick)" : " (no model)")")
+
+            let replyText = chosenCandidates.count > 1
+                ? "\u{201C}\(markerLabel)\u{201D} is in \(chosenCandidates.count) places — marked them all."
+                : "Here's \u{201C}\(markerLabel)\u{201D}."
+            currentReplyText = replyText
+            WispSoundPlayer.shared.play(.reply)
+
+            let fastPointingTaskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(
+                    kind: .modelCall,
+                    summary: didAskModel
+                        ? "Pointed from the on-screen element list — text-only model pick, no screenshot"
+                        : "Pointed from the on-screen element list — no model call"
+                ),
+                to: fastPointingTaskID
+            )
+            AgentTaskRegistry.shared.finishTask(fastPointingTaskID, status: .succeeded, finalText: replyText)
+            conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                BuddyChatMessage(role: .user, text: transcript),
+                BuddyChatMessage(role: .assistant, text: replyText),
+            ]))
+
+            voiceState = .idle
+            scheduleTransientHideIfNeeded()
+        }
+    }
+
+    /// Everything on screen fast pointing can choose from: labelled
+    /// Accessibility elements (converted to screenshot pixels) and OCR lines.
+    static func pointingCandidates(
+        accessibilityElementSnapshot: AccessibilityElementSnapshot?,
+        screenTextSnapshot: ScreenTextSnapshot?,
+        screenCaptures: [CompanionScreenCapture]
+    ) -> [PointingCandidate] {
+        var pointingCandidates: [PointingCandidate] = []
+        for element in accessibilityElementSnapshot?.elements ?? [] {
+            let elementText = element.labelText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !elementText.isEmpty,
+                  let resolvedRegion = resolveAccessibilityElementRegion(
+                      elementID: element.elementID,
+                      accessibilityElementSnapshot: accessibilityElementSnapshot,
+                      screenCaptures: screenCaptures
+                  ) else { continue }
+            pointingCandidates.append(PointingCandidate(
+                elementID: element.elementID,
+                text: elementText,
+                accessibilityRoleName: element.shortRoleName,
+                regionInScreenshotPixels: resolvedRegion.regionInScreenshotPixels,
+                screenNumber: resolvedRegion.screenNumber
+            ))
+        }
+        for entry in screenTextSnapshot?.entries ?? [] {
+            pointingCandidates.append(PointingCandidate(
+                elementID: entry.lineID,
+                text: entry.text,
+                accessibilityRoleName: nil,
+                regionInScreenshotPixels: entry.boundingBoxInScreenshotPixels,
+                screenNumber: entry.screenNumber
+            ))
+        }
+        return pointingCandidates
+    }
+
+    /// The element's text as a short marker label: bullets trimmed, long OCR
+    /// lines cut so the label reads as a name, not a sentence.
+    static func shortPointingLabel(for elementText: String) -> String {
+        let trimmedText = elementText.trimmingCharacters(in: CharacterSet(charactersIn: "•·-–—>› ").union(.whitespaces))
+        guard trimmedText.count > 40 else { return trimmedText }
+        return String(trimmedText.prefix(39)) + "…"
     }
 
     /// Keeps the local Ollama and Chatterbox servers warm while Wisp is

@@ -68,6 +68,10 @@ struct ToolConfirmationView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
         }
+        .background(
+            WispStateWash(color: WispColor.warning, strength: 0.3)
+                .clipShape(RoundedRectangle(cornerRadius: WispRadius.panel, style: .continuous))
+        )
         .frame(width: 312)
         // Only this card takes clicks. The overlay behind it must stay
         // transparent to the mouse or the whole desktop becomes unclickable.

@@ -65,8 +65,16 @@ enum AccessibilityElementSnapshotter {
     /// runs detached, off the main actor, since it is nothing but blocking IPC.
     static func captureFrontmostApplicationSnapshot() async -> AccessibilityElementSnapshot? {
         guard AXIsProcessTrusted() else { return nil }
-        guard let frontmostApplication = NSWorkspace.shared.frontmostApplication else { return nil }
-        guard frontmostApplication.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+        guard var frontmostApplication = NSWorkspace.shared.frontmostApplication else { return nil }
+        // A typed question makes Wisp frontmost (the composer activates it to
+        // take keystrokes), but the question is about the app the user was in,
+        // so read that one instead of giving up.
+        if frontmostApplication.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            guard let lastExternalBundleIdentifier = FrontmostAppTracker.shared.lastExternalApplication?.bundleIdentifier,
+                  let lastExternalApplication = NSRunningApplication
+                      .runningApplications(withBundleIdentifier: lastExternalBundleIdentifier).first else { return nil }
+            frontmostApplication = lastExternalApplication
+        }
         if let frontmostBundleIdentifier = frontmostApplication.bundleIdentifier,
            domHandledBrowserBundleIdentifiers.contains(frontmostBundleIdentifier) {
             return nil

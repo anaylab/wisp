@@ -84,8 +84,14 @@ struct NotchHUDView: View {
                 height: viewModel.windowSize.height,
                 alignment: .top
             )
-            .animation(.spring(response: 0.34, dampingFraction: 0.86), value: viewModel.isExpanded)
-            .animation(.spring(response: 0.38, dampingFraction: 0.86), value: viewModel.isWorkspaceOpen)
+            .animation(
+                reduceMotion ? WispMotion.smooth : WispMotion.islandMorph(expanding: viewModel.isExpanded),
+                value: viewModel.isExpanded
+            )
+            .animation(
+                reduceMotion ? WispMotion.smooth : WispMotion.islandMorph(expanding: viewModel.isWorkspaceOpen),
+                value: viewModel.isWorkspaceOpen
+            )
             .animation(.spring(response: 0.36, dampingFraction: 0.84), value: islandIsVisible)
         }
         // The dynamic island is always dark, regardless of the system's light or
@@ -123,8 +129,8 @@ struct NotchHUDView: View {
             height: viewModel.isExpanded ? droppedFixedHeight : viewModel.collapsedSize.height,
             alignment: .top
         )
-        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: collapsedPillWidth)
-        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: droppedWidth)
+        .animation(WispMotion.island, value: collapsedPillWidth)
+        .animation(WispMotion.island, value: droppedWidth)
         // Solid black by default, like Apple's Dynamic Island, so on a notched
         // Mac the surface is indistinguishable from the camera cutout; Liquid
         // Glass is the opt-in alternative (`NotchIslandStylePreference`). The
@@ -143,6 +149,14 @@ struct NotchHUDView: View {
                 )
         )
         .clipShape(notchSurfaceShape)
+        // A soft colour wash rising from the bottom edge names the state of a
+        // pending decision or a success / error moment; nothing for ordinary
+        // activity, which the rim and mark already carry.
+        .overlay(
+            WispStateWash(color: companionManager.islandState.washColor)
+                .clipShape(notchSurfaceShape)
+                .opacity(viewModel.isExpanded ? 1 : 0)
+        )
         // The rim carries state: lavender light travelling around it while Wisp
         // works, and the whole rim lighting up for a pending decision or a
         // success / error flash. On glass it also catches a specular highlight
@@ -173,11 +187,30 @@ struct NotchHUDView: View {
                 width: NotchViewModel.workspaceSize.width,
                 height: NotchViewModel.workspaceSize.height
             )
+        } else if viewModel.isFileDragNearby || viewModel.fileDropFeedback != nil {
+            fileDropContent
         } else if viewModel.isFullPanel {
             expandedContent
         } else {
             messageContent
         }
+    }
+
+    /// What the island shows while a file is dragged to it, and briefly after a
+    /// drop: the invitation, then the result.
+    private var fileDropContent: some View {
+        HStack(spacing: 10) {
+            Image(systemName: viewModel.fileDropFeedback == nil ? "tray.and.arrow.down" : "checkmark.circle")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(WispColor.Island.textSecondary)
+            Text(viewModel.fileDropFeedback ?? "Drop to add to your brain")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundColor(WispColor.Island.textPrimary)
+        }
+        .frame(maxWidth: .infinity, minHeight: Self.compactMessageMinimumHeight - 24, alignment: .center)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
+        .padding(.top, notchContentTopInset + 8)
     }
 
     /// The width of the dropped surface — narrow for the compact message so a short
@@ -207,8 +240,13 @@ struct NotchHUDView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
             .padding(.top, notchContentTopInset + 8)
+            // A floor under the card so a one-line reply doesn't drop as a
+            // sliver and then jump taller when a longer one lands.
+            .frame(minHeight: notchContentTopInset + Self.compactMessageMinimumHeight, alignment: .top)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    private static let compactMessageMinimumHeight: CGFloat = 76
 
     /// An answer always wins the compact surface; the morning banner only shows
     /// on an otherwise empty notch.
