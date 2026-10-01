@@ -10,6 +10,44 @@
 
 import SwiftUI
 
+// MARK: - Button style
+
+/// The buddy pages' capsule buttons. These views are drawn in two places: the
+/// notch, which is always dark (the glass style's white-on-dark colours are
+/// right there), and the Wisp window, which follows the system appearance —
+/// where that same glass style is white on near-white and almost invisible. So
+/// dark keeps the glass look and light uses the window's native bordered
+/// buttons, like the "New Buddy" button beside them.
+private struct BuddyButtonStyleModifier: ViewModifier {
+    let isProminent: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if colorScheme == .dark {
+            content.wispGlassButtonStyle(prominence: isProminent ? .prominent : .subtle, cornerRadius: 999)
+        } else if isProminent {
+            content
+                .buttonStyle(.borderedProminent)
+                .tint(WispColor.accentText)
+                .buttonBorderShape(.capsule)
+                .pointerCursor()
+        } else {
+            content
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .pointerCursor()
+        }
+    }
+}
+
+private extension View {
+    func buddyButtonStyle(isProminent: Bool) -> some View {
+        modifier(BuddyButtonStyleModifier(isProminent: isProminent))
+    }
+}
+
 // MARK: - Schedule editor
 
 /// "Repeat: Never / Every day / Every week", then the time (and weekday).
@@ -780,7 +818,7 @@ struct BuddyDetailView: View {
                     Label("Stop", systemImage: "stop.fill")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .wispGlassButtonStyle(prominence: .subtle, cornerRadius: 999)
+                .buddyButtonStyle(isProminent: false)
             } else {
                 Button {
                     didFailToStartRun = !buddyStore.runNow(buddyWithID: buddy.id)
@@ -788,7 +826,7 @@ struct BuddyDetailView: View {
                     Label("Run now", systemImage: "play.fill")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .wispGlassButtonStyle(prominence: .prominent, cornerRadius: 999)
+                .buddyButtonStyle(isProminent: true)
                 .nativeTooltip(didFailToStartRun
                     ? "This buddy's model is busy with other runs — try again when one finishes"
                     : "Do its job now")
@@ -933,7 +971,7 @@ struct NewBuddyForm: View {
                 Spacer(minLength: 0)
                 Button("Cancel", action: onCancel)
                     .font(.system(size: 12, weight: .medium))
-                    .wispGlassButtonStyle(prominence: .subtle, cornerRadius: 999)
+                    .buddyButtonStyle(isProminent: false)
                 Button {
                     let newBuddy = buddyStore.createBuddy(
                         instruction: trimmedInstruction,
@@ -947,7 +985,7 @@ struct NewBuddyForm: View {
                     Label(schedule.isRepeating ? "Create" : "Create & run", systemImage: "sparkles")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .wispGlassButtonStyle(prominence: .prominent, cornerRadius: 999)
+                .buddyButtonStyle(isProminent: true)
                 .disabled(trimmedInstruction.isEmpty)
                 .opacity(trimmedInstruction.isEmpty ? 0.5 : 1)
             }
