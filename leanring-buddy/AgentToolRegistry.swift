@@ -107,12 +107,27 @@ final class AgentToolRegistry: ObservableObject {
             forRequest: transcript,
             knownShortcutNames: ShortcutsBridge.shared.cachedShortcutNames
         )
-        let routableDefinitions = definitions.filter { isToolPermitted($0.name) }
+        // The brain tools only exist for the model while the brain is on, and
+        // a request naming one of its pages ("how's atlas going?") boosts the
+        // reading tools — no scope vocabulary could know the user's own names.
+        let isBrainEnabled = BrainPreferences.shared.isBrainEnabled
+        var boostedToolNames = shortcutsRoutingHints.boostedToolNames
+        if isBrainEnabled,
+           BrainToolRouting.requestNamesAPage(
+               transcript,
+               pageNames: BrainStore.shared.pages.filter { $0.kind != .me }.flatMap(\.allNames)
+           ) {
+            boostedToolNames.formUnion(BrainToolNames.reading)
+        }
+        let routableDefinitions = (isBrainEnabled
+            ? definitions
+            : definitions.filter { !BrainToolNames.all.contains($0.name) })
+            .filter { isToolPermitted($0.name) }
         let selectedDefinitions = AgentToolRouter.select(
             from: routableDefinitions,
             for: transcript,
             limit: AgentToolScope.maximumExposedTools,
-            boostedToolNames: shortcutsRoutingHints.boostedToolNames
+            boostedToolNames: boostedToolNames
         )
         return ShortcutsToolRouting.applyingMatchingShortcutNames(
             shortcutsRoutingHints.matchingShortcutNames,
@@ -484,8 +499,9 @@ final class AgentToolRegistry: ObservableObject {
         }
     }
 
-    /// Lets the model add to and remove from the user's memory file,
-    /// `~/.wisp/memory.md` (see `MemoryStore`).
+    /// Lets the model add to and remove from the user's memory: the brain's
+    /// me page while the brain is on, `~/.wisp/memory.md` while it is off
+    /// (see `MemoryStore`, which decides).
     ///
     /// Both ask first. They only touch a local text file, but that file is fed
     /// into every future prompt, so a fact the model invents — or one planted
@@ -520,6 +536,8 @@ final class AgentToolRegistry: ObservableObject {
                 return "that's already in memory: \(knownFact)"
             case .nothingToRemember:
                 return "there was nothing to remember in that."
+            case .refused(let reason):
+                return "couldn't save that: \(reason)."
             }
         }
 
@@ -639,6 +657,7 @@ final class AgentToolRegistry: ObservableObject {
         registerShortcutsTools()
         registerChromeTabTools()
         registerMessagingTools()
+        registerBrainTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

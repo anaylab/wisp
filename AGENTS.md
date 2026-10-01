@@ -40,7 +40,7 @@ cloud dependency to the local path, without asking.
   (`WispWindow/`) replaced the old dashboard, the pop-out conversation window, the notch's own
   settings pages and the big menu bar panel, so every setting has exactly one home. It is a stock
   `NavigationSplitView` in an `NSWindow` whose `NSHostingController` bridges title + toolbar
-  (`sceneBridgingOptions`); sidebar sections are `WispSection` (Today, Chat, Buddies, Routines,
+  (`sceneBridgingOptions`); sidebar sections are `WispSection` (Today, Chat, Buddies, Brain, Routines,
   History · Manage: Connections, Settings) and a multi-page section switches pages with a segmented
   control in the toolbar (`WispPage`). Anything opens it at a page with
   `WispWindowNavigator.open(_:)` (closes the notch workspace + quick panel first). On launch with a
@@ -518,8 +518,44 @@ cloud dependency to the local path, without asking.
   `MemoryStore.shared.promptInstructions()`, so it applies with or without agent mode. In agent
   mode the model can call `remember` (`.writing`) and `forget` (destructive; refuses a vague
   query matching >3 facts) — both confirm, since the file shapes every later prompt; the
-  `.memory` `AgentToolScope` routes "remember that…"/"forget…" to them. History → **Memory** lists facts with delete buttons, reveals memory.md, and clears conversation
-  history (which also empties the live transcript via `onConversationHistoryCleared`).
+  `.memory` `AgentToolScope` routes "remember that…"/"forget…" to them. **While the brain is on
+  (default) this layer lives in the brain's `wiki/me.md` instead**: `BrainMemoryMigration` moves
+  memory.md's facts there once, `MemoryStore` keeps its API but reads/writes the me page
+  (`BrainAboutMe` builds the ≤800-char system-prompt block), and memory.md is only read with the
+  brain off. Brain → Settings clears conversation history (which also empties the live transcript
+  via `onConversationHistoryCleared`); the old History → Memory page is gone.
+- **Brain** (Karpathy's "LLM wiki"; local, `Brain/` + `WispWindow/Brain/`): `~/.wisp/brain/` is a
+  folder of markdown pages Wisp maintains — a valid Obsidian vault. `SCHEMA.md` (user-editable
+  conventions, put in every writer's prompt), generated `index.md`, human `log.md`, `wiki/` pages
+  (`me.md`, `people/`, `projects/`, `topics/`, `sources/`, …; frontmatter title/kind/summary/
+  aliases/tags/sources/locked, `## Section` bodies, `[[links]]`), `raw/` sources Wisp never edits
+  (inbox/ingested/notes/conversations/activity), `.brain/` machine state. **No writer touches a page
+  file**: ingest, digests, lint and agent tools produce `BrainEditProposal`s (lenient JSON from the
+  model) and `BrainEditPlanner` validates each batch — caps, section-only edits, bullet dedupe, and
+  `BrainEditProvenance.trust`: `.external` (web/files/window titles) may only append/create and
+  never touch `me`, `.derivedFromUser` (conversations/notes) may not replace, `.userAuthored` may do
+  anything; locked pages are never changed. `BrainStore.apply` versions every overwritten page under
+  `.brain/versions/<change>/` and records a `BrainChangeRecord`, so every batch is one Undo in
+  Brain → Log (conflict-checked by content hash; `deletingSlugs:` makes a merge one record).
+  **Reading**: `BrainSearch` is BM25 with field weights (no embedding model — residency); each turn
+  the ≤4 relevant page summaries (`BrainPromptContext`, score bar, ~700 chars) join the per-turn
+  screen-context block on the **user message** and are stripped from history like `a`/`t` ids.
+  Agent tools (`.brain` scope): `search_brain`, `read_brain_page` (read-only), `add_to_brain`,
+  `ingest_into_brain` (ask). `BrainCommandRouter` sends "add this page/file to my brain" straight to
+  the queue (front browser tab or Finder selection), no model. **Feeds**: `BrainIngestQueue`
+  (serial, persisted, resumable; `BrainTextExtractor` md/txt/PDF/HTML/RTF/DOCX + user-requested URL
+  fetch, `BrainTextChunker` ~2500-char chunks, `BrainKnowledgeExtractor` one call per chunk + a
+  `source` page per material, `BrainInboxWatcher` polls `raw/inbox/`); `BrainConversationDigester`
+  (ended sessions ≥30 min idle, user words + answers only, substantive-only heuristic, ≤3 per
+  pass); `BrainNotesImporter` (folder/Obsidian, hash-deduped, 500 per run; Apple Notes via
+  AppleScript); `BrainActivityRecorder` (**opt-in, off by default**: app/window title/URL-without-
+  query once a minute while present and not on a call, built-in + user exclusions, Chrome incognito
+  skipped, reuses existing OCR text only, never screenshots, 30-day retention, daily digest of a
+  compact summary **always on the local model**). `BrainMaintenance` lints (broken links → stub
+  pages, likely duplicates → merge + relink, oversized → split, missing summaries). All model work
+  is background priority through `ModelAccessGate`; switches live in `BrainPreferences`. UI: sidebar
+  **Brain** with Pages (reader/editor, backlinks), Graph (force layout), Inbox (drop zone, jobs,
+  notes import), Health, Log (undo), Settings.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 
@@ -719,6 +755,29 @@ Grouped by what they do. Line counts are approximate.
 | `AgentTaskRegistry.swift` | ~165 | Task and step records backing History → Timeline. Loads saved history on launch and saves it (debounced) on every change. |
 | `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
 
+### Brain
+| File | Lines | Purpose |
+|------|-------|---------|
+| `Brain/BrainPage.swift` | ~455 | Pure page model: `BrainPageKind` (folders, symbols), frontmatter parse/render, `BrainSlug` (safe slugs, comparable names), `[[link]]` parsing, `## Section` split/join. |
+| `Brain/BrainEdit.swift` | ~550 | `BrainEditProvenance` (origin + trust), `BrainEditProposal`, lenient `BrainEditProposalParser`, and `BrainEditPlanner` — the validator every brain write goes through. |
+| `Brain/BrainSearch.swift` | ~205 | BM25 `BrainSearchIndex` (field-weighted, whole-word name boost) and `BrainPromptContext` (the per-turn relevant-pages block). |
+| `Brain/BrainStore.swift` | ~650 | The vault: layout + seeding, page load/resolve/backlinks, `apply` (versioned, one change record, optional deletions), hand edits, undo, index.md/log.md, raw sources, Finder/Obsidian opening. |
+| `Brain/BrainSchema.swift / BrainPreferences.swift` | ~50/~65 | Default SCHEMA.md + the edit-proposal prompt rules; the brain's UserDefaults switches (activity off by default). |
+| `Brain/BrainAboutMe.swift / BrainMemoryMigration.swift` | ~155/~145 | me-page facts → system-prompt block, remember/forget edits; one-time memory.md → me.md migration. |
+| `Brain/BrainAgentTools.swift / BrainCommandRouter.swift` | ~350/~240 | `search_brain`/`read_brain_page`/`add_to_brain`/`ingest_into_brain`; deterministic "add this to my brain" parsing + front-tab/Finder target resolution. |
+| `Brain/BrainKnowledgeExtractor.swift` | ~350 | Source text → edit proposals: per-chunk model calls with relevant page titles, one stricter retry, source-page summary call. |
+| `Brain/BrainIngestQueue.swift / BrainIngestJob.swift` | ~615/~140 | Serial persisted ingest queue (raw copies, trust mapping, History rows, one drain notification) and the job type + codec. |
+| `Brain/BrainTextExtractor.swift / BrainTextChunker.swift` | ~685/~215 | md/txt/PDF/HTML/RTF/DOCX extraction, HTML→text, user-requested web fetch; heading/paragraph chunking with even sampling. |
+| `Brain/BrainIngestProposalMerger.swift / BrainIngestFileRules.swift / BrainInboxWatcher.swift` | ~405/~125/~115 | Cross-chunk merge + batch fitting + source page; supported types and inbox stability rules; `raw/inbox/` poller. |
+| `Brain/BrainConversationDigester.swift / BrainConversationDigestPlanning.swift` | ~225/~410 | Periodic digest of ended conversation sessions; pure exchange filtering, substance heuristic, material + state. |
+| `Brain/BrainNotesImporter.swift / BrainNotesImportPlanning.swift / BrainNotesImportAppleNotes.swift` | ~370/~255/~185 | Folder/Obsidian import (hash-deduped, capped) and Apple Notes export via a parameterised AppleScript. |
+| `Brain/BrainActivityRecorder.swift / BrainActivitySampler.swift / BrainActivityLog.swift / BrainActivitySummary.swift / BrainActivityExclusions.swift` | ~360/~230/~245/~420/~205 | Opt-in activity feed: sampling, exclusions, day spans (0600 files, 30-day retention), summaries, daily local-model digest. |
+| `Brain/BrainLinter.swift / BrainLintChecks.swift / BrainPageMerger.swift / BrainPageSplitter.swift` | ~230/~595/~255/~190 | `BrainMaintenance` (periodic lint + fixes) and the pure checks, duplicate merge with relinking, and oversized-page split. |
+| `WispWindow/Brain/BrainPagesPage.swift / BrainPageReaderView.swift / BrainPageEditorView.swift` | ~445/~390/~155 | Brain → Pages: search/grouped list, markdown reader with in-app `[[links]]`, chips, backlinks, back/forward; raw-markdown editor with rename. |
+| `WispWindow/Brain/BrainGraphPage.swift / BrainGraphLayout.swift` | ~465/~340 | Brain → Graph: Canvas force-directed graph (clock stops when settled/hidden) and the pure layout + fast link resolver. |
+| `WispWindow/Brain/BrainInboxPage.swift / BrainHealthPage.swift / BrainLogPage.swift / BrainSettingsPage.swift` | ~675/~370/~270/~610 | Inbox (drop zone, jobs, notes import), Health (overview + fixes), Log (undo), Settings (switches, activity privacy, vault, conversation history). |
+| `WispWindow/Brain/BrainSharedViews.swift / BrainMarkdownRendering.swift` | ~495/~330 | Shared navigation state, chips, markdown view; pure markdown block parser and `wisp-brain://` link rewriting. |
+
 ### Voice modes, glance cards & sources
 | File | Lines | Purpose |
 |------|-------|---------|
@@ -737,7 +796,6 @@ Grouped by what they do. Line counts are approximate.
 | `WispTimerStore.swift` / `TimerCardView.swift` | ~235/~225 | `timer` kind: the main-actor store that owns countdowns (completion task, scheduled `UNUserNotification`, finish callback) independent of any card, plus `WispTimerDurationFormatter`; the card is a live countdown (`CountdownSecondTickSchedule`, paused when off-screen) with a Cancel button. |
 | `ConfiguredSourceStore.swift` / `RESTSourceDataProvider.swift` / `SourceCardView.swift` | ~90/~140/~90 | `source` kind: user endpoints in `~/.wisp/sources.json`, fetched over HTTPS and mapped to generic blocks. |
 | `SourcesTab.swift` | ~150 | Connections → Sources: the live-card-data master toggle + the configured-source list. |
-| `MemoryTab.swift` | ~185 | History → Memory: remembered facts with per-row delete, reveal/reload memory.md, and the saved-conversation summary with "Clear conversation history" (confirmation dialog). |
 
 ### Wisp window, notch and UI
 | File | Lines | Purpose |
@@ -758,6 +816,7 @@ Grouped by what they do. Line counts are approximate.
 | `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
+| `NotchFileDrop.swift` | ~75 | Drop a file on the notch to add it to the brain: `NotchFileDropView` (a transparent `hitTest`-nil sibling above the hosting view; wrapping it, registering it, or SwiftUI `.onDrop` all failed to receive drags) and `NotchFileDragDetector` (drag-pasteboard change count + held button, so window drags never misfire). `NotchWindowController.updateFileDragState` opens the island under a file drag (brain on only) and `addDroppedFilesToBrain` enqueues supported files on `BrainIngestQueue`, showing the result via `viewModel.fileDropFeedback`. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `DesignSystem.swift` | ~480 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
@@ -833,6 +892,12 @@ running):
 ./Tests/ModelProviderContract/run.sh     # provider layer, ~10s
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
+./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
+./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec
+./Tests/BrainDigest/run.sh               # conversation digest + notes import policy
+./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
+./Tests/BrainLint/run.sh                 # lint checks, merge, split
+./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
 ```
 

@@ -36,6 +36,12 @@ enum AgentToolScope: String, CaseIterable {
     /// Texting someone and looking them up in Contacts (`send_imessage`,
     /// `find_contact`).
     case messaging
+    /// The user's brain — their personal wiki (`search_brain`,
+    /// `read_brain_page`, `add_to_brain`, `ingest_into_brain`). A request
+    /// that names one of its pages is boosted separately, by
+    /// `AgentToolRegistry.definitions(forRequest:)`, since page names are the
+    /// user's own and no fixed vocabulary knows them.
+    case brain
     case general
 
     /// Words that indicate this scope, weighted equally.
@@ -64,6 +70,12 @@ enum AgentToolScope: String, CaseIterable {
             // Not bare "text": "the text on screen" is a screen question.
             return ["message", "imessage", "sms", "send a text", "text message",
                     "contact", "phone number", "email address", "whose number"]
+        case .brain:
+            // Not bare "notes": "notes app" and "release notes" aren't the
+            // brain. Not "remember": that routes to the memory tools.
+            return ["my brain", "in my brain", "to my brain", "wiki", "my notes on", "my notes about",
+                    "what do i know about", "what do you know about", "what have i saved",
+                    "what did i save", "ingest"]
         case .general:
             return []
         }
@@ -133,6 +145,8 @@ enum AgentToolScope: String, CaseIterable {
             return name == "remember" || name == "forget"
         case .messaging:
             return name == MessagingToolNames.sendIMessage || name == MessagingToolNames.findContact
+        case .brain:
+            return BrainToolNames.all.contains(name)
         case .general:
             // What a conversation plausibly reaches for: the things that
             // answer a question about the user's own machine right now.

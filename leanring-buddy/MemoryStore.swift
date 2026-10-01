@@ -20,6 +20,13 @@
 //  the most recent facts), for the same reason the skill index is terse: it is
 //  paid for on every turn, alongside a screenshot, on a small local model.
 //
+//  The brain took this over. While the brain is on (`BrainPreferences`), the
+//  facts live in its me page (`~/.wisp/brain/wiki/me.md`, `## Facts` — moved
+//  there once by `BrainMemoryMigration`), and this store forwards to it: the
+//  prompt block comes from `BrainAboutMe`, `remember` appends to the me page
+//  and `forget` removes bullets from it, both versioned and undoable in the
+//  brain's change log. memory.md is only read and written with the brain off.
+//
 
 import AppKit
 import Combine
@@ -202,6 +209,8 @@ final class MemoryStore: ObservableObject {
         case added(String)
         case alreadyKnown(String)
         case nothingToRemember
+        /// The brain wouldn't take it (the me page is locked, or full).
+        case refused(String)
     }
 
     /// What happened when asked to forget something.
@@ -217,8 +226,14 @@ final class MemoryStore: ObservableObject {
     /// matches half the file is a model guessing, not the user asking.
     static let maximumFactsRemovedByOneForget = 3
 
-    /// Every fact in the file, oldest first.
+    /// Every fact, oldest first: the me page's Facts bullets while the brain
+    /// is on, memory.md's bullets while it is off.
     @Published private(set) var facts: [String] = []
+
+    /// `~/.wisp/memory.md`, the pre-brain memory file.
+    static let legacyMemoryFileURL: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".wisp", isDirectory: true)
+        .appendingPathComponent("memory.md", isDirectory: false)
 
     /// `~/.wisp/memory.md`.
     let memoryFileURL: URL
@@ -227,30 +242,77 @@ final class MemoryStore: ObservableObject {
     /// re-read only when the user actually edited the file.
     private var lastReadModificationDate: Date?
 
+    /// Keeps `facts` current when the brain's pages change (a hand edit, an
+    /// undo, a digest filing a fact about the user).
+    private var brainPagesSubscription: AnyCancellable?
+
+    /// Whether `facts` currently holds the me page's bullets, so switching the
+    /// brain off re-reads memory.md even though the file itself didn't change.
+    private var factsAreFromBrain = false
+
+    /// Whether memory lives in the brain right now. Read on every call so the
+    /// master switch applies live.
+    private var isBrainTheMemory: Bool {
+        BrainPreferences.shared.isBrainEnabled
+    }
+
     private init() {
-        memoryFileURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".wisp", isDirectory: true)
-            .appendingPathComponent("memory.md", isDirectory: false)
+        memoryFileURL = Self.legacyMemoryFileURL
         reload()
+    }
+
+    /// Starts following the brain's pages, the first time memory is read from
+    /// the brain — not at init, because touching `BrainStore` creates the
+    /// vault, and with the brain off nothing should read or write it.
+    private func subscribeToBrainPagesIfNeeded() {
+        guard brainPagesSubscription == nil else { return }
+        brainPagesSubscription = BrainStore.shared.$pages
+            .dropFirst()
+            .sink { [weak self] updatedPages in
+                // `$pages` publishes before the property is set, so the new
+                // pages are read from the value delivered, not the store.
+                guard let self, self.isBrainTheMemory else { return }
+                let updatedMePage = updatedPages.first { $0.slug == BrainAboutMe.mePageSlug }
+                let factsOnMePage = BrainAboutMe.factBullets(onMePage: updatedMePage)
+                self.factsAreFromBrain = true
+                if self.facts != factsOnMePage { self.facts = factsOnMePage }
+            }
     }
 
     // MARK: Reading
 
-    /// Re-reads the file. A missing file is simply no facts.
+    /// Re-reads the facts. A missing file (or me page) is simply no facts.
     func reload() {
+        if isBrainTheMemory {
+            BrainStore.shared.reload()
+            refreshFactsFromBrainIfItIsTheMemory()
+            return
+        }
         lastReadModificationDate = currentFileModificationDate()
         facts = MemoryFileFormat.parseFacts(from: readFileContents())
+        factsAreFromBrain = false
     }
 
     /// Re-reads only if the file changed since the last read. Cheap enough to
-    /// call before every turn — one `stat`.
+    /// call before every turn — one `stat` (a directory walk of them for the
+    /// brain).
     func reloadIfFileChanged() {
-        guard currentFileModificationDate() != lastReadModificationDate else { return }
+        if isBrainTheMemory {
+            BrainStore.shared.reloadIfChanged()
+            refreshFactsFromBrainIfItIsTheMemory()
+            return
+        }
+        guard factsAreFromBrain || currentFileModificationDate() != lastReadModificationDate else { return }
         reload()
     }
 
-    /// The memory block for the system prompt, current as of the file on disk.
+    /// The memory block for the system prompt: "about the user" from the me
+    /// page while the brain is on (stable until that page changes, so the
+    /// prefix cache keeps hitting), memory.md's facts while it is off.
     func promptInstructions() -> String {
+        if isBrainTheMemory {
+            return BrainAboutMe.promptInstructions(mePage: currentMePage())
+        }
         reloadIfFileChanged()
         return MemoryIndex.promptInstructions(for: facts)
     }
@@ -259,6 +321,18 @@ final class MemoryStore: ObservableObject {
 
     func remember(_ rawFact: String) throws -> RememberOutcome {
         guard let fact = MemoryFileFormat.normalizedFact(rawFact) else { return .nothingToRemember }
+        if isBrainTheMemory {
+            let applyResult = BrainStore.shared.apply(
+                proposals: [BrainAboutMe.rememberProposal(forFact: fact)],
+                provenance: BrainAboutMe.rememberProvenance
+            )
+            refreshFactsFromBrainIfItIsTheMemory()
+            if applyResult.didChangeAnything { return .added(fact) }
+            // Nothing changed and nothing was refused: the bullet was already
+            // on the page, which the planner skips silently.
+            if applyResult.refusals.isEmpty { return .alreadyKnown(fact) }
+            return .refused(applyResult.refusals.joined(separator: "; "))
+        }
         let currentMarkdown = readFileContents()
         guard !MemoryFileFormat.containsFact(fact, in: currentMarkdown) else { return .alreadyKnown(fact) }
         try writeFileContents(MemoryFileFormat.appendingFact(fact, to: currentMarkdown))
@@ -266,6 +340,20 @@ final class MemoryStore: ObservableObject {
     }
 
     func forget(matching query: String) throws -> ForgetOutcome {
+        if isBrainTheMemory {
+            guard let mePage = currentMePage() else { return .nothingMatched }
+            let matchingBullets = BrainAboutMe.bulletsMatching(query, onMePage: mePage)
+            guard !matchingBullets.isEmpty else { return .nothingMatched }
+            guard matchingBullets.count <= Self.maximumFactsRemovedByOneForget else {
+                return .tooManyMatches(matchingBullets)
+            }
+            let removal = BrainAboutMe.pageRemovingBullets(matching: query, from: mePage)
+            // Saved as the user's own edit: versioned, so the Brain page's
+            // change log can undo a forget the user regrets.
+            BrainStore.shared.savePageEditedByUser(removal.updatedPage)
+            refreshFactsFromBrainIfItIsTheMemory()
+            return .removed(removal.removedBullets)
+        }
         let currentMarkdown = readFileContents()
         let matchingFacts = MemoryFileFormat.facts(matching: query, in: currentMarkdown)
         guard !matchingFacts.isEmpty else { return .nothingMatched }
@@ -280,6 +368,14 @@ final class MemoryStore: ObservableObject {
     /// Removes one exact fact — the dashboard's per-row delete button, where
     /// the user has pointed at precisely the line they mean.
     func removeFact(_ factToRemove: String) {
+        if isBrainTheMemory {
+            guard let mePage = currentMePage() else { return }
+            let removal = BrainAboutMe.pageRemovingExactBullet(factToRemove, from: mePage)
+            guard !removal.removedBullets.isEmpty else { return }
+            BrainStore.shared.savePageEditedByUser(removal.updatedPage)
+            refreshFactsFromBrainIfItIsTheMemory()
+            return
+        }
         let removal = MemoryFileFormat.removingFacts(from: readFileContents()) { fact in
             fact == factToRemove
         }
@@ -291,9 +387,18 @@ final class MemoryStore: ObservableObject {
         }
     }
 
-    /// Shows memory.md in Finder, creating it (with its explanatory header)
-    /// first so there is something to open and edit.
+    /// Shows where the facts live in Finder: the me page while the brain is
+    /// on, otherwise memory.md — created (with its explanatory header) first
+    /// so there is something to open and edit.
     func revealMemoryFileInFinder() {
+        if isBrainTheMemory {
+            if let mePage = currentMePage() {
+                BrainStore.shared.revealPageInFinder(mePage)
+            } else {
+                BrainStore.shared.revealVaultInFinder()
+            }
+            return
+        }
         if !FileManager.default.fileExists(atPath: memoryFileURL.path) {
             try? writeFileContents(MemoryFileFormat.newFileHeader)
         }
@@ -302,6 +407,22 @@ final class MemoryStore: ObservableObject {
         } else {
             NSWorkspace.shared.activateFileViewerSelecting([memoryFileURL.deletingLastPathComponent()])
         }
+    }
+
+    // MARK: Brain
+
+    /// The me page as it is on disk now (re-read if it changed).
+    private func currentMePage() -> BrainPage? {
+        subscribeToBrainPagesIfNeeded()
+        return BrainStore.shared.page(withSlug: BrainAboutMe.mePageSlug)
+    }
+
+    private func refreshFactsFromBrainIfItIsTheMemory() {
+        guard isBrainTheMemory else { return }
+        subscribeToBrainPagesIfNeeded()
+        factsAreFromBrain = true
+        let factsOnMePage = BrainAboutMe.factBullets(onMePage: BrainStore.shared.mePage)
+        if facts != factsOnMePage { facts = factsOnMePage }
     }
 
     // MARK: Disk

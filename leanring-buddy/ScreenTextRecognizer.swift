@@ -64,6 +64,11 @@ final class ScreenTextRecognizer {
 
     private var recognitionTaskCache = ScreenTextRecognitionCache<RecognitionTask>()
 
+    /// The last recognition to finish, on any display, and when it finished —
+    /// so the brain's activity feed can reuse text Wisp already read rather
+    /// than ever capturing the screen for itself.
+    private var mostRecentFinishedRecognition: (finishedDate: Date, result: ScreenTextRecognitionResult)?
+
     private init() {}
 
     // MARK: - Starting recognition
@@ -97,6 +102,27 @@ final class ScreenTextRecognizer {
             )
         }
         recognitionTaskCache.store(recognitionTask, forDisplay: displayID, imageData: imageData)
+        Task { @MainActor in
+            let finishedResult = await recognitionTask.value
+            self.mostRecentFinishedRecognition = (Date(), finishedResult)
+        }
+    }
+
+    /// Plain text of the most recently finished recognition, top to bottom,
+    /// or nil when there is none newer than `maximumAgeSeconds`. Never starts
+    /// a capture or a recognition.
+    func mostRecentRecognizedPlainText(maximumAgeSeconds: TimeInterval) -> String? {
+        guard let mostRecentFinishedRecognition,
+              Date().timeIntervalSince(mostRecentFinishedRecognition.finishedDate) <= maximumAgeSeconds else { return nil }
+        let readableLines = mostRecentFinishedRecognition.result.lines
+            .filter { $0.confidence >= 0.35 }
+            .sorted { lhs, rhs in
+                lhs.boundingBoxInScreenshotPixels.minY != rhs.boundingBoxInScreenshotPixels.minY
+                    ? lhs.boundingBoxInScreenshotPixels.minY < rhs.boundingBoxInScreenshotPixels.minY
+                    : lhs.boundingBoxInScreenshotPixels.minX < rhs.boundingBoxInScreenshotPixels.minX
+            }
+            .map(\.text)
+        return readableLines.isEmpty ? nil : readableLines.joined(separator: "\n")
     }
 
     // MARK: - Reading results
