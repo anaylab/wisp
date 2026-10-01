@@ -157,12 +157,16 @@ enum ConversationHistoryCodec {
         return PersistedConversationTurn(id: turn.id, startedAt: turn.startedAt, messages: persistedMessages)
     }
 
-    /// Returns nil for images — the one kind of block that is never written.
+    /// Returns nil for images and provider replay blocks — the kinds of block
+    /// that are never written.
     private static func persistedBlock(from block: BuddyContentBlock) -> PersistedContentBlock? {
         switch block {
         case .text(let text):
             return .text(text)
         case .image:
+            return nil
+        case .providerReplay:
+            // Only valid inside the tool loop that produced it.
             return nil
         case .toolUse(let id, let name, let input):
             return .toolUse(id: id, name: name, input: input)

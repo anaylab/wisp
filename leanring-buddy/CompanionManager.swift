@@ -1612,7 +1612,11 @@ final class CompanionManager: ObservableObject {
                 // already drawn, and feeding coordinates back would teach the
                 // model to answer with numbers about a screen it can no longer
                 // see. Every other message is kept exactly as it happened.
-                var recordedMessages = messagesFromThisTurn.map(\.withoutImages)
+                //
+                // Provider-only replay blocks (Claude's thinking and web search
+                // results) go too: they are valid only inside the tool loop that
+                // produced them.
+                var recordedMessages = messagesFromThisTurn.map { $0.withoutImages.withoutProviderReplayBlocks }
                 // The Accessibility element list goes the same way as the
                 // screenshot: its ids are only valid for this turn's snapshot,
                 // and replaying them would invite the model to point at `a12`

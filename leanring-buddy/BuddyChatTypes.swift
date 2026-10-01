@@ -133,6 +133,13 @@ enum BuddyContentBlock: Sendable {
     case image(data: Data, label: String)
     case toolUse(id: String, name: String, input: JSONValue)
     case toolResult(toolUseID: String, toolName: String, content: String, isError: Bool)
+    /// A block only the provider that produced it understands — Claude's
+    /// signed thinking blocks and its server-side web search / fetch calls and
+    /// results — kept as the provider's own JSON so it can be sent back
+    /// verbatim later in the same tool loop, which Claude requires. Other
+    /// providers skip it, and it is never persisted or carried into the next
+    /// turn (`withoutProviderReplayBlocks`).
+    case providerReplay(providerFamily: String, block: JSONValue)
 }
 
 /// Views onto a run of blocks.
@@ -181,6 +188,20 @@ extension Array where Element == BuddyContentBlock {
             return true
         }
     }
+
+    /// The same blocks with every provider-only replay block removed.
+    ///
+    /// Those blocks matter only inside the tool loop that produced them. The
+    /// stored transcript is already an edited projection (screenshots and
+    /// screen-element lists dropped, the final reply rewritten), so a signed
+    /// thinking block carried into a later turn could never pass Claude's
+    /// history check anyway, and a web search result would only cost tokens.
+    var withoutProviderReplayBlocks: [BuddyContentBlock] {
+        filter { block in
+            if case .providerReplay = block { return false }
+            return true
+        }
+    }
 }
 
 struct BuddyChatMessage: Sendable {
@@ -210,6 +231,11 @@ struct BuddyChatMessage: Sendable {
     /// The same message with every image dropped.
     var withoutImages: BuddyChatMessage {
         BuddyChatMessage(role: role, blocks: blocks.withoutImages)
+    }
+
+    /// The same message with every provider-only replay block dropped.
+    var withoutProviderReplayBlocks: BuddyChatMessage {
+        BuddyChatMessage(role: role, blocks: blocks.withoutProviderReplayBlocks)
     }
 }
 

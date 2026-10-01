@@ -51,6 +51,14 @@ cloud dependency to the local path, without asking.
 - **Framework**: SwiftUI (macOS native) with AppKit bridging for the notch, cursor overlay, menu
   bar item and the Wisp window
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
+- **Claude** (when selected): Opus 5.5 by default, model/effort/web access chosen in Settings →
+  Model (`AnthropicModelSettings`). Claude always thinks on 5.5-era models and signs each thinking
+  block against the conversation before it, so its private blocks (`BuddyContentBlock.providerReplay`)
+  are resent verbatim inside a tool loop, and the agent loop keeps the turn **append-only** for
+  providers with `ModelCapabilities.requiresAppendOnlyHistoryWithinTurn` (the screenshot is resent on
+  later passes — a cache read — instead of dropped). Replay blocks are stripped from the stored
+  transcript (`withoutProviderReplayBlocks`) and never persisted. Web search/fetch run on Anthropic's
+  side and are added only to requests that already carry tools (agent mode).
 - **Chat / Vision**: a pluggable `ModelProvider`, chosen at runtime via
   `BuddyChatProviderSelection` and built by `ModelProviderFactory`. Default is local Ollama
   `qwen2.5vl:3b` at `http://localhost:11434` (NDJSON streaming); the cloud providers
@@ -619,9 +627,10 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `LocalOllamaAPI.swift` | ~350 | Ollama client: NDJSON streaming, `keep_alive`, per-mode context and token limits, and the heuristic that decides whether a prompt needs a screenshot at all. |
-| `ModelProvider.swift` | ~248 | Provider-agnostic runtime: the `ModelProvider` protocol (`streamTurn`), plus `ModelRequest`, `ModelCapabilities`, and `ModelDeployment` (`sendsDataOffThisMachine`, which drives the local-only-machinery gates). |
+| `ModelProvider.swift` | ~260 | Provider-agnostic runtime: the `ModelProvider` protocol (`streamTurn`), plus `ModelRequest`, `ModelCapabilities`, and `ModelDeployment` (`sendsDataOffThisMachine`, which drives the local-only-machinery gates). |
 | `OllamaProvider.swift` | ~294 | Presents `LocalOllamaAPI` as a `ModelProvider`; owns the `[TOOL:...]` text convention that fakes tool calls for the local model. |
-| `AnthropicProvider.swift` | ~425 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, thinking disabled (the transcript can't replay thinking blocks). |
+| `AnthropicProvider.swift` | ~680 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, adaptive thinking + `effort` (Opus/Sonnet 5.5), signed thinking and web blocks kept as `.providerReplay` and resent verbatim within a tool loop (`drop_block` for stale ones), prompt caching (system breakpoint + automatic), server-side `web_search`/`web_fetch` on tool-bearing turns (resumes `pause_turn`), `fallbacks: "default"` for refusals, no sampling params on models that reject them. |
+| `AnthropicModelSettings.swift` | ~140 | Claude's settings (UserDefaults): `AnthropicModelChoice` (Opus 5.5 default / Sonnet 5.5 / Haiku 4.5, with each model's API differences as data), `AnthropicEffortLevel` (low default), and the web-access switch. Edited in Settings → Model, read by `ModelProviderFactory`. |
 | `OpenAIProvider.swift` | ~435 | GPT as a bring-your-own-key `ModelProvider` over Chat Completions: tool results become separate `role:"tool"` messages. |
 | `GeminiProvider.swift` | ~415 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. |
 | `ModelProviderFactory.swift` | ~75 | Builds the `ModelProvider` for the current `BuddyChatProviderSelection`, reading a cloud provider's key from `ProviderKeychainStore`. Used by CompanionManager's turn path. |
@@ -739,7 +748,7 @@ Grouped by what they do. Line counts are approximate.
 | `WispWindow/ChatPage.swift` | ~440 | Chat: the last 6 hours of interactive exchanges as a thread (running turns show the live browser step + Stop, answers have Copy), a follow-up box (`askTypedQuestion`; capture excludes Wisp's own windows), and a side column of running and recently finished tasks. Opened by the notch's expand button via `openConversationWindow()`. |
 | `WispWindow/BuddiesPage.swift` | ~150 | Buddies: a list of buddies + the selected one's `BuddyDetailView` or `NewBuddyForm`; a single invitation when there are none. |
 | `WispWindow/GeneralSettingsPage.swift` | ~330 | Settings → General: `PermissionsChecklist` (mic / accessibility / screen recording / screen content with Grant buttons — also shown on Today until granted), `ActiveStackCard` (model + residency, speech, voice, agent mode, local-only assurance), island surface, speak replies, sound cues and `VoiceUpgradeHint`. `SettingRow` is the shared title/detail/control row. |
-| `WispWindow/ModelSettingsPage.swift` | ~390 | Settings → Model (`PerformanceTab`: provider choice + API key, system readouts, timings) and the shared `DashboardCard` (native grouped card) and `DashboardEmptyState` (`ContentUnavailableView`). |
+| `WispWindow/ModelSettingsPage.swift` | ~465 | Settings → Model (`PerformanceTab`: provider choice + API key, system readouts, timings) and the shared `DashboardCard` (native grouped card) and `DashboardEmptyState` (`ContentUnavailableView`). |
 | `HistoryTab.swift` | ~480 | The History **Timeline** page (`WispPage.timeline`): search (title/answer/steps), filters (All · Answers · Browser · Tools · Needs attention), day-grouped list, and a detail pane — answer, failure reason, "What Wisp did" steps, and actions: Stop, Copy answer, Ask again (closes the Wisp window first) and **Save as routine** (creates a `WispRoutine` and hands it to the Routines editor via `RoutineStore.routineIDToOpenInEditor`). Routine, skill and dictation runs are titled with `AgentTaskRecord.routineRunTitlePrefix`/`skillRunTitlePrefix`/`dictationTitlePrefix` (set via `sendTranscriptToClaudeWithScreenshot(transcript:historyTitle:)`), and `isUsersOwnQuestion` hides re-ask/save for them. |
 | `HomeTab.swift` | ~855 | The Wisp window's **Today** page: a setup card with the permission checklist until everything is granted; greeting + voice/silent toggle; an ask bar (typed question via `CompanionManager.askTypedQuestion`, or `/` to filter and run routines); "Needs you" alerts with fixes (Ollama/Chatterbox unreachable — localhost checks every 30s, only for services in use — pending confirmation, a failed/interrupted task in the last 2h); Running now (per-task Stop); Up next (Calendar, requests access only from its Connect button); Routines tiles; Recent answers with Copy. Anything it runs closes the Wisp window first so the screenshot shows the user's work. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |

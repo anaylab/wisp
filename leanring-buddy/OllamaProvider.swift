@@ -233,6 +233,9 @@ final class OllamaProvider: ModelProvider, @unchecked Sendable {
                 // Carried separately — Ollama takes images as a base64 array
                 // on the message, not inline in the text.
                 continue
+            case .providerReplay:
+                // Another provider's private block; meaningless here.
+                continue
             }
         }
         return parts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)

@@ -212,6 +212,7 @@ func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
             case .toolUse(_, let name, _): return "toolUse(\(name))"
             case .toolResult(_, let name, _, _): return "toolResult(\(name))"
             case .image(_, let label): return "image(\(label))"
+            case .providerReplay(let providerFamily, _): return "providerReplay(\(providerFamily))"
             }
         }
         return "\(role)[\(blocks.joined(separator: " "))]"
@@ -749,6 +750,7 @@ func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
               messageShape(outcome?.messages ?? []).last ?? "nothing")
     }
 
+    await anthropicProviderSuite()
     await buddyBotSuite()
 
     print("\n\(String(repeating: "─", count: 52))")

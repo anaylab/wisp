@@ -221,9 +221,17 @@ final class AgentTurnRunner {
             // conversation holds, and this is where that gets decided rather
             // than inside a provider, where the guarantee would only ever be
             // as good as that one provider.
+            //
+            // Except for a provider that signs its reasoning against the whole
+            // conversation so far (Claude): there, dropping the screenshot
+            // would edit history mid-loop and void the thinking behind the
+            // pending tool call, so the request stays append-only and the
+            // screenshot is resent — which its prompt cache makes cheap.
+            let dropsImagesOnLaterPasses = iteration > 0
+                && !modelProvider.capabilities.requiresAppendOnlyHistoryWithinTurn
             let request = ModelRequest(
                 systemPrompt: systemPrompt,
-                messages: iteration == 0 ? messages : messages.map(\.withoutImages),
+                messages: dropsImagesOnLaterPasses ? messages.map(\.withoutImages) : messages,
                 tools: tools
             )
 

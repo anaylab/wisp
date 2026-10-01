@@ -132,6 +132,17 @@ struct ModelCapabilities: Sendable {
     /// Reserved: lets a router shed history, or refuse a request, before
     /// spending a round trip to discover it does not fit.
     let contextWindowTokens: Int
+    /// The provider needs every request in a tool loop to repeat the earlier
+    /// ones exactly, with new messages only appended.
+    ///
+    /// Claude signs each thinking block against everything before it; if a
+    /// later request in the same turn drops the screenshot, that signature no
+    /// longer matches and the reasoning behind the pending tool call is
+    /// thrown away (and the prompt cache misses from that point). For such a
+    /// provider the agent loop resends the screenshot on every pass, which
+    /// costs a cheap cache read rather than the seconds of local prompt
+    /// evaluation that motivate dropping it for the local model.
+    let requiresAppendOnlyHistoryWithinTurn: Bool
 
     init(
         supportsText: Bool = true,
@@ -140,7 +151,8 @@ struct ModelCapabilities: Sendable {
         supportsNativeToolCalls: Bool,
         supportsStreaming: Bool,
         supportsStructuredOutput: Bool = false,
-        contextWindowTokens: Int
+        contextWindowTokens: Int,
+        requiresAppendOnlyHistoryWithinTurn: Bool = false
     ) {
         self.supportsText = supportsText
         self.supportsVision = supportsVision
@@ -149,6 +161,7 @@ struct ModelCapabilities: Sendable {
         self.supportsStreaming = supportsStreaming
         self.supportsStructuredOutput = supportsStructuredOutput
         self.contextWindowTokens = contextWindowTokens
+        self.requiresAppendOnlyHistoryWithinTurn = requiresAppendOnlyHistoryWithinTurn
     }
 }
 
