@@ -87,7 +87,8 @@ struct WispWindowView: View {
         case .history:
             return taskRegistry.runningRecords.count
         case .buddies:
-            return buddyStore.buddies.filter { buddyStore.isRunning($0, in: taskRegistry) }.count
+            // Working, or finished with something the user hasn't read.
+            return buddyStore.buddiesNeedingAttentionCount(in: taskRegistry)
         case .settings:
             return companionManager.allPermissionsGranted ? 0 : 1
         default:

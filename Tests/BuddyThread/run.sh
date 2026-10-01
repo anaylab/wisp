@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Runs the buddy thread suite: the prompt-history projection, the stored-thread
-# cap, and the store's begin/complete/persist/delete round trip.
+# cap, the store's begin/complete/persist/delete round trip, and the buddy list
+# rules (unread, order, copies, thread contents, answer markdown).
 #
 # Standalone (plain swiftc, no xcodebuild — see CLAUDE.md).
 #
@@ -19,6 +20,7 @@ swiftc -target arm64-apple-macos26.0 \
   -o "$BUILD_DIR/buddy-thread" \
   Tests/BuddyThread/main.swift \
   leanring-buddy/Buddies/BuddyThread.swift \
+  leanring-buddy/Buddies/BuddyListPolicy.swift \
   leanring-buddy/BuddyChatTypes.swift \
   leanring-buddy/ToolMetadata.swift
 

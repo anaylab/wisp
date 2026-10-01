@@ -342,12 +342,108 @@ extension BuddyModelChoice {
     }
 }
 
+// MARK: - Shared list pieces
+
+/// The one-line status under a buddy's name in every buddy list:
+/// "Working…", "Done · 10:39 PM", "Failed · 10:39 PM", "Next · Tue 9:00 AM", "Ready".
+enum BuddyStatusText {
+    static func line(for buddy: WispBuddy, isRunning: Bool, latestRunRecord: AgentTaskRecord?) -> String {
+        if isRunning { return "Working…" }
+        if let latestRunRecord {
+            let finishedText = (latestRunRecord.finishedAt ?? latestRunRecord.startedAt)
+                .formatted(date: .omitted, time: .shortened)
+            switch latestRunRecord.status {
+            case .failed: return "Failed · \(finishedText)"
+            case .succeeded where !buddy.schedule.isRepeating: return "Done · \(finishedText)"
+            default: break
+            }
+        }
+        if let nextScheduledRunAt = buddy.nextScheduledRunAt {
+            let nextRunText = Calendar.current.isDateInToday(nextScheduledRunAt)
+                ? nextScheduledRunAt.formatted(date: .omitted, time: .shortened)
+                : nextScheduledRunAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+            return "Next · \(nextRunText)"
+        }
+        return "Ready"
+    }
+}
+
+/// A buddy's actions, as Rakazo's bot menu: the list's right-click menu and
+/// the ⋯ button on a buddy's page. Clearing and deleting only *ask* — the
+/// host decides how to confirm, since a sheet can't hang off the notch panel.
+struct BuddyActionsMenuItems: View {
+    let buddy: WispBuddy
+    let isRunning: Bool
+    /// Read state only makes sense from the list; on its own page the buddy is
+    /// read by definition.
+    let showsReadState: Bool
+    let onDuplicated: (UUID) -> Void
+    let onRequestClearConversation: () -> Void
+    let onRequestDeletion: () -> Void
+
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
+
+    var body: some View {
+        if isRunning {
+            Button("Stop", systemImage: "stop.fill") {
+                buddyStore.stopRun(ofBuddyWithID: buddy.id)
+            }
+        } else {
+            Button("Run Now", systemImage: "play.fill") {
+                buddyStore.runNow(buddyWithID: buddy.id)
+            }
+        }
+
+        Divider()
+
+        Button(buddy.isPinnedInList ? "Unpin" : "Pin", systemImage: buddy.isPinnedInList ? "pin.slash" : "pin") {
+            buddyStore.setPinned(buddyWithID: buddy.id, isPinned: !buddy.isPinnedInList)
+        }
+        if showsReadState {
+            let isUnread = buddyStore.isUnread(buddy, in: taskRegistry)
+            Button(isUnread ? "Mark as Read" : "Mark as Unread", systemImage: isUnread ? "circle" : "circle.fill") {
+                buddyStore.setMarkedUnread(buddyWithID: buddy.id, isMarkedUnread: !isUnread)
+            }
+        }
+        Toggle(isOn: Binding(
+            get: { buddy.postsNotificationWhenFinished },
+            set: { newValue in buddyStore.setNotifiesWhenFinished(buddyWithID: buddy.id, notifiesWhenFinished: newValue) }
+        )) {
+            Label("Notify When Finished", systemImage: "bell")
+        }
+
+        Divider()
+
+        Button("Duplicate", systemImage: "plus.square.on.square") {
+            if let duplicatedBuddy = buddyStore.duplicateBuddy(withID: buddy.id) {
+                onDuplicated(duplicatedBuddy.id)
+            }
+        }
+
+        Divider()
+
+        Button("Clear Conversation…", systemImage: "eraser", action: onRequestClearConversation)
+        Button("Delete…", systemImage: "trash", role: .destructive, action: onRequestDeletion)
+    }
+}
+
 // MARK: - A buddy's thread
 
 struct BuddyDetailView: View {
     let buddyID: UUID
     /// Space to leave at the top so nothing sits behind the physical notch.
     let topInset: CGFloat
+    /// Shows a copy made from the ⋯ menu.
+    var onDuplicated: (UUID) -> Void = { _ in }
+
+    /// Clearing and deleting are confirmed inline, above the controls: this
+    /// view also lives in the non-activating notch panel, where a sheet or
+    /// alert has no window to attach to.
+    private enum PendingConfirmation {
+        case clearConversation
+        case deletion
+    }
 
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
@@ -360,7 +456,9 @@ struct BuddyDetailView: View {
     @FocusState private var isMessageFieldFocused: Bool
     @State private var isRenaming = false
     @State private var editedName = ""
-    @State private var isConfirmingDeletion = false
+    @State private var pendingConfirmation: PendingConfirmation?
+    @State private var isEditingJob = false
+    @State private var editedInstruction = ""
     @State private var didFailToStartRun = false
     @FocusState private var isNameFieldFocused: Bool
 
@@ -375,7 +473,12 @@ struct BuddyDetailView: View {
     }
 
     private func content(for buddy: WispBuddy) -> some View {
-        let runRecords = buddyStore.runRecords(of: buddy, in: taskRegistry)
+        // The whole stored thread, not just the runs History still holds.
+        let threadTaskIDs = BuddyListPolicy.threadTaskIDs(
+            exchangeTaskIDs: threadStore.exchanges(ofBuddyWithID: buddy.id).map(\.taskID),
+            runTaskIDs: buddy.runTaskIDs
+        )
+        let latestRunRecord = buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
         return VStack(spacing: 0) {
             header(for: buddy, isRunning: isRunning)
@@ -394,15 +497,15 @@ struct BuddyDetailView: View {
                             ),
                             modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice)
                         )
-                        if runRecords.isEmpty {
+                        if threadTaskIDs.isEmpty {
                             Text(buddy.schedule.isRepeating
                                  ? "Hasn't run yet — its first run is \(nextRunPhrase(for: buddy))."
                                  : "Hasn't run yet.")
                                 .font(.system(size: 11.5))
                                 .foregroundColor(DS.Colors.textTertiary)
                         }
-                        ForEach(runRecords) { runRecord in
-                            runView(runRecord, buddyID: buddy.id)
+                        ForEach(threadTaskIDs, id: \.self) { taskID in
+                            threadEntryView(taskID: taskID, buddyID: buddy.id)
                         }
                         Color.clear
                             .frame(height: 1)
@@ -415,19 +518,29 @@ struct BuddyDetailView: View {
                 .onAppear {
                     scrollProxy.scrollTo(threadBottomAnchorID, anchor: .bottom)
                 }
-                .onChange(of: runRecords.last.map { "\($0.id)|\($0.status.displayName)|\($0.steps.count)" } ?? "") { _, _ in
+                .onChange(of: latestRunRecord.map { "\($0.id)|\($0.status.displayName)|\($0.steps.count)" } ?? "") { _, _ in
                     withAnimation(.easeOut(duration: 0.2)) {
                         scrollProxy.scrollTo(threadBottomAnchorID, anchor: .bottom)
                     }
+                    // A run that finishes while its thread is open has been seen.
+                    buddyStore.markRead(buddyWithID: buddy.id, in: taskRegistry)
                 }
             }
 
+            if let pendingConfirmation {
+                confirmationStrip(for: buddy, confirmation: pendingConfirmation)
+            }
             messageField(for: buddy, isRunning: isRunning)
             controlBar(for: buddy, isRunning: isRunning)
         }
-        .onChange(of: buddyID) { _, _ in
+        .onAppear {
+            buddyStore.markRead(buddyWithID: buddy.id, in: taskRegistry)
+        }
+        .onChange(of: buddyID) { _, newBuddyID in
+            buddyStore.markRead(buddyWithID: newBuddyID, in: taskRegistry)
             isRenaming = false
-            isConfirmingDeletion = false
+            isEditingJob = false
+            pendingConfirmation = nil
             didFailToStartRun = false
             expandedRunIDs = []
             draftMessageText = ""
@@ -475,9 +588,40 @@ struct BuddyDetailView: View {
                 .buttonStyle(.plain)
                 .pointerCursor()
                 .nativeTooltip("Rename this buddy")
+                .overlay(alignment: .trailing) {
+                    // Beside the name, outside its capsule, so the name stays centred.
+                    actionsMenu(for: buddy, isRunning: isRunning)
+                        .offset(x: 30)
+                }
             }
         }
         .padding(.bottom, 4)
+    }
+
+    private func actionsMenu(for buddy: WispBuddy, isRunning: Bool) -> some View {
+        Menu {
+            BuddyActionsMenuItems(
+                buddy: buddy,
+                isRunning: isRunning,
+                showsReadState: false,
+                onDuplicated: onDuplicated,
+                onRequestClearConversation: { pendingConfirmation = .clearConversation },
+                onRequestDeletion: { pendingConfirmation = .deletion }
+            )
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(DS.Colors.textSecondary)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(WispColor.surface2))
+                .contentShape(Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .pointerCursor()
+        .nativeTooltip("More")
     }
 
     // MARK: Thread
@@ -501,15 +645,33 @@ struct BuddyDetailView: View {
                     .font(.system(size: 10, weight: .medium))
                 Text("Its job")
                     .font(.system(size: 10.5, weight: .medium))
+                Spacer(minLength: 0)
+                if !isEditingJob {
+                    Button {
+                        editedInstruction = buddy.instruction
+                        isEditingJob = true
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                    .nativeTooltip("Change this buddy's job — its thread and notes stay")
+                }
             }
             .foregroundColor(DS.Colors.textTertiary)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(buddy.instruction)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                if isEditingJob {
+                    jobEditor(for: buddy)
+                } else {
+                    Text(buddy.instruction)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text(scheduleLine(for: buddy))
                     .font(.system(size: 11.5))
                     .foregroundColor(DS.Colors.textSecondary)
@@ -525,6 +687,33 @@ struct BuddyDetailView: View {
                     .strokeBorder(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex).opacity(0.35), lineWidth: 1)
             )
         }
+    }
+
+    private func jobEditor(for buddy: WispBuddy) -> some View {
+        let trimmedInstruction = editedInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .trailing, spacing: 6) {
+            TextField("What should it do?", text: $editedInstruction, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(2...6)
+                .onSubmit { saveEditedJob(of: buddy) }
+            HStack(spacing: 6) {
+                Button("Cancel") { isEditingJob = false }
+                    .font(.system(size: 11.5, weight: .medium))
+                    .buddyButtonStyle(isProminent: false)
+                Button("Save") { saveEditedJob(of: buddy) }
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .buddyButtonStyle(isProminent: true)
+                    .disabled(trimmedInstruction.isEmpty)
+                    .opacity(trimmedInstruction.isEmpty ? 0.5 : 1)
+            }
+        }
+    }
+
+    private func saveEditedJob(of buddy: WispBuddy) {
+        buddyStore.updateInstruction(ofBuddyWithID: buddy.id, to: editedInstruction)
+        isEditingJob = false
     }
 
     /// What the buddy has chosen to remember. Hidden until it has saved
@@ -594,28 +783,62 @@ struct BuddyDetailView: View {
         return nextScheduledRunAt.formatted(.dateTime.weekday(.wide)) + " at \(timeText)"
     }
 
-    private func runView(_ runRecord: AgentTaskRecord, buddyID: UUID) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+    /// One exchange of the thread. While History still holds its run, the run
+    /// shows live (progress, status, timing); once the run has aged out of
+    /// History the thread's own copy of the question and answer is shown.
+    private func threadEntryView(taskID: UUID, buddyID: UUID) -> some View {
+        let runRecord = taskRegistry.records.first { $0.id == taskID }
+        let exchange = threadStore.exchange(forTaskID: taskID, ofBuddyWithID: buddyID)
+        return VStack(alignment: .leading, spacing: 7) {
             // A run of the buddy's own job needs no bubble (the job card says it);
             // one the user started with a message shows what they said.
-            if let messageExchange = threadStore.exchange(forTaskID: runRecord.id, ofBuddyWithID: buddyID),
-               messageExchange.origin != .job {
+            if let exchange, exchange.origin != .job {
                 userMessageBubble(
-                    messageExchange.userText,
-                    senderName: messageExchange.origin == .delegated ? messageExchange.requesterName : nil
+                    exchange.userText,
+                    senderName: exchange.origin == .delegated ? exchange.requesterName : nil
                 )
             }
-            if !runRecord.steps.isEmpty {
-                progressDisclosure(for: runRecord)
-            }
-            runOutcome(runRecord)
-            HStack(spacing: 8) {
-                statusChip(for: runRecord.status)
-                Text(runTimingText(runRecord))
+            if let runRecord {
+                if !runRecord.steps.isEmpty {
+                    progressDisclosure(for: runRecord)
+                }
+                runOutcome(runRecord)
+                HStack(spacing: 8) {
+                    statusChip(for: runRecord.status)
+                    Text(runTimingText(runRecord))
+                        .font(.system(size: 10.5).monospacedDigit())
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+            } else if let exchange {
+                if let answerText = exchange.answerText, !answerText.isEmpty {
+                    answerBubble(answerText)
+                } else {
+                    Text("No answer was kept for this run.")
+                        .font(.system(size: 11.5))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+                Text(startedText(exchange.startedAt))
                     .font(.system(size: 10.5).monospacedDigit())
                     .foregroundColor(DS.Colors.textTertiary)
             }
         }
+    }
+
+    /// The buddy's answer, with its markdown (bold, links, code) drawn inline.
+    private func answerBubble(_ answerText: String) -> some View {
+        Text(BuddyAnswerFormatting.attributedAnswer(answerText))
+            .font(.system(size: 12.5))
+            .foregroundColor(DS.Colors.textPrimary)
+            .tint(WispColor.Brand.lavender)
+            .lineSpacing(2)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(WispColor.surface2)
+            )
     }
 
     /// What was asked: the user's message, or — with `senderName` — another
@@ -703,18 +926,7 @@ struct BuddyDetailView: View {
                     .lineLimit(2)
             }
         case .succeeded:
-            Text(answerText.isEmpty ? "Done." : answerText)
-                .font(.system(size: 12.5))
-                .foregroundColor(DS.Colors.textPrimary)
-                .lineSpacing(2)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(WispColor.surface2)
-                )
+            answerBubble(answerText.isEmpty ? "Done." : answerText)
         case .failed(let failureReason):
             Text(answerText.isEmpty ? failureReason : answerText)
                 .font(.system(size: 12))
@@ -756,14 +968,15 @@ struct BuddyDetailView: View {
         let durationText = totalSeconds >= 60
             ? "\(totalSeconds / 60)m \(totalSeconds % 60)s"
             : "\(totalSeconds)s"
-        let calendar = Calendar.current
-        let startedText: String
-        if calendar.isDateInToday(runRecord.startedAt) {
-            startedText = runRecord.startedAt.formatted(date: .omitted, time: .shortened)
-        } else {
-            startedText = runRecord.startedAt.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        return "\(durationText) · \(startedText(runRecord.startedAt))"
+    }
+
+    /// "10:39 PM" today, "Sep 28, 10:39 PM" before.
+    private func startedText(_ startedAt: Date) -> String {
+        if Calendar.current.isDateInToday(startedAt) {
+            return startedAt.formatted(date: .omitted, time: .shortened)
         }
-        return "\(durationText) · \(startedText)"
+        return startedAt.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
     // MARK: Controls
@@ -773,13 +986,17 @@ struct BuddyDetailView: View {
     private func messageField(for buddy: WispBuddy, isRunning: Bool) -> some View {
         let trimmedDraft = draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
         return HStack(spacing: 8) {
-            TextField("Message \(buddy.name)", text: $draftMessageText)
+            // Typing stays open while it works; only sending waits, since a
+            // buddy answers one thing at a time.
+            TextField(isRunning ? "\(buddy.name) is working — reply when it's done" : "Message \(buddy.name)", text: $draftMessageText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .foregroundColor(DS.Colors.textPrimary)
                 .focused($isMessageFieldFocused)
-                .disabled(isRunning)
-                .onSubmit { sendDraftMessage(to: buddy) }
+                .onSubmit {
+                    guard !isRunning else { return }
+                    sendDraftMessage(to: buddy)
+                }
             Button {
                 sendDraftMessage(to: buddy)
             } label: {
@@ -807,6 +1024,58 @@ struct BuddyDetailView: View {
         let didStart = buddyStore.sendMessage(draftMessageText, toBuddyWithID: buddy.id)
         didFailToStartRun = !didStart && !draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if didStart { draftMessageText = "" }
+    }
+
+    /// "Clear Gmail Digest's conversation? … [Cancel] [Clear]", above the controls.
+    private func confirmationStrip(for buddy: WispBuddy, confirmation: PendingConfirmation) -> some View {
+        let (questionText, detailText, confirmTitle): (String, String, String) = {
+            switch confirmation {
+            case .clearConversation:
+                return ("Clear \(buddy.name)'s conversation?",
+                        "It starts fresh. Its job, notes and settings stay, and its runs stay in History.",
+                        "Clear")
+            case .deletion:
+                return ("Delete \(buddy.name)?",
+                        "Its thread and notes are removed. Its runs stay in History.",
+                        "Delete")
+            }
+        }()
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(questionText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Text(detailText)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Button("Cancel") { pendingConfirmation = nil }
+                .font(.system(size: 11.5, weight: .medium))
+                .buddyButtonStyle(isProminent: false)
+            Button(confirmTitle) {
+                switch confirmation {
+                case .clearConversation:
+                    buddyStore.clearConversation(ofBuddyWithID: buddy.id)
+                    expandedRunIDs = []
+                case .deletion:
+                    buddyStore.deleteBuddy(withID: buddy.id)
+                }
+                pendingConfirmation = nil
+            }
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundColor(DS.Colors.destructiveText)
+            .buddyButtonStyle(isProminent: false)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(WispColor.surface3)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .transition(.opacity)
     }
 
     private func controlBar(for buddy: WispBuddy, isRunning: Bool) -> some View {
@@ -850,31 +1119,6 @@ struct BuddyDetailView: View {
                     .font(.system(size: 10.5))
                     .foregroundColor(DS.Colors.warningText)
             }
-
-            Button {
-                if isConfirmingDeletion {
-                    buddyStore.deleteBuddy(withID: buddy.id)
-                } else {
-                    isConfirmingDeletion = true
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11, weight: .medium))
-                    if isConfirmingDeletion {
-                        Text("Delete?")
-                            .font(.system(size: 11.5, weight: .semibold))
-                    }
-                }
-                .foregroundColor(isConfirmingDeletion ? DS.Colors.destructiveText : DS.Colors.textTertiary)
-                .padding(.horizontal, 9)
-                .frame(height: 26)
-                .background(Capsule(style: .continuous).fill(isConfirmingDeletion ? WispColor.surface3 : WispColor.surface2))
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .pointerCursor()
-            .nativeTooltip(isConfirmingDeletion ? "Click again to delete this buddy (its runs stay in History)" : "Delete this buddy")
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -951,6 +1195,10 @@ struct NewBuddyForm: View {
                 schedule = BuddySchedule.inferred(fromInstruction: newInstructionText)
             }
 
+            if trimmedInstruction.isEmpty {
+                starterJobs
+            }
+
             BuddyScheduleEditor(schedule: Binding(
                 get: { schedule },
                 set: { newSchedule in
@@ -996,5 +1244,42 @@ struct NewBuddyForm: View {
         .onAppear {
             isInstructionFieldFocused = true
         }
+    }
+
+    /// A few ready-made jobs for a blank form, so a first buddy is one click.
+    /// Picking one fills the field (and its wording sets the schedule).
+    private var starterJobs: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Or start from one of these")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundColor(DS.Colors.textTertiary)
+            ForEach(BuddyListPolicy.starterJobs, id: \.instruction) { starterJob in
+                Button {
+                    instructionText = starterJob.instruction
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: starterJob.symbolName)
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 16)
+                            .foregroundColor(DS.Colors.textTertiary)
+                        Text(starterJob.instruction)
+                            .font(.system(size: 12))
+                            .foregroundColor(DS.Colors.textSecondary)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(WispColor.surface2)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(PressableScaleButtonStyle())
+                .pointerCursor()
+            }
+        }
+        .transition(.opacity)
     }
 }

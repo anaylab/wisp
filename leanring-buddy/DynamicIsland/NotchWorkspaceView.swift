@@ -185,8 +185,9 @@ struct NotchWorkspaceView: View {
 
     private var filteredBuddies: [WispBuddy] {
         let trimmedSearchText = sessionSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSearchText.isEmpty else { return buddyStore.buddies }
-        return buddyStore.buddies.filter { buddy in
+        let orderedBuddies = buddyStore.orderedBuddies(in: taskRegistry)
+        guard !trimmedSearchText.isEmpty else { return orderedBuddies }
+        return orderedBuddies.filter { buddy in
             buddy.name.localizedCaseInsensitiveContains(trimmedSearchText)
                 || buddy.instruction.localizedCaseInsensitiveContains(trimmedSearchText)
         }
@@ -196,6 +197,7 @@ struct NotchWorkspaceView: View {
         let isSelected = selectedBuddyID == buddy.id && !isCreatingBuddy
         let isHovered = hoveredSessionID == buddy.id
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
+        let isUnread = buddyStore.isUnread(buddy, in: taskRegistry) && !isSelected
         return Button {
             isCreatingBuddy = false
             selectedBuddyID = buddy.id
@@ -207,12 +209,22 @@ struct NotchWorkspaceView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(WispColor.Island.textPrimary)
                         .lineLimit(1)
-                    Text(buddyStatusLine(buddy, isRunning: isRunning))
-                        .font(.system(size: 10.5))
-                        .foregroundColor(WispColor.Island.textSecondary)
-                        .lineLimit(1)
+                    Text(BuddyStatusText.line(
+                        for: buddy,
+                        isRunning: isRunning,
+                        latestRunRecord: buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
+                    ))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(WispColor.Island.textSecondary)
+                    .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                if isUnread {
+                    Circle()
+                        .fill(WispColor.Brand.lavender)
+                        .frame(width: 6, height: 6)
+                        .accessibilityLabel("New")
+                }
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
@@ -235,27 +247,6 @@ struct NotchWorkspaceView: View {
             hoveredSessionID = isHovering ? buddy.id : (hoveredSessionID == buddy.id ? nil : hoveredSessionID)
         }
         .animation(.easeOut(duration: 0.12), value: isHovered)
-    }
-
-    /// "Working…", "Done 10:39 PM", "Next: tomorrow 9:00 AM", "Ready".
-    private func buddyStatusLine(_ buddy: WispBuddy, isRunning: Bool) -> String {
-        if isRunning { return "Working…" }
-        if let latestRunRecord = buddyStore.runRecords(of: buddy, in: taskRegistry).last {
-            let finishedText = (latestRunRecord.finishedAt ?? latestRunRecord.startedAt)
-                .formatted(date: .omitted, time: .shortened)
-            switch latestRunRecord.status {
-            case .failed: return "Failed · \(finishedText)"
-            case .succeeded where !buddy.schedule.isRepeating: return "Done · \(finishedText)"
-            default: break
-            }
-        }
-        if let nextScheduledRunAt = buddy.nextScheduledRunAt {
-            let nextRunText = Calendar.current.isDateInToday(nextScheduledRunAt)
-                ? nextScheduledRunAt.formatted(date: .omitted, time: .shortened)
-                : nextScheduledRunAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
-            return "Next · \(nextRunText)"
-        }
-        return "Ready"
     }
 
     private func sessionRow(_ session: NotchConversationSession) -> some View {
@@ -381,7 +372,11 @@ struct NotchWorkspaceView: View {
             }
         } else if let selectedBuddyID, buddyStore.buddy(withID: selectedBuddyID) != nil {
             ZStack(alignment: .topTrailing) {
-                BuddyDetailView(buddyID: selectedBuddyID, topInset: notchTopInset)
+                BuddyDetailView(
+                    buddyID: selectedBuddyID,
+                    topInset: notchTopInset,
+                    onDuplicated: { duplicatedBuddyID in self.selectedBuddyID = duplicatedBuddyID }
+                )
                 workspaceHeaderControls
                     .padding(.top, 8)
                     .padding(.trailing, 12)

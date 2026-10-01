@@ -48,6 +48,9 @@ enum BackgroundTaskLauncher {
     ///   model; a buddy passes its thread so a run continues the conversation.
     /// - Parameter onSucceeded: Called with the task id and the answer when the
     ///   task finishes successfully (a buddy files the answer in its thread).
+    /// - Parameter completionNotification: How the finish is announced: a buddy
+    ///   names itself ("Gmail Digest finished"), and `nil` posts nothing — for a
+    ///   buddy the user muted, or a run another buddy asked for.
     /// - Returns: The task's id, or nil when too many are already running.
     @discardableResult
     static func start(
@@ -58,6 +61,7 @@ enum BackgroundTaskLauncher {
         conversationHistory: [BuddyChatMessage] = [],
         toolkit: AgentRunToolkit = .none,
         onSucceeded: (@MainActor (UUID, String) -> Void)? = nil,
+        completionNotification: CompletionNotificationStyle? = .generic,
         speakConfirmation: @escaping @MainActor (String) async -> Void
     ) -> UUID? {
         let runsOffThisMachine = modelProvider.deployment.sendsDataOffThisMachine
@@ -103,7 +107,9 @@ enum BackgroundTaskLauncher {
                 )
                 onSucceeded?(taskID, outcome.terminalText)
                 FinishedWorkInbox.shared.recordFinishedTask(taskID)
-                notifyCompletion(request: displayTitle, result: outcome.terminalText, didSucceed: true)
+                if let completionNotification {
+                    notifyCompletion(style: completionNotification, request: displayTitle, result: outcome.terminalText, didSucceed: true)
+                }
             } catch is CancellationError {
                 AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
             } catch {
@@ -112,7 +118,9 @@ enum BackgroundTaskLauncher {
                     status: .failed(error.localizedDescription)
                 )
                 FinishedWorkInbox.shared.recordFinishedTask(taskID)
-                notifyCompletion(request: displayTitle, result: error.localizedDescription, didSucceed: false)
+                if let completionNotification {
+                    notifyCompletion(style: completionNotification, request: displayTitle, result: error.localizedDescription, didSucceed: false)
+                }
             }
         }
 
@@ -122,6 +130,14 @@ enum BackgroundTaskLauncher {
     }
 
     // MARK: - Notification
+
+    /// Whose finish a notification announces.
+    enum CompletionNotificationStyle {
+        /// "Wisp finished a task", with the task as the subtitle.
+        case generic
+        /// "<name> finished", with the buddy's job as the subtitle.
+        case buddy(name: String, job: String)
+    }
 
     /// Posts a system notification when a task finishes.
     ///
@@ -133,20 +149,32 @@ enum BackgroundTaskLauncher {
     /// On a call (`QuietModeMonitor`) no notification is posted at all — a
     /// banner sliding over a shared screen is exactly what quiet mode is for.
     /// The result waits in the notch's "new" badge (`FinishedWorkInbox`) instead.
-    private static func notifyCompletion(request: String, result: String, didSucceed: Bool) {
+    private static func notifyCompletion(style: CompletionNotificationStyle, request: String, result: String, didSucceed: Bool) {
         guard !QuietModeMonitor.shared.isQuiet else {
             print("🌙 Background: finished during a call — holding the notification, badge only")
             return
         }
+        let notificationTitle: String
+        let notificationSubtitle: String
+        switch style {
+        case .generic:
+            notificationTitle = didSucceed ? "Wisp finished a task" : "A Wisp task failed"
+            notificationSubtitle = String(request.prefix(60))
+        case .buddy(let name, let job):
+            notificationTitle = didSucceed ? "\(name) finished" : "\(name) ran into a problem"
+            notificationSubtitle = String(job.prefix(60))
+        }
+        // Without Wisp's machine tags, which would show up raw in the banner.
+        let notificationBody = String(AnswerDisplayText.cleaned(result).prefix(200))
         let center = UNUserNotificationCenter.current()
 
         center.requestAuthorization(options: [.alert, .sound]) { isGranted, _ in
             guard isGranted else { return }
 
             let content = UNMutableNotificationContent()
-            content.title = didSucceed ? "Wisp finished a task" : "A Wisp task failed"
-            content.subtitle = String(request.prefix(60))
-            content.body = String(result.prefix(200))
+            content.title = notificationTitle
+            content.subtitle = notificationSubtitle
+            content.body = notificationBody
             content.sound = didSucceed ? .default : nil
 
             center.add(

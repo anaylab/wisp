@@ -85,5 +85,57 @@ MainActor.assumeIsolated {
 
 }
 
+// MARK: - Buddy list policy (unread, order, copies, thread contents)
+
+do {
+    let createdAt = Date(timeIntervalSince1970: 1_000)
+    let earlier = Date(timeIntervalSince1970: 2_000)
+    let later = Date(timeIntervalSince1970: 3_000)
+
+    check(!BuddyListPolicy.isUnread(latestFinishedRunAt: nil, lastReadAt: nil, createdAt: createdAt, isMarkedUnread: false),
+          "a buddy that never finished anything isn't unread")
+    check(BuddyListPolicy.isUnread(latestFinishedRunAt: earlier, lastReadAt: nil, createdAt: createdAt, isMarkedUnread: false),
+          "a finish after creation, never opened, is unread")
+    check(BuddyListPolicy.isUnread(latestFinishedRunAt: later, lastReadAt: earlier, createdAt: createdAt, isMarkedUnread: false),
+          "a finish after the last read is unread")
+    check(!BuddyListPolicy.isUnread(latestFinishedRunAt: earlier, lastReadAt: later, createdAt: createdAt, isMarkedUnread: false),
+          "a finish before the last read is read")
+    check(BuddyListPolicy.isUnread(latestFinishedRunAt: nil, lastReadAt: later, createdAt: createdAt, isMarkedUnread: true),
+          "marked unread by hand stays unread")
+
+    check(BuddyListPolicy.isNews(.succeeded) && BuddyListPolicy.isNews(.failed("x")), "answers and failures are news")
+    check(!BuddyListPolicy.isNews(.cancelled) && !BuddyListPolicy.isNews(.interrupted) && !BuddyListPolicy.isNews(.running),
+          "a run the user stopped, or one cut off, isn't news")
+
+    struct ListedItem { let name: String; let isPinned: Bool; let lastActivityAt: Date; let createdAt: Date }
+    let items = [
+        ListedItem(name: "old", isPinned: false, lastActivityAt: earlier, createdAt: createdAt),
+        ListedItem(name: "recent", isPinned: false, lastActivityAt: later, createdAt: createdAt),
+        ListedItem(name: "pinned", isPinned: true, lastActivityAt: createdAt, createdAt: createdAt),
+        ListedItem(name: "tieNewer", isPinned: false, lastActivityAt: earlier, createdAt: earlier),
+    ]
+    let orderedNames = BuddyListPolicy.ordered(
+        items, isPinned: \.isPinned, lastActivityAt: \.lastActivityAt, createdAt: \.createdAt
+    ).map(\.name)
+    check(orderedNames == ["pinned", "recent", "tieNewer", "old"], "pinned first, then latest activity, then newest (got \(orderedNames))")
+
+    check(BuddyListPolicy.duplicateName(of: "Gmail Digest", existingNames: ["Gmail Digest"]) == "Gmail Digest copy", "first copy name")
+    check(BuddyListPolicy.duplicateName(of: "Gmail Digest", existingNames: ["Gmail Digest", "gmail digest copy"]) == "Gmail Digest copy 2",
+          "a second copy is numbered, case-insensitively")
+
+    let legacyRunID = UUID()
+    let firstExchangeID = UUID()
+    let secondExchangeID = UUID()
+    let threadIDs = BuddyListPolicy.threadTaskIDs(
+        exchangeTaskIDs: [firstExchangeID, secondExchangeID],
+        runTaskIDs: [legacyRunID, secondExchangeID]
+    )
+    check(threadIDs == [legacyRunID, firstExchangeID, secondExchangeID],
+          "the thread keeps exchanges whose runs aged out, with older thread-less runs first and no duplicates")
+
+    let formattedAnswer = BuddyAnswerFormatting.attributedAnswer("**Three** new stories\n- one")
+    check(String(formattedAnswer.characters) == "Three new stories\n- one", "markdown emphasis is drawn, not shown, and line breaks stay")
+}
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

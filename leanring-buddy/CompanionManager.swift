@@ -2304,6 +2304,10 @@ final class CompanionManager: ObservableObject {
                     answerText: AnswerDisplayText.cleaned(answerText)
                 )
             },
+            // A peer's request is a step in that peer's run, not news of its own.
+            completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated
+                ? .buddy(name: buddy.name, job: buddy.instruction)
+                : nil,
             speakConfirmation: { [weak self] question in
                 guard let self else { return }
                 try? await self.ttsProvider.speakText(question)

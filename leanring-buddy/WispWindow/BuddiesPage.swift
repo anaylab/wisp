@@ -17,6 +17,9 @@ struct BuddiesPage: View {
 
     @State private var selectedBuddyID: UUID?
     @State private var isCreatingBuddy = false
+    /// The buddy a right-click asked to clear or delete, awaiting confirmation.
+    @State private var buddyIDPendingClear: UUID?
+    @State private var buddyIDPendingDeletion: UUID?
 
     var body: some View {
         Group {
@@ -36,9 +39,46 @@ struct BuddiesPage: View {
         }
         .onAppear {
             if selectedBuddyID == nil {
-                selectedBuddyID = buddyStore.buddies.first?.id
+                selectedBuddyID = buddyStore.orderedBuddies(in: taskRegistry).first?.id
             }
         }
+        .onChange(of: buddyStore.buddies.map(\.id)) { _, remainingBuddyIDs in
+            // The open buddy was deleted: show the next one rather than nothing.
+            if let selectedBuddyID, !remainingBuddyIDs.contains(selectedBuddyID) {
+                self.selectedBuddyID = buddyStore.orderedBuddies(in: taskRegistry).first?.id
+            }
+        }
+        .confirmationDialog(
+            "Clear \(pendingBuddyName(buddyIDPendingClear))'s conversation?",
+            isPresented: isPresentedBinding($buddyIDPendingClear)
+        ) {
+            Button("Clear Conversation", role: .destructive) {
+                if let buddyIDPendingClear { buddyStore.clearConversation(ofBuddyWithID: buddyIDPendingClear) }
+            }
+        } message: {
+            Text("It starts fresh. Its job, notes and settings stay, and its runs stay in History.")
+        }
+        .confirmationDialog(
+            "Delete \(pendingBuddyName(buddyIDPendingDeletion))?",
+            isPresented: isPresentedBinding($buddyIDPendingDeletion)
+        ) {
+            Button("Delete", role: .destructive) {
+                if let buddyIDPendingDeletion { buddyStore.deleteBuddy(withID: buddyIDPendingDeletion) }
+            }
+        } message: {
+            Text("Its thread and notes are removed. Its runs stay in History.")
+        }
+    }
+
+    private func pendingBuddyName(_ buddyID: UUID?) -> String {
+        buddyID.flatMap(buddyStore.buddy(withID:))?.name ?? "this buddy"
+    }
+
+    private func isPresentedBinding(_ pendingBuddyID: Binding<UUID?>) -> Binding<Bool> {
+        Binding(
+            get: { pendingBuddyID.wrappedValue != nil },
+            set: { isPresented in if !isPresented { pendingBuddyID.wrappedValue = nil } }
+        )
     }
 
     // MARK: - List
@@ -56,9 +96,19 @@ struct BuddiesPage: View {
     private var buddyList: some View {
         VStack(spacing: 0) {
             List(selection: listSelection) {
-                ForEach(buddyStore.buddies) { buddy in
+                ForEach(buddyStore.orderedBuddies(in: taskRegistry)) { buddy in
                     buddyRow(buddy)
                         .tag(buddy.id)
+                        .contextMenu {
+                            BuddyActionsMenuItems(
+                                buddy: buddy,
+                                isRunning: buddyStore.isRunning(buddy, in: taskRegistry),
+                                showsReadState: true,
+                                onDuplicated: showBuddy,
+                                onRequestClearConversation: { buddyIDPendingClear = buddy.id },
+                                onRequestDeletion: { buddyIDPendingDeletion = buddy.id }
+                            )
+                        }
                 }
             }
             .listStyle(.inset)
@@ -81,18 +131,44 @@ struct BuddiesPage: View {
         .background(WispColor.groupedCardBackground.opacity(0.6))
     }
 
+    private func showBuddy(_ buddyID: UUID) {
+        isCreatingBuddy = false
+        selectedBuddyID = buddyID
+    }
+
     private func buddyRow(_ buddy: WispBuddy) -> some View {
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
+        // The open buddy is being read, so it never shows the dot.
+        let isUnread = buddyStore.isUnread(buddy, in: taskRegistry) && !(buddy.id == selectedBuddyID && !isCreatingBuddy)
         return HStack(spacing: 10) {
             BuddyAvatar(colorIndex: buddy.colorIndex, size: 30, isWorking: isRunning)
             VStack(alignment: .leading, spacing: 2) {
-                Text(buddy.name)
-                    .font(.body.weight(.semibold))
-                    .lineLimit(1)
-                Text(isRunning ? "Working…" : buddy.schedule.summary())
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(buddy.name)
+                        .font(.body.weight(isUnread ? .bold : .semibold))
+                        .lineLimit(1)
+                    if buddy.isPinnedInList {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityLabel("Pinned")
+                    }
+                }
+                Text(BuddyStatusText.line(
+                    for: buddy,
+                    isRunning: isRunning,
+                    latestRunRecord: buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if isUnread {
+                Circle()
+                    .fill(WispColor.accentText)
+                    .frame(width: 8, height: 8)
+                    .accessibilityLabel("New")
             }
         }
         .padding(.vertical, 3)
@@ -112,7 +188,7 @@ struct BuddiesPage: View {
                 onCancel: { isCreatingBuddy = false }
             )
         } else if let selectedBuddyID, buddyStore.buddy(withID: selectedBuddyID) != nil {
-            BuddyDetailView(buddyID: selectedBuddyID, topInset: 0)
+            BuddyDetailView(buddyID: selectedBuddyID, topInset: 0, onDuplicated: showBuddy)
                 .id(selectedBuddyID)
         } else {
             summonInvitation
