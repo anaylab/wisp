@@ -10,6 +10,44 @@
 
 import SwiftUI
 
+// MARK: - Button style
+
+/// The buddy pages' capsule buttons. These views are drawn in two places: the
+/// notch, which is always dark (the glass style's white-on-dark colours are
+/// right there), and the Wisp window, which follows the system appearance —
+/// where that same glass style is white on near-white and almost invisible. So
+/// dark keeps the glass look and light uses the window's native bordered
+/// buttons, like the "New Buddy" button beside them.
+private struct BuddyButtonStyleModifier: ViewModifier {
+    let isProminent: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if colorScheme == .dark {
+            content.wispGlassButtonStyle(prominence: isProminent ? .prominent : .subtle, cornerRadius: 999)
+        } else if isProminent {
+            content
+                .buttonStyle(.borderedProminent)
+                .tint(WispColor.accentText)
+                .buttonBorderShape(.capsule)
+                .pointerCursor()
+        } else {
+            content
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .pointerCursor()
+        }
+    }
+}
+
+private extension View {
+    func buddyButtonStyle(isProminent: Bool) -> some View {
+        modifier(BuddyButtonStyleModifier(isProminent: isProminent))
+    }
+}
+
 // MARK: - Schedule editor
 
 /// "Repeat: Never / Every day / Every week", then the time (and weekday).
@@ -125,20 +163,302 @@ struct BuddyScheduleEditor: View {
     }
 }
 
+// MARK: - Model editor
+
+/// "Model: Same as Wisp / Local / Claude …". A cloud choice says plainly what
+/// leaves this Mac, and what doesn't.
+struct BuddyModelEditor: View {
+    @Binding var modelChoice: BuddyModelChoice?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Model")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .fixedSize()
+                Picker("Model", selection: $modelChoice) {
+                    Text("Same as Wisp").tag(BuddyModelChoice?.none)
+                    Divider()
+                    ForEach(BuddyModelChoice.allChoices) { choice in
+                        Text(menuLabel(for: choice)).tag(BuddyModelChoice?.some(choice))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .pointerCursor()
+            }
+            if let modelChoice, modelChoice.sendsDataOffThisMachine {
+                Text(ProviderKeychainStore.hasAPIKey(for: modelChoice.providerKind)
+                     ? "Its job, thread and notes go to \(modelChoice.providerKind.displayName). Your brain and memory stay here."
+                     : "Add a \(modelChoice.providerKind.displayName) key in Settings → Model, or this buddy can't run.")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(ProviderKeychainStore.hasAPIKey(for: modelChoice.providerKind)
+                                     ? DS.Colors.textTertiary : DS.Colors.warningText)
+                    // A minimum width, or the window's minimum-size pass wraps this
+                    // one word per line and the page grows taller than the window.
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func menuLabel(for choice: BuddyModelChoice) -> String {
+        choice.sendsDataOffThisMachine ? "\(choice.displayName) · cloud" : choice.displayName
+    }
+}
+
+// MARK: - Tool access editor
+
+/// "Tools · All tools ▸": what this buddy may use, as switches per group.
+/// Collapsed it is one line; a buddy with no limit shows "All tools".
+struct BuddyToolAccessEditor: View {
+    @Binding var toolAccess: BuddyToolAccess?
+    /// Whether the buddy's model runs off this Mac, which takes the brain and
+    /// the user's memory off the table.
+    let modelSendsDataOffThisMachine: Bool
+
+    @ObservedObject private var toolRegistry = AgentToolRegistry.shared
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @State private var isExpanded: Bool
+
+    init(toolAccess: Binding<BuddyToolAccess?>, modelSendsDataOffThisMachine: Bool, startsExpanded: Bool = false) {
+        _toolAccess = toolAccess
+        self.modelSendsDataOffThisMachine = modelSendsDataOffThisMachine
+        _isExpanded = State(initialValue: startsExpanded)
+    }
+
+    /// Only groups that have a tool right now, so no switch does nothing.
+    private var availableGroups: [BuddyToolGroup] {
+        let registeredToolNames = toolRegistry.toolNames
+        return BuddyToolGroup.allCases.filter { group in
+            // Asking other buddies is a run-only tool, not in the registry: it
+            // exists whenever there is more than this one buddy.
+            if group == .delegation { return buddyStore.buddies.count > 1 }
+            return registeredToolNames.contains { BuddyToolGroup.group(forToolNamed: $0) == group }
+        }
+    }
+
+    private var availableServerNames: [String] {
+        BuddyToolAccessPolicy.serverNames(inToolNames: toolRegistry.toolNames)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(WispMotion.smooth) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    Text("Tools · \(BuddyToolAccessPolicy.summary(of: toolAccess))")
+                        .font(.system(size: 11.5, weight: .medium))
+                }
+                .foregroundColor(DS.Colors.textSecondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .nativeTooltip("Choose what this buddy is allowed to use")
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 7) {
+                    Toggle(isOn: Binding(
+                        get: { toolAccess == nil },
+                        set: { allowsEveryTool in toolAccess = allowsEveryTool ? nil : BuddyToolAccess.nothing }
+                    )) {
+                        Text("Every tool")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundColor(DS.Colors.textPrimary)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+
+                    if let limitedToolAccess = toolAccess {
+                        ForEach(availableGroups) { group in
+                            groupRow(
+                                title: group.title,
+                                summary: group.summary,
+                                symbolName: group.symbolName,
+                                isAllowed: limitedToolAccess.allows(group),
+                                isUnavailable: group.isPrivateKnowledge && modelSendsDataOffThisMachine,
+                                groupID: group.rawValue
+                            )
+                        }
+                        ForEach(availableServerNames, id: \.self) { serverName in
+                            groupRow(
+                                title: serverName,
+                                summary: "Connected app",
+                                symbolName: "puzzlepiece.extension",
+                                isAllowed: limitedToolAccess.allowsServer(named: serverName),
+                                isUnavailable: false,
+                                groupID: BuddyToolAccessPolicy.groupID(forServerNamed: serverName)
+                            )
+                        }
+                    }
+                }
+                .padding(.leading, 14)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private func groupRow(
+        title: String, summary: String, symbolName: String,
+        isAllowed: Bool, isUnavailable: Bool, groupID: String
+    ) -> some View {
+        Toggle(isOn: Binding(
+            get: { isAllowed && !isUnavailable },
+            set: { newValue in toolAccess = toolAccess?.setting(groupID: groupID, isAllowed: newValue) }
+        )) {
+            HStack(spacing: 6) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 10.5))
+                    .frame(width: 14)
+                    .foregroundColor(DS.Colors.textTertiary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Text(isUnavailable ? "Not available to cloud models" : summary)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+            }
+        }
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .disabled(isUnavailable)
+        .opacity(isUnavailable ? 0.55 : 1)
+    }
+}
+
+extension BuddyModelChoice {
+    /// Whether a buddy with this choice (nil = follows Wisp) runs off this Mac.
+    static func sendsDataOffThisMachine(_ choice: BuddyModelChoice?) -> Bool {
+        choice?.sendsDataOffThisMachine ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine
+    }
+}
+
+// MARK: - Shared list pieces
+
+/// The one-line status under a buddy's name in every buddy list:
+/// "Working…", "Done · 10:39 PM", "Failed · 10:39 PM", "Next · Tue 9:00 AM", "Ready".
+enum BuddyStatusText {
+    static func line(for buddy: WispBuddy, isRunning: Bool, latestRunRecord: AgentTaskRecord?) -> String {
+        if isRunning { return "Working…" }
+        if let latestRunRecord {
+            let finishedText = (latestRunRecord.finishedAt ?? latestRunRecord.startedAt)
+                .formatted(date: .omitted, time: .shortened)
+            switch latestRunRecord.status {
+            case .failed: return "Failed · \(finishedText)"
+            case .succeeded where !buddy.schedule.isRepeating: return "Done · \(finishedText)"
+            default: break
+            }
+        }
+        if let nextScheduledRunAt = buddy.nextScheduledRunAt {
+            let nextRunText = Calendar.current.isDateInToday(nextScheduledRunAt)
+                ? nextScheduledRunAt.formatted(date: .omitted, time: .shortened)
+                : nextScheduledRunAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+            return "Next · \(nextRunText)"
+        }
+        return "Ready"
+    }
+}
+
+/// A buddy's actions, as Rakazo's bot menu: the list's right-click menu and
+/// the ⋯ button on a buddy's page. Clearing and deleting only *ask* — the
+/// host decides how to confirm, since a sheet can't hang off the notch panel.
+struct BuddyActionsMenuItems: View {
+    let buddy: WispBuddy
+    let isRunning: Bool
+    /// Read state only makes sense from the list; on its own page the buddy is
+    /// read by definition.
+    let showsReadState: Bool
+    let onDuplicated: (UUID) -> Void
+    let onRequestClearConversation: () -> Void
+    let onRequestDeletion: () -> Void
+
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
+
+    var body: some View {
+        if isRunning {
+            Button("Stop", systemImage: "stop.fill") {
+                buddyStore.stopRun(ofBuddyWithID: buddy.id)
+            }
+        } else {
+            Button("Run Now", systemImage: "play.fill") {
+                buddyStore.runNow(buddyWithID: buddy.id)
+            }
+        }
+
+        Divider()
+
+        Button(buddy.isPinnedInList ? "Unpin" : "Pin", systemImage: buddy.isPinnedInList ? "pin.slash" : "pin") {
+            buddyStore.setPinned(buddyWithID: buddy.id, isPinned: !buddy.isPinnedInList)
+        }
+        if showsReadState {
+            let isUnread = buddyStore.isUnread(buddy, in: taskRegistry)
+            Button(isUnread ? "Mark as Read" : "Mark as Unread", systemImage: isUnread ? "circle" : "circle.fill") {
+                buddyStore.setMarkedUnread(buddyWithID: buddy.id, isMarkedUnread: !isUnread)
+            }
+        }
+        Toggle(isOn: Binding(
+            get: { buddy.postsNotificationWhenFinished },
+            set: { newValue in buddyStore.setNotifiesWhenFinished(buddyWithID: buddy.id, notifiesWhenFinished: newValue) }
+        )) {
+            Label("Notify When Finished", systemImage: "bell")
+        }
+
+        Divider()
+
+        Button("Duplicate", systemImage: "plus.square.on.square") {
+            if let duplicatedBuddy = buddyStore.duplicateBuddy(withID: buddy.id) {
+                onDuplicated(duplicatedBuddy.id)
+            }
+        }
+
+        Divider()
+
+        Button("Clear Conversation…", systemImage: "eraser", action: onRequestClearConversation)
+        Button("Delete…", systemImage: "trash", role: .destructive, action: onRequestDeletion)
+    }
+}
+
 // MARK: - A buddy's thread
 
 struct BuddyDetailView: View {
     let buddyID: UUID
     /// Space to leave at the top so nothing sits behind the physical notch.
     let topInset: CGFloat
+    /// Shows a copy made from the ⋯ menu.
+    var onDuplicated: (UUID) -> Void = { _ in }
+
+    /// Clearing and deleting are confirmed inline, above the controls: this
+    /// view also lives in the non-activating notch panel, where a sheet or
+    /// alert has no window to attach to.
+    private enum PendingConfirmation {
+        case clearConversation
+        case deletion
+    }
 
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
+    @ObservedObject private var threadStore = BuddyThreadStore.shared
+    @ObservedObject private var memoryStore = BuddyMemoryStore.shared
 
     @State private var expandedRunIDs: Set<UUID> = []
+    @State private var draftMessageText = ""
+    @State private var isMemoryExpanded = false
+    @FocusState private var isMessageFieldFocused: Bool
     @State private var isRenaming = false
     @State private var editedName = ""
-    @State private var isConfirmingDeletion = false
+    @State private var pendingConfirmation: PendingConfirmation?
+    @State private var isEditingJob = false
+    @State private var editedInstruction = ""
     @State private var didFailToStartRun = false
     @FocusState private var isNameFieldFocused: Bool
 
@@ -153,7 +473,12 @@ struct BuddyDetailView: View {
     }
 
     private func content(for buddy: WispBuddy) -> some View {
-        let runRecords = buddyStore.runRecords(of: buddy, in: taskRegistry)
+        // The whole stored thread, not just the runs History still holds.
+        let threadTaskIDs = BuddyListPolicy.threadTaskIDs(
+            exchangeTaskIDs: threadStore.exchanges(ofBuddyWithID: buddy.id).map(\.taskID),
+            runTaskIDs: buddy.runTaskIDs
+        )
+        let latestRunRecord = buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
         return VStack(spacing: 0) {
             header(for: buddy, isRunning: isRunning)
@@ -164,15 +489,23 @@ struct BuddyDetailView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         greetingBubble(for: buddy)
                         jobCard(for: buddy)
-                        if runRecords.isEmpty {
+                        memorySection(for: buddy)
+                        BuddyToolAccessEditor(
+                            toolAccess: Binding(
+                                get: { buddy.toolAccess },
+                                set: { newToolAccess in buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: newToolAccess) }
+                            ),
+                            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice)
+                        )
+                        if threadTaskIDs.isEmpty {
                             Text(buddy.schedule.isRepeating
                                  ? "Hasn't run yet — its first run is \(nextRunPhrase(for: buddy))."
                                  : "Hasn't run yet.")
                                 .font(.system(size: 11.5))
                                 .foregroundColor(DS.Colors.textTertiary)
                         }
-                        ForEach(runRecords) { runRecord in
-                            runView(runRecord)
+                        ForEach(threadTaskIDs, id: \.self) { taskID in
+                            threadEntryView(taskID: taskID, buddyID: buddy.id)
                         }
                         Color.clear
                             .frame(height: 1)
@@ -185,20 +518,32 @@ struct BuddyDetailView: View {
                 .onAppear {
                     scrollProxy.scrollTo(threadBottomAnchorID, anchor: .bottom)
                 }
-                .onChange(of: runRecords.last.map { "\($0.id)|\($0.status.displayName)|\($0.steps.count)" } ?? "") { _, _ in
+                .onChange(of: latestRunRecord.map { "\($0.id)|\($0.status.displayName)|\($0.steps.count)" } ?? "") { _, _ in
                     withAnimation(.easeOut(duration: 0.2)) {
                         scrollProxy.scrollTo(threadBottomAnchorID, anchor: .bottom)
                     }
+                    // A run that finishes while its thread is open has been seen.
+                    buddyStore.markRead(buddyWithID: buddy.id, in: taskRegistry)
                 }
             }
 
+            if let pendingConfirmation {
+                confirmationStrip(for: buddy, confirmation: pendingConfirmation)
+            }
+            messageField(for: buddy, isRunning: isRunning)
             controlBar(for: buddy, isRunning: isRunning)
         }
-        .onChange(of: buddyID) { _, _ in
+        .onAppear {
+            buddyStore.markRead(buddyWithID: buddy.id, in: taskRegistry)
+        }
+        .onChange(of: buddyID) { _, newBuddyID in
+            buddyStore.markRead(buddyWithID: newBuddyID, in: taskRegistry)
             isRenaming = false
-            isConfirmingDeletion = false
+            isEditingJob = false
+            pendingConfirmation = nil
             didFailToStartRun = false
             expandedRunIDs = []
+            draftMessageText = ""
         }
     }
 
@@ -243,9 +588,40 @@ struct BuddyDetailView: View {
                 .buttonStyle(.plain)
                 .pointerCursor()
                 .nativeTooltip("Rename this buddy")
+                .overlay(alignment: .trailing) {
+                    // Beside the name, outside its capsule, so the name stays centred.
+                    actionsMenu(for: buddy, isRunning: isRunning)
+                        .offset(x: 30)
+                }
             }
         }
         .padding(.bottom, 4)
+    }
+
+    private func actionsMenu(for buddy: WispBuddy, isRunning: Bool) -> some View {
+        Menu {
+            BuddyActionsMenuItems(
+                buddy: buddy,
+                isRunning: isRunning,
+                showsReadState: false,
+                onDuplicated: onDuplicated,
+                onRequestClearConversation: { pendingConfirmation = .clearConversation },
+                onRequestDeletion: { pendingConfirmation = .deletion }
+            )
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(DS.Colors.textSecondary)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(WispColor.surface2))
+                .contentShape(Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .pointerCursor()
+        .nativeTooltip("More")
     }
 
     // MARK: Thread
@@ -269,15 +645,33 @@ struct BuddyDetailView: View {
                     .font(.system(size: 10, weight: .medium))
                 Text("Its job")
                     .font(.system(size: 10.5, weight: .medium))
+                Spacer(minLength: 0)
+                if !isEditingJob {
+                    Button {
+                        editedInstruction = buddy.instruction
+                        isEditingJob = true
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                    .nativeTooltip("Change this buddy's job — its thread and notes stay")
+                }
             }
             .foregroundColor(DS.Colors.textTertiary)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(buddy.instruction)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                if isEditingJob {
+                    jobEditor(for: buddy)
+                } else {
+                    Text(buddy.instruction)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text(scheduleLine(for: buddy))
                     .font(.system(size: 11.5))
                     .foregroundColor(DS.Colors.textSecondary)
@@ -295,6 +689,86 @@ struct BuddyDetailView: View {
         }
     }
 
+    private func jobEditor(for buddy: WispBuddy) -> some View {
+        let trimmedInstruction = editedInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .trailing, spacing: 6) {
+            TextField("What should it do?", text: $editedInstruction, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(2...6)
+                .onSubmit { saveEditedJob(of: buddy) }
+            HStack(spacing: 6) {
+                Button("Cancel") { isEditingJob = false }
+                    .font(.system(size: 11.5, weight: .medium))
+                    .buddyButtonStyle(isProminent: false)
+                Button("Save") { saveEditedJob(of: buddy) }
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .buddyButtonStyle(isProminent: true)
+                    .disabled(trimmedInstruction.isEmpty)
+                    .opacity(trimmedInstruction.isEmpty ? 0.5 : 1)
+            }
+        }
+    }
+
+    private func saveEditedJob(of buddy: WispBuddy) {
+        buddyStore.updateInstruction(ofBuddyWithID: buddy.id, to: editedInstruction)
+        isEditingJob = false
+    }
+
+    /// What the buddy has chosen to remember. Hidden until it has saved
+    /// something; each note can be forgotten.
+    @ViewBuilder
+    private func memorySection(for buddy: WispBuddy) -> some View {
+        let savedNotes = memoryStore.facts(ofBuddyWithID: buddy.id)
+        if !savedNotes.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Button {
+                    withAnimation(WispMotion.smooth) { isMemoryExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(isMemoryExpanded ? 90 : 0))
+                        Text(savedNotes.count == 1 ? "Remembers 1 thing" : "Remembers \(savedNotes.count) things")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+
+                if isMemoryExpanded {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(savedNotes, id: \.self) { savedNote in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(savedNote)
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 4)
+                                Button {
+                                    memoryStore.forgetExactFact(savedNote, forBuddyWithID: buddy.id)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundColor(DS.Colors.textTertiary)
+                                }
+                                .buttonStyle(.plain)
+                                .pointerCursor()
+                                .nativeTooltip("Forget this")
+                            }
+                        }
+                    }
+                    .padding(.leading, 14)
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
     private func scheduleLine(for buddy: WispBuddy) -> String {
         guard buddy.schedule.isRepeating else { return buddy.schedule.summary() }
         return "\(buddy.schedule.summary()) · next \(nextRunPhrase(for: buddy)) · while Wisp is running"
@@ -309,19 +783,86 @@ struct BuddyDetailView: View {
         return nextScheduledRunAt.formatted(.dateTime.weekday(.wide)) + " at \(timeText)"
     }
 
-    private func runView(_ runRecord: AgentTaskRecord) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            if !runRecord.steps.isEmpty {
-                progressDisclosure(for: runRecord)
+    /// One exchange of the thread. While History still holds its run, the run
+    /// shows live (progress, status, timing); once the run has aged out of
+    /// History the thread's own copy of the question and answer is shown.
+    private func threadEntryView(taskID: UUID, buddyID: UUID) -> some View {
+        let runRecord = taskRegistry.records.first { $0.id == taskID }
+        let exchange = threadStore.exchange(forTaskID: taskID, ofBuddyWithID: buddyID)
+        return VStack(alignment: .leading, spacing: 7) {
+            // A run of the buddy's own job needs no bubble (the job card says it);
+            // one the user started with a message shows what they said.
+            if let exchange, exchange.origin != .job {
+                userMessageBubble(
+                    exchange.userText,
+                    senderName: exchange.origin == .delegated ? exchange.requesterName : nil
+                )
             }
-            runOutcome(runRecord)
-            HStack(spacing: 8) {
-                statusChip(for: runRecord.status)
-                Text(runTimingText(runRecord))
+            if let runRecord {
+                if !runRecord.steps.isEmpty {
+                    progressDisclosure(for: runRecord)
+                }
+                runOutcome(runRecord)
+                HStack(spacing: 8) {
+                    statusChip(for: runRecord.status)
+                    Text(runTimingText(runRecord))
+                        .font(.system(size: 10.5).monospacedDigit())
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+            } else if let exchange {
+                if let answerText = exchange.answerText, !answerText.isEmpty {
+                    answerBubble(answerText)
+                } else {
+                    Text("No answer was kept for this run.")
+                        .font(.system(size: 11.5))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+                Text(startedText(exchange.startedAt))
                     .font(.system(size: 10.5).monospacedDigit())
                     .foregroundColor(DS.Colors.textTertiary)
             }
         }
+    }
+
+    /// The buddy's answer, with its markdown (bold, links, code) drawn inline.
+    private func answerBubble(_ answerText: String) -> some View {
+        Text(BuddyAnswerFormatting.attributedAnswer(answerText))
+            .font(.system(size: 12.5))
+            .foregroundColor(DS.Colors.textPrimary)
+            .tint(WispColor.Brand.lavender)
+            .lineSpacing(2)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(WispColor.surface2)
+            )
+    }
+
+    /// What was asked: the user's message, or — with `senderName` — another
+    /// buddy's request, labelled so it isn't mistaken for the user's.
+    private func userMessageBubble(_ messageText: String, senderName: String? = nil) -> some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            if let senderName {
+                Text("From \(senderName)")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            Text(messageText)
+                .font(.system(size: 12.5))
+                .foregroundColor(DS.Colors.textPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(senderName == nil ? WispColor.Brand.sage.opacity(0.22) : WispColor.surface3)
+                )
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private func progressDisclosure(for runRecord: AgentTaskRecord) -> some View {
@@ -385,18 +926,7 @@ struct BuddyDetailView: View {
                     .lineLimit(2)
             }
         case .succeeded:
-            Text(answerText.isEmpty ? "Done." : answerText)
-                .font(.system(size: 12.5))
-                .foregroundColor(DS.Colors.textPrimary)
-                .lineSpacing(2)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(WispColor.surface2)
-                )
+            answerBubble(answerText.isEmpty ? "Done." : answerText)
         case .failed(let failureReason):
             Text(answerText.isEmpty ? failureReason : answerText)
                 .font(.system(size: 12))
@@ -438,17 +968,115 @@ struct BuddyDetailView: View {
         let durationText = totalSeconds >= 60
             ? "\(totalSeconds / 60)m \(totalSeconds % 60)s"
             : "\(totalSeconds)s"
-        let calendar = Calendar.current
-        let startedText: String
-        if calendar.isDateInToday(runRecord.startedAt) {
-            startedText = runRecord.startedAt.formatted(date: .omitted, time: .shortened)
-        } else {
-            startedText = runRecord.startedAt.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        return "\(durationText) · \(startedText(runRecord.startedAt))"
+    }
+
+    /// "10:39 PM" today, "Sep 28, 10:39 PM" before.
+    private func startedText(_ startedAt: Date) -> String {
+        if Calendar.current.isDateInToday(startedAt) {
+            return startedAt.formatted(date: .omitted, time: .shortened)
         }
-        return "\(durationText) · \(startedText)"
+        return startedAt.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
     // MARK: Controls
+
+    /// Reply to the buddy. It answers in the same thread, remembering the
+    /// earlier exchanges; disabled while it is mid-run.
+    private func messageField(for buddy: WispBuddy, isRunning: Bool) -> some View {
+        let trimmedDraft = draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HStack(spacing: 8) {
+            // Typing stays open while it works; only sending waits, since a
+            // buddy answers one thing at a time.
+            TextField(isRunning ? "\(buddy.name) is working — reply when it's done" : "Message \(buddy.name)", text: $draftMessageText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+                .foregroundColor(DS.Colors.textPrimary)
+                .focused($isMessageFieldFocused)
+                .onSubmit {
+                    guard !isRunning else { return }
+                    sendDraftMessage(to: buddy)
+                }
+            Button {
+                sendDraftMessage(to: buddy)
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(trimmedDraft.isEmpty || isRunning ? DS.Colors.textTertiary : WispColor.Brand.sage)
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .disabled(trimmedDraft.isEmpty || isRunning)
+            .nativeTooltip("Send")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Capsule(style: .continuous).fill(WispColor.surface2))
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(isMessageFieldFocused ? WispColor.Brand.sage.opacity(0.7) : DS.Colors.borderSubtle, lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+    }
+
+    private func sendDraftMessage(to buddy: WispBuddy) {
+        let didStart = buddyStore.sendMessage(draftMessageText, toBuddyWithID: buddy.id)
+        didFailToStartRun = !didStart && !draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if didStart { draftMessageText = "" }
+    }
+
+    /// "Clear Gmail Digest's conversation? … [Cancel] [Clear]", above the controls.
+    private func confirmationStrip(for buddy: WispBuddy, confirmation: PendingConfirmation) -> some View {
+        let (questionText, detailText, confirmTitle): (String, String, String) = {
+            switch confirmation {
+            case .clearConversation:
+                return ("Clear \(buddy.name)'s conversation?",
+                        "It starts fresh. Its job, notes and settings stay, and its runs stay in History.",
+                        "Clear")
+            case .deletion:
+                return ("Delete \(buddy.name)?",
+                        "Its thread and notes are removed. Its runs stay in History.",
+                        "Delete")
+            }
+        }()
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(questionText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Text(detailText)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Button("Cancel") { pendingConfirmation = nil }
+                .font(.system(size: 11.5, weight: .medium))
+                .buddyButtonStyle(isProminent: false)
+            Button(confirmTitle) {
+                switch confirmation {
+                case .clearConversation:
+                    buddyStore.clearConversation(ofBuddyWithID: buddy.id)
+                    expandedRunIDs = []
+                case .deletion:
+                    buddyStore.deleteBuddy(withID: buddy.id)
+                }
+                pendingConfirmation = nil
+            }
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundColor(DS.Colors.destructiveText)
+            .buddyButtonStyle(isProminent: false)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(WispColor.surface3)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .transition(.opacity)
+    }
 
     private func controlBar(for buddy: WispBuddy, isRunning: Bool) -> some View {
         HStack(spacing: 10) {
@@ -459,7 +1087,7 @@ struct BuddyDetailView: View {
                     Label("Stop", systemImage: "stop.fill")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .wispGlassButtonStyle(prominence: .subtle, cornerRadius: 999)
+                .buddyButtonStyle(isProminent: false)
             } else {
                 Button {
                     didFailToStartRun = !buddyStore.runNow(buddyWithID: buddy.id)
@@ -467,16 +1095,22 @@ struct BuddyDetailView: View {
                     Label("Run now", systemImage: "play.fill")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .wispGlassButtonStyle(prominence: .prominent, cornerRadius: 999)
+                .buddyButtonStyle(isProminent: true)
                 .nativeTooltip(didFailToStartRun
-                    ? "Two background tasks are already running — try again when one finishes"
+                    ? "This buddy's model is busy with other runs — try again when one finishes"
                     : "Do its job now")
             }
 
-            BuddyScheduleEditor(schedule: Binding(
-                get: { buddy.schedule },
-                set: { newSchedule in buddyStore.updateSchedule(ofBuddyWithID: buddy.id, to: newSchedule) }
-            ))
+            VStack(alignment: .leading, spacing: 6) {
+                BuddyScheduleEditor(schedule: Binding(
+                    get: { buddy.schedule },
+                    set: { newSchedule in buddyStore.updateSchedule(ofBuddyWithID: buddy.id, to: newSchedule) }
+                ))
+                BuddyModelEditor(modelChoice: Binding(
+                    get: { buddy.modelChoice },
+                    set: { newModelChoice in buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: newModelChoice) }
+                ))
+            }
 
             Spacer(minLength: 0)
 
@@ -485,31 +1119,6 @@ struct BuddyDetailView: View {
                     .font(.system(size: 10.5))
                     .foregroundColor(DS.Colors.warningText)
             }
-
-            Button {
-                if isConfirmingDeletion {
-                    buddyStore.deleteBuddy(withID: buddy.id)
-                } else {
-                    isConfirmingDeletion = true
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11, weight: .medium))
-                    if isConfirmingDeletion {
-                        Text("Delete?")
-                            .font(.system(size: 11.5, weight: .semibold))
-                    }
-                }
-                .foregroundColor(isConfirmingDeletion ? DS.Colors.destructiveText : DS.Colors.textTertiary)
-                .padding(.horizontal, 9)
-                .frame(height: 26)
-                .background(Capsule(style: .continuous).fill(isConfirmingDeletion ? WispColor.surface3 : WispColor.surface2))
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .pointerCursor()
-            .nativeTooltip(isConfirmingDeletion ? "Click again to delete this buddy (its runs stay in History)" : "Delete this buddy")
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -530,6 +1139,8 @@ struct NewBuddyForm: View {
     @State private var schedule: BuddySchedule = .once
     /// Once the user picks a schedule themselves, stop guessing it from the text.
     @State private var hasChosenScheduleByHand = false
+    @State private var modelChoice: BuddyModelChoice?
+    @State private var toolAccess: BuddyToolAccess?
     @FocusState private var isInstructionFieldFocused: Bool
 
     private var trimmedInstruction: String {
@@ -553,6 +1164,9 @@ struct NewBuddyForm: View {
                     Text("A buddy takes one job and keeps at it — once, or on a schedule. Its runs happen in the background.")
                         .font(.system(size: 11.5))
                         .foregroundColor(DS.Colors.textSecondary)
+                        // Same reason as the model note: without a minimum width the
+                        // window's minimum-size pass makes this text enormously tall.
+                        .frame(minWidth: 280, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -581,6 +1195,10 @@ struct NewBuddyForm: View {
                 schedule = BuddySchedule.inferred(fromInstruction: newInstructionText)
             }
 
+            if trimmedInstruction.isEmpty {
+                starterJobs
+            }
+
             BuddyScheduleEditor(schedule: Binding(
                 get: { schedule },
                 set: { newSchedule in
@@ -589,17 +1207,25 @@ struct NewBuddyForm: View {
                 }
             ))
 
+            BuddyModelEditor(modelChoice: $modelChoice)
+            BuddyToolAccessEditor(
+                toolAccess: $toolAccess,
+                modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(modelChoice)
+            )
+
             Spacer(minLength: 0)
 
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 Button("Cancel", action: onCancel)
                     .font(.system(size: 12, weight: .medium))
-                    .wispGlassButtonStyle(prominence: .subtle, cornerRadius: 999)
+                    .buddyButtonStyle(isProminent: false)
                 Button {
                     let newBuddy = buddyStore.createBuddy(
                         instruction: trimmedInstruction,
                         schedule: schedule,
+                        modelChoice: modelChoice,
+                        toolAccess: toolAccess,
                         runImmediately: !schedule.isRepeating
                     )
                     onCreated(newBuddy.id)
@@ -607,7 +1233,7 @@ struct NewBuddyForm: View {
                     Label(schedule.isRepeating ? "Create" : "Create & run", systemImage: "sparkles")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .wispGlassButtonStyle(prominence: .prominent, cornerRadius: 999)
+                .buddyButtonStyle(isProminent: true)
                 .disabled(trimmedInstruction.isEmpty)
                 .opacity(trimmedInstruction.isEmpty ? 0.5 : 1)
             }
@@ -618,5 +1244,42 @@ struct NewBuddyForm: View {
         .onAppear {
             isInstructionFieldFocused = true
         }
+    }
+
+    /// A few ready-made jobs for a blank form, so a first buddy is one click.
+    /// Picking one fills the field (and its wording sets the schedule).
+    private var starterJobs: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Or start from one of these")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundColor(DS.Colors.textTertiary)
+            ForEach(BuddyListPolicy.starterJobs, id: \.instruction) { starterJob in
+                Button {
+                    instructionText = starterJob.instruction
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: starterJob.symbolName)
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 16)
+                            .foregroundColor(DS.Colors.textTertiary)
+                        Text(starterJob.instruction)
+                            .font(.system(size: 12))
+                            .foregroundColor(DS.Colors.textSecondary)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(WispColor.surface2)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(PressableScaleButtonStyle())
+                .pointerCursor()
+            }
+        }
+        .transition(.opacity)
     }
 }

@@ -1230,6 +1230,23 @@ final class CompanionManager: ObservableObject {
             return
         }
 
+        // "Add this page to my brain" / "ingest this" goes straight to the
+        // brain's ingest queue. The model can't see which tab or file "this"
+        // is, so it is read from the browser or Finder here instead. Only
+        // while the brain is on; otherwise it is an ordinary turn.
+        if BrainPreferences.shared.isBrainEnabled,
+           let brainCommand = BrainCommandRouter.command(from: transcript) {
+            runDirectBrainCommand(brainCommand, transcript: transcript, historyTitle: historyTitle)
+            return
+        }
+
+        // "Remember that …" is filed directly: the local model was measured
+        // saying "I'll remember that" without calling the `remember` tool.
+        if let rememberedFact = BrainCommandRouter.rememberedFact(from: transcript) {
+            runDirectRememberCommand(fact: rememberedFact, transcript: transcript, historyTitle: historyTitle)
+            return
+        }
+
         // "text mom i'm running late" goes straight to Messages, like Siri —
         // not through the model's tool choice, which the local model is
         // unreliable at. Not behind agent mode: the send is always put to the
@@ -1350,6 +1367,21 @@ final class CompanionManager: ObservableObject {
                     print("♿️ Accessibility snapshot: \(accessibilityElementSnapshot.elements.count) elements in \(accessibilityElementSnapshot.applicationName)")
                 }
 
+                // Pages from the user's brain that are relevant to this
+                // request ("" when nothing clears the relevance bar). It joins
+                // the screen context in one per-turn block on the user
+                // message — not the system prompt, which stays identical
+                // between turns for the prefix cache — and is stripped from
+                // the stored transcript with it below, since the next turn
+                // gets its own.
+                let brainPromptContextText = BrainPreferences.shared.isBrainEnabled
+                    && BrainPreferences.shared.isPromptContextEnabled
+                    ? BrainStore.shared.promptContext(forRequest: transcript)
+                    : ""
+                let perTurnContextText = [accessibilityElementPromptText, brainPromptContextText]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n\n")
+
                 guard !Task.isCancelled else { return }
 
                 // Build image labels with the actual screenshot pixel dimensions
@@ -1396,7 +1428,7 @@ final class CompanionManager: ObservableObject {
                     let outcome = try await runner.run(
                         userText: transcript,
                         images: labeledImages,
-                        screenContextText: accessibilityElementPromptText,
+                        screenContextText: perTurnContextText,
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
                             + ScreenAnnotationParser.promptInstructions
                             + GlanceCardParser.promptInstructions
@@ -1432,18 +1464,20 @@ final class CompanionManager: ObservableObject {
                     // exchanges, already projected down to questions and
                     // answers.
                     //
-                    // The Accessibility element list, when there is one, rides
-                    // as its own text block after the transcript — in the user
-                    // message rather than the system prompt, so the system
+                    // The per-turn context (the Accessibility element list and
+                    // OCR lines, plus relevant brain pages), when there is any,
+                    // rides as its own text block after the transcript — in the
+                    // user message rather than the system prompt, so the system
                     // prompt (and the local model's prefix cache) stays
-                    // identical between turns.
-                    let accessibilityElementBlocks: [BuddyContentBlock] = accessibilityElementPromptText.isEmpty
+                    // identical between turns. The transcript stores only the
+                    // question and answer below, so it never reaches history.
+                    let perTurnContextBlocks: [BuddyContentBlock] = perTurnContextText.isEmpty
                         ? []
-                        : [.text(accessibilityElementPromptText)]
+                        : [.text(perTurnContextText)]
                     let currentUserMessage = BuddyChatMessage(
                         role: .user,
                         blocks: [.text(transcript)]
-                            + accessibilityElementBlocks
+                            + perTurnContextBlocks
                             + labeledImages.map { .image(data: $0.data, label: $0.label) }
                     )
                     let singleCallRequest = ModelRequest(
@@ -1612,16 +1646,22 @@ final class CompanionManager: ObservableObject {
                 // already drawn, and feeding coordinates back would teach the
                 // model to answer with numbers about a screen it can no longer
                 // see. Every other message is kept exactly as it happened.
-                var recordedMessages = messagesFromThisTurn.map(\.withoutImages)
-                // The Accessibility element list goes the same way as the
-                // screenshot: its ids are only valid for this turn's snapshot,
-                // and replaying them would invite the model to point at `a12`
-                // next turn when `a12` has become a different element.
-                if !accessibilityElementPromptText.isEmpty {
+                //
+                // Provider-only replay blocks (Claude's thinking and web search
+                // results) go too: they are valid only inside the tool loop that
+                // produced them.
+                var recordedMessages = messagesFromThisTurn.map { $0.withoutImages.withoutProviderReplayBlocks }
+                // The per-turn context goes the same way as the screenshot:
+                // the element list's ids are only valid for this turn's
+                // snapshot, and replaying them would invite the model to point
+                // at `a12` next turn when `a12` has become a different element;
+                // the brain pages were picked for this request, and the next
+                // one picks its own.
+                if !perTurnContextText.isEmpty {
                     recordedMessages = recordedMessages.map { recordedMessage in
                         var messageWithoutElementList = recordedMessage
                         messageWithoutElementList.blocks.removeAll { block in
-                            if case .text(let blockText) = block { return blockText == accessibilityElementPromptText }
+                            if case .text(let blockText) = block { return blockText == perTurnContextText }
                             return false
                         }
                         return messageWithoutElementList
@@ -2263,21 +2303,65 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// Starts one run of a buddy's job as a background task, listed under the
-    /// buddy's name. Returns the task id, or nil when the background-task limit
-    /// is reached (the buddy store retries a scheduled run a minute later).
-    func startBuddyRun(_ buddy: WispBuddy) -> UUID? {
-        guard BackgroundTaskLauncher.canStartAnotherTask else { return nil }
-        return BackgroundTaskLauncher.start(
-            request: buddy.instruction,
+    /// Starts one run for a buddy — its job, or a message the user sent it — as a
+    /// background task listed under the buddy's name. The run continues the
+    /// buddy's thread: earlier exchanges go in front of the model, and the answer
+    /// is filed back in the thread. Returns the task id, or nil when the
+    /// background-task limit is reached (the buddy store retries a scheduled run
+    /// a minute later).
+    func startBuddyRun(_ buddy: WispBuddy, request: BuddyRunRequest) -> UUID? {
+        // The buddy's own model if it picked one, else whatever Wisp uses. A
+        // cloud buddy is checked against the cloud ceiling, not the local queue.
+        let buddyModelProvider: any ModelProvider = buddy.modelChoice.map(ModelProviderFactory.make)
+            ?? selectedModelProvider
+        let runsOffThisMachine = buddyModelProvider.deployment.sendsDataOffThisMachine
+        guard BackgroundTaskLauncher.canStartAnotherTask(runsOffThisMachine: runsOffThisMachine) else { return nil }
+
+        let buddyThreadStore = BuddyThreadStore.shared
+        let buddyID = buddy.id
+        guard let runTaskID = BackgroundTaskLauncher.start(
+            request: request.text,
             title: AgentTaskRecord.buddyRunTitlePrefix + buddy.name,
-            modelProvider: selectedModelProvider,
-            systemPrompt: Self.companionVoiceResponseSystemPrompt,
+            modelProvider: buddyModelProvider,
+            systemPrompt: Self.companionVoiceResponseSystemPrompt
+                + BuddyThreadPolicy.systemPromptAddendum(buddyName: buddy.name, job: buddy.instruction)
+                + (request.requesterName.map(BuddyThreadPolicy.delegatedRequestAddendum(requesterName:)) ?? "")
+                + BuddyMemoryStore.shared.promptInstructions(forBuddyWithID: buddyID),
+            conversationHistory: buddyThreadStore.historyMessages(forBuddyWithID: buddyID),
+            toolkit: BuddyRunToolkitBuilder.toolkit(
+                forBuddyWithID: buddyID,
+                modelSendsDataOffThisMachine: runsOffThisMachine,
+                toolAccess: buddy.toolAccess,
+                // A run a peer started can't ask another peer in turn.
+                delegation: request.requesterName == nil ? (caller: buddy, service: .live()) : nil
+            ),
+            onSucceeded: { finishedTaskID, answerText in
+                buddyThreadStore.completeExchange(
+                    forBuddyWithID: buddyID,
+                    taskID: finishedTaskID,
+                    // Stored without Wisp's machine tags so replaying it never
+                    // shows the model a [POINT:…] or [SAY:…] it would imitate.
+                    answerText: AnswerDisplayText.cleaned(answerText)
+                )
+            },
+            // A peer's request is a step in that peer's run, not news of its own.
+            completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated
+                ? .buddy(name: buddy.name, job: buddy.instruction)
+                : nil,
             speakConfirmation: { [weak self] question in
                 guard let self else { return }
                 try? await self.ttsProvider.speakText(question)
             }
+        ) else { return nil }
+
+        buddyThreadStore.beginExchange(
+            forBuddyWithID: buddyID,
+            taskID: runTaskID,
+            origin: request.origin,
+            userText: request.text,
+            requesterName: request.requesterName
         )
+        return runTaskID
     }
 
     /// Starts any configured MCP servers.
@@ -2916,6 +3000,150 @@ extension CompanionManager {
 // MARK: - Direct browser commands
 
 extension CompanionManager {
+    /// Carries out a brain command recognised by `BrainCommandRouter`: finds
+    /// what "this" is (the front browser tab, or the Finder selection), queues
+    /// it on `BrainIngestQueue`, and says so in the notch. The reading itself
+    /// runs in the background; the Brain page shows its progress.
+    ///
+    /// The user's own words are the consent — like the direct browser routes,
+    /// no confirmation card. Ingested content is `.external` trust, so the
+    /// planner never lets it touch the user's own page.
+    /// Saves a fact the user asked Wisp to remember (see
+    /// `BrainCommandRouter.rememberedFact`) and says so in the notch. Goes
+    /// through `MemoryStore`, which writes the brain's Me page (or memory.md
+    /// with the brain off) as the user's own words.
+    fileprivate func runDirectRememberCommand(fact: String, transcript: String, historyTitle: String?) {
+        let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+        PerfMetricsRecorder.shared.abandonTurn()
+
+        let replyText: String
+        let didSucceed: Bool
+        do {
+            switch try MemoryStore.shared.remember(fact) {
+            case .added:
+                replyText = "got it — i'll remember that."
+                didSucceed = true
+            case .alreadyKnown:
+                replyText = "i already know that."
+                didSucceed = true
+            case .nothingToRemember:
+                replyText = "there was nothing to remember in that."
+                didSucceed = false
+            case .refused(let reason):
+                replyText = reason
+                didSucceed = false
+            }
+        } catch {
+            replyText = "i couldn't save that: \(error.localizedDescription)"
+            didSucceed = false
+        }
+
+        AgentTaskRegistry.shared.appendStep(
+            AgentStepRecord(
+                kind: .tool(name: "remember"),
+                summary: didSucceed ? "Remembered “\(fact)” — no model call" : "Remember: \(replyText)",
+                isError: !didSucceed
+            ),
+            to: taskID
+        )
+        AgentTaskRegistry.shared.finishTask(
+            taskID, status: didSucceed ? .succeeded : .failed(replyText), finalText: replyText
+        )
+        conversationTranscript.append(ConversationTranscript.Turn(messages: [
+            BuddyChatMessage(role: .user, text: transcript),
+            BuddyChatMessage(role: .assistant, text: replyText),
+        ]))
+        conversationTranscript.trimToRecentTurns(10)
+
+        currentReplyText = replyText
+        flashIsland(didSucceed ? .success : .error)
+
+        let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            if isReplySpeechEnabled {
+                self.voiceState = .responding
+                try? await self.ttsProvider.speakText(replyText)
+            }
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
+    }
+
+    fileprivate func runDirectBrainCommand(
+        _ brainCommand: BrainCommandRouter.Command,
+        transcript: String,
+        historyTitle: String?
+    ) {
+        let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+        PerfMetricsRecorder.shared.abandonTurn()
+
+        let replyText: String
+        let didSucceed: Bool
+        switch BrainCommandTargetResolver.resolve(brainCommand.targetHint) {
+        case .webPage(let webPage):
+            BrainIngestQueue.shared.enqueue(webPageURL: webPage.url)
+            replyText = BrainCommandRouter.queuedReply(forTitles: [webPage.title])
+            didSucceed = true
+        case .files(let fileURLs):
+            var queuedFileNames: [String] = []
+            var skippedFileReasons: [String] = []
+            for fileURL in fileURLs {
+                let enqueueResult = AgentToolRegistry.enqueueFileForBrainIngest(fileURL)
+                if enqueueResult.didQueue {
+                    queuedFileNames.append(fileURL.lastPathComponent)
+                } else {
+                    skippedFileReasons.append(enqueueResult.resultText)
+                }
+            }
+            if queuedFileNames.isEmpty {
+                replyText = skippedFileReasons.first ?? "there was nothing to add."
+                didSucceed = false
+            } else {
+                replyText = BrainCommandRouter.queuedReply(forTitles: queuedFileNames)
+                didSucceed = true
+            }
+        case .unavailable(let reason):
+            replyText = reason
+            didSucceed = false
+        }
+
+        AgentTaskRegistry.shared.appendStep(
+            AgentStepRecord(
+                kind: .tool(name: "brain"),
+                summary: didSucceed ? "Queued for the brain — no model call" : "Brain: \(replyText)",
+                isError: !didSucceed
+            ),
+            to: taskID
+        )
+        AgentTaskRegistry.shared.finishTask(
+            taskID, status: didSucceed ? .succeeded : .failed(replyText), finalText: replyText
+        )
+        conversationTranscript.append(ConversationTranscript.Turn(messages: [
+            BuddyChatMessage(role: .user, text: transcript),
+            BuddyChatMessage(role: .assistant, text: replyText),
+        ]))
+        conversationTranscript.trimToRecentTurns(10)
+
+        currentReplyText = replyText
+        flashIsland(didSucceed ? .success : .error)
+
+        let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            if isReplySpeechEnabled {
+                self.voiceState = .responding
+                try? await self.ttsProvider.speakText(replyText)
+            }
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
+    }
+
     /// Carries out a browser command recognised by `BrowserCommandRouter`,
     /// without the model choosing a tool.
     ///

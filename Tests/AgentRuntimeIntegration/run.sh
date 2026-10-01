@@ -55,6 +55,8 @@ swiftc -target arm64-apple-macos26.0 \
   -I "$BUILD_DIR/stub" \
   -o "$BUILD_DIR/integration" \
   Tests/AgentRuntimeIntegration/main.swift \
+  Tests/AgentRuntimeIntegration/AnthropicProviderTests.swift \
+  Tests/AgentRuntimeIntegration/BuddyBotTests.swift \
   "${APP_SOURCES[@]}" \
   "$BUILD_DIR/stub/PostHog.o"
 

@@ -4,7 +4,8 @@
 //
 //  Buddies (modeled on HeyClicky's "Clickys"): named, coloured agents that
 //  each own one job — "Every morning, summarize what's new on Hacker News" —
-//  and keep a thread of every time they ran it. A buddy doesn't hold a model
+//  and keep one continuous thread (`BuddyThreadStore`) of what they were asked
+//  and answered, which each run continues. A buddy doesn't hold a model
 //  or a loop of its own: each run is an ordinary background task
 //  (`BackgroundTaskLauncher`, via `CompanionManager.startBuddyRun`), so it
 //  queues behind the one local model like any other background work and its
@@ -95,6 +96,14 @@ enum BuddySchedule: Codable, Equatable {
     }
 }
 
+/// What one run of a buddy is for: its standing job, or a message from the user.
+struct BuddyRunRequest {
+    let origin: BuddyThreadExchange.Origin
+    let text: String
+    /// The buddy that asked, for a `.delegated` run.
+    var requesterName: String? = nil
+}
+
 struct WispBuddy: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
@@ -109,8 +118,30 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// When a repeating buddy runs next; nil for `.once`.
     var nextScheduledRunAt: Date?
 
+    /// The model this buddy runs on; nil follows whatever Wisp itself uses.
+    /// Optional so a buddies.json from before this existed still loads.
+    var modelChoice: BuddyModelChoice?
+    /// The tool groups this buddy is limited to; nil means every tool, as
+    /// before. Optional for the same reason as `modelChoice`.
+    var toolAccess: BuddyToolAccess?
+
+    // List state, as Rakazo's bot list. All optional so older files still load.
+    /// Kept at the top of the list.
+    var isPinned: Bool?
+    /// When the user last had this buddy's thread open; runs that finish
+    /// after it make the buddy unread.
+    var lastReadAt: Date?
+    /// The user marked it unread by hand; cleared when they open it.
+    var isMarkedUnread: Bool?
+    /// Whether a finished run posts a notification; nil means yes.
+    var notifiesWhenFinished: Bool?
+
     /// The most runs a buddy remembers (older ones stay in History).
     static let maximumRememberedRuns = 20
+
+    /// Nil (older files, or never pinned) reads as not pinned.
+    var isPinnedInList: Bool { isPinned ?? false }
+    var postsNotificationWhenFinished: Bool { notifiesWhenFinished ?? true }
 }
 
 /// Names a buddy from its job: a subject from the instruction plus a role —
@@ -208,10 +239,12 @@ final class BuddyStore: ObservableObject {
     private let buddiesFileURL: URL
     private var scheduleCheckTimer: Timer?
 
-    /// Starts one run of a buddy's job and returns its background task id, or
-    /// nil when it couldn't start (e.g. the background-task limit is reached).
-    /// Set by `start(runStarter:)`; the store never talks to the model itself.
-    private var runStarter: ((WispBuddy) -> UUID?)?
+    /// Starts one run for a buddy — its job, or a message the user sent it —
+    /// and returns its background task id, or nil when it couldn't start (e.g.
+    /// the background-task limit is reached). The run is recorded in the buddy's
+    /// thread by whoever starts it. Set by `start(runStarter:)`; the store never
+    /// talks to the model itself.
+    private var runStarter: ((WispBuddy, BuddyRunRequest) -> UUID?)?
 
     /// The app uses `shared`, backed by the real file. Tests make their own
     /// store on a temporary file.
@@ -224,7 +257,7 @@ final class BuddyStore: ObservableObject {
 
     /// Hooks up how runs start and begins the once-a-minute schedule check.
     /// Safe to call more than once.
-    func start(runStarter: @escaping (WispBuddy) -> UUID?) {
+    func start(runStarter: @escaping (WispBuddy, BuddyRunRequest) -> UUID?) {
         self.runStarter = runStarter
         guard scheduleCheckTimer == nil else { return }
         let timer = Timer(timeInterval: Self.scheduleCheckIntervalSeconds, repeats: true) { [weak self] _ in
@@ -281,13 +314,58 @@ final class BuddyStore: ObservableObject {
         return !latestRunRecord.status.isTerminal
     }
 
+    /// The buddy's latest run that the registry still holds.
+    func latestRunRecord(of buddy: WispBuddy, in taskRegistry: AgentTaskRegistry = .shared) -> AgentTaskRecord? {
+        guard let latestRunTaskID = buddy.runTaskIDs.last else { return nil }
+        return taskRegistry.records.first { $0.id == latestRunTaskID }
+    }
+
+    /// Whether the buddy finished something the user hasn't seen.
+    func isUnread(_ buddy: WispBuddy, in taskRegistry: AgentTaskRegistry = .shared) -> Bool {
+        let latestRun = latestRunRecord(of: buddy, in: taskRegistry)
+        let latestNewsFinishedAt = latestRun.flatMap { runRecord in
+            BuddyListPolicy.isNews(runRecord.status) ? runRecord.finishedAt : nil
+        }
+        return BuddyListPolicy.isUnread(
+            latestFinishedRunAt: latestNewsFinishedAt,
+            lastReadAt: buddy.lastReadAt,
+            createdAt: buddy.createdAt,
+            isMarkedUnread: buddy.isMarkedUnread ?? false
+        )
+    }
+
+    /// Pinned first, then most recent activity — how every buddy list is ordered.
+    func orderedBuddies(in taskRegistry: AgentTaskRegistry = .shared) -> [WispBuddy] {
+        BuddyListPolicy.ordered(
+            buddies,
+            isPinned: \.isPinnedInList,
+            lastActivityAt: { buddy in
+                self.latestRunRecord(of: buddy, in: taskRegistry)?.startedAt
+                    ?? BuddyThreadStore.shared.exchanges(ofBuddyWithID: buddy.id).last?.startedAt
+                    ?? buddy.createdAt
+            },
+            createdAt: \.createdAt
+        )
+    }
+
+    /// Buddies that are working or have news — what the sidebar badge counts.
+    func buddiesNeedingAttentionCount(in taskRegistry: AgentTaskRegistry = .shared) -> Int {
+        buddies.filter { isRunning($0, in: taskRegistry) || isUnread($0, in: taskRegistry) }.count
+    }
+
     // MARK: - Changes
 
     /// Creates a buddy for `instruction`, named from it, in the next colour.
     /// A one-off buddy runs right away; a repeating one waits for its time
     /// unless `runImmediately`.
     @discardableResult
-    func createBuddy(instruction: String, schedule: BuddySchedule, runImmediately: Bool) -> WispBuddy {
+    func createBuddy(
+        instruction: String,
+        schedule: BuddySchedule,
+        modelChoice: BuddyModelChoice? = nil,
+        toolAccess: BuddyToolAccess? = nil,
+        runImmediately: Bool
+    ) -> WispBuddy {
         let trimmedInstruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = Date()
         let newBuddy = WispBuddy(
@@ -298,7 +376,9 @@ final class BuddyStore: ObservableObject {
             schedule: schedule,
             createdAt: now,
             runTaskIDs: [],
-            nextScheduledRunAt: schedule.nextRunDate(after: now, calendar: .current)
+            nextScheduledRunAt: schedule.nextRunDate(after: now, calendar: .current),
+            modelChoice: modelChoice,
+            toolAccess: toolAccess
         )
         buddies.insert(newBuddy, at: 0)
         saveBuddies()
@@ -308,12 +388,40 @@ final class BuddyStore: ObservableObject {
         return newBuddy
     }
 
-    /// Starts a run now. Returns false when it couldn't start.
+    /// Starts a run of the buddy's job now. Returns false when it couldn't start.
     @discardableResult
     func runNow(buddyWithID buddyID: UUID) -> Bool {
-        guard let buddy = buddy(withID: buddyID), !isRunning(buddy),
-              let runStarter, let runTaskID = runStarter(buddy) else {
-            return false
+        guard let buddy = buddy(withID: buddyID) else { return false }
+        return startRun(of: buddy, request: BuddyRunRequest(origin: .job, text: buddy.instruction))
+    }
+
+    /// Sends the user's message to the buddy as the next turn of its thread.
+    /// Returns false when the buddy is mid-run or the run couldn't start.
+    @discardableResult
+    func sendMessage(_ messageText: String, toBuddyWithID buddyID: UUID) -> Bool {
+        let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMessageText.isEmpty, let buddy = buddy(withID: buddyID) else { return false }
+        return startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText))
+    }
+
+    /// Starts a run of `buddyID` for another buddy's `ask_buddy` request and
+    /// returns its task id; nil when the buddy is busy or the queue is full.
+    func startDelegatedRun(to buddyID: UUID, message: String, fromBuddyNamed requesterName: String) -> UUID? {
+        guard let buddy = buddy(withID: buddyID) else { return nil }
+        return startRunReturningTaskID(
+            of: buddy,
+            request: BuddyRunRequest(origin: .delegated, text: message, requesterName: requesterName)
+        )
+    }
+
+    private func startRun(of buddy: WispBuddy, request: BuddyRunRequest) -> Bool {
+        startRunReturningTaskID(of: buddy, request: request) != nil
+    }
+
+    private func startRunReturningTaskID(of buddy: WispBuddy, request: BuddyRunRequest) -> UUID? {
+        let buddyID = buddy.id
+        guard !isRunning(buddy), let runStarter, let runTaskID = runStarter(buddy, request) else {
+            return nil
         }
         mutateBuddy(withID: buddyID) { buddy in
             buddy.runTaskIDs.append(runTaskID)
@@ -321,7 +429,7 @@ final class BuddyStore: ObservableObject {
                 buddy.runTaskIDs.removeFirst(buddy.runTaskIDs.count - WispBuddy.maximumRememberedRuns)
             }
         }
-        return true
+        return runTaskID
     }
 
     func stopRun(ofBuddyWithID buddyID: UUID) {
@@ -335,6 +443,14 @@ final class BuddyStore: ObservableObject {
         mutateBuddy(withID: buddyID) { $0.name = trimmedName }
     }
 
+    func updateToolAccess(ofBuddyWithID buddyID: UUID, to newToolAccess: BuddyToolAccess?) {
+        mutateBuddy(withID: buddyID) { $0.toolAccess = newToolAccess }
+    }
+
+    func updateModelChoice(ofBuddyWithID buddyID: UUID, to newModelChoice: BuddyModelChoice?) {
+        mutateBuddy(withID: buddyID) { $0.modelChoice = newModelChoice }
+    }
+
     func updateSchedule(ofBuddyWithID buddyID: UUID, to newSchedule: BuddySchedule) {
         mutateBuddy(withID: buddyID) { buddy in
             buddy.schedule = newSchedule
@@ -342,8 +458,83 @@ final class BuddyStore: ObservableObject {
         }
     }
 
+    /// The user has the thread open: everything finished so far is seen.
+    /// Writes only when something changes, since this runs on every finish.
+    func markRead(buddyWithID buddyID: UUID, in taskRegistry: AgentTaskRegistry = .shared) {
+        guard let buddy = buddy(withID: buddyID),
+              isUnread(buddy, in: taskRegistry) else { return }
+        mutateBuddy(withID: buddyID) { buddy in
+            buddy.lastReadAt = Date()
+            buddy.isMarkedUnread = nil
+        }
+    }
+
+    func setMarkedUnread(buddyWithID buddyID: UUID, isMarkedUnread: Bool) {
+        mutateBuddy(withID: buddyID) { buddy in
+            buddy.isMarkedUnread = isMarkedUnread ? true : nil
+            if !isMarkedUnread { buddy.lastReadAt = Date() }
+        }
+    }
+
+    func setPinned(buddyWithID buddyID: UUID, isPinned: Bool) {
+        mutateBuddy(withID: buddyID) { $0.isPinned = isPinned ? true : nil }
+    }
+
+    func setNotifiesWhenFinished(buddyWithID buddyID: UUID, notifiesWhenFinished: Bool) {
+        mutateBuddy(withID: buddyID) { $0.notifiesWhenFinished = notifiesWhenFinished ? nil : false }
+    }
+
+    /// Changes the buddy's job. Its thread and notes stay: the next run sees
+    /// the new job in its prompt and the earlier exchanges as history.
+    func updateInstruction(ofBuddyWithID buddyID: UUID, to newInstruction: String) {
+        let trimmedInstruction = newInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInstruction.isEmpty else { return }
+        mutateBuddy(withID: buddyID) { $0.instruction = trimmedInstruction }
+    }
+
+    /// A new buddy with the same job, schedule, model and tools, but a fresh
+    /// thread and no notes — the setup is copied, not what it has learned.
+    /// It doesn't run until its schedule or the user says so.
+    @discardableResult
+    func duplicateBuddy(withID buddyID: UUID) -> WispBuddy? {
+        guard let originalBuddy = buddy(withID: buddyID) else { return nil }
+        let now = Date()
+        let duplicatedBuddy = WispBuddy(
+            id: UUID(),
+            name: BuddyListPolicy.duplicateName(of: originalBuddy.name, existingNames: buddies.map(\.name)),
+            instruction: originalBuddy.instruction,
+            colorIndex: nextColorIndex(),
+            schedule: originalBuddy.schedule,
+            createdAt: now,
+            runTaskIDs: [],
+            nextScheduledRunAt: originalBuddy.schedule.nextRunDate(after: now, calendar: .current),
+            modelChoice: originalBuddy.modelChoice,
+            toolAccess: originalBuddy.toolAccess,
+            notifiesWhenFinished: originalBuddy.notifiesWhenFinished
+        )
+        buddies.insert(duplicatedBuddy, at: 0)
+        saveBuddies()
+        return duplicatedBuddy
+    }
+
+    /// Starts the buddy's thread over: its next run has no earlier exchanges in
+    /// front of it. Its notes (`BuddyMemoryStore`) stay, and every run stays in
+    /// History. Stops a run in progress first so its answer doesn't land in the
+    /// cleared thread.
+    func clearConversation(ofBuddyWithID buddyID: UUID) {
+        stopRun(ofBuddyWithID: buddyID)
+        BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
+        mutateBuddy(withID: buddyID) { buddy in
+            buddy.runTaskIDs = []
+            buddy.isMarkedUnread = nil
+            buddy.lastReadAt = Date()
+        }
+    }
+
     func deleteBuddy(withID buddyID: UUID) {
         stopRun(ofBuddyWithID: buddyID)
+        BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
+        BuddyMemoryStore.shared.deleteMemory(ofBuddyWithID: buddyID)
         buddies.removeAll { $0.id == buddyID }
         saveBuddies()
     }

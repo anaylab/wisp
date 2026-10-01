@@ -53,6 +53,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         wispWindowController = WispWindowController(companionManager: companionManager)
 
         companionManager.start()
+        startBrainServicesIfEnabled()
         // Open the window only when the user still needs to do something, which
         // means one of the permissions is missing; Today leads with the checklist.
         if !companionManager.allPermissionsGranted {
@@ -65,6 +66,27 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         companionManager.stop()
         // After stop(), so any task it cancelled is saved in its final state.
         AgentTaskRegistry.shared.saveHistoryImmediately()
+        // The queue batches its saves; flush so a job added just before quit resumes.
+        BrainIngestQueue.shared.saveQueueNow()
+    }
+
+    /// Opens the brain (`~/.wisp/brain/`) and starts the services that keep
+    /// it: the ingest queue (and its inbox watcher), the conversation digest,
+    /// the activity recorder (which itself stays off unless the user opted
+    /// in) and the periodic lint. None of them runs while the brain's master
+    /// switch is off — "off" means nothing reads from or writes to it.
+    ///
+    /// The one-time move of memory.md's facts into the me page runs first, so
+    /// the first turn's "about the user" block already has them.
+    private func startBrainServicesIfEnabled() {
+        guard BrainPreferences.shared.isBrainEnabled else { return }
+        // Touching the store creates the vault on first launch and loads it.
+        _ = BrainStore.shared
+        BrainMemoryMigration.migrateIfNeeded()
+        BrainIngestQueue.shared.start()
+        BrainConversationDigester.shared.start()
+        BrainActivityRecorder.shared.start()
+        BrainMaintenance.shared.start()
     }
 
     /// Registers the app as a login item so it launches automatically on

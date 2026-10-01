@@ -40,7 +40,7 @@ cloud dependency to the local path, without asking.
   (`WispWindow/`) replaced the old dashboard, the pop-out conversation window, the notch's own
   settings pages and the big menu bar panel, so every setting has exactly one home. It is a stock
   `NavigationSplitView` in an `NSWindow` whose `NSHostingController` bridges title + toolbar
-  (`sceneBridgingOptions`); sidebar sections are `WispSection` (Today, Chat, Buddies, Routines,
+  (`sceneBridgingOptions`); sidebar sections are `WispSection` (Today, Chat, Buddies, Brain, Routines,
   History · Manage: Connections, Settings) and a multi-page section switches pages with a segmented
   control in the toolbar (`WispPage`). Anything opens it at a page with
   `WispWindowNavigator.open(_:)` (closes the notch workspace + quick panel first). On launch with a
@@ -51,6 +51,14 @@ cloud dependency to the local path, without asking.
 - **Framework**: SwiftUI (macOS native) with AppKit bridging for the notch, cursor overlay, menu
   bar item and the Wisp window
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
+- **Claude** (when selected): Opus 5.5 by default, model/effort/web access chosen in Settings →
+  Model (`AnthropicModelSettings`). Claude always thinks on 5.5-era models and signs each thinking
+  block against the conversation before it, so its private blocks (`BuddyContentBlock.providerReplay`)
+  are resent verbatim inside a tool loop, and the agent loop keeps the turn **append-only** for
+  providers with `ModelCapabilities.requiresAppendOnlyHistoryWithinTurn` (the screenshot is resent on
+  later passes — a cache read — instead of dropped). Replay blocks are stripped from the stored
+  transcript (`withoutProviderReplayBlocks`) and never persisted. Web search/fetch run on Anthropic's
+  side and are added only to requests that already carry tools (agent mode).
 - **Chat / Vision**: a pluggable `ModelProvider`, chosen at runtime via
   `BuddyChatProviderSelection` and built by `ModelProviderFactory`. Default is local Ollama
   `qwen2.5vl:3b` at `http://localhost:11434` (NDJSON streaming); the cloud providers
@@ -164,7 +172,56 @@ cloud dependency to the local path, without asking.
   Support/Wisp/buddies.json`) holds identity (name from `BuddyNameGenerator` — subject + role word,
   no model call; colour from `BuddyAppearance`, least-used first), the job, a `BuddySchedule`
   (once / daily / weekly; `inferred(fromInstruction:)` pre-fills the form from "every morning…"),
-  and the ids of its runs. A buddy has no loop of its own: each run is an ordinary background task
+  and the ids of its runs. Each buddy also has **one continuous thread** (`BuddyThreadStore`,
+  `~/Library/Application Support/Wisp/buddy-threads.json`, text only): every run — its job, or a
+  message the user typed in the buddy's thread (`BuddyStore.sendMessage`) — is an exchange
+  (question + answer). The last 6 answered exchanges (`BuddyThreadPolicy`, answers clipped to 1500
+  chars, machine tags stripped) go in front of the model as `conversationHistory`, and the system
+  prompt gets a persona addendum, so a run says what changed since last time and a reply stays in
+  context; 100 exchanges are kept. **Per-buddy memory** (`BuddyMemoryStore`, `~/Library/Application Support/Wisp/buddy-memory/<id>.md`, same
+  bullet format as memory.md): short notes the buddy saves with its own `remember_for_this_buddy` /
+  `forget_for_this_buddy` tools (`BuddyRunToolkitBuilder`, bound to that buddy, no confirmation — they only
+  touch its own file), rendered into its system prompt (≤800 chars, newest first, framed as data not
+  instructions since a model that read a web page wrote them), listed with a Forget button on its page.
+  Kept out of the Brain on purpose (works with the brain off, never enters the main assistant's retrieval).
+**Per-buddy tool allow-list** (`WispBuddy.toolAccess: BuddyToolAccess?`, nil = every tool, so existing
+  buddies are unchanged): limited to *groups* — `BuddyToolGroup` (Browser, Screen, Messages & Contacts, Reminders,
+  Shortcuts, Coding agent, Brain, Your memory) plus one `mcp:<server>` group per connected server — because the tool
+  list isn't fixed and a stored list of tool names would go stale or let a newly installed tool through. Anything
+  not in an allowed group is refused to a limited buddy, including tools in no group; `get_current_time` and
+  `load_skill` are always kept; `do_in_background` is never available to a buddy (it would start a task outside the
+  buddy's thread, model and limits). `BuddyToolAccessPolicy.isPermitted` is the one rule; it is enforced by
+  `AgentRunToolkit.permitsRegistryTool` *before* tool ranking (`AgentToolRegistry.definitions(forRequest:isToolPermitted:)`,
+  so a limited buddy still gets a full set of relevant tools) and again by name at call time (so a tool that
+  registers after the run began is held to it too). Edited with `BuddyToolAccessEditor` ("Tools · Browser, Screen"
+  on the page and in the new-buddy form); Brain/Your memory show as unavailable for a cloud-model buddy.
+    **Per-buddy model** (`WispBuddy.modelChoice: BuddyModelChoice?`, nil = follow Wisp): local, a Claude model,
+  GPT or Gemini, built by `ModelProviderFactory.make(_ choice:)`; picked with `BuddyModelEditor` (page + new
+  form), which says what leaves the Mac. A buddy whose model is off this machine (`deployment.sendsDataOffThisMachine`)
+  gets `BuddyRunToolPolicy.privateKnowledgeToolNames` removed — the brain tools plus `remember`/`forget` — both
+  from the tool list and refused by name (`AgentRunToolkit`), and bypasses `ModelAccessGate` (no resident model to
+  protect), so cloud buddies run in parallel with each other and with a live local turn. Capacity is
+  `BackgroundTaskCapacityPolicy`: 2 local, 4 cloud, counted separately in `BackgroundTaskLauncher`.
+  **Delegation** (`ask_buddy`, `Buddies/BuddyDelegation.swift`): a buddy can ask a peer for help; the peer answers in
+  *its own* thread (origin `.delegated`, `BuddyThreadExchange.requesterName`, shown with a "From <buddy>" label and
+  fed to the model as "<name> asked you: …"; the run's prompt says it's a peer's request, not the user's) and the
+  answer returns to the caller as the tool result. `BuddyDelegationService` (injectable, so the flow is tested without
+  the app) resolves the peer by name (ambiguous → asks which, never guesses; can't ask itself), starts the run via
+  `BuddyStore.startDelegatedRun`, and polls the task until it ends (5-minute cap, then stops the peer). A busy peer or a
+  full queue is reported back at once instead of waited on, so two buddies can't deadlock the queue. **Crossing a
+  model boundary asks first** — different `providerKind` between caller and target (local↔cloud either way, or two
+  different cloud providers): `BuddyDelegationPolicy.requiresApproval`, the card (`ToolConfirmationCardBuilder.askBuddyCard`)
+  names both buddies and models, the message and where it goes, and `ask_buddy` is on `ToolCallSafety`'s always-ask
+  list so session auto-approve doesn't skip it. Same-model delegation doesn't ask. **No chains**: a run started by a
+  delegation isn't given the tool. It is a run-only tool (`AgentRunTool`, so no registry entry) in the `.delegation`
+  tool group ("Other buddies"), and only offered when there is at least one peer and the buddy's allow-list permits it.
+  **List experience** (modeled on Rakazo's bot list): buddies are ordered pinned first, then by latest
+  activity; one that finishes a run while you aren't looking is **unread** (dot in both lists, counted in the
+  Buddies sidebar badge with working buddies) until its thread is opened. Right-click (window) or ⋯ (page):
+  Run now/Stop, Pin, Mark read/unread, **Notify when finished** (per buddy; the notification names the buddy,
+  and runs another buddy asked for never notify), Duplicate (setup only — no thread or notes), Clear
+  conversation (thread restarts, notes and History stay), Delete. The job is editable in place.
+  A buddy has no loop of its own: each run is an ordinary background task
   via `CompanionManager.startBuddyRun` → `BackgroundTaskLauncher.start(title: "Buddy · <name>")`,
   so it queues behind the model like any background work and its record lives in
   `AgentTaskRegistry`/History. The schedule is checked every minute while Wisp runs
@@ -461,8 +518,44 @@ cloud dependency to the local path, without asking.
   `MemoryStore.shared.promptInstructions()`, so it applies with or without agent mode. In agent
   mode the model can call `remember` (`.writing`) and `forget` (destructive; refuses a vague
   query matching >3 facts) — both confirm, since the file shapes every later prompt; the
-  `.memory` `AgentToolScope` routes "remember that…"/"forget…" to them. History → **Memory** lists facts with delete buttons, reveals memory.md, and clears conversation
-  history (which also empties the live transcript via `onConversationHistoryCleared`).
+  `.memory` `AgentToolScope` routes "remember that…"/"forget…" to them. **While the brain is on
+  (default) this layer lives in the brain's `wiki/me.md` instead**: `BrainMemoryMigration` moves
+  memory.md's facts there once, `MemoryStore` keeps its API but reads/writes the me page
+  (`BrainAboutMe` builds the ≤800-char system-prompt block), and memory.md is only read with the
+  brain off. Brain → Settings clears conversation history (which also empties the live transcript
+  via `onConversationHistoryCleared`); the old History → Memory page is gone.
+- **Brain** (Karpathy's "LLM wiki"; local, `Brain/` + `WispWindow/Brain/`): `~/.wisp/brain/` is a
+  folder of markdown pages Wisp maintains — a valid Obsidian vault. `SCHEMA.md` (user-editable
+  conventions, put in every writer's prompt), generated `index.md`, human `log.md`, `wiki/` pages
+  (`me.md`, `people/`, `projects/`, `topics/`, `sources/`, …; frontmatter title/kind/summary/
+  aliases/tags/sources/locked, `## Section` bodies, `[[links]]`), `raw/` sources Wisp never edits
+  (inbox/ingested/notes/conversations/activity), `.brain/` machine state. **No writer touches a page
+  file**: ingest, digests, lint and agent tools produce `BrainEditProposal`s (lenient JSON from the
+  model) and `BrainEditPlanner` validates each batch — caps, section-only edits, bullet dedupe, and
+  `BrainEditProvenance.trust`: `.external` (web/files/window titles) may only append/create and
+  never touch `me`, `.derivedFromUser` (conversations/notes) may not replace, `.userAuthored` may do
+  anything; locked pages are never changed. `BrainStore.apply` versions every overwritten page under
+  `.brain/versions/<change>/` and records a `BrainChangeRecord`, so every batch is one Undo in
+  Brain → Log (conflict-checked by content hash; `deletingSlugs:` makes a merge one record).
+  **Reading**: `BrainSearch` is BM25 with field weights (no embedding model — residency); each turn
+  the ≤4 relevant page summaries (`BrainPromptContext`, score bar, ~700 chars) join the per-turn
+  screen-context block on the **user message** and are stripped from history like `a`/`t` ids.
+  Agent tools (`.brain` scope): `search_brain`, `read_brain_page` (read-only), `add_to_brain`,
+  `ingest_into_brain` (ask). `BrainCommandRouter` sends "add this page/file to my brain" straight to
+  the queue (front browser tab or Finder selection), no model. **Feeds**: `BrainIngestQueue`
+  (serial, persisted, resumable; `BrainTextExtractor` md/txt/PDF/HTML/RTF/DOCX + user-requested URL
+  fetch, `BrainTextChunker` ~2500-char chunks, `BrainKnowledgeExtractor` one call per chunk + a
+  `source` page per material, `BrainInboxWatcher` polls `raw/inbox/`); `BrainConversationDigester`
+  (ended sessions ≥30 min idle, user words + answers only, substantive-only heuristic, ≤3 per
+  pass); `BrainNotesImporter` (folder/Obsidian, hash-deduped, 500 per run; Apple Notes via
+  AppleScript); `BrainActivityRecorder` (**opt-in, off by default**: app/window title/URL-without-
+  query once a minute while present and not on a call, built-in + user exclusions, Chrome incognito
+  skipped, reuses existing OCR text only, never screenshots, 30-day retention, daily digest of a
+  compact summary **always on the local model**). `BrainMaintenance` lints (broken links → stub
+  pages, likely duplicates → merge + relink, oversized → split, missing summaries). All model work
+  is background priority through `ModelAccessGate`; switches live in `BrainPreferences`. UI: sidebar
+  **Brain** with Pages (reader/editor, backlinks), Graph (force layout), Inbox (drop zone, jobs,
+  notes import), Health, Log (undo), Settings.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 
@@ -570,9 +663,10 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `LocalOllamaAPI.swift` | ~350 | Ollama client: NDJSON streaming, `keep_alive`, per-mode context and token limits, and the heuristic that decides whether a prompt needs a screenshot at all. |
-| `ModelProvider.swift` | ~248 | Provider-agnostic runtime: the `ModelProvider` protocol (`streamTurn`), plus `ModelRequest`, `ModelCapabilities`, and `ModelDeployment` (`sendsDataOffThisMachine`, which drives the local-only-machinery gates). |
+| `ModelProvider.swift` | ~260 | Provider-agnostic runtime: the `ModelProvider` protocol (`streamTurn`), plus `ModelRequest`, `ModelCapabilities`, and `ModelDeployment` (`sendsDataOffThisMachine`, which drives the local-only-machinery gates). |
 | `OllamaProvider.swift` | ~294 | Presents `LocalOllamaAPI` as a `ModelProvider`; owns the `[TOOL:...]` text convention that fakes tool calls for the local model. |
-| `AnthropicProvider.swift` | ~425 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, thinking disabled (the transcript can't replay thinking blocks). |
+| `AnthropicProvider.swift` | ~680 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, adaptive thinking + `effort` (Opus/Sonnet 5.5), signed thinking and web blocks kept as `.providerReplay` and resent verbatim within a tool loop (`drop_block` for stale ones), prompt caching (system breakpoint + automatic), server-side `web_search`/`web_fetch` on tool-bearing turns (resumes `pause_turn`), `fallbacks: "default"` for refusals, no sampling params on models that reject them. |
+| `AnthropicModelSettings.swift` | ~140 | Claude's settings (UserDefaults): `AnthropicModelChoice` (Opus 5.5 default / Sonnet 5.5 / Haiku 4.5, with each model's API differences as data), `AnthropicEffortLevel` (low default), and the web-access switch. Edited in Settings → Model, read by `ModelProviderFactory`. |
 | `OpenAIProvider.swift` | ~435 | GPT as a bring-your-own-key `ModelProvider` over Chat Completions: tool results become separate `role:"tool"` messages. |
 | `GeminiProvider.swift` | ~415 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. |
 | `ModelProviderFactory.swift` | ~75 | Builds the `ModelProvider` for the current `BuddyChatProviderSelection`, reading a cloud provider's key from `ProviderKeychainStore`. Used by CompanionManager's turn path. |
@@ -661,6 +755,29 @@ Grouped by what they do. Line counts are approximate.
 | `AgentTaskRegistry.swift` | ~165 | Task and step records backing History → Timeline. Loads saved history on launch and saves it (debounced) on every change. |
 | `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
 
+### Brain
+| File | Lines | Purpose |
+|------|-------|---------|
+| `Brain/BrainPage.swift` | ~455 | Pure page model: `BrainPageKind` (folders, symbols), frontmatter parse/render, `BrainSlug` (safe slugs, comparable names), `[[link]]` parsing, `## Section` split/join. |
+| `Brain/BrainEdit.swift` | ~550 | `BrainEditProvenance` (origin + trust), `BrainEditProposal`, lenient `BrainEditProposalParser`, and `BrainEditPlanner` — the validator every brain write goes through. |
+| `Brain/BrainSearch.swift` | ~205 | BM25 `BrainSearchIndex` (field-weighted, whole-word name boost) and `BrainPromptContext` (the per-turn relevant-pages block). |
+| `Brain/BrainStore.swift` | ~650 | The vault: layout + seeding, page load/resolve/backlinks, `apply` (versioned, one change record, optional deletions), hand edits, undo, index.md/log.md, raw sources, Finder/Obsidian opening. |
+| `Brain/BrainSchema.swift / BrainPreferences.swift` | ~50/~65 | Default SCHEMA.md + the edit-proposal prompt rules; the brain's UserDefaults switches (activity off by default). |
+| `Brain/BrainAboutMe.swift / BrainMemoryMigration.swift` | ~155/~145 | me-page facts → system-prompt block, remember/forget edits; one-time memory.md → me.md migration. |
+| `Brain/BrainAgentTools.swift / BrainCommandRouter.swift` | ~350/~240 | `search_brain`/`read_brain_page`/`add_to_brain`/`ingest_into_brain`; deterministic "add this to my brain" parsing + front-tab/Finder target resolution. |
+| `Brain/BrainKnowledgeExtractor.swift` | ~350 | Source text → edit proposals: per-chunk model calls with relevant page titles, one stricter retry, source-page summary call. |
+| `Brain/BrainIngestQueue.swift / BrainIngestJob.swift` | ~615/~140 | Serial persisted ingest queue (raw copies, trust mapping, History rows, one drain notification) and the job type + codec. |
+| `Brain/BrainTextExtractor.swift / BrainTextChunker.swift` | ~685/~215 | md/txt/PDF/HTML/RTF/DOCX extraction, HTML→text, user-requested web fetch; heading/paragraph chunking with even sampling. |
+| `Brain/BrainIngestProposalMerger.swift / BrainIngestFileRules.swift / BrainInboxWatcher.swift` | ~405/~125/~115 | Cross-chunk merge + batch fitting + source page; supported types and inbox stability rules; `raw/inbox/` poller. |
+| `Brain/BrainConversationDigester.swift / BrainConversationDigestPlanning.swift` | ~225/~410 | Periodic digest of ended conversation sessions; pure exchange filtering, substance heuristic, material + state. |
+| `Brain/BrainNotesImporter.swift / BrainNotesImportPlanning.swift / BrainNotesImportAppleNotes.swift` | ~370/~255/~185 | Folder/Obsidian import (hash-deduped, capped) and Apple Notes export via a parameterised AppleScript. |
+| `Brain/BrainActivityRecorder.swift / BrainActivitySampler.swift / BrainActivityLog.swift / BrainActivitySummary.swift / BrainActivityExclusions.swift` | ~360/~230/~245/~420/~205 | Opt-in activity feed: sampling, exclusions, day spans (0600 files, 30-day retention), summaries, daily local-model digest. |
+| `Brain/BrainLinter.swift / BrainLintChecks.swift / BrainPageMerger.swift / BrainPageSplitter.swift` | ~230/~595/~255/~190 | `BrainMaintenance` (periodic lint + fixes) and the pure checks, duplicate merge with relinking, and oversized-page split. |
+| `WispWindow/Brain/BrainPagesPage.swift / BrainPageReaderView.swift / BrainPageEditorView.swift` | ~445/~390/~155 | Brain → Pages: search/grouped list, markdown reader with in-app `[[links]]`, chips, backlinks, back/forward; raw-markdown editor with rename. |
+| `WispWindow/Brain/BrainGraphPage.swift / BrainGraphLayout.swift` | ~465/~340 | Brain → Graph: Canvas force-directed graph (clock stops when settled/hidden) and the pure layout + fast link resolver. |
+| `WispWindow/Brain/BrainInboxPage.swift / BrainHealthPage.swift / BrainLogPage.swift / BrainSettingsPage.swift` | ~675/~370/~270/~610 | Inbox (drop zone, jobs, notes import), Health (overview + fixes), Log (undo), Settings (switches, activity privacy, vault, conversation history). |
+| `WispWindow/Brain/BrainSharedViews.swift / BrainMarkdownRendering.swift` | ~495/~330 | Shared navigation state, chips, markdown view; pure markdown block parser and `wisp-brain://` link rewriting. |
+
 ### Voice modes, glance cards & sources
 | File | Lines | Purpose |
 |------|-------|---------|
@@ -679,7 +796,6 @@ Grouped by what they do. Line counts are approximate.
 | `WispTimerStore.swift` / `TimerCardView.swift` | ~235/~225 | `timer` kind: the main-actor store that owns countdowns (completion task, scheduled `UNUserNotification`, finish callback) independent of any card, plus `WispTimerDurationFormatter`; the card is a live countdown (`CountdownSecondTickSchedule`, paused when off-screen) with a Cancel button. |
 | `ConfiguredSourceStore.swift` / `RESTSourceDataProvider.swift` / `SourceCardView.swift` | ~90/~140/~90 | `source` kind: user endpoints in `~/.wisp/sources.json`, fetched over HTTPS and mapped to generic blocks. |
 | `SourcesTab.swift` | ~150 | Connections → Sources: the live-card-data master toggle + the configured-source list. |
-| `MemoryTab.swift` | ~185 | History → Memory: remembered facts with per-row delete, reveal/reload memory.md, and the saved-conversation summary with "Clear conversation history" (confirmation dialog). |
 
 ### Wisp window, notch and UI
 | File | Lines | Purpose |
@@ -690,7 +806,7 @@ Grouped by what they do. Line counts are approximate.
 | `WispWindow/ChatPage.swift` | ~440 | Chat: the last 6 hours of interactive exchanges as a thread (running turns show the live browser step + Stop, answers have Copy), a follow-up box (`askTypedQuestion`; capture excludes Wisp's own windows), and a side column of running and recently finished tasks. Opened by the notch's expand button via `openConversationWindow()`. |
 | `WispWindow/BuddiesPage.swift` | ~150 | Buddies: a list of buddies + the selected one's `BuddyDetailView` or `NewBuddyForm`; a single invitation when there are none. |
 | `WispWindow/GeneralSettingsPage.swift` | ~330 | Settings → General: `PermissionsChecklist` (mic / accessibility / screen recording / screen content with Grant buttons — also shown on Today until granted), `ActiveStackCard` (model + residency, speech, voice, agent mode, local-only assurance), island surface, speak replies, sound cues and `VoiceUpgradeHint`. `SettingRow` is the shared title/detail/control row. |
-| `WispWindow/ModelSettingsPage.swift` | ~390 | Settings → Model (`PerformanceTab`: provider choice + API key, system readouts, timings) and the shared `DashboardCard` (native grouped card) and `DashboardEmptyState` (`ContentUnavailableView`). |
+| `WispWindow/ModelSettingsPage.swift` | ~465 | Settings → Model (`PerformanceTab`: provider choice + API key, system readouts, timings) and the shared `DashboardCard` (native grouped card) and `DashboardEmptyState` (`ContentUnavailableView`). |
 | `HistoryTab.swift` | ~480 | The History **Timeline** page (`WispPage.timeline`): search (title/answer/steps), filters (All · Answers · Browser · Tools · Needs attention), day-grouped list, and a detail pane — answer, failure reason, "What Wisp did" steps, and actions: Stop, Copy answer, Ask again (closes the Wisp window first) and **Save as routine** (creates a `WispRoutine` and hands it to the Routines editor via `RoutineStore.routineIDToOpenInEditor`). Routine, skill and dictation runs are titled with `AgentTaskRecord.routineRunTitlePrefix`/`skillRunTitlePrefix`/`dictationTitlePrefix` (set via `sendTranscriptToClaudeWithScreenshot(transcript:historyTitle:)`), and `isUsersOwnQuestion` hides re-ask/save for them. |
 | `HomeTab.swift` | ~855 | The Wisp window's **Today** page: a setup card with the permission checklist until everything is granted; greeting + voice/silent toggle; an ask bar (typed question via `CompanionManager.askTypedQuestion`, or `/` to filter and run routines); "Needs you" alerts with fixes (Ollama/Chatterbox unreachable — localhost checks every 30s, only for services in use — pending confirmation, a failed/interrupted task in the last 2h); Running now (per-task Stop); Up next (Calendar, requests access only from its Connect button); Routines tiles; Recent answers with Copy. Anything it runs closes the Wisp window first so the screenshot shows the user's work. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
@@ -700,6 +816,7 @@ Grouped by what they do. Line counts are approximate.
 | `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
+| `NotchFileDrop.swift` | ~75 | Drop a file on the notch to add it to the brain: `NotchFileDropView` (a transparent `hitTest`-nil sibling above the hosting view; wrapping it, registering it, or SwiftUI `.onDrop` all failed to receive drags) and `NotchFileDragDetector` (drag-pasteboard change count + held button, so window drags never misfire). `NotchWindowController.updateFileDragState` opens the island under a file drag (brain on only) and `addDroppedFilesToBrain` enqueues supported files on `BrainIngestQueue`, showing the result via `viewModel.fileDropFeedback`. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `DesignSystem.swift` | ~480 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
@@ -727,9 +844,17 @@ names forward here.
 | `DynamicIsland/NotchWorkspaceView.swift` | ~725 | The notch's quick chat: `NotchWorkspacePage` (.chat), a sidebar of buddies and searchable conversations (Settings / Open Wisp buttons open the window), thread bubbles, the talk pill and a Type field → `askTypedQuestion`. |
 | `DynamicIsland/NotchIslandStyle.swift` | ~125 | `NotchIslandSurfaceStyle` (black default / Liquid Glass), the persisted `NotchIslandStylePreference`, the `wispNotchIslandSurface(in:style:)` modifier, and `WispIslandButtonStyle` (flat subtle fill / white prominent capsule). |
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
-| `Buddies/BuddyStore.swift` | ~390 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy`, `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/reschedule/delete). |
+| `Buddies/BuddyMemory.swift` | ~170 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete). |
+| `Buddies/BuddyModelChoice.swift` | ~75 | `BuddyModelChoice` (provider + optional Claude model, `allChoices`) and `BackgroundTaskCapacityPolicy` (local vs cloud concurrency). |
+| `Buddies/BuddyDelegation.swift` | ~230 | `ask_buddy`: `BuddyDelegationPolicy` (pure: peer resolution, when to ask, the boundary note), `BuddyDelegationService` (approval, start, wait, outcome; injectable) and the run-only tool. |
+| `Buddies/BuddyToolAccess.swift` | ~200 | `BuddyToolGroup`, `BuddyToolAccess` (the allow-list) and the pure `BuddyToolAccessPolicy` (`isPermitted`, server discovery, summaries). |
+| `Buddies/BuddyRunToolkit.swift` | ~120 | `BuddyRunToolPolicy` (tools a cloud buddy may not use) and `BuddyRunToolkitBuilder` (per-buddy memory tools + exclusions). |
+| `AgentRunToolkit.swift` | ~35 | Per-run tool changes for `AgentTurnRunner`: names to hide/refuse and run-only tools. |
+| `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
+| `Buddies/BuddyStore.swift` | ~580 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
+| `Buddies/BuddyListPolicy.swift` | ~105 | Pure buddy-list rules (Rakazo-style): unread (a succeeded/failed run finishing after the last read, or marked by hand), ordering (pinned → latest activity → newest), copy names, which task ids make up the visible thread (stored exchanges, not just runs History still holds), starter jobs, and `BuddyAnswerFormatting` (inline markdown for answers). Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyAvatar.swift` | ~130 | `BuddyAppearance` (the 8-colour palette) and `BuddyAvatar` (cloud + happy eyes, bobs while working, clock paused at rest). |
-| `Buddies/BuddyViews.swift` | ~620 | `BuddyScheduleEditor`, `BuddyDetailView` (a buddy's thread + Run now/Stop, schedule, rename, delete) and `NewBuddyForm`. |
+| `Buddies/BuddyViews.swift` | ~1285 | `BuddyScheduleEditor`, model/tool editors, `BuddyStatusText` and `BuddyActionsMenuItems` (shared by the window list's right-click menu and the page's ⋯ menu), `BuddyDetailView` (the whole stored thread, editable job, inline clear/delete confirmation since the notch panel can't host sheets; marks the buddy read while open) and `NewBuddyForm` (with starter jobs). |
 | `DynamicIsland/MorningBriefing.swift` | ~255 | The morning notch: `MorningSuggestion`, the pure `MorningSuggestionBuilder` and `MorningBriefingSchedule` (once a day, daytime, user present), and `MorningBriefingController` (1-min check, pending suggestions, `presentationSequenceNumber` the notch drops the banner on, `perform`). |
 | `DynamicIsland/QuietModeMonitor.swift` | ~280 | Quiet mode: `QuietModeDetection` (CoreAudio processes capturing input, CoreMediaIO camera running, system-listener filter) and the polling `QuietModeMonitor` publishing `activeQuietReason`. |
 | `DynamicIsland/FinishedWorkInbox.swift` | ~55 | Unseen finished background task ids behind the notch's "N new" badge and NEW section (in-memory, cap 5). |
@@ -767,6 +892,13 @@ running):
 ./Tests/ModelProviderContract/run.sh     # provider layer, ~10s
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
+./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
+./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec
+./Tests/BrainDigest/run.sh               # conversation digest + notes import policy
+./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
+./Tests/BrainLint/run.sh                 # lint checks, merge, split
+./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
+./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a

@@ -26,6 +26,8 @@ struct HomeTab: View {
     @ObservedObject private var bindingStore = ShortcutBindingStore.shared
     @ObservedObject private var routineStore = RoutineStore.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
+    @ObservedObject private var brainStore = BrainStore.shared
+    @ObservedObject private var brainIngestQueue = BrainIngestQueue.shared
 
     /// Moves the Wisp window to another page (e.g. "All routines").
     let onSelectPage: (WispPage) -> Void
@@ -95,6 +97,7 @@ struct HomeTab: View {
     private var secondaryColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
             routinesCard
+            brainCard
             recentAnswersCard
         }
     }
@@ -697,6 +700,71 @@ struct HomeTab: View {
             return "In \(firstAppName)"
         }
         return routine.isPinnedInNotch ? "In the notch" : "Click to run"
+    }
+
+    // MARK: - Brain
+
+    /// A glance at the brain: how big it is, what's being read, and the last
+    /// couple of changes — the Brain section has everything else.
+    private var brainCard: some View {
+        DashboardCard(title: "Brain") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "brain")
+                        .foregroundStyle(DS.Colors.accentText)
+                    Text(brainStore.pages.isEmpty
+                         ? "Nothing filed yet"
+                         : "\(brainStore.pages.count) \(brainStore.pages.count == 1 ? "page" : "pages")")
+                        .font(WispFont.bodyMedium)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    if brainIngestQueue.pendingJobCount > 0 {
+                        Text("· reading \(brainIngestQueue.pendingJobCount)")
+                            .font(WispFont.callout)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                    }
+                }
+                let recentBrainChanges = brainStore.changeRecords.filter { !$0.isUndone }.prefix(2)
+                if recentBrainChanges.isEmpty {
+                    Text("Wisp files lasting facts from your conversations here. Drop in files, links or notes to teach it more.")
+                        .font(WispFont.callout)
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(Array(recentBrainChanges)) { changeRecord in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(changeRecord.changeDescriptions.first ?? changeRecord.provenance.label)
+                                .font(WispFont.callout)
+                                .foregroundStyle(DS.Colors.textPrimary)
+                                .lineLimit(1)
+                            Text("\(changeRecord.provenance.label) · \(changeRecord.date.formatted(.relative(presentation: .named)))")
+                                .font(WispFont.caption)
+                                .foregroundStyle(DS.Colors.textTertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                HStack(spacing: 14) {
+                    Button {
+                        onSelectPage(.brainPages)
+                    } label: {
+                        Text("Open Brain")
+                            .font(WispFont.caption)
+                            .foregroundStyle(DS.Colors.accentText)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                    Button {
+                        onSelectPage(.brainInbox)
+                    } label: {
+                        Text("Add to Brain")
+                            .font(WispFont.caption)
+                            .foregroundStyle(DS.Colors.accentText)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                }
+            }
+        }
     }
 
     // MARK: - Recent answers

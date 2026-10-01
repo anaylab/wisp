@@ -22,6 +22,7 @@ struct WispWindowView: View {
     @ObservedObject var metricsRecorder: PerfMetricsRecorder
     @ObservedObject var router: WispWindowRouter
     @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var brainIngestQueue = BrainIngestQueue.shared
 
     var body: some View {
         NavigationSplitView {
@@ -87,7 +88,11 @@ struct WispWindowView: View {
         case .history:
             return taskRegistry.runningRecords.count
         case .buddies:
-            return buddyStore.buddies.filter { buddyStore.isRunning($0, in: taskRegistry) }.count
+            // Working, or finished with something the user hasn't read.
+            return buddyStore.buddiesNeedingAttentionCount(in: taskRegistry)
+        case .brain:
+            // Things still being read into the brain.
+            return brainIngestQueue.pendingJobCount
         case .settings:
             return companionManager.allPermissionsGranted ? 0 : 1
         default:
@@ -138,8 +143,18 @@ struct WispWindowView: View {
                 companionManager: companionManager,
                 onSelectPage: { router.select($0) }
             )
-        case .memory:
-            MemoryTab()
+        case .brainPages:
+            BrainPagesPage()
+        case .brainGraph:
+            BrainGraphPage()
+        case .brainInbox:
+            BrainInboxPage()
+        case .brainHealth:
+            BrainHealthPage()
+        case .brainLog:
+            BrainLogPage()
+        case .brainSettings:
+            BrainSettingsPage()
         case .marketplace:
             MarketplaceTab()
         case .tools:

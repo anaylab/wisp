@@ -418,6 +418,7 @@ func runSuite() async {
             case .toolUse(_, let name, _): return "toolUse(\(name))"
             case .toolResult(_, let name, _, _): return "toolResult(\(name))"
             case .image(_, let label): return "image(\(label))"
+            case .providerReplay(let providerFamily, _): return "providerReplay(\(providerFamily))"
             }
         }
     }

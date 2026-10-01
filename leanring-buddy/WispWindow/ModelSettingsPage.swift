@@ -223,6 +223,10 @@ private struct ModelProviderCard: View {
                 if selectedProviderKind.requiresAPIKey {
                     apiKeyField
                 }
+
+                if selectedProviderKind == .anthropic {
+                    ClaudeModelOptions(companionManager: companionManager)
+                }
             }
         }
         .onAppear {
@@ -319,6 +323,80 @@ private struct ModelProviderCard: View {
         apiKeyDraft = ""
         hasStoredAPIKey = false
         companionManager.rebuildSelectedModelProvider()
+    }
+}
+
+/// Claude's own choices, shown under the provider picker while Claude is
+/// selected: which model, how hard it thinks, and whether it may use the web.
+/// Each change rebuilds the provider so the next turn uses it.
+private struct ClaudeModelOptions: View {
+    @ObservedObject var companionManager: CompanionManager
+
+    @State private var selectedModel: AnthropicModelChoice = AnthropicModelSettings.selectedModel
+    @State private var effortLevel: AnthropicEffortLevel = AnthropicModelSettings.effortLevel
+    @State private var isWebAccessEnabled: Bool = AnthropicModelSettings.isWebAccessEnabled
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+
+            SettingRow(title: "Claude model", detail: selectedModel.shortDescription) {
+                Picker("Claude model", selection: $selectedModel) {
+                    ForEach(AnthropicModelChoice.allCases) { modelChoice in
+                        Text(modelChoice.displayName).tag(modelChoice)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .pointerCursor()
+            }
+            .onChange(of: selectedModel) { _, newModel in
+                AnthropicModelSettings.selectedModel = newModel
+                companionManager.rebuildSelectedModelProvider()
+            }
+
+            SettingRow(title: "Thinking", detail: thinkingDetail) {
+                Picker("Thinking", selection: $effortLevel) {
+                    ForEach(AnthropicEffortLevel.allCases) { effortLevel in
+                        Text(effortLevel.displayName).tag(effortLevel)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .pointerCursor()
+                .disabled(!selectedModel.usesAdaptiveThinkingAndEffort)
+            }
+            .onChange(of: effortLevel) { _, newEffortLevel in
+                AnthropicModelSettings.effortLevel = newEffortLevel
+                companionManager.rebuildSelectedModelProvider()
+            }
+
+            SettingRow(
+                title: "Search the web",
+                detail: "Lets Claude search and read web pages itself during tasks, on Anthropic's servers — without using your browser."
+            ) {
+                Toggle("Search the web", isOn: $isWebAccessEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .pointerCursor()
+            }
+            .onChange(of: isWebAccessEnabled) { _, newValue in
+                AnthropicModelSettings.isWebAccessEnabled = newValue
+                companionManager.rebuildSelectedModelProvider()
+            }
+        }
+    }
+
+    private var thinkingDetail: String {
+        guard selectedModel.usesAdaptiveThinkingAndEffort else {
+            return "Haiku answers without extended thinking."
+        }
+        switch effortLevel {
+        case .low: return "Quickest replies. Claude still thinks, but briefly."
+        case .medium: return "More thought for multi-step tasks, a little slower."
+        case .high: return "Deepest reasoning. Slowest and uses the most tokens."
+        }
     }
 }
 

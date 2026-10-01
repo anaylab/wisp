@@ -92,6 +92,8 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         menu.addItem(actionItem(title: "Open Wisp", action: #selector(openToday), keyEquivalent: "o"))
         menu.addItem(actionItem(title: "Chat", action: #selector(openChat)))
         menu.addItem(actionItem(title: "Buddies", action: #selector(openBuddies)))
+        menu.addItem(actionItem(title: "Brain", action: #selector(openBrain)))
+        menu.addItem(actionItem(title: "Add to Brain…", action: #selector(addToBrain)))
         menu.addItem(.separator())
 
         let pauseListeningItem = actionItem(title: "Pause Listening", action: #selector(togglePauseListening))
@@ -156,6 +158,15 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
     @objc private func openBuddies() {
         WispWindowNavigator.open(.buddies)
+    }
+
+    @objc private func openBrain() {
+        WispWindowNavigator.open(.brainPages)
+    }
+
+    /// The Inbox page is where files, links and text are dropped or picked.
+    @objc private func addToBrain() {
+        WispWindowNavigator.open(.brainInbox)
     }
 
     @objc private func openSettings() {

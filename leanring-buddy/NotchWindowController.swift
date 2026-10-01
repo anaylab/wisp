@@ -168,8 +168,8 @@ final class NotchWindowController {
         QuietModeMonitor.shared.start()
         MorningBriefingController.shared.start()
         // Buddies' scheduled runs; each run is a background task started here.
-        BuddyStore.shared.start { [weak companionManager] buddy in
-            companionManager?.startBuddyRun(buddy)
+        BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
+            companionManager?.startBuddyRun(buddy, request: runRequest)
         }
     }
 

@@ -10,7 +10,7 @@
 //  the dashboard, the pop-out conversation window and the settings pages inside
 //  the notch — so every setting now has exactly one home.
 //
-//  The sidebar has seven sections (`WispSection`). A section with several pages
+//  The sidebar has eight sections (`WispSection`). A section with several pages
 //  (`WispPage`) shows them as a segmented control in the toolbar. Anything that
 //  wants the window open at a particular page — the notch's gear, the menu bar
 //  menu, Today's "Review" button — calls `WispWindowNavigator.open(_:)`.
@@ -32,6 +32,7 @@ enum WispSection: String, CaseIterable, Identifiable {
     case home
     case chat
     case buddies
+    case brain
     case routines
     case history
     case connections
@@ -44,6 +45,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         case .home: return "Today"
         case .chat: return "Chat"
         case .buddies: return "Buddies"
+        case .brain: return "Brain"
         case .routines: return "Routines"
         case .history: return "History"
         case .connections: return "Connections"
@@ -56,6 +58,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         case .home: return "sun.max"
         case .chat: return "bubble.left.and.bubble.right"
         case .buddies: return "person.2"
+        case .brain: return "brain"
         case .routines: return "bolt"
         case .history: return "clock.arrow.circlepath"
         case .connections: return "powerplug"
@@ -69,15 +72,19 @@ enum WispSection: String, CaseIterable, Identifiable {
         case .home: return [.home]
         case .chat: return [.chat]
         case .buddies: return [.buddies]
+        // What Wisp knows, how it got there, and how to steer it. The old
+        // History → Memory page (memory.md facts + conversation history) folded
+        // into Brain: the user's page is Pages → Me, history lives in Settings.
+        case .brain: return [.brainPages, .brainGraph, .brainInbox, .brainHealth, .brainLog, .brainSettings]
         case .routines: return [.routines]
-        case .history: return [.timeline, .memory]
+        case .history: return [.timeline]
         case .connections: return [.marketplace, .tools, .sources]
         case .settings: return [.general, .shortcuts, .dictation, .cursor, .agent, .model]
         }
     }
 
     /// Sidebar groups: using Wisp, then managing it.
-    static let useSections: [WispSection] = [.home, .chat, .buddies, .routines, .history]
+    static let useSections: [WispSection] = [.home, .chat, .buddies, .brain, .routines, .history]
     static let manageSections: [WispSection] = [.connections, .settings]
 }
 
@@ -87,8 +94,13 @@ enum WispPage: String, CaseIterable, Identifiable {
     case chat
     case buddies
     case routines
+    case brainPages
+    case brainGraph
+    case brainInbox
+    case brainHealth
+    case brainLog
+    case brainSettings
     case timeline
-    case memory
     case marketplace
     case tools
     case sources
@@ -113,8 +125,13 @@ enum WispPage: String, CaseIterable, Identifiable {
         case .chat: return "Chat"
         case .buddies: return "Buddies"
         case .routines: return "Routines"
+        case .brainPages: return "Pages"
+        case .brainGraph: return "Graph"
+        case .brainInbox: return "Inbox"
+        case .brainHealth: return "Health"
+        case .brainLog: return "Log"
+        case .brainSettings: return "Settings"
         case .timeline: return "Timeline"
-        case .memory: return "Memory"
         case .marketplace: return "Marketplace"
         case .tools: return "Servers & Tools"
         case .sources: return "Sources"

@@ -22,7 +22,8 @@ enum ModelProviderFactory {
     /// `authenticationFailed` when it is actually asked to run — which the
     /// settings UI can surface without the app ever being without a provider.
     static func make(
-        _ providerKind: BuddyChatProviderKind = BuddyChatProviderSelection.current
+        _ providerKind: BuddyChatProviderKind = BuddyChatProviderSelection.current,
+        claudeModelOverride: AnthropicModelChoice? = nil
     ) -> any ModelProvider {
         switch providerKind {
         case .localOllama:
@@ -36,10 +37,21 @@ enum ModelProviderFactory {
             return GeminiProvider(apiKey: ProviderKeychainStore.apiKey(for: .gemini))
 
         case .anthropic:
-            return AnthropicProvider(apiKey: ProviderKeychainStore.apiKey(for: .anthropic))
+            return AnthropicProvider(
+                apiKey: ProviderKeychainStore.apiKey(for: .anthropic),
+                modelChoice: claudeModelOverride ?? AnthropicModelSettings.selectedModel,
+                effortLevel: AnthropicModelSettings.effortLevel,
+                isWebAccessEnabled: AnthropicModelSettings.isWebAccessEnabled
+            )
 
         case .openAI:
             return OpenAIProvider(apiKey: ProviderKeychainStore.apiKey(for: .openAI))
         }
+    }
+
+    /// Builds the provider a buddy chose for itself, so one buddy can run on
+    /// Claude while another stays on the local model.
+    static func make(_ buddyModelChoice: BuddyModelChoice) -> any ModelProvider {
+        make(buddyModelChoice.providerKind, claudeModelOverride: buddyModelChoice.claudeModel)
     }
 }

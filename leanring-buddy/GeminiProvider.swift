@@ -331,6 +331,9 @@ final class GeminiProvider: ModelProvider, @unchecked Sendable {
                         "response": ["result": content]
                     ]
                 ])
+            case .providerReplay:
+                // Another provider's private block; meaningless here.
+                continue
             }
         }
 
