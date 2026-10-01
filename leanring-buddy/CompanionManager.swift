@@ -2263,21 +2263,61 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// Starts one run of a buddy's job as a background task, listed under the
-    /// buddy's name. Returns the task id, or nil when the background-task limit
-    /// is reached (the buddy store retries a scheduled run a minute later).
-    func startBuddyRun(_ buddy: WispBuddy) -> UUID? {
-        guard BackgroundTaskLauncher.canStartAnotherTask else { return nil }
-        return BackgroundTaskLauncher.start(
-            request: buddy.instruction,
+    /// Starts one run for a buddy — its job, or a message the user sent it — as a
+    /// background task listed under the buddy's name. The run continues the
+    /// buddy's thread: earlier exchanges go in front of the model, and the answer
+    /// is filed back in the thread. Returns the task id, or nil when the
+    /// background-task limit is reached (the buddy store retries a scheduled run
+    /// a minute later).
+    func startBuddyRun(_ buddy: WispBuddy, request: BuddyRunRequest) -> UUID? {
+        // The buddy's own model if it picked one, else whatever Wisp uses. A
+        // cloud buddy is checked against the cloud ceiling, not the local queue.
+        let buddyModelProvider: any ModelProvider = buddy.modelChoice.map(ModelProviderFactory.make)
+            ?? selectedModelProvider
+        let runsOffThisMachine = buddyModelProvider.deployment.sendsDataOffThisMachine
+        guard BackgroundTaskLauncher.canStartAnotherTask(runsOffThisMachine: runsOffThisMachine) else { return nil }
+
+        let buddyThreadStore = BuddyThreadStore.shared
+        let buddyID = buddy.id
+        guard let runTaskID = BackgroundTaskLauncher.start(
+            request: request.text,
             title: AgentTaskRecord.buddyRunTitlePrefix + buddy.name,
-            modelProvider: selectedModelProvider,
-            systemPrompt: Self.companionVoiceResponseSystemPrompt,
+            modelProvider: buddyModelProvider,
+            systemPrompt: Self.companionVoiceResponseSystemPrompt
+                + BuddyThreadPolicy.systemPromptAddendum(buddyName: buddy.name, job: buddy.instruction)
+                + (request.requesterName.map(BuddyThreadPolicy.delegatedRequestAddendum(requesterName:)) ?? "")
+                + BuddyMemoryStore.shared.promptInstructions(forBuddyWithID: buddyID),
+            conversationHistory: buddyThreadStore.historyMessages(forBuddyWithID: buddyID),
+            toolkit: BuddyRunToolkitBuilder.toolkit(
+                forBuddyWithID: buddyID,
+                modelSendsDataOffThisMachine: runsOffThisMachine,
+                toolAccess: buddy.toolAccess,
+                // A run a peer started can't ask another peer in turn.
+                delegation: request.requesterName == nil ? (caller: buddy, service: .live()) : nil
+            ),
+            onSucceeded: { finishedTaskID, answerText in
+                buddyThreadStore.completeExchange(
+                    forBuddyWithID: buddyID,
+                    taskID: finishedTaskID,
+                    // Stored without Wisp's machine tags so replaying it never
+                    // shows the model a [POINT:…] or [SAY:…] it would imitate.
+                    answerText: AnswerDisplayText.cleaned(answerText)
+                )
+            },
             speakConfirmation: { [weak self] question in
                 guard let self else { return }
                 try? await self.ttsProvider.speakText(question)
             }
+        ) else { return nil }
+
+        buddyThreadStore.beginExchange(
+            forBuddyWithID: buddyID,
+            taskID: runTaskID,
+            origin: request.origin,
+            userText: request.text,
+            requesterName: request.requesterName
         )
+        return runTaskID
     }
 
     /// Starts any configured MCP servers.

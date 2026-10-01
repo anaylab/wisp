@@ -164,7 +164,50 @@ cloud dependency to the local path, without asking.
   Support/Wisp/buddies.json`) holds identity (name from `BuddyNameGenerator` — subject + role word,
   no model call; colour from `BuddyAppearance`, least-used first), the job, a `BuddySchedule`
   (once / daily / weekly; `inferred(fromInstruction:)` pre-fills the form from "every morning…"),
-  and the ids of its runs. A buddy has no loop of its own: each run is an ordinary background task
+  and the ids of its runs. Each buddy also has **one continuous thread** (`BuddyThreadStore`,
+  `~/Library/Application Support/Wisp/buddy-threads.json`, text only): every run — its job, or a
+  message the user typed in the buddy's thread (`BuddyStore.sendMessage`) — is an exchange
+  (question + answer). The last 6 answered exchanges (`BuddyThreadPolicy`, answers clipped to 1500
+  chars, machine tags stripped) go in front of the model as `conversationHistory`, and the system
+  prompt gets a persona addendum, so a run says what changed since last time and a reply stays in
+  context; 100 exchanges are kept. **Per-buddy memory** (`BuddyMemoryStore`, `~/Library/Application Support/Wisp/buddy-memory/<id>.md`, same
+  bullet format as memory.md): short notes the buddy saves with its own `remember_for_this_buddy` /
+  `forget_for_this_buddy` tools (`BuddyRunToolkitBuilder`, bound to that buddy, no confirmation — they only
+  touch its own file), rendered into its system prompt (≤800 chars, newest first, framed as data not
+  instructions since a model that read a web page wrote them), listed with a Forget button on its page.
+  Kept out of the Brain on purpose (works with the brain off, never enters the main assistant's retrieval).
+**Per-buddy tool allow-list** (`WispBuddy.toolAccess: BuddyToolAccess?`, nil = every tool, so existing
+  buddies are unchanged): limited to *groups* — `BuddyToolGroup` (Browser, Screen, Messages & Contacts, Reminders,
+  Shortcuts, Coding agent, Brain, Your memory) plus one `mcp:<server>` group per connected server — because the tool
+  list isn't fixed and a stored list of tool names would go stale or let a newly installed tool through. Anything
+  not in an allowed group is refused to a limited buddy, including tools in no group; `get_current_time` and
+  `load_skill` are always kept; `do_in_background` is never available to a buddy (it would start a task outside the
+  buddy's thread, model and limits). `BuddyToolAccessPolicy.isPermitted` is the one rule; it is enforced by
+  `AgentRunToolkit.permitsRegistryTool` *before* tool ranking (`AgentToolRegistry.definitions(forRequest:isToolPermitted:)`,
+  so a limited buddy still gets a full set of relevant tools) and again by name at call time (so a tool that
+  registers after the run began is held to it too). Edited with `BuddyToolAccessEditor` ("Tools · Browser, Screen"
+  on the page and in the new-buddy form); Brain/Your memory show as unavailable for a cloud-model buddy.
+    **Per-buddy model** (`WispBuddy.modelChoice: BuddyModelChoice?`, nil = follow Wisp): local, a Claude model,
+  GPT or Gemini, built by `ModelProviderFactory.make(_ choice:)`; picked with `BuddyModelEditor` (page + new
+  form), which says what leaves the Mac. A buddy whose model is off this machine (`deployment.sendsDataOffThisMachine`)
+  gets `BuddyRunToolPolicy.privateKnowledgeToolNames` removed — the brain tools plus `remember`/`forget` — both
+  from the tool list and refused by name (`AgentRunToolkit`), and bypasses `ModelAccessGate` (no resident model to
+  protect), so cloud buddies run in parallel with each other and with a live local turn. Capacity is
+  `BackgroundTaskCapacityPolicy`: 2 local, 4 cloud, counted separately in `BackgroundTaskLauncher`.
+  **Delegation** (`ask_buddy`, `Buddies/BuddyDelegation.swift`): a buddy can ask a peer for help; the peer answers in
+  *its own* thread (origin `.delegated`, `BuddyThreadExchange.requesterName`, shown with a "From <buddy>" label and
+  fed to the model as "<name> asked you: …"; the run's prompt says it's a peer's request, not the user's) and the
+  answer returns to the caller as the tool result. `BuddyDelegationService` (injectable, so the flow is tested without
+  the app) resolves the peer by name (ambiguous → asks which, never guesses; can't ask itself), starts the run via
+  `BuddyStore.startDelegatedRun`, and polls the task until it ends (5-minute cap, then stops the peer). A busy peer or a
+  full queue is reported back at once instead of waited on, so two buddies can't deadlock the queue. **Crossing a
+  model boundary asks first** — different `providerKind` between caller and target (local↔cloud either way, or two
+  different cloud providers): `BuddyDelegationPolicy.requiresApproval`, the card (`ToolConfirmationCardBuilder.askBuddyCard`)
+  names both buddies and models, the message and where it goes, and `ask_buddy` is on `ToolCallSafety`'s always-ask
+  list so session auto-approve doesn't skip it. Same-model delegation doesn't ask. **No chains**: a run started by a
+  delegation isn't given the tool. It is a run-only tool (`AgentRunTool`, so no registry entry) in the `.delegation`
+  tool group ("Other buddies"), and only offered when there is at least one peer and the buddy's allow-list permits it.
+  A buddy has no loop of its own: each run is an ordinary background task
   via `CompanionManager.startBuddyRun` → `BackgroundTaskLauncher.start(title: "Buddy · <name>")`,
   so it queues behind the model like any background work and its record lives in
   `AgentTaskRegistry`/History. The schedule is checked every minute while Wisp runs
@@ -727,6 +770,13 @@ names forward here.
 | `DynamicIsland/NotchWorkspaceView.swift` | ~725 | The notch's quick chat: `NotchWorkspacePage` (.chat), a sidebar of buddies and searchable conversations (Settings / Open Wisp buttons open the window), thread bubbles, the talk pill and a Type field → `askTypedQuestion`. |
 | `DynamicIsland/NotchIslandStyle.swift` | ~125 | `NotchIslandSurfaceStyle` (black default / Liquid Glass), the persisted `NotchIslandStylePreference`, the `wispNotchIslandSurface(in:style:)` modifier, and `WispIslandButtonStyle` (flat subtle fill / white prominent capsule). |
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
+| `Buddies/BuddyMemory.swift` | ~170 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete). |
+| `Buddies/BuddyModelChoice.swift` | ~75 | `BuddyModelChoice` (provider + optional Claude model, `allChoices`) and `BackgroundTaskCapacityPolicy` (local vs cloud concurrency). |
+| `Buddies/BuddyDelegation.swift` | ~230 | `ask_buddy`: `BuddyDelegationPolicy` (pure: peer resolution, when to ask, the boundary note), `BuddyDelegationService` (approval, start, wait, outcome; injectable) and the run-only tool. |
+| `Buddies/BuddyToolAccess.swift` | ~200 | `BuddyToolGroup`, `BuddyToolAccess` (the allow-list) and the pure `BuddyToolAccessPolicy` (`isPermitted`, server discovery, summaries). |
+| `Buddies/BuddyRunToolkit.swift` | ~120 | `BuddyRunToolPolicy` (tools a cloud buddy may not use) and `BuddyRunToolkitBuilder` (per-buddy memory tools + exclusions). |
+| `AgentRunToolkit.swift` | ~35 | Per-run tool changes for `AgentTurnRunner`: names to hide/refuse and run-only tools. |
+| `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyStore.swift` | ~390 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy`, `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/reschedule/delete). |
 | `Buddies/BuddyAvatar.swift` | ~130 | `BuddyAppearance` (the 8-colour palette) and `BuddyAvatar` (cloud + happy eyes, bobs while working, clock paused at rest). |
 | `Buddies/BuddyViews.swift` | ~620 | `BuddyScheduleEditor`, `BuddyDetailView` (a buddy's thread + Run now/Stop, schedule, rename, delete) and `NewBuddyForm`. |
@@ -767,6 +817,7 @@ running):
 ./Tests/ModelProviderContract/run.sh     # provider layer, ~10s
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
+./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a

@@ -18,7 +18,7 @@ import Foundation
 /// a compile-time Info.plist value, because the user changes it live in the
 /// dashboard. The Info.plist `ChatProvider` key survives only as the shipped
 /// default, which is always local.
-enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable {
+enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codable {
     /// The on-device Ollama model. The default, and the only provider whose
     /// requests never leave this machine.
     case localOllama

@@ -21,22 +21,33 @@ import UserNotifications
 
 @MainActor
 enum BackgroundTaskLauncher {
-    /// Ceiling on concurrent background tasks.
-    ///
-    /// They all queue behind one model anyway, so a larger number would only
-    /// lengthen the queue while making the dashboard harder to read.
-    private static let maximumConcurrentTasks = 2
+    /// Running tasks whose model is off this machine. They don't share the one
+    /// resident local model, so they are counted against their own, higher
+    /// ceiling (`BackgroundTaskCapacityPolicy`) instead of the local queue's.
+    private static var runningOffMachineTaskIDs: Set<UUID> = []
 
-    /// Whether another background task can start right now.
-    static var canStartAnotherTask: Bool {
-        AgentTaskRegistry.shared.backgroundRunningCount < maximumConcurrentTasks
+    /// Whether another background task can start right now, on the model
+    /// that runs here (or, with `runsOffThisMachine`, on a cloud model).
+    static func canStartAnotherTask(runsOffThisMachine: Bool = false) -> Bool {
+        BackgroundTaskCapacityPolicy.canStart(
+            runsOffThisMachine: runsOffThisMachine,
+            runningTotal: AgentTaskRegistry.shared.backgroundRunningCount,
+            runningOffThisMachine: runningOffMachineTaskIDs.count
+        )
     }
+
+    /// Whether another task on the local model can start right now.
+    static var canStartAnotherTask: Bool { canStartAnotherTask() }
 
     /// Starts a background agent task.
     ///
     /// - Parameter title: How the task is listed (History, the notch, the
     ///   notification). Defaults to the request itself; a buddy's run passes
     ///   "Buddy · <name>" instead of repeating its whole job.
+    /// - Parameter conversationHistory: Earlier exchanges to put in front of the
+    ///   model; a buddy passes its thread so a run continues the conversation.
+    /// - Parameter onSucceeded: Called with the task id and the answer when the
+    ///   task finishes successfully (a buddy files the answer in its thread).
     /// - Returns: The task's id, or nil when too many are already running.
     @discardableResult
     static func start(
@@ -44,20 +55,27 @@ enum BackgroundTaskLauncher {
         title: String? = nil,
         modelProvider: any ModelProvider,
         systemPrompt: String,
+        conversationHistory: [BuddyChatMessage] = [],
+        toolkit: AgentRunToolkit = .none,
+        onSucceeded: (@MainActor (UUID, String) -> Void)? = nil,
         speakConfirmation: @escaping @MainActor (String) async -> Void
     ) -> UUID? {
-        guard canStartAnotherTask else {
-            print("🌙 Background: refused \"\(request.prefix(40))\" — \(maximumConcurrentTasks) already running")
+        let runsOffThisMachine = modelProvider.deployment.sendsDataOffThisMachine
+        guard canStartAnotherTask(runsOffThisMachine: runsOffThisMachine) else {
+            print("🌙 Background: refused \"\(request.prefix(40))\" — too many already running")
             return nil
         }
 
         let displayTitle = title ?? request
         let taskID = AgentTaskRegistry.shared.beginTask(title: displayTitle, kind: .background)
+        if runsOffThisMachine { runningOffMachineTaskIDs.insert(taskID) }
 
         let work = Task { @MainActor in
+            defer { runningOffMachineTaskIDs.remove(taskID) }
             let runner = AgentTurnRunner(
                 modelProvider: modelProvider,
                 priority: .background,
+                toolkit: toolkit,
                 speakConfirmation: speakConfirmation
             )
 
@@ -69,7 +87,7 @@ enum BackgroundTaskLauncher {
                     // the most expensive thing a request can do.
                     images: [],
                     systemPrompt: systemPrompt,
-                    conversationHistory: [],
+                    conversationHistory: conversationHistory,
                     onNarration: { narration in
                         print("🌙 Background narration: \(narration)")
                     },
@@ -83,6 +101,7 @@ enum BackgroundTaskLauncher {
                     status: .succeeded,
                     finalText: outcome.terminalText
                 )
+                onSucceeded?(taskID, outcome.terminalText)
                 FinishedWorkInbox.shared.recordFinishedTask(taskID)
                 notifyCompletion(request: displayTitle, result: outcome.terminalText, didSucceed: true)
             } catch is CancellationError {

@@ -90,7 +90,14 @@ final class AgentToolRegistry: ObservableObject {
     /// Registered and exposed are separate concerns: everything registered is
     /// callable, but only what is exposed appears in the prompt and therefore
     /// costs tokens and competes for the model's attention.
-    func definitions(forRequest transcript: String) -> [BuddyToolDefinition] {
+    ///
+    /// - Parameter isToolPermitted: Tools a caller may not use are dropped
+    ///   *before* ranking, so a limited buddy still gets a full set of relevant
+    ///   tools instead of losing slots to ones it can't call.
+    func definitions(
+        forRequest transcript: String,
+        isToolPermitted: (String) -> Bool = { _ in true }
+    ) -> [BuddyToolDefinition] {
         // Apple Shortcuts are matched by name against the cached list — never
         // a fresh process spawn on the turn's critical path; a stale cache is
         // refreshed in the background for the next turn instead. See
@@ -100,8 +107,9 @@ final class AgentToolRegistry: ObservableObject {
             forRequest: transcript,
             knownShortcutNames: ShortcutsBridge.shared.cachedShortcutNames
         )
+        let routableDefinitions = definitions.filter { isToolPermitted($0.name) }
         let selectedDefinitions = AgentToolRouter.select(
-            from: definitions,
+            from: routableDefinitions,
             for: transcript,
             limit: AgentToolScope.maximumExposedTools,
             boostedToolNames: shortcutsRoutingHints.boostedToolNames

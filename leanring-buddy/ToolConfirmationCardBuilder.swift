@@ -80,6 +80,9 @@ enum ToolConfirmationCardBuilder {
         if ToolCallInspection.bareToolName(toolName) == ShortcutsToolRouting.runShortcutToolName {
             return runShortcutCard(toolInput: toolInput)
         }
+        if ToolCallInspection.bareToolName(toolName) == BuddyDelegationToolNames.askBuddy {
+            return askBuddyCard(toolInput: toolInput)
+        }
         // Its prepared input names the resolved person and handle, which the
         // generic message shape would show only half of.
         if ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage {
@@ -351,6 +354,36 @@ enum ToolConfirmationCardBuilder {
         blocks.append(.list(rows: [
             GlanceListRow(text: "Does whatever this shortcut is built to do", iconName: "info.circle", tone: .neutral)
         ]))
+        return GlanceCard(blocks: blocks)
+    }
+
+    // MARK: - Buddies
+
+    /// "Ask Buddy": who is asking whom, on which models, the message, and the
+    /// sentence saying where it goes — the reason this card appears at all.
+    static func askBuddyCard(toolInput: JSONValue) -> GlanceCard {
+        var blocks: [GlanceBlock] = [
+            .header(title: "Ask Buddy", iconName: "person", trailingText: "Buddies")
+        ]
+        var keyValuePairs: [GlanceKeyValuePair] = []
+        func modelSuffix(_ modelKey: String) -> String {
+            ToolCallInspection.stringValue(forAnyOf: [modelKey], in: toolInput).map { " · \($0)" } ?? ""
+        }
+        if let askerName = ToolCallInspection.stringValue(forAnyOf: ["from"], in: toolInput) {
+            keyValuePairs.append(GlanceKeyValuePair(key: "From", value: truncatedFieldValue(askerName + modelSuffix("from_model")), tone: .neutral))
+        }
+        if let targetName = ToolCallInspection.stringValue(forAnyOf: ["to"], in: toolInput) {
+            keyValuePairs.append(GlanceKeyValuePair(key: "To", value: truncatedFieldValue(targetName + modelSuffix("to_model")), tone: .neutral))
+        }
+        if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
+        if let bodyPreviewBlock = bodyPreviewBlock(forAnyOf: ["message"], in: toolInput) {
+            blocks.append(bodyPreviewBlock)
+        }
+        if let boundaryNote = ToolCallInspection.stringValue(forAnyOf: ["note"], in: toolInput) {
+            blocks.append(.list(rows: [
+                GlanceListRow(text: boundaryNote, iconName: "exclamationmark.triangle", tone: .neutral)
+            ]))
+        }
         return GlanceCard(blocks: blocks)
     }
 

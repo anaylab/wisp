@@ -68,6 +68,10 @@ final class AgentTurnRunner {
     /// still bounded, and the user can stop it at any time by talking.
     private static let longRunningToolTimeoutSeconds: [String: TimeInterval] = [
         "browser_task": 10 * 60,
+        // Waits for a peer buddy's whole run, plus the approval a model
+        // boundary can require first.
+        BuddyDelegationToolNames.askBuddy: ToolConfirmationCoordinator.confirmationTimeoutSeconds
+            + BuddyDelegationPolicy.answerTimeoutSeconds + 15,
         // A shortcut can call the network or other apps. Its own run is
         // bounded by `ShortcutsBridge.runTimeoutSeconds`; this outlasts that
         // plus the confirmation window, so the bridge's clearer "still
@@ -106,17 +110,29 @@ final class AgentTurnRunner {
     /// Whether this turn is something the user is waiting on. Background runs
     /// stand aside whenever a conversation needs the model.
     private let priority: ModelAccessGate.Priority
+    /// Tools hidden from, or added to, this run alone (see `AgentRunToolkit`).
+    private let toolkit: AgentRunToolkit
 
     init(
         modelProvider: any ModelProvider,
         toolRegistry: AgentToolRegistry = .shared,
         priority: ModelAccessGate.Priority = .interactive,
+        toolkit: AgentRunToolkit = .none,
         speakConfirmation: @escaping @MainActor (String) async -> Void
     ) {
         self.modelProvider = modelProvider
         self.toolRegistry = toolRegistry
         self.priority = priority
+        self.toolkit = toolkit
         self.speakConfirmation = speakConfirmation
+    }
+
+    /// Whether this run shares the one resident local model. A cloud model has
+    /// no such copy to protect, so its calls neither queue behind the local
+    /// model nor make it wait — that is what lets cloud buddies run in parallel
+    /// with each other and with a live conversation on the local model.
+    private var sharesLocalModelGate: Bool {
+        !modelProvider.deployment.sendsDataOffThisMachine
     }
 
     /// Runs the request to a final answer.
@@ -147,7 +163,9 @@ final class AgentTurnRunner {
         // against 262 and 0.36s for the handful that are relevant — and a 7B
         // model's tool choice degrades as the list grows, so the irrelevant
         // ones are worse than merely expensive.
-        let tools = toolRegistry.definitions(forRequest: userText)
+        let runToolkit = toolkit
+        let tools = toolRegistry.definitions(forRequest: userText, isToolPermitted: { runToolkit.permits($0) })
+            + toolkit.additionalTools.map(\.definition)
 
         var steps: [AgentStepRecord] = []
 
@@ -180,7 +198,7 @@ final class AgentTurnRunner {
 
             // Between steps, background work steps aside for anyone talking.
             // No-op when nothing is waiting.
-            if priority == .background {
+            if priority == .background && sharesLocalModelGate {
                 await ModelAccessGate.shared.yieldToInteractiveWorkIfNeeded()
                 try Task.checkCancellation()
             }
@@ -230,12 +248,15 @@ final class AgentTurnRunner {
             // is still delivered as increments so sentence-by-sentence
             // synthesis keeps working.
             let iterationDeltas = CollectedDeltas()
-            let turn = try await ModelAccessGate.shared.withAccess(priority: priority) {
+            let streamModelTurn = { [modelProvider] in
                 try await modelProvider.streamTurn(request) { delta in
                     iterationDeltas.append(delta)
                     onModelTextDelta(delta)
                 }
             }
+            let turn = sharesLocalModelGate
+                ? try await ModelAccessGate.shared.withAccess(priority: priority, operation: streamModelTurn)
+                : try await streamModelTurn()
 
             try Task.checkCancellation()
 
@@ -387,9 +408,22 @@ final class AgentTurnRunner {
         // that passed its own registry got its tool list honoured and its
         // implementations ignored, and no test could observe what actually ran.
         let registry = toolRegistry
+        let runToolkit = toolkit
+        // A tool this run isn't permitted is refused by name too: the model
+        // can call a tool it was never shown, and hiding the definition alone
+        // would not stop it. (A run-only tool is the run's own, so it's exempt.)
+        if runToolkit.additionalTool(named: name) == nil && !runToolkit.permits(name) {
+            return AgentToolRegistry.Outcome(
+                content: "the \(name) tool isn't available to you.",
+                isError: true, wasDeclined: false
+            )
+        }
         return await withTaskGroup(of: AgentToolRegistry.Outcome?.self) { group in
             group.addTask { @MainActor in
-                await registry.invoke(name: name, input: input)
+                if let runTool = runToolkit.additionalTool(named: name) {
+                    return AgentToolRegistry.Outcome(content: await runTool.run(input), isError: false, wasDeclined: false)
+                }
+                return await registry.invoke(name: name, input: input)
             }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(Self.timeoutSeconds(forToolNamed: name) * 1_000_000_000))

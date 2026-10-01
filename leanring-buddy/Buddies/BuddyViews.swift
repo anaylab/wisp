@@ -125,6 +125,185 @@ struct BuddyScheduleEditor: View {
     }
 }
 
+// MARK: - Model editor
+
+/// "Model: Same as Wisp / Local / Claude …". A cloud choice says plainly what
+/// leaves this Mac, and what doesn't.
+struct BuddyModelEditor: View {
+    @Binding var modelChoice: BuddyModelChoice?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Model")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .fixedSize()
+                Picker("Model", selection: $modelChoice) {
+                    Text("Same as Wisp").tag(BuddyModelChoice?.none)
+                    Divider()
+                    ForEach(BuddyModelChoice.allChoices) { choice in
+                        Text(menuLabel(for: choice)).tag(BuddyModelChoice?.some(choice))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .pointerCursor()
+            }
+            if let modelChoice, modelChoice.sendsDataOffThisMachine {
+                Text(ProviderKeychainStore.hasAPIKey(for: modelChoice.providerKind)
+                     ? "Its job, thread and notes go to \(modelChoice.providerKind.displayName). Your brain and memory stay here."
+                     : "Add a \(modelChoice.providerKind.displayName) key in Settings → Model, or this buddy can't run.")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(ProviderKeychainStore.hasAPIKey(for: modelChoice.providerKind)
+                                     ? DS.Colors.textTertiary : DS.Colors.warningText)
+                    // A minimum width, or the window's minimum-size pass wraps this
+                    // one word per line and the page grows taller than the window.
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func menuLabel(for choice: BuddyModelChoice) -> String {
+        choice.sendsDataOffThisMachine ? "\(choice.displayName) · cloud" : choice.displayName
+    }
+}
+
+// MARK: - Tool access editor
+
+/// "Tools · All tools ▸": what this buddy may use, as switches per group.
+/// Collapsed it is one line; a buddy with no limit shows "All tools".
+struct BuddyToolAccessEditor: View {
+    @Binding var toolAccess: BuddyToolAccess?
+    /// Whether the buddy's model runs off this Mac, which takes the brain and
+    /// the user's memory off the table.
+    let modelSendsDataOffThisMachine: Bool
+
+    @ObservedObject private var toolRegistry = AgentToolRegistry.shared
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @State private var isExpanded: Bool
+
+    init(toolAccess: Binding<BuddyToolAccess?>, modelSendsDataOffThisMachine: Bool, startsExpanded: Bool = false) {
+        _toolAccess = toolAccess
+        self.modelSendsDataOffThisMachine = modelSendsDataOffThisMachine
+        _isExpanded = State(initialValue: startsExpanded)
+    }
+
+    /// Only groups that have a tool right now, so no switch does nothing.
+    private var availableGroups: [BuddyToolGroup] {
+        let registeredToolNames = toolRegistry.toolNames
+        return BuddyToolGroup.allCases.filter { group in
+            // Asking other buddies is a run-only tool, not in the registry: it
+            // exists whenever there is more than this one buddy.
+            if group == .delegation { return buddyStore.buddies.count > 1 }
+            return registeredToolNames.contains { BuddyToolGroup.group(forToolNamed: $0) == group }
+        }
+    }
+
+    private var availableServerNames: [String] {
+        BuddyToolAccessPolicy.serverNames(inToolNames: toolRegistry.toolNames)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(WispMotion.smooth) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    Text("Tools · \(BuddyToolAccessPolicy.summary(of: toolAccess))")
+                        .font(.system(size: 11.5, weight: .medium))
+                }
+                .foregroundColor(DS.Colors.textSecondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .nativeTooltip("Choose what this buddy is allowed to use")
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 7) {
+                    Toggle(isOn: Binding(
+                        get: { toolAccess == nil },
+                        set: { allowsEveryTool in toolAccess = allowsEveryTool ? nil : BuddyToolAccess.nothing }
+                    )) {
+                        Text("Every tool")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundColor(DS.Colors.textPrimary)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+
+                    if let limitedToolAccess = toolAccess {
+                        ForEach(availableGroups) { group in
+                            groupRow(
+                                title: group.title,
+                                summary: group.summary,
+                                symbolName: group.symbolName,
+                                isAllowed: limitedToolAccess.allows(group),
+                                isUnavailable: group.isPrivateKnowledge && modelSendsDataOffThisMachine,
+                                groupID: group.rawValue
+                            )
+                        }
+                        ForEach(availableServerNames, id: \.self) { serverName in
+                            groupRow(
+                                title: serverName,
+                                summary: "Connected app",
+                                symbolName: "puzzlepiece.extension",
+                                isAllowed: limitedToolAccess.allowsServer(named: serverName),
+                                isUnavailable: false,
+                                groupID: BuddyToolAccessPolicy.groupID(forServerNamed: serverName)
+                            )
+                        }
+                    }
+                }
+                .padding(.leading, 14)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private func groupRow(
+        title: String, summary: String, symbolName: String,
+        isAllowed: Bool, isUnavailable: Bool, groupID: String
+    ) -> some View {
+        Toggle(isOn: Binding(
+            get: { isAllowed && !isUnavailable },
+            set: { newValue in toolAccess = toolAccess?.setting(groupID: groupID, isAllowed: newValue) }
+        )) {
+            HStack(spacing: 6) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 10.5))
+                    .frame(width: 14)
+                    .foregroundColor(DS.Colors.textTertiary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Text(isUnavailable ? "Not available to cloud models" : summary)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+            }
+        }
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .disabled(isUnavailable)
+        .opacity(isUnavailable ? 0.55 : 1)
+    }
+}
+
+extension BuddyModelChoice {
+    /// Whether a buddy with this choice (nil = follows Wisp) runs off this Mac.
+    static func sendsDataOffThisMachine(_ choice: BuddyModelChoice?) -> Bool {
+        choice?.sendsDataOffThisMachine ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine
+    }
+}
+
 // MARK: - A buddy's thread
 
 struct BuddyDetailView: View {
@@ -134,8 +313,13 @@ struct BuddyDetailView: View {
 
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
+    @ObservedObject private var threadStore = BuddyThreadStore.shared
+    @ObservedObject private var memoryStore = BuddyMemoryStore.shared
 
     @State private var expandedRunIDs: Set<UUID> = []
+    @State private var draftMessageText = ""
+    @State private var isMemoryExpanded = false
+    @FocusState private var isMessageFieldFocused: Bool
     @State private var isRenaming = false
     @State private var editedName = ""
     @State private var isConfirmingDeletion = false
@@ -164,6 +348,14 @@ struct BuddyDetailView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         greetingBubble(for: buddy)
                         jobCard(for: buddy)
+                        memorySection(for: buddy)
+                        BuddyToolAccessEditor(
+                            toolAccess: Binding(
+                                get: { buddy.toolAccess },
+                                set: { newToolAccess in buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: newToolAccess) }
+                            ),
+                            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice)
+                        )
                         if runRecords.isEmpty {
                             Text(buddy.schedule.isRepeating
                                  ? "Hasn't run yet — its first run is \(nextRunPhrase(for: buddy))."
@@ -172,7 +364,7 @@ struct BuddyDetailView: View {
                                 .foregroundColor(DS.Colors.textTertiary)
                         }
                         ForEach(runRecords) { runRecord in
-                            runView(runRecord)
+                            runView(runRecord, buddyID: buddy.id)
                         }
                         Color.clear
                             .frame(height: 1)
@@ -192,6 +384,7 @@ struct BuddyDetailView: View {
                 }
             }
 
+            messageField(for: buddy, isRunning: isRunning)
             controlBar(for: buddy, isRunning: isRunning)
         }
         .onChange(of: buddyID) { _, _ in
@@ -199,6 +392,7 @@ struct BuddyDetailView: View {
             isConfirmingDeletion = false
             didFailToStartRun = false
             expandedRunIDs = []
+            draftMessageText = ""
         }
     }
 
@@ -295,6 +489,59 @@ struct BuddyDetailView: View {
         }
     }
 
+    /// What the buddy has chosen to remember. Hidden until it has saved
+    /// something; each note can be forgotten.
+    @ViewBuilder
+    private func memorySection(for buddy: WispBuddy) -> some View {
+        let savedNotes = memoryStore.facts(ofBuddyWithID: buddy.id)
+        if !savedNotes.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Button {
+                    withAnimation(WispMotion.smooth) { isMemoryExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(isMemoryExpanded ? 90 : 0))
+                        Text(savedNotes.count == 1 ? "Remembers 1 thing" : "Remembers \(savedNotes.count) things")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+
+                if isMemoryExpanded {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(savedNotes, id: \.self) { savedNote in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(savedNote)
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 4)
+                                Button {
+                                    memoryStore.forgetExactFact(savedNote, forBuddyWithID: buddy.id)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundColor(DS.Colors.textTertiary)
+                                }
+                                .buttonStyle(.plain)
+                                .pointerCursor()
+                                .nativeTooltip("Forget this")
+                            }
+                        }
+                    }
+                    .padding(.leading, 14)
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
     private func scheduleLine(for buddy: WispBuddy) -> String {
         guard buddy.schedule.isRepeating else { return buddy.schedule.summary() }
         return "\(buddy.schedule.summary()) · next \(nextRunPhrase(for: buddy)) · while Wisp is running"
@@ -309,8 +556,17 @@ struct BuddyDetailView: View {
         return nextScheduledRunAt.formatted(.dateTime.weekday(.wide)) + " at \(timeText)"
     }
 
-    private func runView(_ runRecord: AgentTaskRecord) -> some View {
+    private func runView(_ runRecord: AgentTaskRecord, buddyID: UUID) -> some View {
         VStack(alignment: .leading, spacing: 7) {
+            // A run of the buddy's own job needs no bubble (the job card says it);
+            // one the user started with a message shows what they said.
+            if let messageExchange = threadStore.exchange(forTaskID: runRecord.id, ofBuddyWithID: buddyID),
+               messageExchange.origin != .job {
+                userMessageBubble(
+                    messageExchange.userText,
+                    senderName: messageExchange.origin == .delegated ? messageExchange.requesterName : nil
+                )
+            }
             if !runRecord.steps.isEmpty {
                 progressDisclosure(for: runRecord)
             }
@@ -322,6 +578,30 @@ struct BuddyDetailView: View {
                     .foregroundColor(DS.Colors.textTertiary)
             }
         }
+    }
+
+    /// What was asked: the user's message, or — with `senderName` — another
+    /// buddy's request, labelled so it isn't mistaken for the user's.
+    private func userMessageBubble(_ messageText: String, senderName: String? = nil) -> some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            if let senderName {
+                Text("From \(senderName)")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            Text(messageText)
+                .font(.system(size: 12.5))
+                .foregroundColor(DS.Colors.textPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(senderName == nil ? WispColor.Brand.sage.opacity(0.22) : WispColor.surface3)
+                )
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private func progressDisclosure(for runRecord: AgentTaskRecord) -> some View {
@@ -450,6 +730,47 @@ struct BuddyDetailView: View {
 
     // MARK: Controls
 
+    /// Reply to the buddy. It answers in the same thread, remembering the
+    /// earlier exchanges; disabled while it is mid-run.
+    private func messageField(for buddy: WispBuddy, isRunning: Bool) -> some View {
+        let trimmedDraft = draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HStack(spacing: 8) {
+            TextField("Message \(buddy.name)", text: $draftMessageText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+                .foregroundColor(DS.Colors.textPrimary)
+                .focused($isMessageFieldFocused)
+                .disabled(isRunning)
+                .onSubmit { sendDraftMessage(to: buddy) }
+            Button {
+                sendDraftMessage(to: buddy)
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(trimmedDraft.isEmpty || isRunning ? DS.Colors.textTertiary : WispColor.Brand.sage)
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .disabled(trimmedDraft.isEmpty || isRunning)
+            .nativeTooltip("Send")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Capsule(style: .continuous).fill(WispColor.surface2))
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(isMessageFieldFocused ? WispColor.Brand.sage.opacity(0.7) : DS.Colors.borderSubtle, lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+    }
+
+    private func sendDraftMessage(to buddy: WispBuddy) {
+        let didStart = buddyStore.sendMessage(draftMessageText, toBuddyWithID: buddy.id)
+        didFailToStartRun = !didStart && !draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if didStart { draftMessageText = "" }
+    }
+
     private func controlBar(for buddy: WispBuddy, isRunning: Bool) -> some View {
         HStack(spacing: 10) {
             if isRunning {
@@ -469,14 +790,20 @@ struct BuddyDetailView: View {
                 }
                 .wispGlassButtonStyle(prominence: .prominent, cornerRadius: 999)
                 .nativeTooltip(didFailToStartRun
-                    ? "Two background tasks are already running — try again when one finishes"
+                    ? "This buddy's model is busy with other runs — try again when one finishes"
                     : "Do its job now")
             }
 
-            BuddyScheduleEditor(schedule: Binding(
-                get: { buddy.schedule },
-                set: { newSchedule in buddyStore.updateSchedule(ofBuddyWithID: buddy.id, to: newSchedule) }
-            ))
+            VStack(alignment: .leading, spacing: 6) {
+                BuddyScheduleEditor(schedule: Binding(
+                    get: { buddy.schedule },
+                    set: { newSchedule in buddyStore.updateSchedule(ofBuddyWithID: buddy.id, to: newSchedule) }
+                ))
+                BuddyModelEditor(modelChoice: Binding(
+                    get: { buddy.modelChoice },
+                    set: { newModelChoice in buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: newModelChoice) }
+                ))
+            }
 
             Spacer(minLength: 0)
 
@@ -530,6 +857,8 @@ struct NewBuddyForm: View {
     @State private var schedule: BuddySchedule = .once
     /// Once the user picks a schedule themselves, stop guessing it from the text.
     @State private var hasChosenScheduleByHand = false
+    @State private var modelChoice: BuddyModelChoice?
+    @State private var toolAccess: BuddyToolAccess?
     @FocusState private var isInstructionFieldFocused: Bool
 
     private var trimmedInstruction: String {
@@ -553,6 +882,9 @@ struct NewBuddyForm: View {
                     Text("A buddy takes one job and keeps at it — once, or on a schedule. Its runs happen in the background.")
                         .font(.system(size: 11.5))
                         .foregroundColor(DS.Colors.textSecondary)
+                        // Same reason as the model note: without a minimum width the
+                        // window's minimum-size pass makes this text enormously tall.
+                        .frame(minWidth: 280, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -589,6 +921,12 @@ struct NewBuddyForm: View {
                 }
             ))
 
+            BuddyModelEditor(modelChoice: $modelChoice)
+            BuddyToolAccessEditor(
+                toolAccess: $toolAccess,
+                modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(modelChoice)
+            )
+
             Spacer(minLength: 0)
 
             HStack(spacing: 8) {
@@ -600,6 +938,8 @@ struct NewBuddyForm: View {
                     let newBuddy = buddyStore.createBuddy(
                         instruction: trimmedInstruction,
                         schedule: schedule,
+                        modelChoice: modelChoice,
+                        toolAccess: toolAccess,
                         runImmediately: !schedule.isRepeating
                     )
                     onCreated(newBuddy.id)

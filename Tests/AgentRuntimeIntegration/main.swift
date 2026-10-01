@@ -749,6 +749,8 @@ func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
               messageShape(outcome?.messages ?? []).last ?? "nothing")
     }
 
+    await buddyBotSuite()
+
     print("\n\(String(repeating: "─", count: 52))")
     print("  \(tally.passed) passed, \(tally.failed) failed, \(tally.passed + tally.failed) total")
     exit(tally.failed == 0 ? 0 : 1)
