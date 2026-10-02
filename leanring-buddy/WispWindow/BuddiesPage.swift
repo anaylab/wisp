@@ -14,12 +14,26 @@ import SwiftUI
 struct BuddiesPage: View {
     @ObservedObject var taskRegistry: AgentTaskRegistry
     @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var router = WispWindowRouter.shared
 
     @State private var selectedBuddyID: UUID?
     @State private var isCreatingBuddy = false
     /// The buddy a right-click asked to clear or delete, awaiting confirmation.
     @State private var buddyIDPendingClear: UUID?
     @State private var buddyIDPendingDeletion: UUID?
+
+    /// Today's Buddies tile can ask for a particular buddy, or the new-buddy
+    /// form; take the request once and clear it.
+    private func takeRequestFromOtherPages() {
+        if router.isNewBuddyFormRequested {
+            router.isNewBuddyFormRequested = false
+            isCreatingBuddy = true
+        } else if let requestedBuddyID = router.buddyIDToOpen {
+            router.buddyIDToOpen = nil
+            isCreatingBuddy = false
+            selectedBuddyID = requestedBuddyID
+        }
+    }
 
     var body: some View {
         Group {
@@ -38,10 +52,13 @@ struct BuddiesPage: View {
             }
         }
         .onAppear {
+            takeRequestFromOtherPages()
             if selectedBuddyID == nil {
                 selectedBuddyID = buddyStore.orderedBuddies(in: taskRegistry).first?.id
             }
         }
+        .onChange(of: router.buddyIDToOpen) { _, _ in takeRequestFromOtherPages() }
+        .onChange(of: router.isNewBuddyFormRequested) { _, _ in takeRequestFromOtherPages() }
         .onChange(of: buddyStore.buddies.map(\.id)) { _, remainingBuddyIDs in
             // The open buddy was deleted: show the next one rather than nothing.
             if let selectedBuddyID, !remainingBuddyIDs.contains(selectedBuddyID) {

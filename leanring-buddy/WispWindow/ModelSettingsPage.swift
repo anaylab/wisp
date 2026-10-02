@@ -418,17 +418,13 @@ struct DashboardCard<Content: View>: View {
                 content
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(WispColor.groupedCardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(WispColor.cardSeparator, lineWidth: 0.5)
-            )
+            .padding(16)
+            // Same surface as Today's bento tiles, so every page of the window
+            // reads as one system.
+            .wispBentoSurface()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .wispEntrance()
     }
 }
 

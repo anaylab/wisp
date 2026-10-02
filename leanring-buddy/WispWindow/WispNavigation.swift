@@ -79,7 +79,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         case .routines: return [.routines]
         case .history: return [.timeline]
         case .connections: return [.marketplace, .tools, .sources]
-        case .settings: return [.general, .shortcuts, .dictation, .cursor, .agent, .model]
+        case .settings: return [.general, .shortcuts, .dictation, .agent, .model]
         }
     }
 
@@ -107,7 +107,6 @@ enum WispPage: String, CaseIterable, Identifiable {
     case general
     case shortcuts
     case dictation
-    case cursor
     case agent
     case model
 
@@ -138,7 +137,6 @@ enum WispPage: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .shortcuts: return "Shortcuts"
         case .dictation: return "Dictation"
-        case .cursor: return "Cursor"
         case .agent: return "Agent"
         case .model: return "Model"
         }
@@ -151,6 +149,12 @@ final class WispWindowRouter: ObservableObject {
     static let shared = WispWindowRouter()
 
     @Published private(set) var selectedPage: WispPage = .home
+
+    /// A buddy another page asked the Buddies page to show (Today's Buddies
+    /// tile). The Buddies page takes it and clears it.
+    @Published var buddyIDToOpen: UUID?
+    /// Today's "+" asked the Buddies page to open the new-buddy form.
+    @Published var isNewBuddyFormRequested = false
 
     /// The page last open in each section, so returning to Settings lands on
     /// Dictation again rather than resetting to the section's first page.
