@@ -19,6 +19,7 @@ struct GeneralSettingsPage: View {
     @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
+    @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
 
     var body: some View {
         ScrollView {
@@ -53,7 +54,38 @@ struct GeneralSettingsPage: View {
                 .fixedSize()
                 .pointerCursor()
             }
+            Divider()
+            SettingRow(
+                title: "Marker colour",
+                detail: "The colour of the markers, boxes and arrows Wisp draws on screen."
+            ) {
+                HStack(spacing: 8) {
+                    ForEach(WispCursorColor.allCases) { markerColor in
+                        markerColorSwatch(markerColor)
+                    }
+                }
+            }
         }
+    }
+
+    private func markerColorSwatch(_ markerColor: WispCursorColor) -> some View {
+        let isSelected = cursorAppearance.selectedColor == markerColor
+        return Button {
+            withAnimation(WispMotion.island) { cursorAppearance.selectedColor = markerColor }
+        } label: {
+            Circle()
+                .fill(markerColor.color)
+                .frame(width: 18, height: 18)
+                .padding(3)
+                .overlay(
+                    Circle().strokeBorder(isSelected ? markerColor.color : .clear, lineWidth: 2)
+                )
+                .scaleEffect(isSelected ? 1.08 : 1)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .nativeTooltip(markerColor.displayName)
     }
 
     private var voiceCard: some View {

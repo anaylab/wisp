@@ -23,15 +23,30 @@ struct WispWindowView: View {
     @ObservedObject var router: WispWindowRouter
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var brainIngestQueue = BrainIngestQueue.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var pageTransition: AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: 8)),
+            removal: .opacity
+        )
+    }
 
     var body: some View {
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
         } detail: {
-            pageContent(router.selectedPage)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(WispColor.windowBackground)
+            // Each page gets its own identity so switching pages crossfades
+            // with a small lift instead of swapping in place.
+            ZStack {
+                pageContent(router.selectedPage)
+                    .id(router.selectedPage)
+                    .transition(pageTransition)
+            }
+            .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.9), value: router.selectedPage)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(WispColor.windowBackground)
                 .navigationTitle(router.selectedSection.title)
                 .toolbar {
                     if router.selectedSection.pages.count > 1 {
@@ -70,7 +85,7 @@ struct WispWindowView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            WispWindowStatusFooter()
+            WispWindowStatusFooter(companionManager: companionManager)
         }
     }
 
@@ -167,8 +182,6 @@ struct WispWindowView: View {
             ShortcutsTab()
         case .dictation:
             DictationTab()
-        case .cursor:
-            CursorTab(companionManager: companionManager)
         case .agent:
             AgentTab(companionManager: companionManager)
         case .model:
@@ -177,32 +190,48 @@ struct WispWindowView: View {
     }
 }
 
-/// The sidebar's footer: which model is answering and whether it's warm, in
-/// one quiet line. It replaced the old dashboard's memory gauge, which sat at
-/// 95%+ red on any Mac with a local model loaded and read as an alarm; the full
-/// memory readout lives in Settings → Model.
+/// The sidebar's footer: Wisp itself, alive — the mark moves with what Wisp
+/// is doing (listening, thinking, acting) and the line under it says so —
+/// plus which model is answering and whether it's warm. It replaced the old
+/// dashboard's memory gauge, which sat at 95%+ red on any Mac with a local
+/// model loaded and read as an alarm; the full memory readout lives in
+/// Settings → Model.
 private struct WispWindowStatusFooter: View {
+    @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var stackReadout = ActiveStackReadout.shared
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(residencyColor)
-                .frame(width: 7, height: 7)
+        let islandState = companionManager.islandState
+        HStack(spacing: 10) {
+            WispMark(state: islandState.markState, size: 26)
+                .frame(width: 30, height: 30)
+                .background(
+                    Circle()
+                        .fill(islandState.isActive ? WispColor.intelligence.opacity(0.18) : WispColor.accentSubtle)
+                )
+                .animation(WispMotion.smooth, value: islandState.isActive)
             VStack(alignment: .leading, spacing: 1) {
-                Text(stackReadout.chatModelName)
-                    .font(.caption.weight(.medium).monospaced())
+                Text(companionManager.isListeningPaused ? "Listening paused" : islandState.label)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(stackReadout.isEntirelyLocal ? "Running on this Mac" : "Uses a cloud service")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .contentTransition(.opacity)
+                    .animation(WispMotion.smooth, value: islandState.label)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(residencyColor)
+                        .frame(width: 6, height: 6)
+                    Text(stackReadout.chatModelName)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .nativeTooltip(stackReadout.isEntirelyLocal ? "Running on this Mac" : "Uses a cloud service")
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .onAppear { stackReadout.startPolling() }
         .onDisappear { stackReadout.stopPolling() }
     }

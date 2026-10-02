@@ -267,34 +267,13 @@ final class CompanionManager: ObservableObject {
     /// Used by the panel to show accurate status text ("Active" vs "Ready").
     @Published private(set) var isOverlayVisible: Bool = false
 
-    /// Whether the cursor stays on screen when Wisp has nothing to do.
-    ///
-    /// Off by default, which means the cursor is invisible at rest, fades in
-    /// when you hold the hotkey, points at whatever it is describing, and
-    /// fades out a second after it finishes speaking.
-    ///
-    /// The always-on behaviour used to be the default. For an app that sits in
-    /// the menu bar all day that is a mark trailing the pointer through every
-    /// unrelated task, which is noise the rest of the time — the cursor should
-    /// earn its place on screen by having something to say.
-    @Published var isCursorAlwaysVisible: Bool =
-        UserDefaults.standard.bool(forKey: "isCursorAlwaysVisible")
-
-    func setCursorAlwaysVisible(_ enabled: Bool) {
-        isCursorAlwaysVisible = enabled
-        UserDefaults.standard.set(enabled, forKey: "isCursorAlwaysVisible")
-        transientHideTask?.cancel()
-        transientHideTask = nil
-
-        if enabled {
-            overlayWindowManager.hasShownOverlayBefore = true
-            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
-            isOverlayVisible = true
-        } else {
-            overlayWindowManager.hideOverlay()
-            isOverlayVisible = false
-        }
-    }
+    /// Whether the overlay stays on screen when Wisp has nothing to do. Always
+    /// false now: there is no flying cursor any more, so an always-on overlay
+    /// would only be an invisible full-screen panel. The overlay fades in for
+    /// markers and confirmations and out again afterwards. The old Cursor
+    /// settings page that toggled this is gone, and a stored `true` from it is
+    /// deliberately ignored.
+    let isCursorAlwaysVisible = false
 
     /// Whether every permission has been granted at some point.
     ///
