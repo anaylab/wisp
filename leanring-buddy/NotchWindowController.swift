@@ -62,6 +62,19 @@ final class NotchViewModel: ObservableObject {
     @Published var isFileDragNearby: Bool = false
     /// A short result line shown after a drop ("Added 2 files to your brain").
     @Published var fileDropFeedback: String?
+    /// A notice the notch dropped on its own (a coding session finished, a
+    /// payment came in); cleared by the controller once its moment has passed.
+    @Published var presentedNotice: NotchNotice?
+    /// Set by the controller: carries out the user's choice for a dropped file.
+    var performFileDropChoice: ((NotchFileDropChoice) -> Void)?
+}
+
+/// What to do with a file dropped on the notch.
+enum NotchFileDropChoice {
+    case askAboutIt
+    case addToBrain
+    case email
+    case dismiss
 }
 
 @MainActor
@@ -87,6 +100,15 @@ final class NotchWindowController {
     /// Marks the "new" background results seen once the user has opened the
     /// full panel (where they are listed) and then closed it again.
     private var finishedWorkSeenObserver: AnyCancellable?
+    /// Opens the island for a coding agent's permission request and keeps it
+    /// open until every pending one is answered.
+    private var codingAgentApprovalObserver: AnyCancellable?
+    /// Drops a short "finished" notice when a coding session stops.
+    private var codingAgentCompletionObserver: AnyCancellable?
+    /// Drops a short notice for a new payment, deploy, failed workflow…
+    private var serviceAnnouncementObserver: AnyCancellable?
+    private var noticeClearWorkItem: DispatchWorkItem?
+    private var pendingDropExpiryWorkItem: DispatchWorkItem?
 
     /// Hover is ignored until this moment. Set when the HUD is force-collapsed
     /// (e.g. a skill was launched) so the click that triggered it — or the
@@ -167,6 +189,11 @@ final class NotchWindowController {
         // Quiet mode first, so the briefing's first check already knows about a call.
         QuietModeMonitor.shared.start()
         MorningBriefingController.shared.start()
+        // Coding agents (Claude Code, Gemini CLI, Antigravity) report in over
+        // a local socket once their hooks are installed; services poll only
+        // once the user has saved a key for them.
+        CodingAgentSessionStore.shared.start()
+        ServiceIntegrationMonitor.shared.start()
         // Buddies' scheduled runs; each run is a background task started here.
         BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
             companionManager?.startBuddyRun(buddy, request: runRequest)
@@ -189,6 +216,9 @@ final class NotchWindowController {
         viewModel.windowSize = panelSize
         viewModel.requestWorkspacePage = { [weak self] requestedPage in
             self?.setWorkspacePage(requestedPage)
+        }
+        viewModel.performFileDropChoice = { [weak self] fileDropChoice in
+            self?.performFileDropChoice(fileDropChoice)
         }
 
         let notchHUDView = NotchHUDView(
@@ -225,17 +255,18 @@ final class NotchWindowController {
         notchPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         // Collapsed to begin with, so the transparent window is click-through.
         notchPanel.ignoresMouseEvents = true
-        // Dropping a file on the notch adds it to the brain. The drop view is a
-        // sibling above the hosting view (not a wrapper, not SwiftUI's onDrop —
-        // neither received drags on this panel); it ignores clicks.
+        // Dropping a file on the notch offers Ask about it / Add to brain /
+        // Email. The drop view is a sibling above the hosting view (not a
+        // wrapper, not SwiftUI's onDrop — neither received drags on this
+        // panel); it ignores clicks.
         let panelContentContainerView = NSView(frame: NSRect(origin: .zero, size: panelSize))
         hostingView.frame = panelContentContainerView.bounds
         hostingView.autoresizingMask = [.width, .height]
         let fileDropView = NotchFileDropView(frame: panelContentContainerView.bounds)
         fileDropView.autoresizingMask = [.width, .height]
-        fileDropView.canAcceptFiles = { BrainPreferences.shared.isBrainEnabled }
+        fileDropView.canAcceptFiles = { true }
         fileDropView.onFilesDropped = { [weak self] droppedFileURLs in
-            self?.addDroppedFilesToBrain(droppedFileURLs) ?? false
+            self?.receiveDroppedFiles(droppedFileURLs) ?? false
         }
         panelContentContainerView.addSubview(hostingView)
         panelContentContainerView.addSubview(fileDropView)
@@ -301,6 +332,28 @@ final class NotchWindowController {
                 self.autoPresentMorningBriefing()
             }
 
+        codingAgentApprovalObserver = CodingAgentSessionStore.shared.$pendingApprovals
+            .map(\.count)
+            .removeDuplicates()
+            .sink { [weak self] pendingApprovalCount in
+                self?.updateForPendingCodingAgentApprovals(count: pendingApprovalCount)
+            }
+
+        codingAgentCompletionObserver = CodingAgentSessionStore.shared.$latestCompletion
+            .compactMap { $0 }
+            .removeDuplicates()
+            .sink { [weak self] completion in
+                self?.announceCodingAgentCompletion(completion)
+            }
+
+        serviceAnnouncementObserver = ServiceIntegrationMonitor.shared.$latestAnnouncement
+            .compactMap { $0 }
+            .removeDuplicates()
+            .sink { [weak self] serviceEvent in
+                guard let self, self.canDropNoticeNow() else { return }
+                self.presentNotice(.serviceEvent(serviceEvent))
+            }
+
         finishedWorkSeenObserver = viewModel.$isFullPanel
             .removeDuplicates()
             .dropFirst()
@@ -328,8 +381,13 @@ final class NotchWindowController {
                     self.presentationHoldUntil = .distantPast
                     return
                 }
+                // A permission card stays up through a turn: the agent is
+                // blocked on it, and it's a click, not part of the screenshot's
+                // subject.
+                if !CodingAgentSessionStore.shared.pendingApprovals.isEmpty { return }
                 self.viewModel.isExpanded = false
                 self.viewModel.isFullPanel = false
+                self.viewModel.presentedNotice = nil
                 // A dismiss means the current answer surface is being cleared off
                 // the screen, so the glance card goes with it.
                 self.companionManager.resolvedGlanceCard = nil
@@ -505,7 +563,10 @@ final class NotchWindowController {
         // own regardless of hover. Once the hold expires the normal hover logic
         // resumes, so if the cursor is over the panel it stays open and
         // otherwise it collapses.
+        // A coding agent waiting on a permission holds the island open too:
+        // it can't continue until the user answers.
         let isWithinPresentationHold = Date() < presentationHoldUntil
+            || !CodingAgentSessionStore.shared.pendingApprovals.isEmpty
 
         if viewModel.isExpanded {
             // Hovering the surface is a deliberate look — upgrade a compact
@@ -554,7 +615,7 @@ final class NotchWindowController {
     private func updateFileDragState(geometry: NotchGeometry, mouseLocation: CGPoint) -> Bool {
         let isFileDragInProgress = fileDragDetector.isFileDragInProgress()
         if !isFileDragInProgress { exitFileDragPanelMode() }
-        guard isFileDragInProgress, BrainPreferences.shared.isBrainEnabled, !viewModel.isWorkspaceOpen else {
+        guard isFileDragInProgress, !viewModel.isWorkspaceOpen else {
             if viewModel.isFileDragNearby { viewModel.isFileDragNearby = false }
             return false
         }
@@ -597,6 +658,65 @@ final class NotchWindowController {
         panel.level = normalPanelLevel
         panel.allowsBecomingKey = viewModel.isWorkspaceOpen
         self.normalPanelLevel = nil
+    }
+
+    /// A drop is held in the island with its choices (Ask about it / Add to
+    /// brain / Email) for `pendingDropChoiceSeconds`; left alone, it's dropped.
+    private let pendingDropChoiceSeconds: TimeInterval = 25
+
+    private func receiveDroppedFiles(_ droppedFileURLs: [URL]) -> Bool {
+        viewModel.isFileDragNearby = false
+        let attachmentStore = NotchFileAttachmentStore.shared
+        attachmentStore.receiveDrop(droppedFileURLs)
+        guard attachmentStore.hasPendingDrop else { return false }
+
+        presentationHoldUntil = Date().addingTimeInterval(pendingDropChoiceSeconds)
+        hoverSuspendedUntil = .distantPast
+        viewModel.isFullPanel = false
+        viewModel.isExpanded = true
+
+        pendingDropExpiryWorkItem?.cancel()
+        let droppedFileURLsAwaitingChoice = attachmentStore.pendingDroppedFileURLs
+        let expiryWorkItem = DispatchWorkItem {
+            guard attachmentStore.pendingDroppedFileURLs == droppedFileURLsAwaitingChoice else { return }
+            attachmentStore.dismissPendingDrop()
+        }
+        pendingDropExpiryWorkItem = expiryWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + pendingDropChoiceSeconds, execute: expiryWorkItem)
+        return true
+    }
+
+    private func performFileDropChoice(_ fileDropChoice: NotchFileDropChoice) {
+        let attachmentStore = NotchFileAttachmentStore.shared
+        pendingDropExpiryWorkItem?.cancel()
+        switch fileDropChoice {
+        case .askAboutIt:
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let attachmentErrorMessage = await attachmentStore.attachPendingFileForQuestions() {
+                    self.showFileDropFeedback(attachmentErrorMessage)
+                    self.companionManager.flashIsland(.error)
+                    return
+                }
+                // The chat is where the question gets typed (or spoken, with
+                // the chip showing what's attached).
+                self.setWorkspacePage(.chat)
+            }
+        case .addToBrain:
+            let brainReadableFileURLs = attachmentStore.brainReadablePendingFileURLs
+            attachmentStore.dismissPendingDrop()
+            _ = addDroppedFilesToBrain(brainReadableFileURLs)
+        case .email:
+            if attachmentStore.emailPendingFiles() {
+                presentationHoldUntil = .distantPast
+            } else {
+                showFileDropFeedback("No mail app could take it")
+                companionManager.flashIsland(.error)
+            }
+        case .dismiss:
+            attachmentStore.dismissPendingDrop()
+            presentationHoldUntil = .distantPast
+        }
     }
 
     /// Queues dropped files for the brain and reports the result in the island.
@@ -699,6 +819,67 @@ final class NotchWindowController {
             performHUDHaptic()
         }
         WispSoundPlayer.shared.play(.reply)
+    }
+
+    // MARK: - Coding agents and services
+
+    private func updateForPendingCodingAgentApprovals(count pendingApprovalCount: Int) {
+        guard pendingApprovalCount > 0 else {
+            // Answered: let the island fold away shortly unless it's hovered.
+            presentationHoldUntil = Date().addingTimeInterval(1.0)
+            return
+        }
+        hoverSuspendedUntil = .distantPast
+        if !viewModel.isExpanded {
+            viewModel.isFullPanel = false
+            viewModel.isExpanded = true
+            performHUDHaptic()
+        }
+    }
+
+    private func announceCodingAgentCompletion(_ completion: CodingAgentCompletion) {
+        guard CodingAgentPreferences.shared.isAnnouncingFinishedSessions, canDropNoticeNow() else { return }
+        // The user is already looking at that terminal; it told them itself.
+        if let session = CodingAgentSessionStore.shared.sessions.first(where: { $0.id == completion.sessionID }),
+           CodingAgentTerminalJumper.isSessionHostFrontmost(session) {
+            return
+        }
+        companionManager.flashIsland(completion.didFail ? .error : .success)
+        presentNotice(.codingAgentCompletion(completion))
+    }
+
+    /// A notice may drop only onto a notch that isn't busy with something the
+    /// user is doing, and never during a call (quiet mode).
+    private func canDropNoticeNow() -> Bool {
+        let isNotchShowingAnswer = !companionManager.currentReplyText
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || companionManager.resolvedGlanceCard != nil
+        return !QuietModeMonitor.shared.isQuiet
+            && companionManager.voiceState == .idle
+            && !viewModel.isWorkspaceOpen
+            && !(viewModel.isExpanded && isNotchShowingAnswer)
+            && CodingAgentSessionStore.shared.pendingApprovals.isEmpty
+            && !NotchFileAttachmentStore.shared.hasPendingDrop
+    }
+
+    private let noticeDisplaySeconds: TimeInterval = 7
+
+    private func presentNotice(_ notice: NotchNotice) {
+        viewModel.presentedNotice = notice
+        presentationHoldUntil = Date().addingTimeInterval(noticeDisplaySeconds)
+        hoverSuspendedUntil = .distantPast
+        if !viewModel.isExpanded {
+            viewModel.isFullPanel = false
+            viewModel.isExpanded = true
+            performHUDHaptic()
+        }
+        noticeClearWorkItem?.cancel()
+        let clearWorkItem = DispatchWorkItem { [weak self] in
+            guard let self, self.viewModel.presentedNotice == notice else { return }
+            self.viewModel.presentedNotice = nil
+        }
+        noticeClearWorkItem = clearWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + noticeDisplaySeconds + 0.6, execute: clearWorkItem)
     }
 
     /// A light, smooth "alignment" tick when the HUD opens or closes — the same

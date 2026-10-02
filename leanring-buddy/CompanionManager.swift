@@ -1378,7 +1378,10 @@ final class CompanionManager: ObservableObject {
                     && BrainPreferences.shared.isPromptContextEnabled
                     ? BrainStore.shared.promptContext(forRequest: transcript)
                     : ""
-                let perTurnContextText = [accessibilityElementPromptText, brainPromptContextText]
+                // A file the user dropped on the notch and chose "Ask about it"
+                // for. Same block, so it is stripped from history the same way.
+                let attachedFileContextText = NotchFileAttachmentStore.shared.perTurnContextText()
+                let perTurnContextText = [accessibilityElementPromptText, brainPromptContextText, attachedFileContextText]
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n\n")
 
@@ -2838,6 +2841,8 @@ extension CompanionManager {
     var islandState: WispIslandState {
         if let islandFlash { return islandFlash }
         if pendingToolConfirmation != nil { return .confirmation }
+        // A coding agent (Claude Code) waiting on the user's ok in the notch.
+        if !CodingAgentSessionStore.shared.pendingApprovals.isEmpty { return .confirmation }
         // A browser task reporting progress is carrying out the request, which is
         // more specific than "thinking" — unless the user has started talking over it.
         if !browserActivityText.isEmpty && voiceState != .listening { return .executing }

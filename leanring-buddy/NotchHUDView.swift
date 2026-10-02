@@ -35,6 +35,9 @@ struct NotchHUDView: View {
     @ObservedObject private var morningBriefing = MorningBriefingController.shared
     @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
+    @ObservedObject private var codingAgentSessionStore = CodingAgentSessionStore.shared
+    @ObservedObject private var serviceIntegrationMonitor = ServiceIntegrationMonitor.shared
+    @ObservedObject private var fileAttachmentStore = NotchFileAttachmentStore.shared
 
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
@@ -203,7 +206,7 @@ struct NotchHUDView: View {
             Image(systemName: viewModel.fileDropFeedback == nil ? "tray.and.arrow.down" : "checkmark.circle")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(WispColor.Island.textSecondary)
-            Text(viewModel.fileDropFeedback ?? "Drop to add to your brain")
+            Text(viewModel.fileDropFeedback ?? "Drop it on Wisp")
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundColor(WispColor.Island.textPrimary)
         }
@@ -248,11 +251,22 @@ struct NotchHUDView: View {
 
     private static let compactMessageMinimumHeight: CGFloat = 76
 
-    /// An answer always wins the compact surface; the morning banner only shows
-    /// on an otherwise empty notch.
+    /// What the compact surface shows, most urgent first: a coding agent
+    /// blocked on a permission, a dropped file waiting for a choice, a notice
+    /// the notch dropped on its own, then the answer. The morning banner only
+    /// shows on an otherwise empty notch.
     @ViewBuilder
     private var compactDroppedContent: some View {
-        if !hasAnswer && morningBriefing.hasPendingBriefing {
+        if let oldestPendingApproval = codingAgentSessionStore.oldestPendingApproval {
+            CodingAgentApprovalCard(
+                approvalRequest: oldestPendingApproval,
+                queuedBehindCount: codingAgentSessionStore.pendingApprovals.count - 1
+            )
+        } else if fileAttachmentStore.hasPendingDrop {
+            fileDropChoiceCard
+        } else if let presentedNotice = viewModel.presentedNotice {
+            NotchNoticeCard(notice: presentedNotice)
+        } else if !hasAnswer && morningBriefing.hasPendingBriefing {
             morningBannerContent
         } else {
             answerSurfaceWithReplyActions
@@ -302,6 +316,8 @@ struct NotchHUDView: View {
             || companionManager.islandFlash != nil
             || hasAnswer
             || hasAmbientActivity
+            || viewModel.presentedNotice != nil
+            || fileAttachmentStore.hasPendingDrop
     }
 
     // MARK: - Live activities (executing + ambient)
@@ -324,6 +340,8 @@ struct NotchHUDView: View {
             || upcomingEventMonitor.imminentEvent != nil
             || !finishedWorkInbox.unseenTaskIDs.isEmpty
             || morningBriefing.hasPendingBriefing
+            || !codingAgentSessionStore.busySessions.isEmpty
+            || !codingAgentSessionStore.pendingApprovals.isEmpty
     }
 
     /// Whether a flank is showing a label (step count, task count, countdown)
@@ -386,6 +404,12 @@ struct NotchHUDView: View {
                 .nativeTooltip(runningBackgroundTasks.count == 1
                     ? "1 task running in the background"
                     : "\(runningBackgroundTasks.count) tasks running in the background")
+        } else if companionManager.voiceState == .idle && !isExecutingBrowserTask && !codingAgentSessionStore.busySessions.isEmpty {
+            let busySessions = codingAgentSessionStore.busySessions
+            flankActivityLabel("\(busySessions.count)")
+                .nativeTooltip(busySessions.count == 1
+                    ? "\(busySessions[0].agentKind.displayName) is working in \(busySessions[0].projectName)"
+                    : "\(busySessions.count) coding agents are working")
         } else {
             WispMark(state: companionManager.islandState.markState, size: 15)
         }
@@ -532,6 +556,53 @@ struct NotchHUDView: View {
         .buttonStyle(PressableScaleButtonStyle())
         .pointerCursor()
         .nativeTooltip(tooltip)
+    }
+
+    // MARK: - Coding agents, services, dropped files
+
+    /// Sessions doing something, waiting on the user, or recently finished —
+    /// not ones sitting idle, which the Connections page lists instead.
+    private var visibleCodingAgentSessions: [CodingAgentSession] {
+        Array(codingAgentSessionStore.sessions.filter { $0.state != .idle }.prefix(4))
+    }
+
+    @ViewBuilder
+    private var codingAgentSessionsSection: some View {
+        let visibleSessions = visibleCodingAgentSessions
+        if !visibleSessions.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("CODING")
+                ForEach(visibleSessions) { session in
+                    CodingAgentSessionRow(session: session)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var connectedServicesSection: some View {
+        let connectedKinds = serviceIntegrationMonitor.connectedKinds
+        if !connectedKinds.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                sectionLabel("SERVICES")
+                ForEach(connectedKinds) { serviceKind in
+                    ConnectedServiceNotchRow(
+                        serviceKind: serviceKind,
+                        snapshot: serviceIntegrationMonitor.snapshotsByKind[serviceKind],
+                        errorText: serviceIntegrationMonitor.errorsByKind[serviceKind]
+                    )
+                }
+            }
+        }
+    }
+
+    private var fileDropChoiceCard: some View {
+        NotchFileDropChoiceCard(
+            onAskAboutIt: { viewModel.performFileDropChoice?(.askAboutIt) },
+            onAddToBrain: { viewModel.performFileDropChoice?(.addToBrain) },
+            onEmail: { viewModel.performFileDropChoice?(.email) },
+            onDismiss: { viewModel.performFileDropChoice?(.dismiss) }
+        )
     }
 
     // MARK: - Morning briefing, new results, quiet mode
@@ -812,9 +883,12 @@ struct NotchHUDView: View {
             case .processing:
                 collapsedThinkingDots
             case .idle:
-                // Most time-sensitive first: a meeting about to start, then
-                // results waiting to be seen, then the day's suggestions.
-                if let imminentEvent = upcomingEventMonitor.imminentEvent {
+                // Most time-sensitive first: a coding agent blocked on the
+                // user, a meeting about to start, then results waiting to be
+                // seen, then the day's suggestions.
+                if !codingAgentSessionStore.pendingApprovals.isEmpty {
+                    flankApprovalBadge
+                } else if let imminentEvent = upcomingEventMonitor.imminentEvent {
                     flankEventCountdown(imminentEvent)
                         .nativeTooltip(imminentEvent.title)
                 } else if !finishedWorkInbox.unseenTaskIDs.isEmpty {
@@ -826,6 +900,18 @@ struct NotchHUDView: View {
                 }
             }
         }
+    }
+
+    /// "Allow?" in the right flank while a coding agent waits on a permission.
+    private var flankApprovalBadge: some View {
+        Text("Allow?")
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundColor(WispColor.Island.textPrimary)
+            .padding(.horizontal, 6)
+            .frame(height: 16)
+            .background(Capsule(style: .continuous).fill(WispColor.Brand.lavender.opacity(0.45)))
+            .lineLimit(1)
+            .nativeTooltip("A coding agent is waiting for your ok")
     }
 
     /// Three dots that pulse in sequence while Wisp is thinking, tinted with the
@@ -902,6 +988,9 @@ struct NotchHUDView: View {
     /// The non-notch pill's line while idle with nothing to preview: the meeting
     /// about to start, else how much background work is running.
     private var ambientSummaryText: String? {
+        if let oldestPendingApproval = codingAgentSessionStore.oldestPendingApproval {
+            return "\(oldestPendingApproval.agentKind.displayName) needs your ok"
+        }
         if let imminentEvent = upcomingEventMonitor.imminentEvent {
             let countdownText = UpcomingEventMonitor.compactCountdownText(until: imminentEvent.startDate)
             return "\(imminentEvent.title) · \(countdownText)"
@@ -909,6 +998,10 @@ struct NotchHUDView: View {
         let runningCount = runningBackgroundTasks.count
         if runningCount > 0 {
             return runningCount == 1 ? "1 task running" : "\(runningCount) tasks running"
+        }
+        let busyCodingSessionCount = codingAgentSessionStore.busySessions.count
+        if busyCodingSessionCount > 0 {
+            return busyCodingSessionCount == 1 ? "1 coding agent working" : "\(busyCodingSessionCount) coding agents working"
         }
         let unseenCount = finishedWorkInbox.unseenTaskIDs.count
         if unseenCount > 0 {
@@ -1027,14 +1120,37 @@ struct NotchHUDView: View {
 
     private var quickPanelScrollingSections: some View {
             VStack(alignment: .leading, spacing: 10) {
+                // A coding agent blocked on the user comes before anything else.
+                if let oldestPendingApproval = codingAgentSessionStore.oldestPendingApproval {
+                    CodingAgentApprovalCard(
+                        approvalRequest: oldestPendingApproval,
+                        queuedBehindCount: codingAgentSessionStore.pendingApprovals.count - 1
+                    )
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(WispColor.Brand.lavender.opacity(0.10))
+                    )
+                }
+
+                if fileAttachmentStore.hasPendingDrop {
+                    fileDropChoiceCard
+                }
+
                 // What's in flight right now, with a way to stop it.
                 liveActivitySection
+
+                // Claude Code / Gemini CLI / Antigravity sessions.
+                codingAgentSessionsSection
 
                 // Background results that finished since the user last looked.
                 finishedWorkSection
 
                 // The day's suggestions, until run or dismissed.
                 todaySuggestionsSection
+
+                // GitHub, Stripe, Vercel… — only those the user connected.
+                connectedServicesSection
 
                 // Only present when there is an answer, so an idle panel collapses
                 // down to just the header and footer.

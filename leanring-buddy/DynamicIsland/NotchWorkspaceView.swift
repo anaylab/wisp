@@ -32,6 +32,7 @@ struct NotchWorkspaceView: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var bindingStore = ShortcutBindingStore.shared
+    @ObservedObject private var fileAttachmentStore = NotchFileAttachmentStore.shared
     @ObservedObject private var buddyStore = BuddyStore.shared
 
     let page: NotchWorkspacePage
@@ -617,9 +618,18 @@ struct NotchWorkspaceView: View {
     // MARK: Composer: talk pill + Type field
 
     private var composerBar: some View {
-        HStack(spacing: 10) {
-            talkPill
-            typeField
+        VStack(alignment: .leading, spacing: 8) {
+            // A file dropped on the notch with "Ask about it" rides along with
+            // every question until it's removed.
+            if let attachedFile = fileAttachmentStore.attachedFile {
+                NotchAttachedFileChip(attachedFile: attachedFile) {
+                    fileAttachmentStore.detachFile()
+                }
+            }
+            HStack(spacing: 10) {
+                talkPill
+                typeField
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)

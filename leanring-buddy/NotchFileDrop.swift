@@ -2,7 +2,8 @@
 //  NotchFileDrop.swift
 //  leanring-buddy
 //
-//  Dropping a file on the notch adds it to the brain. The notch window is
+//  Dropping a file on the notch offers Ask about it / Add to brain / Email
+//  (see NotchFileAttachment.swift). The notch window is
 //  click-through while collapsed and its hosting view is SwiftUI, so this lives
 //  at the AppKit level: a transparent sibling drop view above the notch content, plus a
 //  detector that tells the controller when a file drag — as opposed to a window
@@ -20,7 +21,7 @@ import SwiftUI
 /// also has to be at a lower level and able to become key — see
 /// `NotchWindowController.enterFileDragPanelMode`.)
 final class NotchFileDropView: NSView {
-    /// Whether the drop would be accepted right now (brain on). Checked at
+    /// Whether the drop would be accepted right now. Checked at
     /// drag-enter so a refused drag shows the "not allowed" cursor.
     var canAcceptFiles: () -> Bool = { true }
     /// Called with the dropped file URLs; returns whether they were taken.

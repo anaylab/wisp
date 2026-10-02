@@ -78,7 +78,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         case .brain: return [.brainPages, .brainGraph, .brainInbox, .brainHealth, .brainLog, .brainSettings]
         case .routines: return [.routines]
         case .history: return [.timeline]
-        case .connections: return [.marketplace, .tools, .sources]
+        case .connections: return [.marketplace, .tools, .codingAgents, .services, .sources]
         case .settings: return [.general, .shortcuts, .dictation, .cursor, .agent, .model]
         }
     }
@@ -103,6 +103,8 @@ enum WispPage: String, CaseIterable, Identifiable {
     case timeline
     case marketplace
     case tools
+    case codingAgents
+    case services
     case sources
     case general
     case shortcuts
@@ -134,6 +136,8 @@ enum WispPage: String, CaseIterable, Identifiable {
         case .timeline: return "Timeline"
         case .marketplace: return "Marketplace"
         case .tools: return "Servers & Tools"
+        case .codingAgents: return "Coding Agents"
+        case .services: return "Services"
         case .sources: return "Sources"
         case .general: return "General"
         case .shortcuts: return "Shortcuts"

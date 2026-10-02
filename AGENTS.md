@@ -556,6 +556,47 @@ cloud dependency to the local path, without asking.
   is background priority through `ModelAccessGate`; switches live in `BrainPreferences`. UI: sidebar
   **Brain** with Pages (reader/editor, backlinks), Graph (force layout), Inbox (drop zone, jobs,
   notes import), Health, Log (undo), Settings.
+- **Coding agents** (ported from Coucou, `github.com/louis-cfm/coucou`, MIT — code only; its name,
+  Mochi character, icon and sounds are all-rights-reserved and were not brought over): Claude Code,
+  Gemini CLI and Antigravity sessions show in the notch. Their hooks run a relay
+  (`CodingAgentHookRelay`: a `/bin/sh` wrapper + Python script written to
+  `~/Library/Application Support/Wisp/hooks/` on launch; the wrapper checks `xcode-select -p` first so
+  a hook never triggers the command-line-tools dialog) that adds terminal context (`TERM_PROGRAM`,
+  `ITERM_SESSION_ID`, tty, host bundle id) and forwards the JSON to a Unix socket
+  (`.../Wisp/agent-hooks.sock`, 0600 in a 0700 folder, peer-UID checked, 1 MB / 5s / 32-connection caps —
+  `CodingAgentHookServer`, background threads, `nonisolated`). If Wisp isn't running the relay exits 0
+  silently, so an agent is never blocked. `CodingAgentHookEventParser` (pure) → `CodingAgentSessionStore`
+  (per session id; steps, state, pending approvals). **Claude Code's `PermissionRequest`** is held open
+  and shown as `CodingAgentApprovalCard` (Deny / Always — only when Claude offered rules / Allow) in
+  the compact notch, which stays open while any is pending (`isWithinPresentationHold`) and lights the
+  rim (`islandState == .confirmation`). Nothing is allowed without a click; unanswered after 112s, or
+  once the session moves on (PostToolUse/Stop/next prompt), the relay gets "no decision" and Claude
+  Code asks in the terminal. Other agents' permission requests are always handed back. "Jump to
+  terminal" (`CodingAgentTerminalJumper`) selects the exact iTerm session / Terminal tab via AppleScript
+  handlers with parameters, or opens the project folder in VS Code/Cursor. A finished session drops a
+  `NotchNotice` (skipped if its terminal is frontmost, on a call, mid-turn). Hooks are installed from
+  Connections → Coding Agents (`CodingAgentHookInstaller`/`CodingAgentHookSettingsMerger`): only entries
+  whose command contains `wisp-agent-hook` are touched, an unparseable file or unexpected `hooks` shape
+  is refused, the change is previewed as added/removed lines, the file is fingerprinted (changed since
+  preview → nothing written) and backed up as `<name>.bak-<date>` first. Switches:
+  `CodingAgentPreferences` (approvals in notch, announce finished; both default on).
+- **Service integrations** (opt-in, off-machine, from Coucou's pills): GitHub, Vercel, Stripe, n8n,
+  Resend, Notion, Cal.com (`ServiceIntegrationKind`). Nothing is contacted until the user saves a key in
+  Connections → Services (`ServiceIntegrationKeychainStore`, login Keychain; n8n's instance URL must be
+  https or localhost). `ServiceIntegrationMonitor` polls each connected service on its own interval
+  (1–5 min), `ServiceIntegrationClient` fetches and `ServiceIntegrationResponseParser` (pure) builds a
+  `ServiceIntegrationSnapshot` (headline + rows + announceable events). New events are found by id
+  against the previous fetch (the first fetch is only a baseline) and drop a `NotchNotice` (new
+  payment, deploy finished/failed, failed n8n run, bounce, new booking; not during quiet mode). The
+  hover panel lists connected services (SERVICES), and the read-only `check_connected_services` tool
+  (`.reading(.userAccount)`) gives the model the same text.
+- **Dropping a file on the notch** now offers a choice (`NotchFileDropChoiceCard`, held 25s):
+  **Ask about it** (`NotchFileAttachmentStore` reads it — brain extractor formats plus source/config
+  files as UTF-8, ≤6000 chars — and opens the notch chat with a paperclip chip; the text joins the
+  per-turn context block on the user message for every turn until removed or 30 min, and is stripped
+  from history like the screen context), **Add to brain** (brain on, supported types — the old
+  behaviour) or **Email** (`NSSharingService(.composeEmail)` with the file attached; the user picks the
+  recipient and presses Send). Drops are accepted with the brain off now.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 
@@ -755,6 +796,23 @@ Grouped by what they do. Line counts are approximate.
 | `AgentTaskRegistry.swift` | ~165 | Task and step records backing History → Timeline. Loads saved history on launch and saves it (debounced) on every change. |
 | `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
 
+### Coding agents & services
+| File | Lines | Purpose |
+|------|-------|---------|
+| `CodingAgents/CodingAgentHookEvent.swift` | ~290 | Pure: `CodingAgentKind` (tag validation), `CodingAgentTerminalContext`, `CodingAgentHookEventKind`, and `CodingAgentHookEventParser` (payload → event, English step labels, permission summaries, notification categories). |
+| `CodingAgents/CodingAgentHookRelay.swift` | ~270 | Paths (support dir, socket, relay), the `/bin/sh` wrapper and Python relay sources (`pythonRelaySource(socketPath:)`), `installRelayFiles()`, `isPythonAvailable()`. |
+| `CodingAgents/CodingAgentHookServer.swift` | ~240 | The Unix socket server (same-UID, caps, SO_NOSIGPIPE) and `CodingAgentPermissionResponder` (answers a held request exactly once). |
+| `CodingAgents/CodingAgentSessionStore.swift` | ~350 | `CodingAgentSession`/state, `CodingAgentApprovalRequest`, `CodingAgentCompletion`, `CodingAgentPreferences`, and the store (events → sessions, approval queue + timeout + withdrawal, housekeeping). |
+| `CodingAgents/CodingAgentHookInstaller.swift` | ~370 | `CodingAgentHookTarget` (Claude Code / Gemini CLI / Antigravity files), the pure `CodingAgentHookSettingsMerger`, `CodingAgentHookChangePreview` (line diff) and `CodingAgentHookInstaller` (strict read, fingerprint, backup, atomic write). |
+| `CodingAgents/CodingAgentTerminalJumper.swift` | ~200 | Jump to a session's terminal (iTerm session / Terminal tab by tty / editor project window / terminal app) and `isSessionHostFrontmost`. |
+| `CodingAgents/CodingAgentNotchViews.swift` | ~450 | Island views: `CodingAgentApprovalCard`, `CodingAgentSessionRow`, `NotchNotice` + `NotchNoticeCard`, `ConnectedServiceNotchRow`, `NotchFileDropChoiceCard`, `NotchAttachedFileChip`. |
+| `Integrations/ServiceIntegration.swift` | ~270 | `ServiceIntegrationKind` (names, symbols, credential fields, intervals, links), row/event/snapshot types, `ServiceIntegrationKeychainStore`. |
+| `Integrations/ServiceIntegrationClient.swift` | ~540 | HTTP per service + the pure `ServiceIntegrationResponseParser` (GitHub, Vercel, Stripe incl. zero-decimal currencies, n8n with workflow names, Resend, Notion, Cal.com) and `n8nBaseURL` validation. |
+| `Integrations/ServiceIntegrationMonitor.swift` | ~170 | Per-service polling tasks, snapshots/errors, new-event detection → `latestAnnouncement`, and the `check_connected_services` tool. |
+| `NotchFileAttachment.swift` | ~170 | `NotchFileAttachmentStore`: pending dropped files, Ask about it (read + attach, per-turn context text), Email (compose sheet), brain-readable subset. |
+| `WispWindow/CodingAgentsPage.swift` | ~280 | Connections → Coding Agents: hook install/remove rows with `CodingAgentHookPreviewSheet`, notch switches, live sessions with Jump. |
+| `WispWindow/ServicesPage.swift` | ~240 | Connections → Services: per-service connect form (Keychain), status, latest rows, Refresh/Disconnect. |
+
 ### Brain
 | File | Lines | Purpose |
 |------|-------|---------|
@@ -816,7 +874,7 @@ Grouped by what they do. Line counts are approximate.
 | `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
-| `NotchFileDrop.swift` | ~75 | Drop a file on the notch to add it to the brain: `NotchFileDropView` (a transparent `hitTest`-nil sibling above the hosting view; wrapping it, registering it, or SwiftUI `.onDrop` all failed to receive drags) and `NotchFileDragDetector` (drag-pasteboard change count + held button, so window drags never misfire). `NotchWindowController.updateFileDragState` opens the island under a file drag (brain on only) and `addDroppedFilesToBrain` enqueues supported files on `BrainIngestQueue`, showing the result via `viewModel.fileDropFeedback`. |
+| `NotchFileDrop.swift` | ~75 | Drop a file on the notch (then choose Ask about it / Add to brain / Email — see `NotchFileAttachment.swift`): `NotchFileDropView` (a transparent `hitTest`-nil sibling above the hosting view; wrapping it, registering it, or SwiftUI `.onDrop` all failed to receive drags) and `NotchFileDragDetector` (drag-pasteboard change count + held button, so window drags never misfire). `NotchWindowController.updateFileDragState` opens the island under a file drag, `receiveDroppedFiles` holds the drop for a choice, and `addDroppedFilesToBrain` enqueues supported files on `BrainIngestQueue`, showing the result via `viewModel.fileDropFeedback`. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `DesignSystem.swift` | ~480 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
@@ -899,6 +957,7 @@ running):
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
+./Tests/CodingAgentsAndServices/run.sh   # hook parsing, settings merging, the Python relay end to end, service parsers
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a

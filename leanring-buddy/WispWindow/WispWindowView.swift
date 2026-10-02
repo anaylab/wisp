@@ -159,6 +159,10 @@ struct WispWindowView: View {
             MarketplaceTab()
         case .tools:
             ToolsTab()
+        case .codingAgents:
+            CodingAgentsPage()
+        case .services:
+            ServicesPage()
         case .sources:
             SourcesTab()
         case .general:
