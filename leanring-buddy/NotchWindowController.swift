@@ -108,6 +108,9 @@ final class NotchWindowController {
     /// Drops a short notice for a new payment, deploy, failed workflow…
     private var serviceAnnouncementObserver: AnyCancellable?
     private var noticeClearWorkItem: DispatchWorkItem?
+    /// Keeps the companion's sense of "something happened" fresh, so it only
+    /// dozes off after a real quiet.
+    private var companionActivityObservers: [AnyCancellable] = []
     private var pendingDropExpiryWorkItem: DispatchWorkItem?
 
     /// Hover is ignored until this moment. Set when the HUD is force-collapsed
@@ -184,6 +187,12 @@ final class NotchWindowController {
         positionWindow()
         panel?.orderFrontRegardless()
         startHoverTracking()
+        // The companion peeks out to say hello once Wisp is up.
+        if WispCompanionPreference.shared.isCompanionEnabled {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                WispCompanionController.shared.greet()
+            }
+        }
         // Feeds the island's ambient next-meeting countdown.
         UpcomingEventMonitor.shared.start()
         // Quiet mode first, so the briefing's first check already knows about a call.
@@ -351,8 +360,25 @@ final class NotchWindowController {
             .removeDuplicates()
             .sink { [weak self] serviceEvent in
                 guard let self, self.canDropNoticeNow() else { return }
+                switch serviceEvent.tone {
+                case .good: WispCompanionController.shared.celebrate()
+                case .bad: WispCompanionController.shared.commiserate()
+                case .neutral: WispCompanionController.shared.noteActivity()
+                }
                 self.presentNotice(.serviceEvent(serviceEvent))
             }
+
+        companionActivityObservers = [
+            companionManager.$voiceState.removeDuplicates().sink { _ in
+                WispCompanionController.shared.noteActivity()
+            },
+            CodingAgentSessionStore.shared.$lastEventDate.sink { _ in
+                WispCompanionController.shared.noteActivity()
+            },
+            viewModel.$isExpanded.removeDuplicates().filter { $0 }.sink { _ in
+                WispCompanionController.shared.noteActivity()
+            },
+        ]
 
         finishedWorkSeenObserver = viewModel.$isFullPanel
             .removeDuplicates()
@@ -845,6 +871,11 @@ final class NotchWindowController {
             return
         }
         companionManager.flashIsland(completion.didFail ? .error : .success)
+        if completion.didFail {
+            WispCompanionController.shared.commiserate()
+        } else {
+            WispCompanionController.shared.celebrate()
+        }
         presentNotice(.codingAgentCompletion(completion))
     }
 

@@ -38,13 +38,18 @@ struct CodingAgentApprovalCard: View {
     /// How many more are queued behind this one.
     let queuedBehindCount: Int
     @ObservedObject private var sessionStore = CodingAgentSessionStore.shared
+    @ObservedObject private var companionPreference = WispCompanionPreference.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 7) {
-                Image(systemName: "terminal")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(WispColor.Brand.lavender)
+                if companionPreference.isCompanionEnabled {
+                    WispCompanionFace(mood: .needsYou, size: 20)
+                } else {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(WispColor.Brand.lavender)
+                }
                 Text("\(approvalRequest.agentKind.displayName) · \(approvalRequest.projectName)")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(WispColor.Island.textSecondary)
@@ -206,13 +211,11 @@ struct CodingAgentSessionRow: View {
 
 struct NotchNoticeCard: View {
     let notice: NotchNotice
+    @ObservedObject private var companionPreference = WispCompanionPreference.shared
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: symbolName)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(symbolColor)
-                .frame(width: 22)
+            leadingGlyph
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 12.5, weight: .semibold))
@@ -230,6 +233,32 @@ struct NotchNoticeCard: View {
                 Button(actionLabel, action: performAction)
                     .font(.system(size: 11, weight: .medium))
                     .wispIslandButtonStyle(prominence: .subtle)
+            }
+        }
+    }
+
+    /// The companion hops for good news and droops for bad; with it off, a symbol.
+    @ViewBuilder
+    private var leadingGlyph: some View {
+        if companionPreference.isCompanionEnabled, let companionMood {
+            WispCompanionFace(mood: companionMood, size: 28)
+        } else {
+            Image(systemName: symbolName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(symbolColor)
+                .frame(width: 22)
+        }
+    }
+
+    private var companionMood: WispCompanionMood? {
+        switch notice {
+        case .codingAgentCompletion(let completion):
+            return completion.didFail ? .sad : .happy
+        case .serviceEvent(let event):
+            switch event.tone {
+            case .good: return .happy
+            case .bad: return .sad
+            case .neutral: return nil
             }
         }
     }

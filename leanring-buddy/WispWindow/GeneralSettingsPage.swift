@@ -19,6 +19,7 @@ struct GeneralSettingsPage: View {
     @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
+    @ObservedObject private var companionPreference = WispCompanionPreference.shared
 
     var body: some View {
         ScrollView {
@@ -52,6 +53,16 @@ struct GeneralSettingsPage: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
                 .pointerCursor()
+            }
+            Divider()
+            SettingRow(
+                title: "Companion",
+                detail: "A little cloud lives in the notch: it follows your cursor with its eyes, hops when an agent finishes or something needs you, dozes off when it's quiet, and minds being poked. Off shows the Wisp mark."
+            ) {
+                Toggle("Companion", isOn: $companionPreference.isCompanionEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .pointerCursor()
             }
         }
     }

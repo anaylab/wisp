@@ -38,6 +38,8 @@ struct NotchHUDView: View {
     @ObservedObject private var codingAgentSessionStore = CodingAgentSessionStore.shared
     @ObservedObject private var serviceIntegrationMonitor = ServiceIntegrationMonitor.shared
     @ObservedObject private var fileAttachmentStore = NotchFileAttachmentStore.shared
+    @ObservedObject private var companionPreference = WispCompanionPreference.shared
+    @ObservedObject private var companionController = WispCompanionController.shared
 
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
@@ -318,6 +320,19 @@ struct NotchHUDView: View {
             || hasAmbientActivity
             || viewModel.presentedNotice != nil
             || fileAttachmentStore.hasPendingDrop
+            // The companion peeks out for a greeting or a celebration.
+            || (companionPreference.isCompanionEnabled && companionController.activeReaction != nil)
+    }
+
+    /// The companion (when it's on) or the Wisp mark, wherever the notch
+    /// shows Wisp's identity. Only the hover panel's header can be poked.
+    @ViewBuilder
+    private func identityGlyph(size: CGFloat, markSize: CGFloat, isPokeable: Bool, isAnimating: Bool) -> some View {
+        if companionPreference.isCompanionEnabled {
+            NotchCompanion(companionManager: companionManager, size: size, isPokeable: isPokeable, isAnimating: isAnimating)
+        } else {
+            WispMark(state: companionManager.islandState.markState, size: markSize)
+        }
     }
 
     // MARK: - Live activities (executing + ambient)
@@ -411,7 +426,7 @@ struct NotchHUDView: View {
                     ? "\(busySessions[0].agentKind.displayName) is working in \(busySessions[0].projectName)"
                     : "\(busySessions.count) coding agents are working")
         } else {
-            WispMark(state: companionManager.islandState.markState, size: 15)
+            identityGlyph(size: 19, markSize: 15, isPokeable: false, isAnimating: islandIsVisible && !viewModel.isExpanded)
         }
     }
 
@@ -852,7 +867,7 @@ struct NotchHUDView: View {
     /// state indicator, growing with its text.
     private var floatingPillContent: some View {
         HStack(spacing: 7) {
-            WispMark(state: companionManager.islandState.markState, size: 13)
+            identityGlyph(size: 16, markSize: 13, isPokeable: false, isAnimating: !viewModel.isExpanded)
             if let collapsedPrimaryText {
                 Text(collapsedPrimaryText)
                     .font(.system(size: 10.5, weight: .medium))
@@ -1401,7 +1416,12 @@ struct NotchHUDView: View {
     private var notchFlankingHeader: some View {
         HStack(spacing: 0) {
             HStack(spacing: 7) {
-                WispMark(state: companionManager.islandState.markState, size: 16)
+                identityGlyph(
+                    size: 24,
+                    markSize: 16,
+                    isPokeable: true,
+                    isAnimating: viewModel.isExpanded && viewModel.isFullPanel && !viewModel.isWorkspaceOpen
+                )
                 // The state rides beside the name while Wisp is doing something
                 // (the mark's motion carries it too) — this replaced the big
                 // waveform card that used to open the panel.

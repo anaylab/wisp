@@ -33,6 +33,7 @@ struct NotchWorkspaceView: View {
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var bindingStore = ShortcutBindingStore.shared
     @ObservedObject private var fileAttachmentStore = NotchFileAttachmentStore.shared
+    @ObservedObject private var companionPreference = WispCompanionPreference.shared
     @ObservedObject private var buddyStore = BuddyStore.shared
 
     let page: NotchWorkspacePage
@@ -84,7 +85,11 @@ struct NotchWorkspaceView: View {
             // The sidebar sits left of the notch, so its first row can use the
             // notch band itself, as HeyClicky's logo does.
             HStack(spacing: 7) {
-                WispMark(state: companionManager.islandState.markState, size: 16)
+                if companionPreference.isCompanionEnabled {
+                    NotchCompanion(companionManager: companionManager, size: 22, isPokeable: true, isAnimating: true)
+                } else {
+                    WispMark(state: companionManager.islandState.markState, size: 16)
+                }
                 Text("Wisp")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(WispColor.Island.textPrimary)
@@ -522,7 +527,11 @@ struct NotchWorkspaceView: View {
     private var emptyThread: some View {
         VStack(spacing: 8) {
             Spacer()
-            WispMark(state: .idle, size: 34)
+            if companionPreference.isCompanionEnabled {
+                NotchCompanion(companionManager: companionManager, size: 46, isPokeable: true, isAnimating: true)
+            } else {
+                WispMark(state: .idle, size: 34)
+            }
             Text("Ask me anything")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(WispColor.Island.textPrimary)

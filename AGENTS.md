@@ -597,6 +597,20 @@ cloud dependency to the local path, without asking.
   from history like the screen context), **Add to brain** (brain on, supported types — the old
   behaviour) or **Email** (`NSSharingService(.composeEmail)` with the file attached; the user picks the
   recipient and presses Send). Drops are accepted with the brain off now.
+- **Companion** (the *feeling* of Coucou's notch character, in Wisp's own body): a little cloud — the
+  same puffs as `BuddyAvatar`, merged into one path (`CloudPuffsShape`) — replaces the Wisp mark in the
+  notch's left flank, the hover panel's header, the non-notch pill and the notch chat while
+  `WispCompanionPreference` is on (default on; Settings → General → Notch → Companion). Its mood comes
+  from the pure `WispCompanionMoodResolver` (`WispCompanionMood.swift`): a coding agent or confirmation
+  waiting on the user → `needsYou` (wide eyes, hop); then a live reaction (greeting on launch, poke →
+  `annoyed`, three pokes within 1.2s → `dizzy` for 3s, `celebrate()`/`commiserate()` on a finished/failed
+  agent session or a good/bad service event); then the island's activity (listening, thinking, working —
+  also while agents/background tasks are busy — success/error flashes); and, after 10 min with nothing
+  happening, `sleepy`. `WispCompanionFace` breathes, blinks (`WispCompanionBlink`, irregular 3–5s), and
+  its pupils follow the cursor (`WispCompanionGaze`, from its on-screen frame via `ScreenFrameReader`).
+  Its clock only runs while it's visible (`isAnimating`), and Reduce Motion keeps the expressions but
+  drops hops, shakes and eye tracking. Only the hover panel's header can be poked (the collapsed notch
+  is click-through). Finished/failed notices and the approval card use its faces too.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 
@@ -811,6 +825,8 @@ Grouped by what they do. Line counts are approximate.
 | `Integrations/ServiceIntegrationMonitor.swift` | ~170 | Per-service polling tasks, snapshots/errors, new-event detection → `latestAnnouncement`, and the `check_connected_services` tool. |
 | `NotchFileAttachment.swift` | ~170 | `NotchFileAttachmentStore`: pending dropped files, Ask about it (read + attach, per-turn context text), Email (compose sheet), brain-readable subset. |
 | `WispWindow/CodingAgentsPage.swift` | ~280 | Connections → Coding Agents: hook install/remove rows with `CodingAgentHookPreviewSheet`, notch switches, live sessions with Jump. |
+| `Components/WispCompanionMood.swift` | ~175 | Pure: `WispCompanionMood`, `WispCompanionSignals`/`Activity`/`Reaction`, `WispCompanionMoodResolver` (precedence), `WispCompanionPokeTracker` (annoyed → dizzy), `WispCompanionGaze`, `WispCompanionBlink`. Tested by `Tests/WispCompanion`. |
+| `Components/WispCompanion.swift` | ~515 | `WispCompanionPreference`, `WispCompanionController` (greeting, pokes, celebrate/commiserate, last activity), `WispIslandState.companionActivity`, `WispCompanionFace` (cloud + per-mood eyes and motion), `ScreenFrameReader`, and `NotchCompanion` (the notch's live, pokeable companion). |
 | `WispWindow/ServicesPage.swift` | ~240 | Connections → Services: per-service connect form (Keychain), status, latest rows, Refresh/Disconnect. |
 
 ### Brain
@@ -958,6 +974,7 @@ running):
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
 ./Tests/CodingAgentsAndServices/run.sh   # hook parsing, settings merging, the Python relay end to end, service parsers
+./Tests/WispCompanion/run.sh             # the companion's mood precedence, pokes, gaze and blinking
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a
