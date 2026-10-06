@@ -324,6 +324,26 @@ cloud dependency to the local path, without asking.
   times; the fast path lands in ~0.1s (≤0.9s with the model pick, ~0.7s when OCR starts cold for a
   typed question — it waits up to 1.5s, `FastPointingTiming`). Typed questions make Wisp frontmost,
   so `AccessibilityElementSnapshotter` reads `FrontmostAppTracker`'s last external app instead.
+- **Screen watchers** ("tell me when the build finishes", "let me know when it says Succeeded",
+  "watch for \"Done\"", "stop watching"): recognised by `ScreenWatchRequestParser` in
+  `sendTranscriptToClaudeWithScreenshot` right after `FastCommandRouter` (not behind agent mode;
+  conservative — "tell me when you're done"/"the meeting is over"/"an error appears" fall through to
+  the model, which has `watch_screen`/`stop_screen_watch`, read-only, no confirmation, in the
+  buddy `.screen` group). Conditions (`ScreenWatchCondition`): `textAppears` (whole-word,
+  case/accent/punctuation-insensitive; fires when *more* lines match than the fewest seen, so the
+  last build's "Succeeded" already on screen doesn't fire it but a new one does), `textDisappears`
+  (seen, then absent 2 polls), `screenTextSettles` (OCR text changed, then unchanged 4 polls ≈12s —
+  a screen that never changes never fires). `ScreenWatcherStore` polls the display the pointer was
+  on every 3s with **its own capture** (cursor hidden, Wisp's windows excluded, 896px) and calls
+  `ScreenTextRecognizer.recognizeText` directly — *not* the turn's path, because
+  `ScreenshotReuseCache` would hand back the previous frame for exactly the small change being
+  watched for (up to 45s), and the shared one-entry-per-display OCR cache could be evicted under a
+  live turn. OCR is skipped when the frame's pixels are byte-identical to the last poll; menu-bar
+  lines are dropped (the clock). Max 3 watches, 2-hour timeout (says so), 5 failed captures → stops.
+  On success: a `UNUserNotification` (silent in quiet mode), `flashIsland(.success)` (the cue), and —
+  only if Wisp is idle — the line in the notch, spoken in voice mode
+  (`CompanionManager.presentScreenWatchEnding`). While watching, the island stays visible with an eye
+  in the right flank, and the full panel's live section lists each watch with Stop. No model call.
 - **Screen Annotation**: `[BOX:left,top,right,bottom:label]`, `[HIGHLIGHT:...]` and
   `[ARROW:x,y:label]` tags render through a `Canvas` layer in the overlay, as does the `.marker`
   from a `[POINT:]`. Note the corner format — the model emits corners, not origin+size. When
@@ -693,6 +713,9 @@ Grouped by what they do. Line counts are approximate.
 | `ScreenTextSnapshot.swift` | ~360 | Pure, testable side of OCR pointing: recognised-line model, confidence filter, reading order, prompt caps, compact `t`-id rendering + plain text, line-id → region lookup, Vision→screenshot coordinate flip, and `ScreenTextRecognitionCache` (per-display, keyed on screenshot bytes). |
 | `ScreenTextRecognizer.swift` | ~265 | Runs Vision `RecognizeTextRequest` off the main actor for each capture, caches the tasks, and builds a turn's `ScreenTextSnapshot` within a wait budget. Also `CompanionManager.resolveScreenElementRegion` (the shared `a`/`t` id resolver). |
 | `ScreenTextReadingTool.swift` | ~60 | The read-only `read_screen_text` agent tool: captures the screen and returns its OCR text. |
+| `ScreenWatcher.swift` | ~480 | Pure side of screen watchers: `ScreenWatchCondition`, `ScreenWatchTextMatching` (whole-word normalised matching), `ScreenWatchEvaluator` (successive OCR readings → met / waiting) and `ScreenWatchRequestParser` ("tell me when …", "watch for …", "stop watching"). Tested by `Tests/ScreenWatcher`. |
+| `ScreenWatcherStore.swift` | ~350 | Runs the watches: 3s polls of the watched display (own capture + direct OCR, skipped on identical pixels, menu bar dropped), 3-watch cap, 2h timeout, notification, `onWatcherEnded` → `CompanionManager`, and the ending wording. |
+| `ScreenWatchAgentTools.swift` | ~95 | `watch_screen` (condition + text) and `stop_screen_watch`, read-only, registered via `registerScreenWatchTools()`. |
 | `FastPointing.swift` | ~540 | Pure side of fast pointing: `PointingRequestParser` (spoken "where is X" → target + role hint, conservative), `PointingTargetMatcher` (exact/tolerant word scoring, same-place merging, tie → every place, shortlist for the model, connector-word guard) and `PointingModelFallback` (text-only prompt + lenient reply → id). Tested by `Tests/FastPointing`. |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 
@@ -899,6 +922,7 @@ running):
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
+./Tests/ScreenWatcher/run.sh             # screen-watch request parsing, text matching, evaluator
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a

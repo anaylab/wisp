@@ -654,6 +654,7 @@ final class AgentToolRegistry: ObservableObject {
         registerMemoryTools()
         registerReminderTools()
         registerScreenTextTools()
+        registerScreenWatchTools()
         registerShortcutsTools()
         registerChromeTabTools()
         registerMessagingTools()

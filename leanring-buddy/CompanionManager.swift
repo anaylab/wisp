@@ -307,6 +307,11 @@ final class CompanionManager: ObservableObject {
         AgentToolRegistry.shared.browserCursorGuide = self
         // Loopback only; the Wisp Tabs extension dials in whenever Chrome runs.
         ChromeExtensionBridge.shared.start()
+        // Screen watches (spoken or from the `watch_screen` tool) end here:
+        // the line in the notch, the success cue, and speech in voice mode.
+        ScreenWatcherStore.shared.onWatcherEnded = { [weak self] endedWatcher, ending in
+            self?.presentScreenWatchEnding(endedWatcher, ending: ending)
+        }
         restoreRecentConversationHistory()
         connectMCPServersIfAgentModeEnabled()
         bindVoiceStateObservation()
@@ -1206,6 +1211,16 @@ final class CompanionManager: ObservableObject {
                     self.scheduleTransientHideIfNeeded()
                 }
             }
+            return
+        }
+
+        // "Tell me when the build finishes" / "let me know when it says
+        // Succeeded" / "stop watching" starts or stops a screen watch. Watching
+        // is OCR on a timer with no model call, so like the fast commands it
+        // is not behind agent mode; anything the parser isn't sure of goes on
+        // to the model, which has the `watch_screen` tool.
+        if let screenWatchRequest = ScreenWatchRequestParser.request(from: transcript) {
+            runDirectScreenWatchRequest(screenWatchRequest, transcript: transcript, historyTitle: historyTitle)
             return
         }
 
@@ -2857,6 +2872,108 @@ extension CompanionManager {
         }
         islandFlashClearWorkItem = clearWorkItem
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: clearWorkItem)
+    }
+}
+
+// MARK: - Screen watchers
+
+extension CompanionManager {
+    /// Starts or stops a screen watch recognised by `ScreenWatchRequestParser`
+    /// and says so in the notch. The user's own words are the consent: a watch
+    /// only reads the screen, on this Mac.
+    fileprivate func runDirectScreenWatchRequest(
+        _ screenWatchRequest: ScreenWatchRequest,
+        transcript: String,
+        historyTitle: String?
+    ) {
+        let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+        PerfMetricsRecorder.shared.abandonTurn()
+
+        let replyText: String
+        let didSucceed: Bool
+        switch screenWatchRequest {
+        case .startWatching(let condition):
+            switch ScreenWatcherStore.shared.startWatching(condition) {
+            case .started:
+                replyText = "okay — i'll watch your screen and tell you when \(condition.summaryText)."
+                didSucceed = true
+            case .alreadyWatching:
+                replyText = "i'm already watching for \(condition.summaryText)."
+                didSucceed = true
+            case .tooManyWatchers:
+                replyText = "i'm already watching \(ScreenWatcherStore.maximumActiveWatcherCount) things — say \"stop watching\" first."
+                didSucceed = false
+            }
+        case .stopAllWatching:
+            let stoppedWatcherCount = ScreenWatcherStore.shared.stopAllWatching()
+            switch stoppedWatcherCount {
+            case 0: replyText = "i wasn't watching anything."
+            case 1: replyText = "okay, i stopped watching."
+            default: replyText = "okay, i stopped all \(stoppedWatcherCount) watches."
+            }
+            didSucceed = true
+        }
+
+        AgentTaskRegistry.shared.appendStep(
+            AgentStepRecord(
+                kind: .tool(name: ScreenWatchToolNames.watchScreen),
+                summary: didSucceed ? "Screen watch — no model call" : "Screen watch: \(replyText)",
+                isError: !didSucceed
+            ),
+            to: taskID
+        )
+        AgentTaskRegistry.shared.finishTask(
+            taskID, status: didSucceed ? .succeeded : .failed(replyText), finalText: replyText
+        )
+        conversationTranscript.append(ConversationTranscript.Turn(messages: [
+            BuddyChatMessage(role: .user, text: transcript),
+            BuddyChatMessage(role: .assistant, text: replyText),
+        ]))
+        conversationTranscript.trimToRecentTurns(10)
+
+        currentReplyText = replyText
+        if !didSucceed { flashIsland(.error) }
+
+        let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            if isReplySpeechEnabled {
+                self.voiceState = .responding
+                try? await self.ttsProvider.speakText(replyText)
+            }
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
+    }
+
+    /// A watch ended on its own: flash the island (success plays the cue),
+    /// and — only while Wisp is idle, so a turn in progress is never talked
+    /// over or has its answer replaced — show the line in the notch and say it
+    /// in voice mode. The store posts the system notification either way.
+    fileprivate func presentScreenWatchEnding(_ endedWatcher: ActiveScreenWatcher, ending: ScreenWatchEnding) {
+        let endingMessage = ScreenWatcherStore.endingMessage(for: endedWatcher, ending: ending)
+        if case .conditionMet = ending {
+            flashIsland(.success)
+        } else {
+            flashIsland(.error)
+        }
+
+        guard voiceState == .idle else { return }
+        currentReplyText = endingMessage
+
+        guard VoiceOutputPreference.shared.isReplySpeechEnabled else { return }
+        currentResponseTask?.cancel()
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            self.voiceState = .responding
+            try? await self.ttsProvider.speakText(endingMessage)
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
     }
 }
 

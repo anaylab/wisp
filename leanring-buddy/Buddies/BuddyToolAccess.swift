@@ -93,7 +93,8 @@ enum BuddyToolGroup: String, CaseIterable, Identifiable {
             return .browser
         case _ where toolName.hasPrefix("chrome_"):
             return .browser
-        case "read_screen_text", "list_windows", "read_clipboard":
+        case "read_screen_text", "list_windows", "read_clipboard",
+             ScreenWatchToolNames.watchScreen, ScreenWatchToolNames.stopScreenWatch:
             return .screen
         case MessagingToolNames.sendIMessage, MessagingToolNames.findContact:
             return .messaging
