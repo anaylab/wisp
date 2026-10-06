@@ -970,6 +970,7 @@ running):
 ```bash
 ./Tests/ModelProviderContract/run.sh     # provider layer, ~10s
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
+./Tests/HostileProviderAttack/run.sh     # adversarial provider vs the real agent loop; lists known defects
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
 ./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
 ./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec
