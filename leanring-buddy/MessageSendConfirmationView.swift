@@ -88,7 +88,13 @@ struct MessageSendConfirmationView: View {
     private let messageBubbleFill = Color(nsColor: .systemBlue)
 
     var body: some View {
-        WispGlassPanel(cornerRadius: WispRadius.panel, padding: WispSpacing.lg, shadow: .island) {
+        WispGlassPanel(
+            cornerRadius: WispRadius.panel,
+            padding: WispSpacing.lg,
+            shadow: .island,
+            // A send is waiting on the user, like any confirmation card.
+            rimLight: .glowing(WispColor.warning)
+        ) {
             VStack(alignment: .leading, spacing: WispSpacing.md) {
                 recipientHeader
                 messageBubble

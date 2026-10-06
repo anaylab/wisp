@@ -27,16 +27,20 @@ struct WispGlassPanel<Content: View>: View {
     var cornerRadius: CGFloat = WispRadius.panel
     var padding: CGFloat = WispSpacing.lg
     var shadow: WispShadow = .floating
+    /// Light carried in the glass rim (see `WispLiquidRim`) — resting by default.
+    var rimLight: WispLiquidRimLight = .resting
     @ViewBuilder var content: () -> Content
 
     var body: some View {
+        let panelShape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content()
             .padding(padding)
             .wispGlassSurface(cornerRadius: cornerRadius)
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                panelShape
                     .strokeBorder(WispColor.OnGlass.borderSubtle, lineWidth: 1)
             )
+            .wispLiquidRim(in: panelShape, light: rimLight)
             .wispShadow(shadow)
     }
 }

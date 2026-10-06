@@ -169,6 +169,13 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
     /// decide, so the authorization-change callback knows to start the fix.
     private var isAwaitingAuthorizationDecision = false
 
+    /// Fails any still-waiting caller if neither a fix nor a decision arrives —
+    /// e.g. the permission prompt never appears for a background/accessory app,
+    /// or `requestLocation` never calls back — so a places card can never hang on
+    /// "Finding places near you…" forever.
+    private var locationTimeoutTask: Task<Void, Never>?
+    private let locationTimeout: Duration = .seconds(12)
+
     override init() {
         super.init()
         locationManager.delegate = self
@@ -179,25 +186,38 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
     /// been decided. Throws `accessDenied` if the user has refused, so the card
     /// can show a clear "grant access" state instead of a wrong or empty result.
     func requestCurrentLocation() async throws -> CLLocation {
-        switch locationManager.authorizationStatus {
-        case .denied, .restricted:
-            throw LocationError.accessDenied
+        let status = locationManager.authorizationStatus
 
-        case .notDetermined:
-            // Prompt, then wait — the fix is started from the authorization
-            // callback once the user has granted access.
-            return try await withCheckedThrowingContinuation { continuation in
-                pendingLocationContinuations.append(continuation)
+        if status == .denied || status == .restricted {
+            throw LocationError.accessDenied
+        }
+
+        scheduleLocationTimeout()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            pendingLocationContinuations.append(continuation)
+            if status == .notDetermined {
+                // Prompt, then wait — the fix is started from the authorization
+                // callback once the user has granted access.
                 isAwaitingAuthorizationDecision = true
                 locationManager.requestWhenInUseAuthorization()
-            }
-
-        default:
-            // Some authorized state — ask for a fix immediately.
-            return try await withCheckedThrowingContinuation { continuation in
-                pendingLocationContinuations.append(continuation)
+            } else {
+                // Some authorized state — ask for a fix immediately.
                 locationManager.requestLocation()
             }
+        }
+    }
+
+    /// Restarts the single timeout guard. Fires once after `locationTimeout` and
+    /// fails whatever is still waiting.
+    private func scheduleLocationTimeout() {
+        locationTimeoutTask?.cancel()
+        locationTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: self?.locationTimeout ?? .seconds(12))
+            guard let self, !Task.isCancelled else { return }
+            guard !self.pendingLocationContinuations.isEmpty else { return }
+            self.isAwaitingAuthorizationDecision = false
+            self.failAllPending(with: LocationError.unavailable)
         }
     }
 
@@ -241,6 +261,7 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
     // MARK: Continuation bookkeeping
 
     private func resumeAllPending(with location: CLLocation) {
+        locationTimeoutTask?.cancel()
         let continuations = pendingLocationContinuations
         pendingLocationContinuations.removeAll()
         for continuation in continuations {
@@ -249,6 +270,7 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func failAllPending(with error: Error) {
+        locationTimeoutTask?.cancel()
         let continuations = pendingLocationContinuations
         pendingLocationContinuations.removeAll()
         for continuation in continuations {

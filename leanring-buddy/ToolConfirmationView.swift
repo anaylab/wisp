@@ -93,7 +93,13 @@ struct ToolConfirmationView: View {
     }
 
     private var toolCallPanel: some View {
-        WispGlassPanel(cornerRadius: WispRadius.panel, padding: WispSpacing.lg, shadow: .island) {
+        WispGlassPanel(
+            cornerRadius: WispRadius.panel,
+            padding: WispSpacing.lg,
+            shadow: .island,
+            // A decision is pending, so the whole rim glows in the warning tone.
+            rimLight: .glowing(WispColor.warning)
+        ) {
             VStack(alignment: .leading, spacing: WispSpacing.md) {
                 header
                 requestBlock
