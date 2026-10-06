@@ -501,23 +501,31 @@ struct NotchHUDView: View {
 
     /// "Watching until “Succeeded” appears · 4 min" with its own Stop.
     private func screenWatcherRow(_ activeScreenWatcher: ActiveScreenWatcher) -> some View {
-        let elapsedMinutes = Int(Date().timeIntervalSince(activeScreenWatcher.startDate) / 60)
-        let elapsedText = elapsedMinutes < 1 ? "just started" : "\(elapsedMinutes) min"
-        return HStack(spacing: 8) {
+        HStack(spacing: 8) {
             Image(systemName: "eye")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(WispColor.Brand.lavender)
                 .frame(width: 12)
             VStack(alignment: .leading, spacing: 1) {
+                // Two lines, cut at the end: a middle cut hid part of the very
+                // text being watched for ("Pin…le Finished").
                 Text("Watching until \(activeScreenWatcher.condition.summaryText)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(WispColor.Island.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text("Screen watch · \(elapsedText) · on-device")
-                    .font(.system(size: 10.5))
-                    .foregroundColor(WispColor.Island.textTertiary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                // The elapsed time is read from a clock rather than computed
+                // once, so "just started" moves on to "1 min", "2 min" while
+                // the panel stays open. TimelineView pauses while off-screen.
+                TimelineView(.periodic(from: activeScreenWatcher.startDate, by: 30)) { timelineContext in
+                    let elapsedMinutes = Int(timelineContext.date.timeIntervalSince(activeScreenWatcher.startDate) / 60)
+                    let elapsedText = elapsedMinutes < 1 ? "just started" : "\(elapsedMinutes) min"
+                    Text("Screen watch · \(elapsedText) · on-device")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(WispColor.Island.textTertiary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
             liveActivityStopButton(tooltip: "Stop watching the screen for this") {
