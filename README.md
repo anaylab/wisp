@@ -75,6 +75,23 @@ recognises them and just does it.
   <br><sub><b>Menu bar and settings.</b> A plain native menu for the quick stuff (including Pause Listening); Settings shows every permission, the model that's answering, and whether anything leaves your Mac.</sub>
 </p>
 
+<table>
+<tr>
+<td width="33%" align="center" valign="top">
+  <img src="docs/assets/screenshots/routines.png" alt="The Routines page: a saved 'Summarize this page' routine with its instruction, a ⌃⌥1 shortcut and the browsers it's suggested in">
+  <br><sub><b>Routines.</b> Saved instructions on <kbd>⌃⌥</kbd>+number, suggested in the notch for the apps they fit.</sub>
+</td>
+<td width="33%" align="center" valign="top">
+  <img src="docs/assets/screenshots/marketplace.png" alt="Connections → Marketplace: installed MCP servers with their tool counts and toggles, and a searchable catalogue">
+  <br><sub><b>Marketplace.</b> Install MCP servers in a click. Only the ~6 tools relevant to each request reach the model.</sub>
+</td>
+<td width="33%" align="center" valign="top">
+  <img src="docs/assets/screenshots/settings-general.png" alt="Settings → General: every permission granted, the local model running, and 'Runs entirely on this Mac'">
+  <br><sub><b>Settings.</b> Permissions, what's running, and a plain statement of whether anything leaves your Mac.</sub>
+</td>
+</tr>
+</table>
+
 ## Features
 
 <table>
