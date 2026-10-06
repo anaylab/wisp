@@ -348,8 +348,13 @@ struct BuddyChatTurn: Sendable {
     /// nothing. This is the single condition under which the text is safe to
     /// speak; anything else is either a request for a tool or an attempt at
     /// one, and speaking either reads a half-answer aloud.
+    ///
+    /// A reply cut off at the output-token ceiling is a half-answer too, even
+    /// with no tool call in it ("The total for this month is 3"). Only
+    /// `.maxTokens` is excluded, not every reason other than `.endTurn`: some
+    /// providers report a normal finish as `.other` (Claude's `stop_sequence`).
     var isUnambiguousFinalAnswer: Bool {
-        toolUses.isEmpty && malformedToolCallDescriptions.isEmpty
+        toolUses.isEmpty && malformedToolCallDescriptions.isEmpty && stopReason != .maxTokens
     }
 
     init(
