@@ -22,13 +22,6 @@
 import CoreLocation
 import Foundation
 import MapKit
-import os
-
-/// Temporary diagnostic logging for the location fix, visible in Console /
-/// `log stream --predicate 'subsystem == "com.wisp.location.debug"'`. Used to
-/// find where a places turn stalls; the app otherwise logs via `print`, which is
-/// invisible to unified logging when launched via `open`.
-private let locationDebugLog = Logger(subsystem: "com.wisp.location.debug", category: "places")
 
 actor PlacesDataProvider: GlanceCardDataProvider {
     static let shared = PlacesDataProvider()
@@ -194,10 +187,8 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
     /// can show a clear "grant access" state instead of a wrong or empty result.
     func requestCurrentLocation() async throws -> CLLocation {
         let status = locationManager.authorizationStatus
-        locationDebugLog.info("requestCurrentLocation: authStatus=\(status.rawValue, privacy: .public), servicesEnabled=\(CLLocationManager.locationServicesEnabled(), privacy: .public)")
 
         if status == .denied || status == .restricted {
-            locationDebugLog.error("access denied/restricted at entry")
             throw LocationError.accessDenied
         }
 
@@ -209,11 +200,9 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
                 // Prompt, then wait — the fix is started from the authorization
                 // callback once the user has granted access.
                 isAwaitingAuthorizationDecision = true
-                locationDebugLog.info("requesting when-in-use authorization")
                 locationManager.requestWhenInUseAuthorization()
             } else {
                 // Some authorized state — ask for a fix immediately.
-                locationDebugLog.info("already authorized; calling requestLocation")
                 locationManager.requestLocation()
             }
         }
@@ -227,7 +216,6 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
             try? await Task.sleep(for: self?.locationTimeout ?? .seconds(12))
             guard let self, !Task.isCancelled else { return }
             guard !self.pendingLocationContinuations.isEmpty else { return }
-            locationDebugLog.error("location timed out after \(self.locationTimeout, privacy: .public) with \(self.pendingLocationContinuations.count, privacy: .public) waiter(s); authStatus=\(self.locationManager.authorizationStatus.rawValue, privacy: .public)")
             self.isAwaitingAuthorizationDecision = false
             self.failAllPending(with: LocationError.unavailable)
         }
@@ -237,10 +225,9 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         Task { @MainActor in
-            let status = manager.authorizationStatus
-            locationDebugLog.info("authorizationDidChange: authStatus=\(status.rawValue, privacy: .public), awaiting=\(self.isAwaitingAuthorizationDecision, privacy: .public)")
             guard isAwaitingAuthorizationDecision else { return }
 
+            let status = manager.authorizationStatus
             if status == .denied || status == .restricted {
                 isAwaitingAuthorizationDecision = false
                 failAllPending(with: LocationError.accessDenied)
@@ -250,7 +237,6 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
             } else {
                 // Authorized — now start the fix the caller is waiting for.
                 isAwaitingAuthorizationDecision = false
-                locationDebugLog.info("authorized via prompt; calling requestLocation")
                 manager.requestLocation()
             }
         }
@@ -259,18 +245,15 @@ final class WispLocationProvider: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         Task { @MainActor in
             guard let location = locations.last else {
-                locationDebugLog.error("didUpdateLocations with empty array")
                 failAllPending(with: LocationError.unavailable)
                 return
             }
-            locationDebugLog.info("didUpdateLocations: got a fix")
             resumeAllPending(with: location)
         }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         Task { @MainActor in
-            locationDebugLog.error("didFailWithError: \(error.localizedDescription, privacy: .public)")
             failAllPending(with: LocationError.unavailable)
         }
     }
