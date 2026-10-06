@@ -182,6 +182,10 @@ final class AgentToolRegistry: ObservableObject {
         let content: String
         let isError: Bool
         let wasDeclined: Bool
+        /// The arguments the implementation actually ran with — after input
+        /// preparation and any edits the user made on the confirmation card.
+        /// Nil when nothing ran. History records this rather than the model's call.
+        var executedToolInput: JSONValue? = nil
     }
 
     /// Runs a tool by name, asking permission first when the tool needs it.
@@ -217,11 +221,15 @@ final class AgentToolRegistry: ObservableObject {
             }
         }
 
+        // Set when the user fixed a subject, message or title on the card;
+        // the model is told, so it doesn't claim its own wording went out.
+        var userEditNote: String?
         if tool.definition.metadata.requiresConfirmation {
-            let decision = await permissionBroker.requestApproval(
+            let approvalOutcome = await permissionBroker.requestApprovalAllowingEdits(
                 toolName: name,
                 toolInput: inputToRun
             )
+            let decision = approvalOutcome.decision
             guard decision.isApproved else {
                 let reason: String
                 if case .declined(let declineReason) = decision { reason = declineReason }
@@ -231,13 +239,19 @@ final class AgentToolRegistry: ObservableObject {
                     isError: false, wasDeclined: true
                 )
             }
+            // Re-applied against the input that was asked about, through the
+            // one rule that only lets edits touch the card's text fields.
+            let appliedEdits = approvalOutcome.approvedToolInput(forAskedToolInput: inputToRun, toolName: name)
+            inputToRun = appliedEdits.toolInput
+            userEditNote = EditableConfirmationFields.toolResultNote(for: appliedEdits.editedFields)
         }
 
         do {
             let result = try await tool.implementation(inputToRun)
-            return Outcome(content: result, isError: false, wasDeclined: false)
+            let resultWithEditNote = userEditNote.map { result + "\n" + $0 } ?? result
+            return Outcome(content: resultWithEditNote, isError: false, wasDeclined: false, executedToolInput: inputToRun)
         } catch {
-            return Outcome(content: error.localizedDescription, isError: true, wasDeclined: false)
+            return Outcome(content: error.localizedDescription, isError: true, wasDeclined: false, executedToolInput: inputToRun)
         }
     }
 

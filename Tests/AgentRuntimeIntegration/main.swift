@@ -163,6 +163,30 @@ final class StubBroker: ToolPermissionBroker {
     }
 }
 
+/// A broker whose user "edited" fields on the card before answering. Hands
+/// back raw edits, as the real coordinator does — including, in the tests,
+/// keys that must never be editable, to prove the registry drops them.
+final class EditingStubBroker: ToolPermissionBroker {
+    let decision: ToolConfirmationCoordinator.Decision
+    let editedTextsByArgumentKey: [String: String]
+    private(set) var askedAbout: [String] = []
+    init(decision: ToolConfirmationCoordinator.Decision, editedTextsByArgumentKey: [String: String]) {
+        self.decision = decision
+        self.editedTextsByArgumentKey = editedTextsByArgumentKey
+    }
+    func requestApproval(toolName: String, argumentSummary: String) async -> ToolConfirmationCoordinator.Decision {
+        askedAbout.append(toolName)
+        return decision
+    }
+    func requestApprovalAllowingEdits(toolName: String, toolInput: JSONValue) async -> ToolApprovalOutcome {
+        askedAbout.append(toolName)
+        return ToolApprovalOutcome(decision: decision, editedTextsByArgumentKey: editedTextsByArgumentKey)
+    }
+}
+
+final class CapturedInput: @unchecked Sendable { var value: JSONValue? }
+final class RecordedSteps: @unchecked Sendable { var values: [AgentStepRecord] = [] }
+
 func speechRun(_ provider: ScriptedProvider, _ registry: AgentToolRegistry)
 async -> (observed: [String], speakable: [String]) {
     let observed = Deltas(); let speakable = Deltas()
@@ -748,6 +772,109 @@ func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
               messageShape(outcome?.messages ?? []).last
                 == "assistant[text(still working.) toolUse(lookup)]",
               messageShape(outcome?.messages ?? []).last ?? "nothing")
+    }
+
+    section("11. edits on the confirmation card reach the tool that runs")
+    do {
+        // The user rewrote the subject and (via a buggy or hostile broker)
+        // also "edited" the recipient. Only the subject may land.
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        let broker = EditingStubBroker(decision: .approved, editedTextsByArgumentKey: [
+            "subject": "Lunch moved to 1pm",
+            "to": "attacker@example.com",
+        ])
+        registry.setPermissionBroker(broker)
+        let receivedInput = CapturedInput()
+        registry.register(definition("gmail__send_email", .writing())) { input in
+            receivedInput.value = input; return "sent."
+        }
+        let modelInput: JSONValue = .object([
+            "to": .string("sam@example.com"), "subject": .string("Lunch"), "body": .string("See you at noon."),
+        ])
+        let provider = ScriptedProvider(turns: [
+            BuddyChatTurn(text: "", toolUses: [toolCall("t1", "gmail__send_email", modelInput)], stopReason: .toolUse),
+            BuddyChatTurn(text: "done.", stopReason: .endTurn),
+        ])
+        let recordedSteps = RecordedSteps()
+        let outcome = try? await AgentTurnRunner(modelProvider: provider, toolRegistry: registry,
+                                                 speakConfirmation: { _ in })
+            .run(userText: "email sam", images: [], systemPrompt: "sys", conversationHistory: [],
+                 onNarration: { _ in }, onStep: { recordedSteps.values.append($0) })
+        check("the edited approval was asked for", broker.askedAbout == ["gmail__send_email"], broker.askedAbout.description)
+        if case .object(let ranFields)? = receivedInput.value {
+            check("the tool ran with the edited subject", ranFields["subject"] == .string("Lunch moved to 1pm"),
+                  String(describing: ranFields["subject"]))
+            check("an edit to the recipient was dropped", ranFields["to"] == .string("sam@example.com"),
+                  String(describing: ranFields["to"]))
+            check("the untouched body ran as written", ranFields["body"] == .string("See you at noon."))
+        } else {
+            check("the tool ran", false, "it did not")
+        }
+        let toolResultTexts = (outcome?.messages ?? []).flatMap(\.blocks).compactMap { block -> String? in
+            if case .toolResult(_, _, let content, _) = block { return content }
+            return nil
+        }
+        check("the model is told the user edited the subject",
+              toolResultTexts.first.map { $0.hasPrefix("sent.") && $0.contains("subject: \"Lunch moved to 1pm\"") } == true,
+              toolResultTexts.first ?? "no result")
+        let toolStepDetail = recordedSteps.values.first { if case .tool = $0.kind { return true }; return false }?.detail ?? ""
+        check("History records the input that ran, not the model's",
+              toolStepDetail.contains("Lunch moved to 1pm") && !toolStepDetail.contains("attacker"), toolStepDetail)
+    }
+    do {
+        // A broker with no editable card (every older stub) runs the call as asked.
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        registry.setPermissionBroker(StubBroker(decision: .approved))
+        let receivedInput = CapturedInput()
+        registry.register(definition("gmail__send_email", .writing())) { input in
+            receivedInput.value = input; return "sent."
+        }
+        let modelInput: JSONValue = .object(["to": .string("sam@example.com"), "subject": .string("Lunch")])
+        let provider = ScriptedProvider(turns: [
+            BuddyChatTurn(text: "", toolUses: [toolCall("t1", "gmail__send_email", modelInput)], stopReason: .toolUse),
+            BuddyChatTurn(text: "done.", stopReason: .endTurn),
+        ])
+        let outcome = try? await run(AgentTurnRunner(modelProvider: provider, toolRegistry: registry,
+                                                     speakConfirmation: { _ in }))
+        check("without edits the model's input runs unchanged", receivedInput.value == modelInput)
+        let toolResultTexts = (outcome?.messages ?? []).flatMap(\.blocks).compactMap { block -> String? in
+            if case .toolResult(_, _, let content, _) = block { return content }
+            return nil
+        }
+        check("and the result carries no edit note", toolResultTexts == ["sent."], toolResultTexts.description)
+    }
+    do {
+        // Edits never travel with a decline.
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        registry.setPermissionBroker(EditingStubBroker(decision: .declined(reason: "you declined"),
+                                                       editedTextsByArgumentKey: ["subject": "x"]))
+        let ran = Ran()
+        registry.register(definition("gmail__send_email", .writing())) { _ in ran.value = true; return "sent." }
+        let declinedOutcome = await registry.invoke(name: "gmail__send_email",
+                                                    input: .object(["to": .string("a@b.com"), "subject": .string("Hi")]))
+        check("a declined call with edits does not run", !ran.value && declinedOutcome.wasDeclined)
+    }
+    do {
+        // Prepared input (send_imessage's path): edits apply to the prepared
+        // input, so the resolved handle survives and the message is the user's.
+        let registry = AgentToolRegistry.makeEmptyForTesting()
+        registry.setPermissionBroker(EditingStubBroker(decision: .approved, editedTextsByArgumentKey: [
+            "message": "running 10 min late", "handle": "+15550000000",
+        ]))
+        let receivedInput = CapturedInput()
+        registry.register(
+            definition("send_imessage", ToolMetadata(readOnly: false, externalSideEffect: true, dataSource: .localMachine)),
+            preparingInputWith: { _ in
+                .ready(.object(["to": .string("Mom"), "handle": .string("+15551234567"), "message": .string("running late")]))
+            }
+        ) { input in receivedInput.value = input; return "sent to Mom by imessage." }
+        _ = await registry.invoke(name: "send_imessage", input: .object(["to": .string("mom"), "message": .string("running late")]))
+        if case .object(let ranFields)? = receivedInput.value {
+            check("prepared send ran with the edited message", ranFields["message"] == .string("running 10 min late"))
+            check("prepared send kept the resolved handle", ranFields["handle"] == .string("+15551234567"))
+        } else {
+            check("prepared send ran", false, "it did not")
+        }
     }
 
     await anthropicProviderSuite()

@@ -371,10 +371,12 @@ final class AgentTurnRunner {
                     continue
                 }
 
+                // What ran, not what the model asked for: input preparation
+                // and the user's edits on the confirmation card can differ.
                 let toolStep = AgentStepRecord(
                     kind: .tool(name: call.name),
                     summary: outcome.isError ? "Failed: \(outcome.content)" : summarize(outcome.content),
-                    detail: call.input.compactDescription,
+                    detail: (outcome.executedToolInput ?? call.input).compactDescription,
                     startedAt: toolStartedAt,
                     durationSeconds: Date().timeIntervalSince(toolStartedAt),
                     isError: outcome.isError
@@ -433,8 +435,23 @@ final class AgentTurnRunner {
                 }
                 return await registry.invoke(name: name, input: input)
             }
-            group.addTask {
+            group.addTask { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(Self.timeoutSeconds(forToolNamed: name) * 1_000_000_000))
+                // The budget covers the prompt, and a prompt the user is
+                // editing outlives its 45s (each edit pushes it out, up to the
+                // coordinator's cap). Don't abandon the call under them: wait
+                // for that prompt, then give the tool its usual work time.
+                var waitedForPromptBeingEdited = false
+                while !Task.isCancelled,
+                      let promptExpiryDate = ToolConfirmationCoordinator.shared.expiryDateOfPendingConfirmation(forToolNamed: name),
+                      promptExpiryDate > Date() {
+                    waitedForPromptBeingEdited = true
+                    let secondsUntilPromptExpiry = promptExpiryDate.timeIntervalSinceNow + 0.5
+                    try? await Task.sleep(nanoseconds: UInt64(max(0.5, secondsUntilPromptExpiry) * 1_000_000_000))
+                }
+                if waitedForPromptBeingEdited && !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: UInt64(Self.toolWorkTimeoutSeconds * 1_000_000_000))
+                }
                 return nil
             }
 

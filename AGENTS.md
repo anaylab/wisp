@@ -357,10 +357,37 @@ cloud dependency to the local path, without asking.
   folder, content preview, flagged "Outside agent folder"), deletions and other irreversible
   actions (identifying args + "can't be taken back"), and Composio batches (one row per unwrapped
   tool). Reading tools and unrecognised shapes get no card, so the panel falls back to the plain
-  summary (zero regression). Display-only; the spoken yes/no, 45s timeout and deny-by-default
-  flow are unchanged; inline-editable fields are a deliberate future extension. Argument/name
+  summary (zero regression). The spoken yes/no and deny-by-default flow are unchanged. Argument/name
   parsing shared by both lives in `ToolCallInspection` (lenient key lookup, Composio unwrapping,
-  path containment).
+  path containment, and `matchingFieldKey` — the exact key a lenient lookup lands on).
+  **Inline-editable fields**: the card's plain human-text fields can be edited before Allow —
+  email subject/body, message/post text and post title, event title/location (by the card
+  builder's own shape classification, `ConfirmationCardShape`), `send_imessage`'s message (the
+  Siri-style bubble), `create_reminder`'s title and `run_shortcut`'s input. Never recipients,
+  handles, paths, URLs, commands, guests or times (changing who/where would bypass what the
+  consent and `ToolCallSafety` judged), never a non-string or nested value, and never anything
+  in a Composio call. `EditableConfirmationFields` (pure, `Tests/EditableConfirmation`) is the
+  one rule: `editableFields(forToolNamed:toolInput:)` lists them (exact top-level keys) and
+  `applyingEdits` re-derives that set from the asked-about input and drops any edit to another
+  key (and blank/unchanged edits). Data flow: `ToolPermissionBroker.requestApprovalAllowingEdits`
+  returns a `ToolApprovalOutcome` (decision + `editedTextsByArgumentKey`; a default extension
+  wraps the old decision so stubs compile); `AgentToolRegistry.invoke` re-applies the edits via
+  `approvedToolInput(forAskedToolInput:toolName:)` to the (prepared) input it asked about, runs
+  that, appends `toolResultNote` ("the user edited this … subject: \"…\"") to the result so the
+  model doesn't claim its own wording, and returns `Outcome.executedToolInput`, which the runner
+  records as the History step detail. The direct "text mom …" route applies them the same way.
+  The coordinator holds the edits (`editedTextsByArgumentKey`), so a spoken "yes" approves the
+  current text; only `requestApprovalAllowingEdits` callers get editable fields (the old
+  `requestApproval(toolName:toolInput:)` shows none, since its caller runs the original). Each
+  edit/focus pushes `pendingConfirmationExpiryDate` to 45s from now, capped at 5 min after the
+  request (`maximumConfirmationWindowWhileEditingSeconds`); `AgentTurnRunner`'s per-tool timeout
+  waits out a prompt being edited, then grants its usual work time. While such a card is up the
+  overlay panel may become key (`OverlayWindowManager.setAllowsKeyboardFocus`, non-activating,
+  like `NotchPanel.allowsBecomingKey`; turning it off orders the key panel out/in to hand focus
+  back). Fields (`EditableConfirmationFieldView`) read as card text until hovered (fill, pencil,
+  I-beam), multi-line `TextEditor` for bodies, an "edited" mark when changed; plain Return never
+  approves, Cmd-Return = Allow/Send, Esc just leaves the field; the raw call chip shows the
+  edited call.
 - **Browser control**: the user's real Chrome/Safari, driven through the DOM (AppleScript +
   injected JS in `AppleScriptBrowserController`), not the vision model — a snapshot assigns
   every interactive element a stable id (`e7`) and actions refer to ids, so pointing costs a
@@ -571,7 +598,9 @@ assistant's on-screen surfaces — the tool-confirmation card and the drawn mark
 arrows and highlights (`OverlayContentView`). It draws nothing while idle and tracks no
 cursor. It's non-activating, joins all Spaces, and never steals focus. Because it covers the
 whole screen at `.screenSaver` level, it must keep `ignoresMouseEvents = true` except while a
-tool confirmation card is up — otherwise the desktop becomes unclickable.
+tool confirmation card is up — otherwise the desktop becomes unclickable. It may become key
+(`allowsBecomingKey`) only while a confirmation card with editable fields is up, and the manager
+remembers both states so an overlay rebuilt mid-prompt keeps them.
 
 **Notch HUD**: The resident primary surface (Phase 1 of the HeyClicky-style build).
 A borderless `.nonactivatingPanel` (`NotchWindowController` / `NotchPanel`) sits one level
@@ -684,7 +713,7 @@ Grouped by what they do. Line counts are approximate.
 ### Overlay and annotation
 | File | Lines | Purpose |
 |------|-------|---------|
-| `OverlayWindow.swift` | ~265 | Full-screen transparent overlay (one per screen): hosts the tool-confirmation card, the command-mode badge, and the annotation layer (markers, boxes, arrows, highlights) via `OverlayContentView`. Draws nothing while idle. Also owns `ignoresMouseEvents` toggling and the shared `Triangle` glyph. |
+| `OverlayWindow.swift` | ~315 | Full-screen transparent overlay (one per screen, a non-activating `NSPanel`): hosts the tool-confirmation card, the command-mode badge, and the annotation layer (markers, boxes, arrows, highlights) via `OverlayContentView`. Draws nothing while idle. Also owns `ignoresMouseEvents` toggling, key focus only for an editable confirmation card (`setAllowsKeyboardFocus`), and the shared `Triangle` glyph. |
 | `CommandModeIndicator.swift` | ~135 | The push-to-talk gesture badge: `PushToTalkCommandMode` (Talk / Dictate / Type / Hands-free, with label, icon, destination) and `CommandModeIndicator`, the glass capsule the overlay shows under the notch to name the fired gesture. |
 | `ScreenListeningGlow.swift` | ~100 | Ambient "Wisp is listening" cue: a breathing lavender (AI-activity accent) glow around every screen's edges, drawn by the overlay only while `voiceState == .listening`. Honours Reduce Motion (steady glow). |
 | `ScreenAnnotation.swift` | ~315 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. Also the id form (`[BOX:a12:label]`…) via an optional Accessibility-region resolver. |
@@ -706,7 +735,7 @@ Grouped by what they do. Line counts are approximate.
 | `MessageCommandParser.swift` | ~210 | Pure parsing of spoken message commands ("text X saying Y", "send X a text …", "tell X that Y", unseparated "text X Y" → longest-first splits). Conservative; declines pronouns and noun uses ("text size"). |
 | `ContactsDirectory.swift` | ~440 | `ContactRecord`/`ContactHandle` (preferred handle: mobile → phone → email), the pure `ContactMatcher` (ranked tiers, ambiguity, relation words via the Me card), `DirectMessagingHandleParser`, and `ContactsDirectory` (CNContactStore access + off-main fetch). |
 | `MessagesSender.swift` | ~175 | `MessageRecipientResolver` (candidates → one person + handle, or a reason, or "not a message command") and `MessagesAppSender` (AppleScript handler call to Messages with Apple Event parameters; iMessage then SMS; -1743 → Automation hint). |
-| `MessageSendConfirmationView.swift` | ~235 | The Siri-style confirmation panel `ToolConfirmationView` shows for `send_imessage` (recipient, message bubble, Cancel / Send); same consent flow underneath. |
+| `MessageSendConfirmationView.swift` | ~305 | The Siri-style confirmation panel `ToolConfirmationView` shows for `send_imessage` (recipient, an editable message bubble, Cancel / Send); same consent flow underneath. |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
@@ -744,12 +773,14 @@ Grouped by what they do. Line counts are approximate.
 | `ShortcutsAgentTools.swift` | ~280 | `ShortcutNameMatcher` (request → matching shortcut names; exact-name resolution), `ShortcutsToolRouting` (boost hints + per-turn `run_shortcut` description naming ≤3 matches; the `list_shortcuts`/`run_shortcut` definitions), and `AgentToolRegistry.registerShortcutsTools()`. |
 | `ConversationHistoryStore.swift` | ~420 | Persists the last 20 transcript turns to `~/Library/Application Support/Wisp/conversation.json` (Codable `Persisted*` shapes, images dropped, debounced + flushed on quit) and hands back the ≤6h-old ones to resume on launch. `ConversationHistoryCodec` holds the pure encode/decode/merge/resume policy. |
 | `MemoryStore.swift` | ~330 | `~/.wisp/memory.md` user memory: `MemoryFileFormat` (pure bullet parse/append/remove), `MemoryIndex` (the ≤800-char system-prompt block, newest facts first), and the `MemoryStore` ObservableObject behind the `remember`/`forget` tools and the Memory tab. |
-| `ToolConfirmationCoordinator.swift` | ~320 | Permission requests with a 45s timeout and spoken-affirmative parsing. `requestApproval(toolName:toolInput:)` applies the `ToolCallSafety` floor under session auto-approve and attaches the `ToolConfirmationCardBuilder` card to `PendingConfirmation.confirmationCard`. |
-| `ToolConfirmationView.swift` | ~150 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, the optional confirmation card (`GlanceCardView`), exact call in a chip, Cancel / Allow→, "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
-| `ToolCallInspection.swift` | ~310 | Deterministic reading of a tool call: `server__` namespace stripping, identifier → words (camelCase/underscores), Composio execute-meta-tool unwrapping into `InspectedToolAction`s (tolerates JSON-string arguments), lenient case/underscore-insensitive argument lookup, display text for arrays/objects, path-argument extraction and `..`-safe path containment. |
+| `ToolConfirmationCoordinator.swift` | ~530 | Permission requests with a 45s timeout and spoken-affirmative parsing. `requestApproval(toolName:toolInput:)` applies the `ToolCallSafety` floor under session auto-approve and attaches the `ToolConfirmationCardBuilder` card to `PendingConfirmation.confirmationCard`. `requestApprovalAllowingEdits` also offers the call's editable fields and returns a `ToolApprovalOutcome` (decision + edits); holds the typed edits and the movable expiry (`updateEditedText`, `extendTimeoutForEditing`). Defines `ToolPermissionBroker` and `ToolApprovalOutcome`. |
+| `ToolConfirmationView.swift` | ~240 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, the optional confirmation card (`GlanceCardView`, minus the rows its editable fields replace), the editable fields, exact call (with edits) in a chip, Cancel / Allow→ (Cmd-Return), "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
+| `EditableConfirmationFields.swift` | ~250 | Pure rule for inline-editable confirmation fields: which top-level string arguments a call offers (by tool name or card shape), `applyingEdits` (ignores any non-editable key, blank or unchanged edits), the tool-result note telling the model what the user changed, and hiding the card rows the fields replace. Tested by `Tests/EditableConfirmation`. |
+| `EditableConfirmationFieldView.swift` | ~125 | One editable card field: reads as card text until hovered (fill, pencil, I-beam), single-line `TextField` or multi-line `TextEditor`, focus counts as editing activity, "edited" mark (`EditedConfirmationFieldMark`). |
+| `ToolCallInspection.swift` | ~325 | Deterministic reading of a tool call: `server__` namespace stripping, identifier → words (camelCase/underscores), Composio execute-meta-tool unwrapping into `InspectedToolAction`s (tolerates JSON-string arguments), lenient case/underscore-insensitive argument lookup, display text for arrays/objects, path-argument extraction and `..`-safe path containment. |
 | `ToolMetadata.swift` | ~100 | What a tool does (read-only, destructive, external side effect, data source) as data; whether it needs confirmation is computed from it. |
 | `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules, and `alwaysAskBareToolNames` (`run_shortcut`). |
-| `ToolConfirmationCardBuilder.swift` | ~520 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). |
+| `ToolConfirmationCardBuilder.swift` | ~610 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). Exposes the shape it chose (`ConfirmationCardShape`) and its key vocabularies for the editable fields. |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
 | `AgentTaskRegistry.swift` | ~165 | Task and step records backing History → Timeline. Loads saved history on launch and saves it (debounced) on every change. |
 | `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
@@ -899,6 +930,7 @@ running):
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
+./Tests/EditableConfirmation/run.sh      # editable confirmation fields: which, edit application, refusals
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a
