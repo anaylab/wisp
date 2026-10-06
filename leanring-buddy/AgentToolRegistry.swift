@@ -182,6 +182,10 @@ final class AgentToolRegistry: ObservableObject {
         let content: String
         let isError: Bool
         let wasDeclined: Bool
+        /// The arguments the implementation actually ran with — after input
+        /// preparation and any edits the user made on the confirmation card.
+        /// Nil when nothing ran. History records this rather than the model's call.
+        var executedToolInput: JSONValue? = nil
     }
 
     /// Runs a tool by name, asking permission first when the tool needs it.
@@ -217,11 +221,15 @@ final class AgentToolRegistry: ObservableObject {
             }
         }
 
+        // Set when the user fixed a subject, message or title on the card;
+        // the model is told, so it doesn't claim its own wording went out.
+        var userEditNote: String?
         if tool.definition.metadata.requiresConfirmation {
-            let decision = await permissionBroker.requestApproval(
+            let approvalOutcome = await permissionBroker.requestApprovalAllowingEdits(
                 toolName: name,
                 toolInput: inputToRun
             )
+            let decision = approvalOutcome.decision
             guard decision.isApproved else {
                 let reason: String
                 if case .declined(let declineReason) = decision { reason = declineReason }
@@ -231,13 +239,19 @@ final class AgentToolRegistry: ObservableObject {
                     isError: false, wasDeclined: true
                 )
             }
+            // Re-applied against the input that was asked about, through the
+            // one rule that only lets edits touch the card's text fields.
+            let appliedEdits = approvalOutcome.approvedToolInput(forAskedToolInput: inputToRun, toolName: name)
+            inputToRun = appliedEdits.toolInput
+            userEditNote = EditableConfirmationFields.toolResultNote(for: appliedEdits.editedFields)
         }
 
         do {
             let result = try await tool.implementation(inputToRun)
-            return Outcome(content: result, isError: false, wasDeclined: false)
+            let resultWithEditNote = userEditNote.map { result + "\n" + $0 } ?? result
+            return Outcome(content: resultWithEditNote, isError: false, wasDeclined: false, executedToolInput: inputToRun)
         } catch {
-            return Outcome(content: error.localizedDescription, isError: true, wasDeclined: false)
+            return Outcome(content: error.localizedDescription, isError: true, wasDeclined: false, executedToolInput: inputToRun)
         }
     }
 
@@ -647,17 +661,184 @@ final class AgentToolRegistry: ObservableObject {
         }
     }
 
+    /// Lets the model read and add to the user's calendar through EventKit,
+    /// on this Mac. Reading is silent; adding asks first, since it changes the
+    /// user's calendar (and may sync to their iCloud/Google account). No
+    /// attendees are supported, so nothing is ever emailed to anyone.
+    private func registerCalendarTools() {
+        let calendarAccessDeniedMessage = "i don't have calendar access. turn it on for Wisp in System Settings → Privacy & Security → Calendars."
+
+        register(
+            BuddyToolDefinition(
+                name: "get_calendar_events",
+                description: "Read the user's calendar events between two times (defaults to the next 7 days). Use for 'what's on my calendar', 'am I free at 3', 'when is my next meeting'.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "start": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional range start in ISO 8601, e.g. \"2026-10-02T09:00\" or \"2026-10-02\". Defaults to now.")
+                        ]),
+                        "end": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional range end in ISO 8601. A bare date means the end of that day. Defaults to 7 days after the start.")
+                        ])
+                    ])
+                ]),
+                metadata: .reading(.localMachine)
+            )
+        ) { input in
+            var arguments: [String: JSONValue] = [:]
+            if case .object(let providedArguments) = input { arguments = providedArguments }
+
+            var rangeStartDate = Date()
+            if case .string(let rawStartText)? = arguments["start"], !rawStartText.isEmpty {
+                guard let parsedStart = ReminderDueDateParser.parse(rawStartText) else {
+                    return "i couldn't read the start \"\(rawStartText)\". use ISO 8601, like 2026-10-02T09:00."
+                }
+                rangeStartDate = parsedStart.date
+            }
+
+            var rangeEndDate = rangeStartDate.addingTimeInterval(60 * 60 * 24 * 7)
+            if case .string(let rawEndText)? = arguments["end"], !rawEndText.isEmpty {
+                guard let parsedEnd = ReminderDueDateParser.parse(rawEndText) else {
+                    return "i couldn't read the end \"\(rawEndText)\". use ISO 8601, like 2026-10-02T17:00."
+                }
+                // A bare date ("2026-10-03") means through the end of that day.
+                rangeEndDate = parsedEnd.includesTimeOfDay
+                    ? parsedEnd.date
+                    : parsedEnd.date.addingTimeInterval(60 * 60 * 24)
+            }
+            guard rangeEndDate > rangeStartDate else {
+                return "the end has to be after the start."
+            }
+
+            let foundEvents: [CalendarGlanceEvent]
+            do {
+                foundEvents = try await CalendarDataProvider.shared.events(
+                    from: rangeStartDate,
+                    to: rangeEndDate,
+                    maximumEventCount: 25
+                )
+            } catch CalendarDataProvider.CalendarDataError.accessDenied {
+                return calendarAccessDeniedMessage
+            }
+            guard !foundEvents.isEmpty else { return "nothing on the calendar in that range." }
+
+            let eventTimeFormatter = DateFormatter()
+            eventTimeFormatter.dateFormat = "EEE MMM d, h:mm a"
+            let allDayFormatter = DateFormatter()
+            allDayFormatter.dateFormat = "EEE MMM d"
+            return foundEvents.map { event in
+                let whenText = event.isAllDay
+                    ? "\(allDayFormatter.string(from: event.startDate)) (all day)"
+                    : "\(eventTimeFormatter.string(from: event.startDate)) – \(DateFormatter.localizedString(from: event.endDate, dateStyle: .none, timeStyle: .short))"
+                let whereText = event.location.map { " @ \($0)" } ?? ""
+                return "• \(event.title) — \(whenText)\(whereText)"
+            }.joined(separator: "\n")
+        }
+
+        register(
+            BuddyToolDefinition(
+                name: "create_calendar_event",
+                description: "Add an event to the user's calendar. Use when the user asks to schedule, book or put something on their calendar. Cannot invite other people.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "title": .object([
+                            "type": .string("string"),
+                            "description": .string("Event title, short, e.g. \"dentist\"")
+                        ]),
+                        "start": .object([
+                            "type": .string("string"),
+                            "description": .string("Start in ISO 8601, e.g. \"2026-10-03T15:00\", or \"2026-10-03\" for an all-day event.")
+                        ]),
+                        "end": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional end in ISO 8601. Defaults to one hour after the start (the same day for all-day).")
+                        ]),
+                        "location": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional place.")
+                        ]),
+                        "calendar": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional calendar name. Omit to use the default calendar.")
+                        ])
+                    ]),
+                    "required": .array([.string("title"), .string("start")])
+                ]),
+                metadata: .writing(.localMachine)
+            )
+        ) { input in
+            guard case .object(let arguments) = input,
+                  case .string(let rawTitle)? = arguments["title"],
+                  !rawTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return "i need a title for the event."
+            }
+            guard case .string(let rawStartText)? = arguments["start"],
+                  let parsedStart = ReminderDueDateParser.parse(rawStartText) else {
+                return "i need a start time in ISO 8601, like 2026-10-03T15:00."
+            }
+
+            let isAllDayEvent = !parsedStart.includesTimeOfDay
+            var eventEndDate = isAllDayEvent
+                ? parsedStart.date
+                : parsedStart.date.addingTimeInterval(60 * 60)
+            if case .string(let rawEndText)? = arguments["end"], !rawEndText.isEmpty {
+                guard let parsedEnd = ReminderDueDateParser.parse(rawEndText) else {
+                    return "i couldn't read the end \"\(rawEndText)\". use ISO 8601, like 2026-10-03T16:00."
+                }
+                eventEndDate = parsedEnd.date
+            }
+            guard eventEndDate >= parsedStart.date else {
+                return "the end has to be after the start."
+            }
+
+            func nonEmptyText(forKey key: String) -> String? {
+                guard case .string(let rawText)? = arguments[key] else { return nil }
+                let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmedText.isEmpty ? nil : trimmedText
+            }
+
+            let eventTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let savedCalendarName: String
+            do {
+                savedCalendarName = try await CalendarDataProvider.shared.createEvent(
+                    title: eventTitle,
+                    startDate: parsedStart.date,
+                    endDate: eventEndDate,
+                    isAllDay: isAllDayEvent,
+                    location: nonEmptyText(forKey: "location"),
+                    requestedCalendarName: nonEmptyText(forKey: "calendar")
+                )
+            } catch CalendarDataProvider.CalendarDataError.accessDenied {
+                return calendarAccessDeniedMessage
+            } catch CalendarDataProvider.CalendarDataError.noWritableCalendar {
+                return "none of the calendars on this Mac accept new events."
+            }
+
+            let confirmationFormatter = DateFormatter()
+            confirmationFormatter.dateStyle = .medium
+            confirmationFormatter.timeStyle = isAllDayEvent ? .none : .short
+            return "added \"\(eventTitle)\" to the \(savedCalendarName) calendar, \(confirmationFormatter.string(from: parsedStart.date))."
+        }
+    }
+
     private func registerBuiltInTools() {
+        registerCalendarTools()
         registerBrowserTools()
         registerClaudeCodeTool()
         registerSkillTools()
         registerMemoryTools()
         registerReminderTools()
         registerScreenTextTools()
+        registerScreenWatchTools()
         registerShortcutsTools()
         registerChromeTabTools()
         registerMessagingTools()
         registerBrainTools()
+        registerWindowManagementTools()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

@@ -12,12 +12,21 @@
 import AppKit
 import SwiftUI
 
-class OverlayWindow: NSWindow {
+/// A panel rather than a plain window so it can be `.nonactivatingPanel`: while
+/// a confirmation card with editable fields is up, the overlay has to take key
+/// focus for typing, and a non-activating panel can do that without activating
+/// Wisp — the user's app stays the active one (the same approach as
+/// `NotchPanel.allowsBecomingKey`).
+class OverlayWindow: NSPanel {
+    /// Turned on by `OverlayWindowManager` only while a confirmation card with
+    /// editable fields is showing. Off, the overlay never takes focus.
+    var allowsBecomingKey = false
+
     init(screen: NSScreen) {
         // Create window covering entire screen
         super.init(
             contentRect: screen.frame,
-            styleMask: .borderless,
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -43,13 +52,20 @@ class OverlayWindow: NSWindow {
         }
     }
 
-    // Prevent window from becoming key (no focus stealing)
+    // No focus stealing: key only while an editable confirmation card needs typing.
     override var canBecomeKey: Bool {
-        return false
+        return allowsBecomingKey
     }
 
     override var canBecomeMain: Bool {
         return false
+    }
+
+    /// Esc while editing a card field just leaves the field. It never closes
+    /// the overlay (a panel's default) and never answers the prompt — the
+    /// Cancel and Allow buttons, or the voice, do that.
+    override func cancelOperation(_ sender: Any?) {
+        makeFirstResponder(nil)
     }
 }
 
@@ -110,6 +126,7 @@ struct OverlayContentView: View {
                let confirmation = companionManager.pendingToolConfirmation {
                 ToolConfirmationView(
                     confirmation: confirmation,
+                    confirmationCoordinator: ToolConfirmationCoordinator.shared,
                     onApprove: {
                         companionManager.flashIsland(.success)
                         ToolConfirmationCoordinator.shared.approveFromUserInterface()
@@ -207,8 +224,29 @@ class OverlayWindowManager {
     /// near-invisible backdrop, stays transparent to the mouse so clicks
     /// outside the card still reach whatever is underneath.
     func setAcceptsMouseEvents(_ acceptsMouseEvents: Bool) {
+        currentlyAcceptsMouseEvents = acceptsMouseEvents
         for window in overlayWindows {
             window.ignoresMouseEvents = !acceptsMouseEvents
+        }
+    }
+
+    /// Remembered so windows rebuilt while a card is up (a push-to-talk can
+    /// rebuild the overlay) come back in the same state.
+    private var currentlyAcceptsMouseEvents = false
+    private var currentlyAllowsKeyboardFocus = false
+
+    /// Lets the overlay take key focus, for typing into a confirmation card's
+    /// editable fields. Turning it off hands the keyboard back: ordering a key
+    /// panel out and in makes the window server return focus to the user's
+    /// app, and with `allowsBecomingKey` off the overlay can't take it again.
+    func setAllowsKeyboardFocus(_ allowsKeyboardFocus: Bool) {
+        currentlyAllowsKeyboardFocus = allowsKeyboardFocus
+        for window in overlayWindows {
+            window.allowsBecomingKey = allowsKeyboardFocus
+            if !allowsKeyboardFocus && window.isKeyWindow {
+                window.orderOut(nil)
+                window.orderFrontRegardless()
+            }
         }
     }
 
@@ -230,9 +268,15 @@ class OverlayWindowManager {
             // The overlay's cards (e.g. the tool-confirmation panel) are dark
             // glass surfaces like the notch, so pin a dark colour scheme so their
             // adaptive tokens resolve dark regardless of the system appearance.
-            let hostingView = NSHostingView(rootView: contentView.environment(\.colorScheme, .dark))
+            //
+            // First-mouse hosting, as in the notch: the overlay belongs to a
+            // background app, so without it the first click on the card (a
+            // button, or an editable field) would only bring the window forward.
+            let hostingView = FirstMouseHostingView(rootView: contentView.environment(\.colorScheme, .dark))
             hostingView.frame = screen.frame
             window.contentView = hostingView
+            window.ignoresMouseEvents = !currentlyAcceptsMouseEvents
+            window.allowsBecomingKey = currentlyAllowsKeyboardFocus
 
             overlayWindows.append(window)
             window.orderFrontRegardless()

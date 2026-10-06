@@ -35,6 +35,7 @@ struct NotchHUDView: View {
     @ObservedObject private var morningBriefing = MorningBriefingController.shared
     @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
+    @ObservedObject private var screenWatcherStore = ScreenWatcherStore.shared
 
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
@@ -324,6 +325,7 @@ struct NotchHUDView: View {
             || upcomingEventMonitor.imminentEvent != nil
             || !finishedWorkInbox.unseenTaskIDs.isEmpty
             || morningBriefing.hasPendingBriefing
+            || !screenWatcherStore.activeWatchers.isEmpty
     }
 
     /// Whether a flank is showing a label (step count, task count, countdown)
@@ -397,13 +399,17 @@ struct NotchHUDView: View {
     @ViewBuilder
     private var liveActivitySection: some View {
         let imminentEvent = upcomingEventMonitor.imminentEvent
-        if isExecutingBrowserTask || !runningBackgroundTasks.isEmpty || imminentEvent != nil {
+        let activeScreenWatchers = screenWatcherStore.activeWatchers
+        if isExecutingBrowserTask || !runningBackgroundTasks.isEmpty || imminentEvent != nil || !activeScreenWatchers.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 if isExecutingBrowserTask {
                     executingTaskCard
                 }
                 ForEach(runningBackgroundTasks) { backgroundTask in
                     backgroundTaskRow(backgroundTask)
+                }
+                ForEach(activeScreenWatchers) { activeScreenWatcher in
+                    screenWatcherRow(activeScreenWatcher)
                 }
                 if let imminentEvent {
                     imminentEventRow(imminentEvent)
@@ -491,6 +497,51 @@ struct NotchHUDView: View {
             return "Background · \(elapsedText) · \(latestStepSummary)"
         }
         return "Background · \(elapsedText)"
+    }
+
+    /// "Watching until “Succeeded” appears · 4 min" with its own Stop.
+    private func screenWatcherRow(_ activeScreenWatcher: ActiveScreenWatcher) -> some View {
+        let elapsedMinutes = Int(Date().timeIntervalSince(activeScreenWatcher.startDate) / 60)
+        let elapsedText = elapsedMinutes < 1 ? "just started" : "\(elapsedMinutes) min"
+        return HStack(spacing: 8) {
+            Image(systemName: "eye")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(WispColor.Brand.lavender)
+                .frame(width: 12)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Watching until \(activeScreenWatcher.condition.summaryText)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(WispColor.Island.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text("Screen watch · \(elapsedText) · on-device")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(WispColor.Island.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            liveActivityStopButton(tooltip: "Stop watching the screen for this") {
+                screenWatcherStore.stopWatching(watcherID: activeScreenWatcher.id)
+            }
+        }
+    }
+
+    /// An eye in the right flank while a screen watch runs, with a count when
+    /// there is more than one.
+    private func flankScreenWatchIndicator(watcherCount: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "eye")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(WispColor.Brand.lavender)
+            if watcherCount > 1 {
+                Text("\(watcherCount)")
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundColor(WispColor.Island.textSecondary)
+            }
+        }
+        .nativeTooltip(watcherCount == 1
+            ? "Watching your screen — hover to see for what"
+            : "\(watcherCount) screen watches running — hover to see them")
     }
 
     private func imminentEventRow(_ event: CalendarGlanceEvent) -> some View {
@@ -819,6 +870,8 @@ struct NotchHUDView: View {
                         .nativeTooltip(imminentEvent.title)
                 } else if !finishedWorkInbox.unseenTaskIDs.isEmpty {
                     flankUnseenResultsBadge(count: finishedWorkInbox.unseenTaskIDs.count)
+                } else if !screenWatcherStore.activeWatchers.isEmpty {
+                    flankScreenWatchIndicator(watcherCount: screenWatcherStore.activeWatchers.count)
                 } else if morningBriefing.hasPendingBriefing {
                     flankMorningSuggestionsCount(morningBriefing.pendingSuggestions.count)
                 } else {
@@ -913,6 +966,9 @@ struct NotchHUDView: View {
         let unseenCount = finishedWorkInbox.unseenTaskIDs.count
         if unseenCount > 0 {
             return unseenCount == 1 ? "1 new result" : "\(unseenCount) new results"
+        }
+        if let firstScreenWatcher = screenWatcherStore.activeWatchers.first {
+            return "Watching until \(firstScreenWatcher.condition.summaryText)"
         }
         if morningBriefing.hasPendingBriefing {
             return morningBannerTitle

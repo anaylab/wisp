@@ -11,6 +11,10 @@
 //  Same consent flow underneath: the coordinator's timeout, the spoken "yes",
 //  and deny-by-default are unchanged; only the presentation differs.
 //
+//  The bubble is editable: click it to reword the message before sending
+//  (the recipient and number never are). Edits go to the coordinator, so a
+//  spoken "yes" sends the edited text, and typing holds off the timeout.
+//
 
 import Combine
 import SwiftUI
@@ -54,7 +58,15 @@ struct MessageSendDraft: Equatable {
 
 struct MessageSendConfirmationView: View {
     let messageDraft: MessageSendDraft
-    let requestedAt: Date
+    /// The message as an editable field; nil when the caller asked without
+    /// allowing edits, and the bubble is then plain text as before.
+    let editableMessageField: EditableConfirmationField?
+    /// The text in the bubble now: the user's edit, or the original.
+    let currentMessageText: String
+    /// When the prompt expires; moves later while the user edits.
+    let expiryDate: Date?
+    let onMessageTextChange: (String) -> Void
+    let onEditingActivity: () -> Void
     let onSend: () -> Void
     let onCancel: () -> Void
 
@@ -62,7 +74,14 @@ struct MessageSendConfirmationView: View {
     /// and stay when the card has no photo.
     @State private var recipientPhoto: NSImage?
     @State private var secondsRemaining = Int(ToolConfirmationCoordinator.confirmationTimeoutSeconds)
+    @State private var isBubbleHovered = false
+    @FocusState private var isBubbleFocused: Bool
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var isMessageEdited: Bool {
+        guard let editableMessageField else { return false }
+        return currentMessageText != editableMessageField.originalText
+    }
 
     /// The iMessage bubble colour. A system colour, not a brand token: the
     /// bubble should read as "a message in Messages" at a glance.
@@ -88,9 +107,19 @@ struct MessageSendConfirmationView: View {
             recipientPhoto = await ContactsDirectory.shared.thumbnailImage(forContactIdentifier: recipientContactIdentifier)
         }
         .onReceive(countdownTimer) { _ in
-            let elapsedSeconds = Int(Date().timeIntervalSince(requestedAt))
-            secondsRemaining = max(0, Int(ToolConfirmationCoordinator.confirmationTimeoutSeconds) - elapsedSeconds)
+            refreshSecondsRemaining()
         }
+        .onChange(of: expiryDate) { _, _ in
+            refreshSecondsRemaining()
+        }
+        .onChange(of: isBubbleFocused) { _, isNowFocused in
+            if isNowFocused { onEditingActivity() }
+        }
+    }
+
+    private func refreshSecondsRemaining() {
+        guard let expiryDate else { return }
+        secondsRemaining = max(0, Int(expiryDate.timeIntervalSinceNow.rounded(.up)))
     }
 
     // MARK: - Recipient
@@ -161,27 +190,68 @@ struct MessageSendConfirmationView: View {
     /// The text as it will appear in the thread: a right-aligned blue bubble,
     /// with the app it goes through underneath.
     private var messageBubble: some View {
-        VStack(alignment: .trailing, spacing: 4) {
+        let bubbleShape = RoundedRectangle(cornerRadius: 17, style: .continuous)
+        return VStack(alignment: .trailing, spacing: 4) {
+            bubbleText
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(bubbleShape.fill(messageBubbleFill))
+                // Hover/focus ring: the bubble looks like a sent message until
+                // the pointer finds it, then shows it can be edited.
+                .overlay(
+                    bubbleShape.strokeBorder(
+                        Color.white.opacity(isBubbleFocused ? 0.7 : (isBubbleHovered ? 0.35 : 0)),
+                        lineWidth: 1
+                    )
+                )
+                .frame(maxWidth: 236, alignment: .trailing)
+                .onHover { hovering in
+                    guard editableMessageField != nil else { return }
+                    isBubbleHovered = hovering
+                    if hovering { NSCursor.iBeam.push() } else { NSCursor.pop() }
+                }
+                .animation(WispMotion.quick, value: isBubbleHovered)
+                .animation(WispMotion.quick, value: isBubbleFocused)
+
+            HStack(spacing: WispSpacing.xs) {
+                if isMessageEdited {
+                    EditedConfirmationFieldMark()
+                } else if editableMessageField != nil && (isBubbleHovered || isBubbleFocused) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(WispColor.OnGlass.textTertiary)
+                }
+                Text("Messages")
+                    .font(WispFont.caption)
+                    .foregroundColor(WispColor.OnGlass.textTertiary)
+            }
+            .padding(.trailing, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    /// The message: an editable field that grows with its text when the panel
+    /// allows edits (Return does not send — Cmd-Return does), plain
+    /// selectable text otherwise.
+    @ViewBuilder
+    private var bubbleText: some View {
+        if editableMessageField != nil {
+            TextField("", text: Binding(get: { currentMessageText }, set: { onMessageTextChange($0) }), axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundColor(.white)
+                .lineLimit(1...8)
+                .focused($isBubbleFocused)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("Message, editable")
+        } else {
             Text(messageDraft.messageText)
                 .font(.system(size: 14))
                 .foregroundColor(.white)
                 .fixedSize(horizontal: false, vertical: true)
                 .lineLimit(8)
                 .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 17, style: .continuous)
-                        .fill(messageBubbleFill)
-                )
-                .frame(maxWidth: 236, alignment: .trailing)
-
-            Text("Messages")
-                .font(WispFont.caption)
-                .foregroundColor(WispColor.OnGlass.textTertiary)
-                .padding(.trailing, 4)
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Actions
@@ -200,6 +270,8 @@ struct MessageSendConfirmationView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(MessageSendButtonStyle(fill: messageBubbleFill))
+            // Cmd-Return sends from inside the bubble; plain Return never does.
+            .keyboardShortcut(.return, modifiers: .command)
         }
     }
 }

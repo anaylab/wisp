@@ -24,6 +24,8 @@ actor CalendarDataProvider: GlanceCardDataProvider {
     enum CalendarDataError: Error, Equatable {
         /// The user has not granted (or has denied) Calendar access.
         case accessDenied
+        /// No calendar on this Mac accepts new events.
+        case noWritableCalendar
     }
 
     private let eventStore = EKEventStore()
@@ -119,6 +121,69 @@ actor CalendarDataProvider: GlanceCardDataProvider {
         return eventStore.events(matching: predicate)
             .filter { !$0.isAllDay && $0.startDate >= now }
             .count
+    }
+
+    /// Events overlapping `rangeStartDate`…`rangeEndDate`, soonest first, across
+    /// every calendar. For the agent's `get_calendar_events` tool, which can be
+    /// asked about any day ("what's on friday"), unlike `snapshot`'s fixed week.
+    func events(
+        from rangeStartDate: Date,
+        to rangeEndDate: Date,
+        maximumEventCount: Int
+    ) async throws -> [CalendarGlanceEvent] {
+        try await ensureAccess()
+
+        let predicate = eventStore.predicateForEvents(
+            withStart: rangeStartDate,
+            end: rangeEndDate,
+            calendars: nil
+        )
+        return eventStore.events(matching: predicate)
+            .sorted { $0.startDate < $1.startDate }
+            .prefix(maximumEventCount)
+            .map { event in
+                CalendarGlanceEvent(
+                    id: event.eventIdentifier ?? UUID().uuidString,
+                    title: event.title ?? "(no title)",
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                    isAllDay: event.isAllDay,
+                    location: event.location?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil,
+                    calendarColorHex: event.calendar?.cgColor?.hexString
+                )
+            }
+    }
+
+    /// Adds an event to the user's calendar and returns the name of the
+    /// calendar it landed in. `requestedCalendarName` picks a writable calendar
+    /// by name; nil (or no match) uses the default calendar for new events.
+    func createEvent(
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        isAllDay: Bool,
+        location: String?,
+        requestedCalendarName: String?
+    ) async throws -> String {
+        try await ensureAccess()
+
+        let writableCalendars = eventStore.calendars(for: .event).filter { $0.allowsContentModifications }
+        let requestedCalendar = requestedCalendarName.flatMap { requestedName in
+            writableCalendars.first { $0.title.caseInsensitiveCompare(requestedName) == .orderedSame }
+        }
+        guard let targetCalendar = requestedCalendar ?? eventStore.defaultCalendarForNewEvents else {
+            throw CalendarDataError.noWritableCalendar
+        }
+
+        let newEvent = EKEvent(eventStore: eventStore)
+        newEvent.title = title
+        newEvent.calendar = targetCalendar
+        newEvent.isAllDay = isAllDay
+        newEvent.startDate = startDate
+        newEvent.endDate = endDate
+        newEvent.location = location
+        try eventStore.save(newEvent, span: .thisEvent, commit: true)
+        return targetCalendar.title
     }
 
     /// Ensures the app can read events, requesting access on first use.

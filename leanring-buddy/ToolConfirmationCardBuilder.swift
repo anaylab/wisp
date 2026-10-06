@@ -18,9 +18,11 @@
 //  and their renderer (`GlanceCardView`), so it looks like every other card
 //  Wisp shows.
 //
-//  v1 is display-only. Inline-editable fields — letting the user fix a
-//  recipient or a subject on the card before allowing it (VoiceOS-style
-//  `{{param}}` bindings) — are a deliberate future extension, not an omission.
+//  The card itself stays display-only. The human-text fields on it (a
+//  subject, a message, an event title) are made editable separately, by
+//  `EditableConfirmationFields`, which follows this file's shape
+//  classification; the panel then draws those fields as text boxes in place
+//  of their rows. Recipients, paths and the like are never editable.
 //
 
 import Foundation
@@ -43,9 +45,11 @@ enum ToolConfirmationCardBuilder {
 
     private static let emailRecipientKeys = ["to", "recipient", "recipients", "recipient_email", "to_email", "send_to", "email_to", "emails"]
     private static let messageRecipientKeys = ["channel", "channel_id", "channel_name", "chat_id", "conversation", "conversation_id", "to", "recipient", "recipient_id", "user", "user_id", "username", "phone_number", "thread"]
-    private static let bodyKeys = ["body", "message_body", "text", "message", "content", "html", "html_body", "markdown_text", "markdown", "status", "caption"]
-    private static let subjectKeys = ["subject"]
-    private static let eventTitleKeys = ["summary", "title", "name", "subject"]
+    static let bodyKeys = ["body", "message_body", "text", "message", "content", "html", "html_body", "markdown_text", "markdown", "status", "caption"]
+    static let subjectKeys = ["subject"]
+    static let postTitleKeys = ["title"]
+    static let eventLocationKeys = ["location", "place", "where"]
+    static let eventTitleKeys = ["summary", "title", "name", "subject"]
     private static let eventStartKeys = ["start", "start_time", "start_datetime", "start_date_time", "start_date", "starts_at", "when"]
     private static let eventEndKeys = ["end", "end_time", "end_datetime", "end_date_time", "end_date", "ends_at"]
     private static let eventGuestKeys = ["attendees", "invitees", "guests", "participants"]
@@ -98,12 +102,39 @@ enum ToolConfirmationCardBuilder {
         return confirmationCard(for: onlyAction, agentWorkingDirectoryPath: agentWorkingDirectoryPath)
     }
 
+    /// Which of the card shapes below a call was drawn as. Exposed so the
+    /// editable fields (`EditableConfirmationFields`) follow exactly the same
+    /// classification as the card they sit on — an email's subject is
+    /// editable only when the card the user is reading is an email card.
+    enum ConfirmationCardShape: Equatable {
+        case email
+        case messageOrPost
+        case calendarEvent
+        case fileWrite
+        case deletion
+        case otherIrreversibleAction
+    }
+
     /// The card for one concrete action. Order matters: deletion is checked
     /// first because "delete email" must read as a deletion, not a new email.
     static func confirmationCard(
         for inspectedAction: InspectedToolAction,
         agentWorkingDirectoryPath: String?
     ) -> GlanceCard? {
+        classifiedConfirmationCard(for: inspectedAction, agentWorkingDirectoryPath: agentWorkingDirectoryPath)?.card
+    }
+
+    /// The shape of card one concrete action gets, or nil for none.
+    static func confirmationCardShape(for inspectedAction: InspectedToolAction) -> ConfirmationCardShape? {
+        classifiedConfirmationCard(for: inspectedAction, agentWorkingDirectoryPath: nil)?.shape
+    }
+
+    /// The one place the shapes are tried, in order, so the card and its
+    /// shape can never disagree.
+    private static func classifiedConfirmationCard(
+        for inspectedAction: InspectedToolAction,
+        agentWorkingDirectoryPath: String?
+    ) -> (shape: ConfirmationCardShape, card: GlanceCard)? {
         let actionNameWords = Set(inspectedAction.actionNameWords)
         let isReadingAction = ToolCallSafety.namesReadingAction(actionNameWords: actionNameWords)
             && ToolCallSafety.alwaysIrreversibleWords.isDisjoint(with: actionNameWords)
@@ -113,16 +144,16 @@ enum ToolConfirmationCardBuilder {
         if isReadingAction { return nil }
 
         if !actionNameWords.isDisjoint(with: deletionWords) {
-            return deletionCard(for: inspectedAction)
+            return (.deletion, deletionCard(for: inspectedAction))
         }
-        if let emailCard = emailCard(for: inspectedAction) { return emailCard }
-        if let calendarEventCard = calendarEventCard(for: inspectedAction) { return calendarEventCard }
-        if let messageOrPostCard = messageOrPostCard(for: inspectedAction) { return messageOrPostCard }
+        if let emailCard = emailCard(for: inspectedAction) { return (.email, emailCard) }
+        if let calendarEventCard = calendarEventCard(for: inspectedAction) { return (.calendarEvent, calendarEventCard) }
+        if let messageOrPostCard = messageOrPostCard(for: inspectedAction) { return (.messageOrPost, messageOrPostCard) }
         if let fileWriteCard = fileWriteCard(for: inspectedAction, agentWorkingDirectoryPath: agentWorkingDirectoryPath) {
-            return fileWriteCard
+            return (.fileWrite, fileWriteCard)
         }
         if ToolCallSafety.namesIrreversibleAction(actionNameWords: actionNameWords) {
-            return irreversibleActionCard(for: inspectedAction)
+            return (.otherIrreversibleAction, irreversibleActionCard(for: inspectedAction))
         }
         return nil
     }
@@ -208,7 +239,7 @@ enum ToolConfirmationCardBuilder {
         let keyValuePairs = keyValuePairs(from: [
             ("To", messageRecipientKeys),
             ("Where", ["subreddit", "board", "page", "group", "repo", "repository"]),
-            ("Title", ["title"])
+            ("Title", postTitleKeys)
         ], in: arguments)
         if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
         if let bodyPreviewBlock = bodyPreviewBlock(forAnyOf: bodyKeys, in: arguments) {
@@ -240,7 +271,7 @@ enum ToolConfirmationCardBuilder {
             ("Title", eventTitleKeys),
             ("Starts", eventStartKeys),
             ("Ends", eventEndKeys),
-            ("Where", ["location", "place", "where"]),
+            ("Where", eventLocationKeys),
             ("Guests", eventGuestKeys)
         ], in: arguments)
         if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
