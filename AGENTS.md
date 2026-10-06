@@ -426,6 +426,28 @@ cloud dependency to the local path, without asking.
   and read-only `find_contact`, in the `.messaging` `AgentToolScope`. Needs
   `NSContactsUsageDescription` + the `com.apple.security.personal-information.addressbook`
   entitlement (hardened runtime) and Automation → Messages.
+- **Window management** (`WindowManagement/`): "put Safari on the left and Xcode on the right",
+  "maximize this", "make this window full screen", "move Chrome to the right half", "center this
+  window", "move this to my other screen", "tile Notes and Mail" are recognised by
+  `WindowLayoutCommandParser` (checked in `sendTranscriptToClaudeWithScreenshot` right after
+  `FastCommandRouter`; not behind agent mode, no confirmation — the user's words are the consent and a
+  window can be put back) and carried out by `WindowLayoutExecutor` over Accessibility with **no model
+  call**. Placements: halves, quarters, thirds, maximize, center, next display. Biased toward not
+  matching: a window verb must lead, every clause must parse, app names must resolve to exactly one
+  *running* regular app (`WindowLayoutApplicationNameMatcher`: exact, or a leading/trailing word run
+  like "chrome" → "Google Chrome"; ambiguous or not running → ordinary model turn), an article-led
+  target needs "window"/"app" ("the code" is not VS Code), and a bare "this"/"it" only counts with a
+  placement that can only mean a window ("left half", "of the screen", corners, thirds, other screen —
+  not bare "left", and "center this" is left alone). "this" is the frontmost app, or
+  `FrontmostAppTracker`'s last external app when a typed question made Wisp frontmost. Frames come from
+  the pure `WindowFrameCalculator` (display = the one holding the window's centre; `visibleFrame`s in
+  AppKit space flipped to AX top-left space by the **primary** display's height, edges rounded so
+  tiled halves share an edge). The executor reads the app and `NSScreen`s on the main actor, then runs
+  AX detached with a 0.5s messaging timeout: focused → main → first standard window, unminimize, refuse
+  a native full-screen Space, position → size → position (apps clamp), `AXRaise` + activate. Reply in
+  the notch: "done — Safari left, Xcode right." + `flashIsland`. The agent gets `arrange_windows`
+  (app + placement; `.writing(.localMachine)`, so it asks once and session auto-approve covers it; in
+  the buddy **Screen** tool group).
 - **Chrome tab organizing** (the **Wisp Tabs** extension, `chrome-extension/` at the repo root,
   loaded unpacked): AppleScript can't reach `chrome.tabGroups`, so a thin MV3 extension exposes tab
   primitives (`getTabs`/`groupTabs`/`ungroupTabs`/`closeTabs`) and Wisp does all the deciding.
@@ -706,6 +728,9 @@ Grouped by what they do. Line counts are approximate.
 | `MessageCommandParser.swift` | ~210 | Pure parsing of spoken message commands ("text X saying Y", "send X a text …", "tell X that Y", unseparated "text X Y" → longest-first splits). Conservative; declines pronouns and noun uses ("text size"). |
 | `ContactsDirectory.swift` | ~440 | `ContactRecord`/`ContactHandle` (preferred handle: mobile → phone → email), the pure `ContactMatcher` (ranked tiers, ambiguity, relation words via the Me card), `DirectMessagingHandleParser`, and `ContactsDirectory` (CNContactStore access + off-main fetch). |
 | `MessagesSender.swift` | ~175 | `MessageRecipientResolver` (candidates → one person + handle, or a reason, or "not a message command") and `MessagesAppSender` (AppleScript handler call to Messages with Apple Event parameters; iMessage then SMS; -1743 → Automation hint). |
+| `WindowManagement/WindowLayoutCommand.swift` | ~700 | Pure side of window management: `WindowPlacement`, `WindowLayoutTarget`/`Assignment`/`Command`, `WindowLayoutApplicationNameMatcher` (unique running-app match), `WindowLayoutCommandParser` (spoken commands + tool-argument placements, conservative), `WindowLayoutReplyText`, and `WindowFrameCalculator` (placement + display visibleFrames → AX frame, primary-height flip, next-display relative move). Tested by `Tests/WindowManagement`. |
+| `WindowManagement/WindowLayoutExecutor.swift` | ~300 | Places windows over Accessibility: running-app resolution (regular apps, not Wisp; "this" via `FrontmostAppTracker`), detached AX with a 0.5s timeout, unminimize, position/size/position, raise + activate, `PlacementFailure` reasons. |
+| `WindowManagement/WindowManagementAgentTools.swift` | ~85 | The `arrange_windows` agent tool (`registerWindowManagementTools()`). |
 | `MessageSendConfirmationView.swift` | ~235 | The Siri-style confirmation panel `ToolConfirmationView` shows for `send_imessage` (recipient, message bubble, Cancel / Send); same consent flow underneath. |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
@@ -899,6 +924,7 @@ running):
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
+./Tests/WindowManagement/run.sh          # window layout command parsing, app matching, frame math
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a

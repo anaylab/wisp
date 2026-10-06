@@ -1209,6 +1209,21 @@ final class CompanionManager: ObservableObject {
             return
         }
 
+        // "Put Safari on the left and Xcode on the right", "maximize this",
+        // "move this to my other screen" move windows directly through the
+        // Accessibility API — no model, no agent mode, no confirmation card:
+        // the user's words are the consent, and a window can always be put
+        // back. The parser only matches running apps, never guesses, and
+        // declines anything loose ("move this to the right"), which then goes
+        // to the model as an ordinary turn.
+        if let windowLayoutCommand = WindowLayoutCommandParser.command(
+            from: transcript,
+            runningApplicationNames: WindowLayoutExecutor.runningApplicationNamesForMatching()
+        ) {
+            runDirectWindowLayoutCommand(windowLayoutCommand, transcript: transcript, historyTitle: historyTitle)
+            return
+        }
+
         // "Add this page to my brain" / "ingest this" goes straight to the
         // brain's ingest queue. The model can't see which tab or file "this"
         // is, so it is read from the browser or Finder here instead. Only
@@ -2857,6 +2872,62 @@ extension CompanionManager {
         }
         islandFlashClearWorkItem = clearWorkItem
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: clearWorkItem)
+    }
+}
+
+// MARK: - Direct window layout commands
+
+extension CompanionManager {
+    /// Carries out a window layout recognised by `WindowLayoutCommandParser`
+    /// ("put Safari on the left and Xcode on the right") and says how it went
+    /// in the notch: "done — Safari left, Xcode right."
+    fileprivate func runDirectWindowLayoutCommand(
+        _ windowLayoutCommand: WindowLayoutCommand,
+        transcript: String,
+        historyTitle: String?
+    ) {
+        let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+        PerfMetricsRecorder.shared.abandonTurn()
+
+        currentResponseTask = Task { [weak self] in
+            let assignmentResults = await WindowLayoutExecutor.execute(windowLayoutCommand)
+            guard let self else { return }
+
+            let replyText = WindowLayoutReplyText.reply(for: assignmentResults)
+            let didPlaceAnyWindow = assignmentResults.contains { $0.failureReason == nil }
+
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(
+                    kind: .tool(name: WindowManagementToolNames.arrangeWindows),
+                    summary: didPlaceAnyWindow ? "Arranged windows — no model call" : "Windows: \(replyText)",
+                    isError: !didPlaceAnyWindow
+                ),
+                to: taskID
+            )
+            AgentTaskRegistry.shared.finishTask(
+                taskID, status: didPlaceAnyWindow ? .succeeded : .failed(replyText), finalText: replyText
+            )
+            self.conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                BuddyChatMessage(role: .user, text: transcript),
+                BuddyChatMessage(role: .assistant, text: replyText),
+            ]))
+            self.conversationTranscript.trimToRecentTurns(10)
+
+            // The windows have already moved; a newer turn that cancelled this
+            // one owns the notch from here.
+            guard !Task.isCancelled else { return }
+            self.currentReplyText = replyText
+            self.flashIsland(didPlaceAnyWindow ? .success : .error)
+
+            if VoiceOutputPreference.shared.isReplySpeechEnabled {
+                self.voiceState = .responding
+                try? await self.ttsProvider.speakText(replyText)
+            }
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
     }
 }
 
