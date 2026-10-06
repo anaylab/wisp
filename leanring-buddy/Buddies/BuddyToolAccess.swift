@@ -53,7 +53,7 @@ enum BuddyToolGroup: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .browser: return "Drive your Chrome or Safari"
-        case .screen: return "Read your screen, windows and clipboard; arrange windows"
+        case .screen: return "Read and watch your screen, windows and clipboard; arrange windows"
         case .messaging: return "Text people and look them up"
         case .reminders: return "Add reminders"
         case .shortcuts: return "Run your Apple Shortcuts"
@@ -93,7 +93,8 @@ enum BuddyToolGroup: String, CaseIterable, Identifiable {
             return .browser
         case _ where toolName.hasPrefix("chrome_"):
             return .browser
-        case "read_screen_text", "list_windows", "read_clipboard", WindowManagementToolNames.arrangeWindows:
+        case "read_screen_text", "list_windows", "read_clipboard", WindowManagementToolNames.arrangeWindows,
+             ScreenWatchToolNames.watchScreen, ScreenWatchToolNames.stopScreenWatch:
             return .screen
         case MessagingToolNames.sendIMessage, MessagingToolNames.findContact:
             return .messaging
