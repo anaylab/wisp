@@ -204,11 +204,25 @@ Upgrade `ToolConfirmationView.swift` to render a declarative card while preservi
   summary (zero regression).
 - v1 is **display-only** (no inline editing). Comment that inline-editable fields
   (VoiceOS `{{param}}` bindings) are a deliberate future extension.
+- **Done since (inline-editable fields):** the plain human-text fields are now
+  editable on the card before Allow — email subject/body, message/post text and
+  post title, event title/location, `send_imessage`'s message (in the Siri-style
+  bubble), `create_reminder`'s title, `run_shortcut`'s input. Recipients,
+  handles, paths, URLs, commands, guests/times, non-string or nested values and
+  anything in a Composio call stay read-only. `EditableConfirmationFields` (pure,
+  `Tests/EditableConfirmation`) lists the fields by exact argument key and applies
+  edits only to them; `ToolPermissionBroker.requestApprovalAllowingEdits` returns a
+  `ToolApprovalOutcome` (decision + edits, default extension for old stubs); the
+  registry re-applies the edits to the input it asked about, runs that, tells the
+  model which fields the user changed, and records the input that ran in History.
+  A spoken "yes" approves the current edits; editing extends the timeout (to a
+  5-minute cap); the overlay panel takes key focus only while such a card is up.
 
 ## Explicit non-goals
 
 - No charts, sandboxed HTML widgets, or Widget Kit equivalent.
-- No inline-editable confirmation fields / param bindings.
+- No inline-editable confirmation fields / param bindings *in this plan's v1*
+  (since added — see Phase 6).
 - The **generic** path adds no network calls; **data-sourced** kinds (weather, …)
   intentionally do, gated + labelled (see "Local-first posture"). No changes to
   model **provider** selection, and no screenshots/transcripts sent to any card

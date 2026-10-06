@@ -2240,6 +2240,10 @@ final class CompanionManager: ObservableObject {
                     self.pendingToolConfirmation = confirmation
                 }
                 self.overlayWindowManager.setAcceptsMouseEvents(confirmation != nil)
+                // Typing into the card's editable fields needs key focus; the
+                // overlay takes it only while such a card is up.
+                let confirmationOffersEditableFields = confirmation?.offersEditableFields == true
+                self.overlayWindowManager.setAllowsKeyboardFocus(confirmationOffersEditableFields)
 
                 // A prompt is worth seeing even when the cursor is set to stay
                 // hidden, since otherwise there is nothing to click.
@@ -2252,6 +2256,7 @@ final class CompanionManager: ObservableObject {
                     self.isOverlayVisible = true
                     // The windows were just rebuilt, so re-apply.
                     self.overlayWindowManager.setAcceptsMouseEvents(true)
+                    self.overlayWindowManager.setAllowsKeyboardFocus(confirmationOffersEditableFields)
                 }
             }
     }
@@ -3092,7 +3097,7 @@ extension CompanionManager {
             switch recipientResolution {
             case .resolved(let resolvedOutgoingMessage):
                 let preparedToolInput = AgentToolRegistry.sendIMessageToolInput(for: resolvedOutgoingMessage)
-                let decision = await ToolConfirmationCoordinator.shared.requestApproval(
+                let approvalOutcome = await ToolConfirmationCoordinator.shared.requestApprovalAllowingEdits(
                     toolName: MessagingToolNames.sendIMessage,
                     toolInput: preparedToolInput
                 )
@@ -3100,10 +3105,21 @@ extension CompanionManager {
                     AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
                     return
                 }
-                if decision.isApproved {
+                if approvalOutcome.isApproved {
+                    // The user may have reworded the message on the card; only
+                    // the message can change — the recipient stays the one asked about.
+                    let appliedEdits = approvalOutcome.approvedToolInput(
+                        forAskedToolInput: preparedToolInput,
+                        toolName: MessagingToolNames.sendIMessage
+                    )
+                    var messageTextToSend = resolvedOutgoingMessage.messageText
+                    if case .object(let appliedFields) = appliedEdits.toolInput,
+                       case .string(let approvedMessageText)? = appliedFields["message"] {
+                        messageTextToSend = approvedMessageText
+                    }
                     do {
                         try MessagesAppSender.send(
-                            messageText: resolvedOutgoingMessage.messageText,
+                            messageText: messageTextToSend,
                             to: resolvedOutgoingMessage.recipientHandle
                         )
                         replyText = "sent to \(resolvedOutgoingMessage.recipientDisplayName.lowercased())."

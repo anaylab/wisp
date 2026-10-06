@@ -20,8 +20,14 @@
 //  Subject, a file write with its path), it is drawn with the generic glance-
 //  card renderer between the request and the buttons, and the raw call chip
 //  shrinks to a single line beneath it. Without a card the panel is exactly the
-//  plain summary it always was. The card is display-only; inline-editable
-//  fields (VoiceOS-style `{{param}}` bindings) are a deliberate future extension.
+//  plain summary it always was.
+//
+//  The call's human-text fields (subject, body, message, event title, …, as
+//  decided by `EditableConfirmationFields`) are drawn as editable text boxes in
+//  place of their card rows, so the user can fix the wording before Allow. The
+//  typed text goes straight to the coordinator — which is what makes a spoken
+//  "yes" approve the edited version — and the raw call chip shows the call as
+//  it will run with those edits. Recipients, paths and the like stay read-only.
 //
 
 import Combine
@@ -29,14 +35,31 @@ import SwiftUI
 
 struct ToolConfirmationView: View {
     let confirmation: ToolConfirmationCoordinator.PendingConfirmation
+    /// Holds the edits and the (movable) expiry. Observed so the fields and
+    /// the countdown follow it.
+    @ObservedObject var confirmationCoordinator: ToolConfirmationCoordinator
     let onApprove: () -> Void
     let onDeny: () -> Void
 
     /// Counts down alongside the coordinator's own timeout, so the card
     /// doesn't sit there looking live after the request has expired.
-    @State private var secondsRemaining: Int = 45
+    @State private var secondsRemaining: Int = Int(ToolConfirmationCoordinator.confirmationTimeoutSeconds)
 
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    /// The call as it will run: the asked-about input with the current edits
+    /// applied, through the same rule the executor uses.
+    private var argumentSummaryWithEdits: String {
+        guard let toolInput = confirmation.toolInput,
+              !confirmationCoordinator.editedTextsByArgumentKey.isEmpty else {
+            return confirmation.argumentSummary
+        }
+        return EditableConfirmationFields.applyingEdits(
+            confirmationCoordinator.editedTextsByArgumentKey,
+            toToolInput: toolInput,
+            toolNamed: confirmation.toolName
+        ).toolInput.compactDescription
+    }
 
     private var hasArguments: Bool {
         confirmation.argumentSummary != "{}" && !confirmation.argumentSummary.isEmpty
@@ -45,15 +68,28 @@ struct ToolConfirmationView: View {
     var body: some View {
         // A message send is shown as the message itself, not as a tool call.
         if let messageDraft = confirmation.messageDraft {
+            let editableMessageField = confirmation.editableFields.first { $0.argumentKey == "message" }
             MessageSendConfirmationView(
                 messageDraft: messageDraft,
-                requestedAt: confirmation.requestedAt,
+                editableMessageField: editableMessageField,
+                currentMessageText: editableMessageField.map(currentText(for:)) ?? messageDraft.messageText,
+                expiryDate: confirmationCoordinator.pendingConfirmationExpiryDate,
+                onMessageTextChange: { editedMessageText in
+                    guard let editableMessageField else { return }
+                    confirmationCoordinator.updateEditedText(editedMessageText, forArgumentKey: editableMessageField.argumentKey)
+                },
+                onEditingActivity: { confirmationCoordinator.extendTimeoutForEditing() },
                 onSend: onApprove,
                 onCancel: onDeny
             )
         } else {
             toolCallPanel
         }
+    }
+
+    /// What a field shows now: the user's edit, or the model's original.
+    private func currentText(for editableField: EditableConfirmationField) -> String {
+        confirmationCoordinator.editedTextsByArgumentKey[editableField.argumentKey] ?? editableField.originalText
     }
 
     private var toolCallPanel: some View {
@@ -77,9 +113,18 @@ struct ToolConfirmationView: View {
         // transparent to the mouse or the whole desktop becomes unclickable.
         .allowsHitTesting(true)
         .onReceive(countdownTimer) { _ in
-            let elapsed = Int(Date().timeIntervalSince(confirmation.requestedAt))
-            secondsRemaining = max(0, 45 - elapsed)
+            refreshSecondsRemaining()
         }
+        // Editing moves the expiry; follow it at once rather than on the next tick.
+        .onChange(of: confirmationCoordinator.pendingConfirmationExpiryDate) { _, _ in
+            refreshSecondsRemaining()
+        }
+    }
+
+    private func refreshSecondsRemaining() {
+        let expiryDate = confirmationCoordinator.pendingConfirmationExpiryDate
+            ?? confirmation.requestedAt.addingTimeInterval(ToolConfirmationCoordinator.confirmationTimeoutSeconds)
+        secondsRemaining = max(0, Int(expiryDate.timeIntervalSinceNow.rounded(.up)))
     }
 
     // MARK: - Header — the wisp mark asking
@@ -114,23 +159,43 @@ struct ToolConfirmationView: View {
 
             // What the call will do, laid out as a card, when its shape is
             // one Wisp recognises.
+            // The rows that became editable fields are left off the card so
+            // nothing is shown twice.
             if let confirmationCard = confirmation.confirmationCard {
-                GlanceCardView(card: confirmationCard)
+                GlanceCardView(card: EditableConfirmationFields.card(
+                    confirmationCard,
+                    hidingRowsShownBy: confirmation.editableFields
+                ))
+            }
+
+            if confirmation.offersEditableFields {
+                VStack(alignment: .leading, spacing: WispSpacing.xs) {
+                    ForEach(confirmation.editableFields) { editableField in
+                        EditableConfirmationFieldView(
+                            editableField: editableField,
+                            currentText: currentText(for: editableField),
+                            onTextChange: { editedText in
+                                confirmationCoordinator.updateEditedText(editedText, forArgumentKey: editableField.argumentKey)
+                            },
+                            onEditingActivity: { confirmationCoordinator.extendTimeoutForEditing() }
+                        )
+                    }
+                }
             }
 
             // The exact call + arguments, so a decision is made on what will
             // actually run rather than on a spoken paraphrase. With a card
             // above, the raw arguments shrink to one (still selectable) line —
-            // the card already shows them legibly.
+            // the card already shows them legibly. Edits are reflected here.
             VStack(alignment: .leading, spacing: WispSpacing.xs) {
                 Text(confirmation.toolName)
                     .font(WispFont.mono)
                     .foregroundColor(WispColor.Brand.sage)
                 if hasArguments {
-                    Text(confirmation.argumentSummary)
+                    Text(argumentSummaryWithEdits)
                         .font(WispFont.mono)
                         .foregroundColor(WispColor.OnGlass.textTertiary)
-                        .lineLimit(confirmation.confirmationCard == nil ? 3 : 1)
+                        .lineLimit(confirmation.confirmationCard == nil && !confirmation.offersEditableFields ? 3 : 1)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -166,6 +231,9 @@ struct ToolConfirmationView: View {
                 .frame(maxWidth: .infinity)
             }
             .wispGlassButtonStyle(prominence: .prominent)
+            // Cmd-Return approves from inside a field. Plain Return never
+            // does: there is deliberately no default button on this card.
+            .keyboardShortcut(.return, modifiers: .command)
         }
     }
 }

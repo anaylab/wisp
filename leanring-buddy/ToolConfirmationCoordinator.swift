@@ -25,6 +25,12 @@
 //  * A denial is reported to the model as a normal tool result, so it can say
 //    something sensible instead of failing the turn.
 //
+//  The card can also let the user fix the wording before allowing — a subject,
+//  a message, an event title (`EditableConfirmationFields` decides which, and
+//  never a recipient or a path). Edits are held here, not in the view, so a
+//  spoken "yes" approves with whatever is in the fields right now; typing
+//  pushes the timeout out so an edit in progress is not lost to it.
+//
 
 import Combine
 
@@ -41,6 +47,13 @@ protocol ToolPermissionBroker: AnyObject {
     /// so the broker can judge the call (the destructive floor under session
     /// auto-approve) and describe it (the rich confirmation card).
     func requestApproval(toolName: String, toolInput: JSONValue) async -> ToolConfirmationCoordinator.Decision
+
+    /// Asks the same way, but lets the user edit the call's human-text fields
+    /// on the card first, and hands back what they typed along with the
+    /// decision. Only a caller that will run the edited input may use this —
+    /// one that asks this way and then runs the original would show the user
+    /// an edit that never happens.
+    func requestApprovalAllowingEdits(toolName: String, toolInput: JSONValue) async -> ToolApprovalOutcome
 }
 
 extension ToolPermissionBroker {
@@ -48,6 +61,45 @@ extension ToolPermissionBroker {
     /// works: it is asked with the compact JSON, exactly as before.
     func requestApproval(toolName: String, toolInput: JSONValue) async -> ToolConfirmationCoordinator.Decision {
         await requestApproval(toolName: toolName, argumentSummary: toolInput.compactDescription)
+    }
+
+    /// A broker with no editable card — every existing stub — approves or
+    /// declines the call exactly as asked, with no edits.
+    func requestApprovalAllowingEdits(toolName: String, toolInput: JSONValue) async -> ToolApprovalOutcome {
+        ToolApprovalOutcome(
+            decision: await requestApproval(toolName: toolName, toolInput: toolInput),
+            editedTextsByArgumentKey: [:]
+        )
+    }
+}
+
+/// A decision plus whatever the user typed into the card's editable fields.
+///
+/// Carries the raw edits rather than a finished input on purpose: whoever
+/// runs the tool gets the input with `approvedToolInput(forAskedToolInput:toolName:)`,
+/// which goes back through `EditableConfirmationFields.applyingEdits` against
+/// the input that was actually asked about. So no broker — however it is
+/// written — can hand the executor an input with a different recipient, path
+/// or tool; at worst its edits to such keys are dropped.
+struct ToolApprovalOutcome: Equatable {
+    let decision: ToolConfirmationCoordinator.Decision
+    /// Argument key (exact spelling) → the text in that field when the user
+    /// approved. Empty when declined or when nothing was offered for editing.
+    let editedTextsByArgumentKey: [String: String]
+
+    var isApproved: Bool { decision.isApproved }
+
+    /// The input to run and which fields the user changed. With no edits (or
+    /// no approval), the asked-about input unchanged.
+    func approvedToolInput(forAskedToolInput askedToolInput: JSONValue, toolName: String) -> AppliedConfirmationEdits {
+        guard decision.isApproved else {
+            return AppliedConfirmationEdits(toolInput: askedToolInput, editedFields: [])
+        }
+        return EditableConfirmationFields.applyingEdits(
+            editedTextsByArgumentKey,
+            toToolInput: askedToolInput,
+            toolNamed: toolName
+        )
     }
 }
 import Foundation
@@ -67,11 +119,24 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         /// Subject, a file write with its path — built deterministically from
         /// the arguments by `ToolConfirmationCardBuilder`. Nil for a tool with
         /// no recognisable shape, in which case the panel shows the plain
-        /// summary exactly as it always has. Display-only.
+        /// summary exactly as it always has. The card itself is display-only;
+        /// its editable rows are drawn from `editableFields` instead.
         let confirmationCard: GlanceCard?
         /// Set for a `send_imessage` call: the panel is then drawn as a
         /// Siri-style message (avatar, bubble, Send) instead of a tool card.
         var messageDraft: MessageSendDraft? = nil
+        /// The fields the card shows as text boxes the user may edit before
+        /// allowing. Empty for most calls, and always empty when the caller
+        /// asked without `requestApprovalAllowingEdits` (it would run the
+        /// original input, so offering an edit would be a lie).
+        var editableFields: [EditableConfirmationField] = []
+        /// The structured arguments asked about, when the caller gave them —
+        /// so the panel can show the call as it will run with the edits made.
+        var toolInput: JSONValue? = nil
+
+        /// Whether the panel needs keyboard focus (so the overlay must be
+        /// allowed to become key while it is up).
+        var offersEditableFields: Bool { !editableFields.isEmpty }
     }
 
     enum Decision: Equatable {
@@ -88,7 +153,23 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     /// short enough that a forgotten prompt doesn't leave a turn hanging.
     static let confirmationTimeoutSeconds: TimeInterval = 45
 
+    /// The longest a prompt can stay up while the user keeps editing it. Each
+    /// edit gives another `confirmationTimeoutSeconds`, so someone typing never
+    /// loses their words to the countdown — but an edited card that is then
+    /// forgotten still expires (and declines) rather than hanging the turn.
+    static let maximumConfirmationWindowWhileEditingSeconds: TimeInterval = 5 * 60
+
     @Published private(set) var pendingConfirmation: PendingConfirmation?
+
+    /// When the pending prompt expires and declines. Moves later while the
+    /// user edits a field; the panel's countdown reads it.
+    @Published private(set) var pendingConfirmationExpiryDate: Date?
+
+    /// What the user has typed into the card's editable fields so far, by
+    /// exact argument key. Kept here rather than in the view so every way of
+    /// approving — the Allow button, Cmd-Return, a spoken "yes" — approves
+    /// the same, current text.
+    @Published private(set) var editedTextsByArgumentKey: [String: String] = [:]
 
     /// When on, tool calls are approved without asking, until the app restarts.
     /// Deliberately session-scoped and not persisted: a blanket "always approve"
@@ -116,7 +197,7 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         speakHandler = handler
     }
 
-    private var pendingContinuation: CheckedContinuation<Decision, Never>?
+    private var pendingContinuation: CheckedContinuation<ToolApprovalOutcome, Never>?
     private var timeoutTask: Task<Void, Never>?
 
     var isAwaitingConfirmation: Bool { pendingConfirmation != nil }
@@ -139,6 +220,14 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         )
     }
 
+    /// Asks about a tool call and offers its human-text fields for editing.
+    ///
+    /// The registry's entry point (and the direct "text mom …" route's): both
+    /// run what the returned outcome says, edits included.
+    func requestApprovalAllowingEdits(toolName: String, toolInput: JSONValue) async -> ToolApprovalOutcome {
+        await requestApprovalWithStructuredInput(toolName: toolName, toolInput: toolInput, offersEditableFields: true)
+    }
+
     /// Asks about a tool call using its structured arguments.
     ///
     /// The registry's entry point. Two things need the arguments rather than a
@@ -146,9 +235,22 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     /// sends, deletes and payments even with session auto-approve on, and the
     /// confirmation card, which shows what the call will do.
     func requestApproval(toolName: String, toolInput: JSONValue) async -> Decision {
+        // A caller asking this way runs the input it passed, so the card must
+        // not offer edits that would silently never happen.
+        await requestApprovalWithStructuredInput(toolName: toolName, toolInput: toolInput, offersEditableFields: false).decision
+    }
+
+    private func requestApprovalWithStructuredInput(
+        toolName: String,
+        toolInput: JSONValue,
+        offersEditableFields: Bool
+    ) async -> ToolApprovalOutcome {
         guard let speakHandler else {
             // No way to ask means no way to consent.
-            return .declined(reason: "there was no way to ask you about this")
+            return ToolApprovalOutcome(
+                decision: .declined(reason: "there was no way to ask you about this"),
+                editedTextsByArgumentKey: [:]
+            )
         }
         let agentWorkingDirectoryPath = AgentSettingsStore.resolvedWorkingDirectoryPath()
         let mustAskEvenWithSessionAutoApprove = ToolCallSafety.mustAskEvenWithSessionAutoApprove(
@@ -161,14 +263,19 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
             toolInput: toolInput,
             agentWorkingDirectoryPath: agentWorkingDirectoryPath
         )
-        return await requestApproval(
+        let editableFields = offersEditableFields
+            ? EditableConfirmationFields.editableFields(forToolNamed: toolName, toolInput: toolInput)
+            : []
+        return await askAndWaitForOutcome(
             toolName: toolName,
             argumentSummary: toolInput.compactDescription,
             speak: speakHandler,
             ignoresSessionAutoApprove: mustAskEvenWithSessionAutoApprove,
             spokenQuestionOverride: Self.spokenQuestionOverride(forToolNamed: toolName, toolInput: toolInput),
             confirmationCard: confirmationCard,
-            messageDraft: MessageSendDraft(toolName: toolName, toolInput: toolInput)
+            messageDraft: MessageSendDraft(toolName: toolName, toolInput: toolInput),
+            editableFields: editableFields,
+            toolInput: toolInput
         )
     }
 
@@ -209,36 +316,113 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         confirmationCard: GlanceCard? = nil,
         messageDraft: MessageSendDraft? = nil
     ) async -> Decision {
+        await askAndWaitForOutcome(
+            toolName: toolName,
+            argumentSummary: argumentSummary,
+            speak: speak,
+            ignoresSessionAutoApprove: ignoresSessionAutoApprove,
+            spokenQuestionOverride: spokenQuestionOverride,
+            confirmationCard: confirmationCard,
+            messageDraft: messageDraft,
+            editableFields: [],
+            toolInput: nil
+        ).decision
+    }
+
+    private func askAndWaitForOutcome(
+        toolName: String,
+        argumentSummary: String,
+        speak: @MainActor (String) async -> Void,
+        ignoresSessionAutoApprove: Bool,
+        spokenQuestionOverride: String?,
+        confirmationCard: GlanceCard?,
+        messageDraft: MessageSendDraft?,
+        editableFields: [EditableConfirmationField],
+        toolInput: JSONValue?
+    ) async -> ToolApprovalOutcome {
         // Session auto-approve short-circuits the whole prompt so long tasks can
         // run without stopping to ask on every step — except for the few actions
-        // that must always be asked about.
+        // that must always be asked about. Nothing is shown, so nothing is edited.
         if autoApproveThisSession && !ignoresSessionAutoApprove {
-            return .approved
+            return ToolApprovalOutcome(decision: .approved, editedTextsByArgumentKey: [:])
         }
 
         // A second request while one is outstanding is refused rather than
         // queued: two spoken questions at once cannot be answered separately.
         if pendingConfirmation != nil {
-            return .declined(reason: "another confirmation was already waiting")
+            return ToolApprovalOutcome(
+                decision: .declined(reason: "another confirmation was already waiting"),
+                editedTextsByArgumentKey: [:]
+            )
         }
 
         let question = spokenQuestionOverride ?? Self.spokenQuestion(forToolNamed: toolName)
+        let requestedAt = Date()
+        editedTextsByArgumentKey = [:]
+        pendingConfirmationExpiryDate = requestedAt.addingTimeInterval(Self.confirmationTimeoutSeconds)
         pendingConfirmation = PendingConfirmation(
             toolName: toolName,
             spokenQuestion: question,
             argumentSummary: argumentSummary,
-            requestedAt: Date(),
+            requestedAt: requestedAt,
             confirmationCard: confirmationCard,
-            messageDraft: messageDraft
+            messageDraft: messageDraft,
+            editableFields: editableFields,
+            toolInput: toolInput
         )
 
         await speak(question)
 
+        // As before, the full window counts from when the question has been
+        // asked aloud, not from when the card appeared.
+        if pendingConfirmation != nil, let expiryBeforeSpeaking = pendingConfirmationExpiryDate {
+            pendingConfirmationExpiryDate = max(expiryBeforeSpeaking, Date().addingTimeInterval(Self.confirmationTimeoutSeconds))
+        }
         startTimeoutCountdown()
 
         return await withCheckedContinuation { continuation in
             pendingContinuation = continuation
         }
+    }
+
+    // MARK: - Editing the card
+
+    /// Records the text now in one of the card's editable fields, and gives
+    /// the user more time — an edit in progress must not be declined out from
+    /// under them by the countdown.
+    ///
+    /// A key the pending card did not offer for editing is ignored here, and
+    /// would be again when the edits are applied.
+    func updateEditedText(_ editedText: String, forArgumentKey argumentKey: String) {
+        guard let pendingConfirmation,
+              pendingConfirmation.editableFields.contains(where: { $0.argumentKey == argumentKey }) else { return }
+        editedTextsByArgumentKey[argumentKey] = editedText
+        extendTimeoutForEditing()
+    }
+
+    /// The user is working in a field (focused it, or is typing): push the
+    /// expiry out to a full window from now, never past the editing cap.
+    func extendTimeoutForEditing() {
+        guard let pendingConfirmation, pendingConfirmation.offersEditableFields,
+              let currentExpiryDate = pendingConfirmationExpiryDate else { return }
+        let latestAllowedExpiryDate = pendingConfirmation.requestedAt
+            .addingTimeInterval(Self.maximumConfirmationWindowWhileEditingSeconds)
+        let extendedExpiryDate = min(
+            latestAllowedExpiryDate,
+            max(currentExpiryDate, Date().addingTimeInterval(Self.confirmationTimeoutSeconds))
+        )
+        guard extendedExpiryDate > currentExpiryDate else { return }
+        pendingConfirmationExpiryDate = extendedExpiryDate
+        startTimeoutCountdown()
+    }
+
+    /// When the pending prompt for this tool will expire, for a caller that
+    /// bounds the whole tool call (the agent loop's own timeout) and must not
+    /// give up while the user is still editing the card. Nil when no prompt
+    /// for this tool is up.
+    func expiryDateOfPendingConfirmation(forToolNamed toolName: String) -> Date? {
+        guard pendingConfirmation?.toolName == toolName else { return nil }
+        return pendingConfirmationExpiryDate
     }
 
     /// Interprets a spoken reply as the answer to the outstanding prompt.
@@ -268,18 +452,28 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     private func resolve(with decision: Decision) {
         timeoutTask?.cancel()
         timeoutTask = nil
+        // Edits only travel with an approval; a decline runs nothing.
+        let approvedEditedTexts = decision.isApproved ? editedTextsByArgumentKey : [:]
         pendingConfirmation = nil
+        pendingConfirmationExpiryDate = nil
+        editedTextsByArgumentKey = [:]
 
         guard let continuation = pendingContinuation else { return }
         pendingContinuation = nil
-        continuation.resume(returning: decision)
+        continuation.resume(returning: ToolApprovalOutcome(
+            decision: decision,
+            editedTextsByArgumentKey: approvedEditedTexts
+        ))
     }
 
+    /// (Re)starts the countdown to `pendingConfirmationExpiryDate` — restarted
+    /// rather than added to when an edit moves the expiry later.
     private func startTimeoutCountdown() {
         timeoutTask?.cancel()
+        let secondsUntilExpiry = max(0, pendingConfirmationExpiryDate?.timeIntervalSinceNow ?? Self.confirmationTimeoutSeconds)
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(
-                nanoseconds: UInt64(Self.confirmationTimeoutSeconds * 1_000_000_000)
+                nanoseconds: UInt64(secondsUntilExpiry * 1_000_000_000)
             )
             guard !Task.isCancelled else { return }
             self?.resolve(with: .declined(reason: "there was no answer, so it was skipped"))

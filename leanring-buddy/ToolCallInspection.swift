@@ -180,16 +180,32 @@ enum ToolCallInspection {
     /// The first matching field of an object, matching keys case-insensitively
     /// and ignoring `_`/`-` so `startTime`, `start_time` and `start-time` agree.
     static func fieldValue(forAnyOf candidateKeys: [String], in arguments: JSONValue) -> JSONValue? {
+        guard case .object(let argumentFields) = arguments,
+              let matchingKey = matchingFieldKey(forAnyOf: candidateKeys, in: arguments) else { return nil }
+        return argumentFields[matchingKey]
+    }
+
+    /// The exact key, as spelled in the arguments, that `fieldValue` reads
+    /// for these candidates — `Subject` or `start_time`, not the candidate's
+    /// own spelling. Needed by anything that writes a field back (an edit on
+    /// the confirmation card), so the edit lands on the key the tool will
+    /// read rather than beside it.
+    ///
+    /// Same rules as `fieldValue`: candidates in order, keys compared
+    /// case-insensitively ignoring `_`/`-`, a null value skipped. When two
+    /// spellings of one key are both present (`startTime` and `start_time`),
+    /// the alphabetically first wins, so the answer never depends on
+    /// dictionary order.
+    static func matchingFieldKey(forAnyOf candidateKeys: [String], in arguments: JSONValue) -> String? {
         guard case .object(let argumentFields) = arguments else { return nil }
-        let normalizedFieldsByKey = Dictionary(
-            argumentFields.map { (normalizedKey($0.key), $0.value) },
-            uniquingKeysWith: { firstValue, _ in firstValue }
-        )
+        let argumentKeysInStableOrder = argumentFields.keys.sorted()
         for candidateKey in candidateKeys {
-            if let matchingValue = normalizedFieldsByKey[normalizedKey(candidateKey)] {
-                if case .null = matchingValue { continue }
-                return matchingValue
+            let normalizedCandidateKey = normalizedKey(candidateKey)
+            guard let matchingKey = argumentKeysInStableOrder.first(where: { normalizedKey($0) == normalizedCandidateKey }) else {
+                continue
             }
+            if case .null? = argumentFields[matchingKey] { continue }
+            return matchingKey
         }
         return nil
     }
