@@ -1152,11 +1152,14 @@ final class CompanionManager: ObservableObject {
     /// not to name a contact and is being handed on as an ordinary turn.
     /// `skipsFastPointing` is set when a "where is X" request couldn't be
     /// answered from the element list and is being handed on the same way.
+    /// `skipsCalendarEventCommandRouting` is set when a scheduling request
+    /// couldn't be turned into an event without the model.
     private func sendTranscriptToClaudeWithScreenshot(
         transcript: String,
         historyTitle: String? = nil,
         skipsMessageCommandRouting: Bool = false,
-        skipsFastPointing: Bool = false
+        skipsFastPointing: Bool = false,
+        skipsCalendarEventCommandRouting: Bool = false
     ) {
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
@@ -1270,6 +1273,25 @@ final class CompanionManager: ObservableObject {
             return
         }
 
+        // "Add lunch with Sam friday at 1 at Tartine" goes straight to the
+        // "New Event" card, like Siri: the words are parsed here and the date
+        // read deterministically, instead of hoping the local model calls
+        // `create_calendar_event` with the right ISO date. A request the parser
+        // can't split goes to Apple's on-device model, then to an ordinary
+        // turn. Not behind agent mode: the event is put to the user on the
+        // card first (unless session auto-approve is on), and can be undone.
+        if !skipsCalendarEventCommandRouting {
+            let calendarEventParseOutcome = CalendarEventCommandParser.parse(transcript)
+            if calendarEventParseOutcome != .notACalendarCommand {
+                runDirectCalendarEventCommand(
+                    calendarEventParseOutcome,
+                    transcript: transcript,
+                    historyTitle: historyTitle
+                )
+                return
+            }
+        }
+
         // Browser commands go straight to the browser. The local model was
         // measured calling no tool at all for "open a new tab", "open youtube"
         // or "go to github.com" — it said "sure" and did nothing — so a plain
@@ -1320,6 +1342,10 @@ final class CompanionManager: ObservableObject {
         PerfMetricsRecorder.shared.recordScreenshotDecision(didAttach: shouldAttachScreenshot)
 
         currentResponseTask = Task {
+            // Events this turn's tool calls create are found by time, to show
+            // the "Event Added" card once the reply is in.
+            let turnStartedAt = Date()
+
             // Stay in processing (spinner) state — no streaming text displayed
             voiceState = .processing
 
@@ -1553,6 +1579,12 @@ final class CompanionManager: ObservableObject {
                 // TTS) ever see it, then resolve it into a card for the notch.
                 let cardParseResult = GlanceCardParser.parse(spokenLineParseResult.displayText)
                 resolveAndPublishGlanceCard(cardParseResult.request)
+                // An event the model added this turn gets its result card with
+                // Undo, unless the model chose a card of its own.
+                if cardParseResult.request == nil,
+                   let eventCreatedThisTurn = CreatedCalendarEventStore.shared.mostRecentEvent(createdSince: turnStartedAt) {
+                    resolvedGlanceCard = .calendarEventAdded(CalendarEventAddedCardState(eventID: eventCreatedThisTurn.id))
+                }
 
                 // Parse the [POINT:...] tag from Claude's response.
                 // Annotations are pulled out first so their tags are gone
@@ -3177,6 +3209,177 @@ extension CompanionManager {
                 self.scheduleTransientHideIfNeeded()
             }
         }
+    }
+}
+
+// MARK: - Direct calendar event commands
+
+extension CompanionManager {
+    /// Adds an event recognised by `CalendarEventCommandParser`, Siri-style:
+    /// the parsed event goes on the "New Event" confirmation card (title and
+    /// place editable), and once allowed it is created on-device and the notch
+    /// shows the "Event Added" card with Undo and Open in Calendar.
+    ///
+    /// A request the parser handed to extraction goes to Apple's on-device
+    /// model first; if that is unavailable or its answer doesn't hold up, the
+    /// request is sent on as an ordinary turn, where the model still has the
+    /// `create_calendar_event` tool.
+    fileprivate func runDirectCalendarEventCommand(
+        _ calendarEventParseOutcome: CalendarEventCommandParseOutcome,
+        transcript: String,
+        historyTitle: String?
+    ) {
+        PerfMetricsRecorder.shared.abandonTurn()
+        voiceState = .processing
+        currentReplyText = ""
+        let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
+
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            let startedAt = Date()
+
+            let calendarEventDraft: CalendarEventDraft?
+            var usedOnDeviceModel = false
+            switch calendarEventParseOutcome {
+            case .draft(let parsedDraft):
+                calendarEventDraft = parsedDraft
+            case .needsExtraction(let requestBody):
+                calendarEventDraft = await CalendarEventDraftExtractor.extractDraft(fromRequestBody: requestBody)
+                usedOnDeviceModel = true
+            case .notACalendarCommand:
+                calendarEventDraft = nil
+            }
+            guard !Task.isCancelled else { return }
+
+            guard let calendarEventDraft else {
+                print("📅 Calendar fast path: couldn't read the event — handing on as a normal turn")
+                self.voiceState = .idle
+                self.sendTranscriptToClaudeWithScreenshot(
+                    transcript: transcript,
+                    historyTitle: historyTitle,
+                    skipsMessageCommandRouting: true,
+                    skipsCalendarEventCommandRouting: true
+                )
+                return
+            }
+
+            let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+            let askedToolInput = AgentToolRegistry.createCalendarEventToolInput(for: calendarEventDraft)
+            let approvalOutcome = await ToolConfirmationCoordinator.shared.requestApprovalAllowingEdits(
+                toolName: AgentToolRegistry.createCalendarEventToolName,
+                toolInput: askedToolInput
+            )
+            guard !Task.isCancelled else {
+                AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+                return
+            }
+
+            let replyText: String
+            let didSucceed: Bool
+            var wasDeclinedByUser = false
+            var createdEventID: String?
+
+            if approvalOutcome.isApproved {
+                // The title and place may have been reworded on the card; the
+                // time can't be edited there, so it stays the one asked about.
+                let appliedEdits = approvalOutcome.approvedToolInput(
+                    forAskedToolInput: askedToolInput,
+                    toolName: AgentToolRegistry.createCalendarEventToolName
+                )
+                let approvedDraft = Self.calendarEventDraft(calendarEventDraft, applyingApprovedToolInput: appliedEdits.toolInput)
+                do {
+                    let createdEventDetails = try await CalendarDataProvider.shared.createEvent(
+                        title: approvedDraft.title,
+                        startDate: approvedDraft.startDate,
+                        endDate: approvedDraft.endDate,
+                        isAllDay: approvedDraft.isAllDay,
+                        location: approvedDraft.location,
+                        requestedCalendarName: nil
+                    )
+                    CreatedCalendarEventStore.shared.record(createdEventDetails: createdEventDetails, draft: approvedDraft)
+                    createdEventID = createdEventDetails.eventIdentifier
+                    replyText = "added \(approvedDraft.title.lowercased()), \(CalendarEventAddedCardView.whenText(for: approvedDraft).lowercased())."
+                    didSucceed = true
+                } catch CalendarDataProvider.CalendarDataError.accessDenied {
+                    replyText = "i can't reach your calendar — allow Wisp under Privacy & Security → Calendars."
+                    didSucceed = false
+                } catch CalendarDataProvider.CalendarDataError.noWritableCalendar {
+                    replyText = "none of the calendars on this Mac accept new events."
+                    didSucceed = false
+                } catch {
+                    replyText = "i couldn't add that event: \(error.localizedDescription)"
+                    didSucceed = false
+                }
+            } else {
+                replyText = "okay, i didn't add it."
+                didSucceed = false
+                wasDeclinedByUser = true
+            }
+
+            let howItWasRead = usedOnDeviceModel ? "read by Apple's on-device model" : "no model call"
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(
+                    kind: .tool(name: AgentToolRegistry.createCalendarEventToolName),
+                    summary: didSucceed ? "Added to Calendar — \(howItWasRead)" : "Calendar: \(replyText)",
+                    startedAt: startedAt,
+                    durationSeconds: Date().timeIntervalSince(startedAt),
+                    isError: !didSucceed && !wasDeclinedByUser
+                ),
+                to: taskID
+            )
+            AgentTaskRegistry.shared.finishTask(
+                taskID,
+                status: didSucceed || wasDeclinedByUser ? .succeeded : .failed(replyText),
+                finalText: replyText
+            )
+
+            self.conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                BuddyChatMessage(role: .user, text: transcript),
+                BuddyChatMessage(role: .assistant, text: replyText),
+            ]))
+            self.conversationTranscript.trimToRecentTurns(10)
+
+            self.currentReplyText = replyText
+            if let createdEventID {
+                self.resolvedGlanceCard = .calendarEventAdded(CalendarEventAddedCardState(eventID: createdEventID))
+            }
+            if !wasDeclinedByUser { self.flashIsland(didSucceed ? .success : .error) }
+
+            if isReplySpeechEnabled {
+                self.voiceState = .responding
+                try? await self.ttsProvider.speakText(replyText)
+            }
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
+    }
+
+    /// The draft with the title and place the user approved on the card.
+    /// Only those two can differ; everything else is the draft as asked.
+    fileprivate static func calendarEventDraft(
+        _ askedDraft: CalendarEventDraft,
+        applyingApprovedToolInput approvedToolInput: JSONValue
+    ) -> CalendarEventDraft {
+        guard case .object(let approvedFields) = approvedToolInput else { return askedDraft }
+        var approvedTitle = askedDraft.title
+        if case .string(let editedTitle)? = approvedFields["title"],
+           !editedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            approvedTitle = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var approvedLocation = askedDraft.location
+        if case .string(let editedLocation)? = approvedFields["location"] {
+            let trimmedLocation = editedLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+            approvedLocation = trimmedLocation.isEmpty ? nil : trimmedLocation
+        }
+        return CalendarEventDraft(
+            title: approvedTitle,
+            startDate: askedDraft.startDate,
+            endDate: askedDraft.endDate,
+            isAllDay: askedDraft.isAllDay,
+            location: approvedLocation
+        )
     }
 }
 

@@ -740,7 +740,7 @@ final class AgentToolRegistry: ObservableObject {
 
         register(
             BuddyToolDefinition(
-                name: "create_calendar_event",
+                name: Self.createCalendarEventToolName,
                 description: "Add an event to the user's calendar. Use when the user asks to schedule, book or put something on their calendar. Cannot invite other people.",
                 inputSchema: .object([
                     "type": .string("object"),
@@ -802,14 +802,15 @@ final class AgentToolRegistry: ObservableObject {
             }
 
             let eventTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            let savedCalendarName: String
+            let eventLocation = nonEmptyText(forKey: "location")
+            let createdEventDetails: CalendarDataProvider.CreatedEventDetails
             do {
-                savedCalendarName = try await CalendarDataProvider.shared.createEvent(
+                createdEventDetails = try await CalendarDataProvider.shared.createEvent(
                     title: eventTitle,
                     startDate: parsedStart.date,
                     endDate: eventEndDate,
                     isAllDay: isAllDayEvent,
-                    location: nonEmptyText(forKey: "location"),
+                    location: eventLocation,
                     requestedCalendarName: nonEmptyText(forKey: "calendar")
                 )
             } catch CalendarDataProvider.CalendarDataError.accessDenied {
@@ -818,10 +819,22 @@ final class AgentToolRegistry: ObservableObject {
                 return "none of the calendars on this Mac accept new events."
             }
 
+            // Recorded so the turn can show the "Event Added" card with Undo.
+            CreatedCalendarEventStore.shared.record(
+                createdEventDetails: createdEventDetails,
+                draft: CalendarEventDraft(
+                    title: eventTitle,
+                    startDate: parsedStart.date,
+                    endDate: eventEndDate,
+                    isAllDay: isAllDayEvent,
+                    location: eventLocation
+                )
+            )
+
             let confirmationFormatter = DateFormatter()
             confirmationFormatter.dateStyle = .medium
             confirmationFormatter.timeStyle = isAllDayEvent ? .none : .short
-            return "added \"\(eventTitle)\" to the \(savedCalendarName) calendar, \(confirmationFormatter.string(from: parsedStart.date))."
+            return "added \"\(eventTitle)\" to the \(createdEventDetails.calendarName) calendar, \(confirmationFormatter.string(from: parsedStart.date))."
         }
     }
 
@@ -915,5 +928,34 @@ final class AgentToolRegistry: ObservableObject {
         }
 
         return described
+    }
+}
+
+// MARK: - Calendar event input shared with the direct route
+
+extension AgentToolRegistry {
+    static let createCalendarEventToolName = "create_calendar_event"
+
+    /// The `create_calendar_event` input for a parsed event, so the calendar
+    /// fast path asks with exactly the card an agent call gets. Local
+    /// wall-clock ISO 8601 ("2026-10-09T13:00"), a bare date for all-day,
+    /// which the tool's own parser and the card both read.
+    static func createCalendarEventToolInput(for calendarEventDraft: CalendarEventDraft) -> JSONValue {
+        let localTimestampFormatter = DateFormatter()
+        localTimestampFormatter.locale = Locale(identifier: "en_US_POSIX")
+        localTimestampFormatter.timeZone = .current
+        localTimestampFormatter.dateFormat = calendarEventDraft.isAllDay ? "yyyy-MM-dd" : "yyyy-MM-dd'T'HH:mm"
+
+        var toolInputFields: [String: JSONValue] = [
+            "title": .string(calendarEventDraft.title),
+            "start": .string(localTimestampFormatter.string(from: calendarEventDraft.startDate)),
+        ]
+        if !calendarEventDraft.isAllDay {
+            toolInputFields["end"] = .string(localTimestampFormatter.string(from: calendarEventDraft.endDate))
+        }
+        if let location = calendarEventDraft.location {
+            toolInputFields["location"] = .string(location)
+        }
+        return .object(toolInputFields)
     }
 }

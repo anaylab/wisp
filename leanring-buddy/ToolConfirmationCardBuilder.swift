@@ -267,18 +267,72 @@ enum ToolConfirmationCardBuilder {
                 trailingText: displayServiceName(inspectedAction.serviceName)
             )
         ]
-        let keyValuePairs = keyValuePairs(from: [
+        let rawKeyValuePairs = keyValuePairs(from: [
             ("Title", eventTitleKeys),
             ("Starts", eventStartKeys),
             ("Ends", eventEndKeys),
             ("Where", eventLocationKeys),
             ("Guests", eventGuestKeys)
         ], in: arguments)
+        let startText = rawKeyValuePairs.first { $0.key == "Starts" }?.value
+        // "Fri, Oct 9 at 1:00 PM" reads like Calendar; "2026-10-09T13:00"
+        // doesn't. Values that aren't a plain timestamp are shown as written.
+        let keyValuePairs = rawKeyValuePairs.map { keyValuePair -> GlanceKeyValuePair in
+            switch keyValuePair.key {
+            case "Starts":
+                return GlanceKeyValuePair(key: keyValuePair.key, value: readableEventTime(keyValuePair.value, sameDayAs: nil), tone: keyValuePair.tone)
+            case "Ends":
+                return GlanceKeyValuePair(key: keyValuePair.key, value: readableEventTime(keyValuePair.value, sameDayAs: startText), tone: keyValuePair.tone)
+            default:
+                return keyValuePair
+            }
+        }
         if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
         if let descriptionPreviewBlock = bodyPreviewBlock(forAnyOf: ["description", "notes", "body", "details"], in: arguments) {
             blocks.append(descriptionPreviewBlock)
         }
         return GlanceCard(blocks: blocks)
+    }
+
+    /// A timestamp as Calendar would say it: "Fri, Oct 9 at 1:00 PM", "Fri,
+    /// Oct 9 (all day)", or just "2:00 PM" for an end on the start's day.
+    /// Anything that isn't an ISO 8601 date or local timestamp is returned
+    /// unchanged, so an unusual value is still shown exactly.
+    private static func readableEventTime(_ timestampText: String, sameDayAs startTimestampText: String?) -> String {
+        guard let parsedTimestamp = parsedEventTimestamp(timestampText) else { return timestampText }
+        if !parsedTimestamp.includesTimeOfDay {
+            let dayFormatter = DateFormatter()
+            dayFormatter.setLocalizedDateFormatFromTemplate("EEEMMMd")
+            return "\(dayFormatter.string(from: parsedTimestamp.date)) (all day)"
+        }
+        if let startTimestampText,
+           let parsedStart = parsedEventTimestamp(startTimestampText),
+           Calendar.current.isDate(parsedStart.date, inSameDayAs: parsedTimestamp.date) {
+            return DateFormatter.localizedString(from: parsedTimestamp.date, dateStyle: .none, timeStyle: .short)
+        }
+        let dayFormatter = DateFormatter()
+        dayFormatter.setLocalizedDateFormatFromTemplate("EEEMMMd")
+        let timeText = DateFormatter.localizedString(from: parsedTimestamp.date, dateStyle: .none, timeStyle: .short)
+        return "\(dayFormatter.string(from: parsedTimestamp.date)) at \(timeText)"
+    }
+
+    private static func parsedEventTimestamp(_ timestampText: String) -> (date: Date, includesTimeOfDay: Bool)? {
+        let trimmedText = timestampText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let zonedFormatter = ISO8601DateFormatter()
+        for zonedOptions: ISO8601DateFormatter.Options in [[.withInternetDateTime], [.withInternetDateTime, .withFractionalSeconds]] {
+            zonedFormatter.formatOptions = zonedOptions
+            if let zonedDate = zonedFormatter.date(from: trimmedText) { return (zonedDate, true) }
+        }
+        let localFormatter = DateFormatter()
+        localFormatter.locale = Locale(identifier: "en_US_POSIX")
+        localFormatter.timeZone = .current
+        for localFormat in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm"] {
+            localFormatter.dateFormat = localFormat
+            if let localDate = localFormatter.date(from: trimmedText) { return (localDate, true) }
+        }
+        localFormatter.dateFormat = "yyyy-MM-dd"
+        if let dayDate = localFormatter.date(from: trimmedText) { return (dayDate, false) }
+        return nil
     }
 
     // MARK: - File writes

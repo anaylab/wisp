@@ -154,9 +154,17 @@ actor CalendarDataProvider: GlanceCardDataProvider {
             }
     }
 
-    /// Adds an event to the user's calendar and returns the name of the
-    /// calendar it landed in. `requestedCalendarName` picks a writable calendar
-    /// by name; nil (or no match) uses the default calendar for new events.
+    /// What `createEvent` made: enough to show the "Event Added" card and to
+    /// undo it.
+    struct CreatedEventDetails: Sendable, Equatable {
+        let eventIdentifier: String
+        let calendarName: String
+        let calendarColorHex: String?
+    }
+
+    /// Adds an event to the user's calendar and returns where it landed.
+    /// `requestedCalendarName` picks a writable calendar by name; nil (or no
+    /// match) uses the default calendar for new events.
     func createEvent(
         title: String,
         startDate: Date,
@@ -164,7 +172,7 @@ actor CalendarDataProvider: GlanceCardDataProvider {
         isAllDay: Bool,
         location: String?,
         requestedCalendarName: String?
-    ) async throws -> String {
+    ) async throws -> CreatedEventDetails {
         try await ensureAccess()
 
         let writableCalendars = eventStore.calendars(for: .event).filter { $0.allowsContentModifications }
@@ -183,7 +191,22 @@ actor CalendarDataProvider: GlanceCardDataProvider {
         newEvent.endDate = endDate
         newEvent.location = location
         try eventStore.save(newEvent, span: .thisEvent, commit: true)
-        return targetCalendar.title
+        return CreatedEventDetails(
+            eventIdentifier: newEvent.eventIdentifier ?? "",
+            calendarName: targetCalendar.title,
+            calendarColorHex: targetCalendar.cgColor?.hexString
+        )
+    }
+
+    /// Removes one event by identifier — the result card's Undo. Only
+    /// `CreatedCalendarEventStore` calls this, and only with an event Wisp
+    /// created itself this session, so it can't be pointed at anything else.
+    /// Returns false when the event is already gone.
+    func removeEvent(withIdentifier eventIdentifier: String) async throws -> Bool {
+        try await ensureAccess()
+        guard let existingEvent = eventStore.event(withIdentifier: eventIdentifier) else { return false }
+        try eventStore.remove(existingEvent, span: .thisEvent, commit: true)
+        return true
     }
 
     /// Ensures the app can read events, requesting access on first use.

@@ -473,6 +473,27 @@ cloud dependency to the local path, without asking.
   and read-only `find_contact`, in the `.messaging` `AgentToolScope`. Needs
   `NSContactsUsageDescription` + the `com.apple.security.personal-information.addressbook`
   entitlement (hardened runtime) and Automation → Messages.
+- **Calendar events, Siri-style** (`docs/siri-style-plan.md`, Phase 1): "add lunch with Sam friday at 1 at
+  Tartine", "schedule the dentist thursday at 3pm for 30 minutes", "put flight to Denver on October 12 on my
+  calendar" are recognised by `CalendarEventCommandParser` (checked in `sendTranscriptToClaudeWithScreenshot` right
+  after the message route; not behind agent mode). **Dates are never computed by a model**: `CalendarEventWhenResolver`
+  reads the time phrase with `NSDataDetector` plus a bare "at 6" (1–6 → afternoon, else the next one ahead) and
+  "in 2 hours", and knows whether a time of day was said (a bare date → all-day, not noon). Title = the rest, with
+  temporal words removed from the detected span but other words kept ("dinner tonight at 7" → "Dinner"); a trailing
+  "at <place>" outside the time phrase is the location; "for an hour"/"from 2 to 3:30" set the length (default 1h).
+  Recurring requests ("every monday") and sends ("schedule an email") are declined. A clearly-scheduling request the
+  parser can't split is `.needsExtraction` → `CalendarEventDraftExtractor`, **Apple's on-device model** (Foundation
+  Models, `@Generable` `{title, location, whenPhrase}`, 6s cap, nil when Apple Intelligence is unavailable), whose
+  answer is checked by `CalendarEventCommandParser.draft(fromExtractedTitle:…)`: the when-phrase must be the user's
+  words and is resolved deterministically, title words must be the user's, a place made of time words is dropped.
+  Anything still unread goes on as an ordinary turn (`skipsCalendarEventCommandRouting`). The route asks with the
+  same `create_calendar_event` card as the agent tool (`AgentToolRegistry.createCalendarEventToolInput`; title and
+  location editable, times read "Fri, Oct 9 at 1:00 PM" via the card builder's `readableEventTime`), creates the event
+  on-device, and the notch shows the **"Event Added" result card** (`CalendarEventAddedCardView`, a
+  `.calendarEventAdded` `ResolvedGlanceCard`: calendar colour bar, title, day + time range, place, calendar, **Open in
+  Calendar** via `ical://ekevent/<id>` and **Undo**). Every event Wisp creates — fast path or the agent tool — is
+  recorded in `CreatedCalendarEventStore` (in memory, this session only), and Undo can only remove an event recorded
+  there. An agent turn whose tool call created an event shows the same card unless the model sent its own `[CARD:]`.
 - **Window management** (`WindowManagement/`): "put Safari on the left and Xcode on the right",
   "maximize this", "make this window full screen", "move Chrome to the right half", "center this
   window", "move this to my other screen", "tile Notes and Mail" are recognised by
@@ -784,6 +805,10 @@ Grouped by what they do. Line counts are approximate.
 | `WindowManagement/WindowLayoutExecutor.swift` | ~300 | Places windows over Accessibility: running-app resolution (regular apps, not Wisp; "this" via `FrontmostAppTracker`), detached AX with a 0.5s timeout, unminimize, position/size/position, raise + activate, `PlacementFailure` reasons. |
 | `WindowManagement/WindowManagementAgentTools.swift` | ~85 | The `arrange_windows` agent tool (`registerWindowManagementTools()`). |
 | `MessageSendConfirmationView.swift` | ~305 | The Siri-style confirmation panel `ToolConfirmationView` shows for `send_imessage` (recipient, an editable message bubble, Cancel / Send); same consent flow underneath. |
+| `CalendarEventCommand.swift` | ~520 | Pure side of the calendar fast path: `CalendarEventDraft`, `CalendarEventCommandParser` (scheduling phrasing → draft / `.needsExtraction` / decline; duration, title/place split, checks on the on-device model's extraction) and `CalendarEventWhenResolver` (`NSDataDetector` + bare "at 6" + "in 2 hours", time-of-day vs all-day). Tested by `Tests/CalendarEventCommand`. |
+| `CalendarEventDraftExtractor.swift` | ~90 | Apple's on-device model (Foundation Models) for scheduling requests the parser can't split: `@Generable ExtractedCalendarEventFields`, availability check, 6s cap; its answer goes through the parser's checks. |
+| `CreatedCalendarEventStore.swift` | ~120 | Events Wisp created this session (both paths), for the result card: Undo (only these events, via `CalendarDataProvider.removeEvent`) and Open in Calendar. |
+| `CalendarEventAddedCardView.swift` | ~185 | The Siri-style "Event Added" result card (colour bar, title, when, place, calendar, Open in Calendar / Undo, removed state). |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
@@ -867,7 +892,7 @@ Grouped by what they do. Line counts are approximate.
 | `GlanceCardView.swift` | ~180 | Renderer for the generic block card (header/list/keyValue/stats). |
 | `GlanceCardDataPreference.swift` | ~40 | The single gate for **network** card data (weather, sources). Default on. |
 | `WeatherSnapshot.swift` / `WeatherDataProvider.swift` / `WeatherCardView.swift` | ~330/~200/~260 | Weather kind: Open-Meteo fetch → snapshot → Apple-Weather-style card. |
-| `CalendarSnapshot.swift` / `CalendarDataProvider.swift` / `CalendarCardView.swift` | ~50/~110/~160 | Calendar kind: EventKit on-device read → next events card. Needs Calendar permission. |
+| `CalendarSnapshot.swift` / `CalendarDataProvider.swift` / `CalendarCardView.swift` | ~50/~240/~160 | Calendar kind: EventKit on-device read → next events card. Needs Calendar permission. The provider also creates events (returning `CreatedEventDetails` for the result card) and removes one for Undo. |
 | `NowPlayingDataProvider.swift` / `NowPlayingCardView.swift` | ~150/~110 | Now-playing kind: AppleScript to Music/Spotify (best-effort, on-device). Needs Automation permission. |
 | `PlacesSnapshot.swift` / `PlacesDataProvider.swift` / `PlacesCardView.swift` | ~85/~230/~250 | `places` kind: CoreLocation one-shot (`WispLocationProvider`, in the provider file) + MapKit `MKLocalSearch` → a Maps-style nearby-results card whose rows open in Apple Maps. Network-gated by `GlanceCardDataPreference`; requests Location permission on first use. |
 | `RemindersSnapshot.swift` / `RemindersDataProvider.swift` / `RemindersCardView.swift` | ~210/~215/~240 | `reminders` kind: EventKit on-device read → incomplete-reminders card (rows open Reminders.app). The snapshot file also holds the pure `RemindersSelection` (overdue/today/all filtering + ordering) and `ReminderDueDateParser` (ISO 8601 variants for `create_reminder`); the provider also saves reminders for the confirmation-gated `create_reminder` tool. Needs Reminders permission (`NSRemindersFullAccessUsageDescription`). |
@@ -982,6 +1007,7 @@ running):
 ./Tests/WindowManagement/run.sh          # window layout command parsing, app matching, frame math
 ./Tests/ScreenWatcher/run.sh             # screen-watch request parsing, text matching, evaluator
 ./Tests/EditableConfirmation/run.sh      # editable confirmation fields: which, edit application, refusals
+./Tests/CalendarEventCommand/run.sh      # calendar fast path: recognition, time resolution, title/place, extraction checks
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a

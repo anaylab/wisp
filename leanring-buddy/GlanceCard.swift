@@ -229,6 +229,9 @@ enum ResolvedGlanceCard: Equatable {
     /// A live countdown. The state only names the timer; the countdown itself
     /// lives in `WispTimerStore` so it outlives this card.
     case timer(TimerCardState)
+    /// The result of adding an event, with Undo. The state only names the
+    /// event; its details and undo progress live in `CreatedCalendarEventStore`.
+    case calendarEventAdded(CalendarEventAddedCardState)
 }
 
 // MARK: - Tag parsing
