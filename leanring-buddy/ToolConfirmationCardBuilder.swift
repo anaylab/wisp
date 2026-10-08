@@ -92,6 +92,11 @@ enum ToolConfirmationCardBuilder {
         if ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage {
             return sendIMessageCard(toolInput: toolInput)
         }
+        // "create reminder" matches no shape below; without its own card the
+        // reminder would be asked about as raw JSON.
+        if ToolCallInspection.bareToolName(toolName) == EditableConfirmationFields.createReminderToolName {
+            return newReminderCard(toolInput: toolInput)
+        }
 
         let inspectedActions = ToolCallInspection.inspectedActions(toolName: toolName, toolInput: toolInput)
 
@@ -333,6 +338,28 @@ enum ToolConfirmationCardBuilder {
         localFormatter.dateFormat = "yyyy-MM-dd"
         if let dayDate = localFormatter.date(from: trimmedText) { return (dayDate, false) }
         return nil
+    }
+
+    // MARK: - Reminders
+
+    /// "New Reminder": what, when it's due (as Reminders would say it), and
+    /// which list.
+    static func newReminderCard(toolInput: JSONValue) -> GlanceCard {
+        var blocks: [GlanceBlock] = [
+            .header(title: "New Reminder", iconName: "checklist", trailingText: "Reminders")
+        ]
+        var keyValuePairs: [GlanceKeyValuePair] = []
+        if let reminderTitle = ToolCallInspection.stringValue(forAnyOf: ["title"], in: toolInput) {
+            keyValuePairs.append(GlanceKeyValuePair(key: "Title", value: truncatedFieldValue(reminderTitle), tone: .neutral))
+        }
+        if let dueText = ToolCallInspection.stringValue(forAnyOf: ["due"], in: toolInput) {
+            keyValuePairs.append(GlanceKeyValuePair(key: "Due", value: readableEventTime(dueText, sameDayAs: nil), tone: .neutral))
+        }
+        if let listName = ToolCallInspection.stringValue(forAnyOf: ["list"], in: toolInput) {
+            keyValuePairs.append(GlanceKeyValuePair(key: "List", value: truncatedFieldValue(listName), tone: .neutral))
+        }
+        if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
+        return GlanceCard(blocks: blocks)
     }
 
     // MARK: - File writes

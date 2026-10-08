@@ -91,7 +91,7 @@ enum EditableConfirmationFields {
         case ShortcutsToolRouting.runShortcutToolName:
             candidateFields = [CandidateField(label: "Input", candidateKeys: ["input"], isMultiline: true, replacedCardRowLabel: "Input")]
         case createReminderToolName:
-            candidateFields = [CandidateField(label: "Title", candidateKeys: ["title"], isMultiline: false, replacedCardRowLabel: nil)]
+            candidateFields = [CandidateField(label: "Title", candidateKeys: ["title"], isMultiline: false, replacedCardRowLabel: "Title")]
         default:
             candidateFields = candidateFieldsForCardShape(toolName: toolName, toolInput: toolInput)
         }

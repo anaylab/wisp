@@ -19,6 +19,7 @@ struct SourceCardState: Equatable {}
 struct RemindersCardState: Equatable {}
 struct TimerCardState: Equatable {}
 struct CalendarEventAddedCardState: Equatable {}
+struct ReminderAddedCardState: Equatable {}
 enum RemindersFilter: String, Equatable {
     case today
     init(lenientRawValue: String?) { self = .today }

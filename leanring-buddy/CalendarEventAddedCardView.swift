@@ -22,7 +22,6 @@ struct CalendarEventAddedCardView: View {
     let state: CalendarEventAddedCardState
 
     @ObservedObject private var createdEventStore = CreatedCalendarEventStore.shared
-    @State private var hoveredButtonTitle: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -100,10 +99,10 @@ struct CalendarEventAddedCardView: View {
         switch createdEvent.undoStatus {
         case .added, .removing:
             HStack(spacing: 8) {
-                cardButton(title: "Open in Calendar", isEnabled: true) {
+                GlanceCardActionButton(title: "Open in Calendar") {
                     createdEventStore.openInCalendar(eventID: createdEvent.id)
                 }
-                cardButton(
+                GlanceCardActionButton(
                     title: createdEvent.undoStatus == .removing ? "Undoing…" : "Undo",
                     isEnabled: createdEvent.undoStatus == .added
                 ) {
@@ -118,35 +117,6 @@ struct CalendarEventAddedCardView: View {
                 .foregroundColor(DS.Colors.destructiveText)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    /// A small capsule button: pointer cursor and a hover fill so it reads as
-    /// clickable in the notch, like the timer card's Cancel.
-    private func cardButton(title: String, isEnabled: Bool, action: @escaping () -> Void) -> some View {
-        let isHovered = hoveredButtonTitle == title && isEnabled
-        return Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(isHovered ? DS.Colors.textPrimary : DS.Colors.textSecondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(isHovered ? DS.Colors.surface4 : DS.Colors.surface3)
-                )
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .pointerCursor(isEnabled: isEnabled)
-        .onHover { isHovering in
-            if isHovering {
-                hoveredButtonTitle = title
-            } else if hoveredButtonTitle == title {
-                hoveredButtonTitle = nil
-            }
-        }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 
     private var attribution: some View {

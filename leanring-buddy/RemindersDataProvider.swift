@@ -100,7 +100,7 @@ actor RemindersDataProvider: GlanceCardDataProvider {
         dueDate: Date?,
         dueDateIncludesTimeOfDay: Bool,
         listName requestedListName: String?
-    ) async throws -> String {
+    ) async throws -> CreatedReminderDetails {
         try await ensureAccess()
 
         let targetReminderList: EKCalendar
@@ -127,7 +127,31 @@ actor RemindersDataProvider: GlanceCardDataProvider {
         }
 
         try eventStore.save(newReminder, commit: true)
-        return targetReminderList.title
+        return CreatedReminderDetails(
+            reminderIdentifier: newReminder.calendarItemIdentifier,
+            listName: targetReminderList.title,
+            listColorHex: targetReminderList.cgColor.flatMap(Self.hexString(from:))
+        )
+    }
+
+    /// What `createReminder` made: enough for the "Reminder Added" card and
+    /// to undo it.
+    struct CreatedReminderDetails: Sendable, Equatable {
+        let reminderIdentifier: String
+        let listName: String
+        let listColorHex: String?
+    }
+
+    /// Removes one reminder by identifier — the result card's Undo. Only
+    /// `CreatedReminderStore` calls this, with a reminder Wisp created itself
+    /// this session. Returns false when it is already gone.
+    func removeReminder(withIdentifier reminderIdentifier: String) async throws -> Bool {
+        try await ensureAccess()
+        guard let existingReminder = eventStore.calendarItem(withIdentifier: reminderIdentifier) as? EKReminder else {
+            return false
+        }
+        try eventStore.remove(existingReminder, commit: true)
+        return true
     }
 
     // MARK: - Helpers

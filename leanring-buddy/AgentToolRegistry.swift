@@ -596,7 +596,7 @@ final class AgentToolRegistry: ObservableObject {
     private func registerReminderTools() {
         register(
             BuddyToolDefinition(
-                name: "create_reminder",
+                name: EditableConfirmationFields.createReminderToolName,
                 description: "Add a reminder to the user's Reminders app. Use when the user asks to be reminded of something or to add a to-do.",
                 inputSchema: .object([
                     "type": .string("object"),
@@ -644,11 +644,22 @@ final class AgentToolRegistry: ObservableObject {
                 requestedListName = rawListName
             }
 
-            let savedListName = try await RemindersDataProvider.shared.createReminder(
+            let createdReminderDetails = try await RemindersDataProvider.shared.createReminder(
                 title: reminderTitle,
                 dueDate: parsedDueDate?.date,
                 dueDateIncludesTimeOfDay: parsedDueDate?.includesTimeOfDay ?? false,
                 listName: requestedListName
+            )
+            let savedListName = createdReminderDetails.listName
+            // Recorded so the turn can show the "Reminder Added" card with Undo.
+            CreatedReminderStore.shared.record(
+                createdReminderDetails: createdReminderDetails,
+                draft: ReminderDraft(
+                    title: reminderTitle,
+                    dueDate: parsedDueDate?.date,
+                    dueDateIncludesTimeOfDay: parsedDueDate?.includesTimeOfDay ?? false,
+                    listName: requestedListName
+                )
             )
 
             guard let parsedDueDate else {
@@ -955,6 +966,27 @@ extension AgentToolRegistry {
         }
         if let location = calendarEventDraft.location {
             toolInputFields["location"] = .string(location)
+        }
+        return .object(toolInputFields)
+    }
+}
+
+// MARK: - Reminder input shared with the direct route
+
+extension AgentToolRegistry {
+    /// The `create_reminder` input for a parsed reminder, so the reminders
+    /// fast path asks with exactly the card an agent call gets.
+    static func createReminderToolInput(for reminderDraft: ReminderDraft) -> JSONValue {
+        var toolInputFields: [String: JSONValue] = ["title": .string(reminderDraft.title)]
+        if let dueDate = reminderDraft.dueDate {
+            let localTimestampFormatter = DateFormatter()
+            localTimestampFormatter.locale = Locale(identifier: "en_US_POSIX")
+            localTimestampFormatter.timeZone = .current
+            localTimestampFormatter.dateFormat = reminderDraft.dueDateIncludesTimeOfDay ? "yyyy-MM-dd'T'HH:mm" : "yyyy-MM-dd"
+            toolInputFields["due"] = .string(localTimestampFormatter.string(from: dueDate))
+        }
+        if let listName = reminderDraft.listName {
+            toolInputFields["list"] = .string(listName)
         }
         return .object(toolInputFields)
     }

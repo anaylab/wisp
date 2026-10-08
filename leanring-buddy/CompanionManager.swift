@@ -1152,14 +1152,16 @@ final class CompanionManager: ObservableObject {
     /// not to name a contact and is being handed on as an ordinary turn.
     /// `skipsFastPointing` is set when a "where is X" request couldn't be
     /// answered from the element list and is being handed on the same way.
-    /// `skipsCalendarEventCommandRouting` is set when a scheduling request
-    /// couldn't be turned into an event without the model.
+    /// `skipsCalendarEventCommandRouting` and `skipsReminderCommandRouting`
+    /// are set when a scheduling or reminder request couldn't be read
+    /// without the model.
     private func sendTranscriptToClaudeWithScreenshot(
         transcript: String,
         historyTitle: String? = nil,
         skipsMessageCommandRouting: Bool = false,
         skipsFastPointing: Bool = false,
-        skipsCalendarEventCommandRouting: Bool = false
+        skipsCalendarEventCommandRouting: Bool = false,
+        skipsReminderCommandRouting: Bool = false
     ) {
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
@@ -1285,6 +1287,22 @@ final class CompanionManager: ObservableObject {
             if calendarEventParseOutcome != .notACalendarCommand {
                 runDirectCalendarEventCommand(
                     calendarEventParseOutcome,
+                    transcript: transcript,
+                    historyTitle: historyTitle
+                )
+                return
+            }
+        }
+
+        // "Remind me to call the bank tomorrow at 9" / "add milk to my
+        // shopping list" go straight to the "New Reminder" card the same way:
+        // parsed here, time read deterministically, on-device model only for
+        // phrasings the parser can't split, and an ordinary turn after that.
+        if !skipsReminderCommandRouting {
+            let reminderParseOutcome = ReminderCommandParser.parse(transcript)
+            if reminderParseOutcome != .notAReminderCommand {
+                runDirectReminderCommand(
+                    reminderParseOutcome,
                     transcript: transcript,
                     historyTitle: historyTitle
                 )
@@ -1579,11 +1597,24 @@ final class CompanionManager: ObservableObject {
                 // TTS) ever see it, then resolve it into a card for the notch.
                 let cardParseResult = GlanceCardParser.parse(spokenLineParseResult.displayText)
                 resolveAndPublishGlanceCard(cardParseResult.request)
-                // An event the model added this turn gets its result card with
-                // Undo, unless the model chose a card of its own.
-                if cardParseResult.request == nil,
-                   let eventCreatedThisTurn = CreatedCalendarEventStore.shared.mostRecentEvent(createdSince: turnStartedAt) {
-                    resolvedGlanceCard = .calendarEventAdded(CalendarEventAddedCardState(eventID: eventCreatedThisTurn.id))
+                // An event or reminder the model added this turn gets its
+                // result card with Undo (the newer one, if it made both),
+                // unless the model chose a card of its own.
+                if cardParseResult.request == nil {
+                    let eventCreatedThisTurn = CreatedCalendarEventStore.shared.mostRecentEvent(createdSince: turnStartedAt)
+                    let reminderCreatedThisTurn = CreatedReminderStore.shared.mostRecentReminder(createdSince: turnStartedAt)
+                    switch (eventCreatedThisTurn, reminderCreatedThisTurn) {
+                    case let (createdEvent?, createdReminder?):
+                        resolvedGlanceCard = createdReminder.createdAt > createdEvent.createdAt
+                            ? .reminderAdded(ReminderAddedCardState(reminderID: createdReminder.id))
+                            : .calendarEventAdded(CalendarEventAddedCardState(eventID: createdEvent.id))
+                    case let (createdEvent?, nil):
+                        resolvedGlanceCard = .calendarEventAdded(CalendarEventAddedCardState(eventID: createdEvent.id))
+                    case let (nil, createdReminder?):
+                        resolvedGlanceCard = .reminderAdded(ReminderAddedCardState(reminderID: createdReminder.id))
+                    case (nil, nil):
+                        break
+                    }
                 }
 
                 // Parse the [POINT:...] tag from Claude's response.
@@ -3380,6 +3411,182 @@ extension CompanionManager {
             isAllDay: askedDraft.isAllDay,
             location: approvedLocation
         )
+    }
+}
+
+// MARK: - Direct reminder commands
+
+extension CompanionManager {
+    /// Adds a reminder recognised by `ReminderCommandParser`, Siri-style: the
+    /// parsed reminder goes on the "New Reminder" confirmation card (title
+    /// editable), and once allowed it is saved on-device and the notch shows
+    /// the "Reminder Added" card with Undo.
+    ///
+    /// A request handed to extraction goes to Apple's on-device model first,
+    /// then on as an ordinary turn if that doesn't produce a checked draft.
+    /// A list the user named that Reminders doesn't have ("my shopping list")
+    /// falls back to the default list, and the reply says so.
+    fileprivate func runDirectReminderCommand(
+        _ reminderParseOutcome: ReminderCommandParseOutcome,
+        transcript: String,
+        historyTitle: String?
+    ) {
+        PerfMetricsRecorder.shared.abandonTurn()
+        voiceState = .processing
+        currentReplyText = ""
+        let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
+
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            let startedAt = Date()
+
+            let reminderDraft: ReminderDraft?
+            var usedOnDeviceModel = false
+            switch reminderParseOutcome {
+            case .draft(let parsedDraft):
+                reminderDraft = parsedDraft
+            case .needsExtraction(let requestBody, let listName):
+                reminderDraft = await ReminderDraftExtractor.extractDraft(fromRequestBody: requestBody, listName: listName)
+                usedOnDeviceModel = true
+            case .notAReminderCommand:
+                reminderDraft = nil
+            }
+            guard !Task.isCancelled else { return }
+
+            guard let reminderDraft else {
+                print("⏰ Reminders fast path: couldn't read the reminder — handing on as a normal turn")
+                self.voiceState = .idle
+                self.sendTranscriptToClaudeWithScreenshot(
+                    transcript: transcript,
+                    historyTitle: historyTitle,
+                    skipsMessageCommandRouting: true,
+                    skipsCalendarEventCommandRouting: true,
+                    skipsReminderCommandRouting: true
+                )
+                return
+            }
+
+            let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+            let createReminderToolName = EditableConfirmationFields.createReminderToolName
+            let askedToolInput = AgentToolRegistry.createReminderToolInput(for: reminderDraft)
+            let approvalOutcome = await ToolConfirmationCoordinator.shared.requestApprovalAllowingEdits(
+                toolName: createReminderToolName,
+                toolInput: askedToolInput
+            )
+            guard !Task.isCancelled else {
+                AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+                return
+            }
+
+            let replyText: String
+            let didSucceed: Bool
+            var wasDeclinedByUser = false
+            var createdReminderID: String?
+
+            if approvalOutcome.isApproved {
+                // Only the title can be edited on the card.
+                let appliedEdits = approvalOutcome.approvedToolInput(
+                    forAskedToolInput: askedToolInput,
+                    toolName: createReminderToolName
+                )
+                var approvedTitle = reminderDraft.title
+                if case .object(let approvedFields) = appliedEdits.toolInput,
+                   case .string(let editedTitle)? = approvedFields["title"],
+                   !editedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    approvedTitle = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                var approvedDraft = ReminderDraft(
+                    title: approvedTitle,
+                    dueDate: reminderDraft.dueDate,
+                    dueDateIncludesTimeOfDay: reminderDraft.dueDateIncludesTimeOfDay,
+                    listName: reminderDraft.listName
+                )
+
+                do {
+                    var missingListName: String?
+                    let createdReminderDetails: RemindersDataProvider.CreatedReminderDetails
+                    do {
+                        createdReminderDetails = try await RemindersDataProvider.shared.createReminder(
+                            title: approvedDraft.title,
+                            dueDate: approvedDraft.dueDate,
+                            dueDateIncludesTimeOfDay: approvedDraft.dueDateIncludesTimeOfDay,
+                            listName: approvedDraft.listName
+                        )
+                    } catch RemindersDataProvider.RemindersDataError.listNotFound(let listName) {
+                        missingListName = listName
+                        approvedDraft = ReminderDraft(
+                            title: approvedDraft.title,
+                            dueDate: approvedDraft.dueDate,
+                            dueDateIncludesTimeOfDay: approvedDraft.dueDateIncludesTimeOfDay,
+                            listName: nil
+                        )
+                        createdReminderDetails = try await RemindersDataProvider.shared.createReminder(
+                            title: approvedDraft.title,
+                            dueDate: approvedDraft.dueDate,
+                            dueDateIncludesTimeOfDay: approvedDraft.dueDateIncludesTimeOfDay,
+                            listName: nil
+                        )
+                    }
+                    CreatedReminderStore.shared.record(createdReminderDetails: createdReminderDetails, draft: approvedDraft)
+                    createdReminderID = createdReminderDetails.reminderIdentifier
+
+                    var replyParts = ["added \(approvedDraft.title.lowercased())"]
+                    if let dueText = ReminderAddedCardView.dueText(for: approvedDraft) {
+                        replyParts.append(dueText.lowercased())
+                    }
+                    if let missingListName {
+                        replyParts.append("in \(createdReminderDetails.listName) — you don't have a \(missingListName) list")
+                    }
+                    replyText = replyParts.joined(separator: ", ") + "."
+                    didSucceed = true
+                } catch {
+                    replyText = error.localizedDescription
+                    didSucceed = false
+                }
+            } else {
+                replyText = "okay, i didn't add it."
+                didSucceed = false
+                wasDeclinedByUser = true
+            }
+
+            let howItWasRead = usedOnDeviceModel ? "read by Apple's on-device model" : "no model call"
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(
+                    kind: .tool(name: createReminderToolName),
+                    summary: didSucceed ? "Added to Reminders — \(howItWasRead)" : "Reminders: \(replyText)",
+                    startedAt: startedAt,
+                    durationSeconds: Date().timeIntervalSince(startedAt),
+                    isError: !didSucceed && !wasDeclinedByUser
+                ),
+                to: taskID
+            )
+            AgentTaskRegistry.shared.finishTask(
+                taskID,
+                status: didSucceed || wasDeclinedByUser ? .succeeded : .failed(replyText),
+                finalText: replyText
+            )
+
+            self.conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                BuddyChatMessage(role: .user, text: transcript),
+                BuddyChatMessage(role: .assistant, text: replyText),
+            ]))
+            self.conversationTranscript.trimToRecentTurns(10)
+
+            self.currentReplyText = replyText
+            if let createdReminderID {
+                self.resolvedGlanceCard = .reminderAdded(ReminderAddedCardState(reminderID: createdReminderID))
+            }
+            if !wasDeclinedByUser { self.flashIsland(didSucceed ? .success : .error) }
+
+            if isReplySpeechEnabled {
+                self.voiceState = .responding
+                try? await self.ttsProvider.speakText(replyText)
+            }
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
     }
 }
 

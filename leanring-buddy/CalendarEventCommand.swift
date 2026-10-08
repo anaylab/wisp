@@ -161,7 +161,7 @@ nonisolated enum CalendarEventCommandParser {
     /// What follows the scheduling words, with any "to my calendar" removed,
     /// or nil when the sentence isn't a scheduling request at all.
     private static func requestBodyAfterCommandWords(in normalizedTranscript: String) -> String? {
-        var remainingText = removingLeadingMatch(of: politenessPrefixPattern, from: normalizedTranscript) ?? normalizedTranscript
+        var remainingText = removingPolitenessPrefix(from: normalizedTranscript)
 
         // "… to my calendar" / "… on my calendar" can close any form, and is
         // what makes plain "add"/"put" a calendar request.
@@ -205,6 +205,12 @@ nonisolated enum CalendarEventCommandParser {
             return textAfterVerb
         }
         return nil
+    }
+
+    /// Drops "can you", "please", "hey wisp" from the front — shared with
+    /// the reminder parser.
+    static func removingPolitenessPrefix(from normalizedText: String) -> String {
+        removingLeadingMatch(of: politenessPrefixPattern, from: normalizedText) ?? normalizedText
     }
 
     private static let politenessPrefixPattern = #"^(?:hey\s+wisp\s+)?(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?=\S)"#
@@ -365,14 +371,14 @@ nonisolated enum CalendarEventCommandParser {
             .filter { !$0.isEmpty }
     }
 
-    private static func capitalizedFirstLetter(_ text: String) -> String {
+    static func capitalizedFirstLetter(_ text: String) -> String {
         guard let firstCharacter = text.first else { return text }
         return firstCharacter.uppercased() + text.dropFirst()
     }
 
     // MARK: - Regex helpers
 
-    fileprivate static func firstMatch(of pattern: String, in text: String) -> NSTextCheckingResult? {
+    static func firstMatch(of pattern: String, in text: String) -> NSTextCheckingResult? {
         guard let regularExpression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
         return regularExpression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
     }
@@ -382,13 +388,13 @@ nonisolated enum CalendarEventCommandParser {
         return regularExpression.matches(in: text, range: NSRange(text.startIndex..., in: text)).last
     }
 
-    fileprivate static func substring(of text: String, capturedBy match: NSTextCheckingResult, groupIndex: Int) -> String? {
+    static func substring(of text: String, capturedBy match: NSTextCheckingResult, groupIndex: Int) -> String? {
         guard match.range(at: groupIndex).location != NSNotFound,
               let capturedRange = Range(match.range(at: groupIndex), in: text) else { return nil }
         return String(text[capturedRange])
     }
 
-    private static func removingLeadingMatch(of pattern: String, from text: String) -> String? {
+    static func removingLeadingMatch(of pattern: String, from text: String) -> String? {
         guard let leadingMatch = firstMatch(of: pattern, in: text),
               leadingMatch.range.location == 0,
               let matchedRange = Range(leadingMatch.range, in: text) else { return nil }

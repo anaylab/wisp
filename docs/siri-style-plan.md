@@ -30,7 +30,7 @@ default. Nothing here sends data off the Mac.
 - **Apple's on-device model (Foundation Models) is optional.** It's used only when
   Apple Intelligence is on. Without it, Wisp behaves as before.
 
-## Phase 1 — Calendar, end to end (this change)
+## Phase 1 — Calendar, end to end (done)
 
 The full Siri loop on one app, so the next apps reuse the same pieces.
 
@@ -63,12 +63,28 @@ The full Siri loop on one app, so the next apps reuse the same pieces.
    that event and nothing else. The agent path shows the card too, unless the model
    sent its own `[CARD:]`.
 
-## Phase 2 — Reminders on the same pieces
+## Phase 2 — Reminders on the same pieces (done)
 
-- "Remind me to call the bank tomorrow at 9" as a fast path. The when-resolver from
-  Phase 1 is shared, and the Foundation Models fallback reuses the same shape.
-- A result card with Undo for `create_reminder`, with a list-colour dot and
-  Open in Reminders.
+1. **Fast path** (`ReminderCommandParser`, `Tests/ReminderCommand`): "remind me to call
+   the bank tomorrow at 9", "remind me at 6 to call mom", "remind me in 20 minutes to
+   stretch", "create a reminder to renew my passport", "add milk to my shopping list".
+   - The time is read by Phase 1's `CalendarEventWhenResolver`. A reminder may have no
+     time (it's saved undated), but a time phrase the resolver can't read goes to
+     extraction rather than being dropped.
+   - A day with no time is due that day with no alarm; a time gets an alarm.
+   - Declined: questions ("remind me what time…"), recurrence, "add this/it to…", and
+     other apps' lists ("my reading list"). "To-do" means the default list. Any other
+     named list is matched when saving; if Reminders has no such list, the reminder goes
+     to the default list and the reply says so.
+2. **On-device fallback**: Phase 1's Foundation Models call moved into a shared
+   `OnDeviceModelExtraction.extract`, with a `ReminderDraftExtractor` (`{title,
+   whenPhrase}`). A time the user said that the model's answer leaves out is rejected.
+3. **"New Reminder" confirmation card** (Title, Due in words, List). Before this,
+   `create_reminder` showed only the raw call. The editable title replaces the Title row.
+4. **"Reminder Added" result card**: a ring in the list's colour, title, relative due
+   text ("Tomorrow at 9:00 AM"), list, **Open Reminders** and **Undo**, for both the fast
+   path and the agent tool (`CreatedReminderStore`). Reminders has no documented link to
+   a single reminder, so the button opens the app.
 
 ## Phase 3 — Personal context (the "knows my data" part)
 

@@ -1337,6 +1337,8 @@ struct NotchHUDView: View {
                 TimerCardView(state: timerCardState)
             case let .calendarEventAdded(calendarEventAddedCardState):
                 CalendarEventAddedCardView(state: calendarEventAddedCardState)
+            case let .reminderAdded(reminderAddedCardState):
+                ReminderAddedCardView(state: reminderAddedCardState)
             }
         }
     }

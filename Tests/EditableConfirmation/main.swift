@@ -285,5 +285,20 @@ if let shortcutCard = ToolConfirmationCardBuilder.confirmationCard(forToolNamed:
     check(remainingRowLabels.contains("Does whatever this shortcut is built to do"), "the warning row (with an icon) is kept")
 }
 
+section("New Reminder card: readable due date, title row replaced by its field")
+if let reminderCard = ToolConfirmationCardBuilder.confirmationCard(forToolNamed: "create_reminder", toolInput: reminderInput, agentWorkingDirectoryPath: nil) {
+    let reminderFields = EditableConfirmationFields.editableFields(forToolNamed: "create_reminder", toolInput: reminderInput)
+    let trimmedReminderCard = EditableConfirmationFields.card(reminderCard, hidingRowsShownBy: reminderFields)
+    let reminderPairs = trimmedReminderCard.blocks.flatMap { block -> [GlanceKeyValuePair] in
+        if case .keyValue(let pairs) = block { return pairs }
+        return []
+    }
+    check(reminderPairs.map(\.key) == ["Due", "List"], "Title row hidden beside its field, got \(reminderPairs.map(\.key))")
+    let dueValue = reminderPairs.first { $0.key == "Due" }?.value ?? ""
+    check(dueValue.hasSuffix("(all day)") && !dueValue.contains("2026-"), "due date reads like Reminders, got \(dueValue)")
+} else {
+    check(false, "reminder card was built")
+}
+
 print("\n\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

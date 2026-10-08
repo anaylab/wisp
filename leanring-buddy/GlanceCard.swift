@@ -232,6 +232,8 @@ enum ResolvedGlanceCard: Equatable {
     /// The result of adding an event, with Undo. The state only names the
     /// event; its details and undo progress live in `CreatedCalendarEventStore`.
     case calendarEventAdded(CalendarEventAddedCardState)
+    /// The result of adding a reminder, with Undo; details in `CreatedReminderStore`.
+    case reminderAdded(ReminderAddedCardState)
 }
 
 // MARK: - Tag parsing
