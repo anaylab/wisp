@@ -143,7 +143,7 @@ struct BrainGraphPage: View {
                     Text("As Wisp fills your brain, each page becomes a dot here and each [[link]] a line between them.")
                 } actions: {
                     Button("Add to Brain") { WispWindowRouter.shared.select(.brainInbox) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(WispPillButtonStyle())
                         .pointerCursor()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -399,7 +399,7 @@ struct BrainGraphPage: View {
             } label: {
                 Image(systemName: "wind")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
             .pointerCursor()
             .help("Shake the layout up and let it settle again")
 

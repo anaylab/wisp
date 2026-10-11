@@ -238,11 +238,11 @@ struct PermissionsChecklist: View {
             } else {
                 if let secondaryActionTitle, let secondaryAction {
                     Button(secondaryActionTitle, action: secondaryAction)
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .pointerCursor()
                 }
                 Button("Grant", action: grant)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(WispPillButtonStyle())
                     .pointerCursor()
             }
         }
@@ -347,7 +347,7 @@ struct VoiceUpgradeHint: View {
                     NSWorkspace.shared.open(spokenContentURL)
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
             .pointerCursor()
         }
     }

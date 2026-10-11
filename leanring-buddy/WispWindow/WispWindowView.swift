@@ -2,15 +2,16 @@
 //  WispWindowView.swift
 //  leanring-buddy
 //
-//  The Wisp window's shell: a native sidebar split view. The sidebar lists the
-//  sections (see `WispNavigation.swift`); a section with several pages switches
-//  between them with a segmented control in the window toolbar, the way System
-//  Settings-era Mac apps do, instead of the custom pill tabs the old dashboard
-//  drew in its own header.
+//  The Wisp window's shell. There is no sidebar: a slim bar along the top holds
+//  the eight sections as icons — the open one expands to show its name and
+//  slides to the next as you move — with Wisp's own state and model at the far
+//  end, and a section with several pages gets a quiet segmented strip beneath
+//  it. That gives every page the full width, which the Buddies messenger and
+//  the Brain graph both want.
 //
-//  The look is deliberately stock macOS — system sidebar, unified toolbar,
-//  semantic colours that follow light/dark — with Wisp's colours used only as
-//  the accent. Each page is an existing view (`HomeTab`, `RoutinesTab`, …), so
+//  The window is full-size-content with a transparent title bar, so the bar sits
+//  where the title bar would, beside the traffic lights, and doubles as the drag
+//  handle. Each page is an existing view (`HomeTab`, `RoutinesTab`, …), so
 //  moving a page between sections never touches its code.
 //
 
@@ -24,6 +25,8 @@ struct WispWindowView: View {
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var brainIngestQueue = BrainIngestQueue.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var sectionTabNamespace
+    @Namespace private var pageTabNamespace
 
     private var pageTransition: AnyTransition {
         .asymmetric(
@@ -33,10 +36,12 @@ struct WispWindowView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
-        } detail: {
+        VStack(spacing: 0) {
+            topBar
+            if router.selectedSection.pages.count > 1 {
+                pageStrip
+                    .transition(.opacity)
+            }
             // Each page gets its own identity so switching pages crossfades
             // with a small lift instead of swapping in place.
             ZStack {
@@ -47,54 +52,84 @@ struct WispWindowView: View {
             .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.9), value: router.selectedPage)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(WispColor.windowBackground)
-                .navigationTitle(router.selectedSection.title)
-                .toolbar {
-                    if router.selectedSection.pages.count > 1 {
-                        ToolbarItem(placement: .principal) {
-                            pagePicker
-                        }
-                    }
-                }
         }
+        .background(WispColor.windowBackground)
+        .animation(reduceMotion ? nil : WispMotion.smooth, value: router.selectedSection)
         .tint(WispColor.accentText)
+        .ignoresSafeArea(.container, edges: .top)
     }
 
-    // MARK: - Sidebar
+    // MARK: - Top bar
 
-    private var sidebarSelection: Binding<WispSection?> {
-        Binding(
-            get: { router.selectedSection },
-            set: { newSection in
-                if let newSection { router.select(newSection) }
-            }
-        )
-    }
+    /// Room for the traffic lights, which sit over the bar's leading edge.
+    private let trafficLightsInset: CGFloat = 78
+    static let topBarHeight: CGFloat = 46
 
-    private var sidebar: some View {
-        List(selection: sidebarSelection) {
-            Section {
-                ForEach(WispSection.useSections) { section in
-                    sidebarRow(section)
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            Spacer().frame(width: trafficLightsInset)
+
+            HStack(spacing: 2) {
+                ForEach(WispSection.allCases) { section in
+                    sectionTab(section)
                 }
             }
-            Section("Manage") {
-                ForEach(WispSection.manageSections) { section in
-                    sidebarRow(section)
-                }
-            }
+
+            Spacer(minLength: 8)
+
+            WispWindowStatusPill(companionManager: companionManager)
         }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            WispWindowStatusFooter(companionManager: companionManager)
+        .padding(.trailing, 16)
+        .frame(height: Self.topBarHeight)
+        .background(WindowDragArea())
+        .overlay(alignment: .bottom) {
+            if router.selectedSection.pages.count <= 1 {
+                Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(height: 0.5)
+            }
         }
     }
 
-    @ViewBuilder
-    private func sidebarRow(_ section: WispSection) -> some View {
-        let badgeCount = sidebarBadgeCount(for: section)
-        Label(section.title, systemImage: section.symbolName)
-            .badge(badgeCount)
-            .tag(section)
+    private func sectionTab(_ section: WispSection) -> some View {
+        let isSelected = router.selectedSection == section
+        let badge = sidebarBadgeCount(for: section)
+        return Button {
+            router.select(section)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: section.symbolName)
+                    .font(.system(size: 13, weight: .medium))
+                if isSelected {
+                    Text(section.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+                }
+            }
+            .foregroundStyle(isSelected ? WispColor.textPrimary : WispColor.textSecondary)
+            .padding(.horizontal, isSelected ? 12 : 10)
+            .frame(height: 30)
+            .background {
+                if isSelected {
+                    Color.clear
+                        .wispBevel(Capsule(style: .continuous), fill: WispColor.surface3)
+                        .matchedGeometryEffect(id: "sectionTab", in: sectionTabNamespace)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if badge > 0 && !isSelected {
+                    Circle()
+                        .fill(section == .settings ? WispColor.warning : WispColor.accentText)
+                        .frame(width: 7, height: 7)
+                        .overlay(Circle().strokeBorder(WispColor.windowBackground, lineWidth: 1.5))
+                        .offset(x: -2, y: 3)
+                        .transition(.scale)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .accessibilityLabel(section.title)
+        .nativeTooltip(isSelected ? nil : section.title)
     }
 
     /// Running work shows where the user would go to see it.
@@ -115,24 +150,40 @@ struct WispWindowView: View {
         }
     }
 
-    // MARK: - Toolbar
+    // MARK: - Page strip
 
-    private var pagePickerSelection: Binding<WispPage> {
-        Binding(
-            get: { router.selectedPage },
-            set: { router.select($0) }
-        )
-    }
-
-    private var pagePicker: some View {
-        Picker("Page", selection: pagePickerSelection) {
+    private var pageStrip: some View {
+        HStack(spacing: 2) {
             ForEach(router.selectedSection.pages) { page in
-                Text(page.title).tag(page)
+                let isSelected = router.selectedPage == page
+                Button {
+                    router.select(page)
+                } label: {
+                    Text(page.title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? WispColor.textPrimary : WispColor.textSecondary)
+                        .padding(.horizontal, 11)
+                        .frame(height: 26)
+                        .background {
+                            if isSelected {
+                                Color.clear
+                                    .wispBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface3)
+                                    .matchedGeometryEffect(id: "pageTab", in: pageTabNamespace)
+                            }
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
             }
+            Spacer()
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
+        .padding(.horizontal, 18)
+        .padding(.bottom, 8)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(height: 0.5)
+        }
+        .animation(reduceMotion ? nil : WispMotion.smooth, value: router.selectedPage)
     }
 
     // MARK: - Pages
@@ -190,50 +241,48 @@ struct WispWindowView: View {
     }
 }
 
-/// The sidebar's footer: Wisp itself, alive — the mark moves with what Wisp
-/// is doing (listening, thinking, acting) and the line under it says so —
-/// plus which model is answering and whether it's warm. It replaced the old
-/// dashboard's memory gauge, which sat at 95%+ red on any Mac with a local
-/// model loaded and read as an alarm; the full memory readout lives in
-/// Settings → Model.
-private struct WispWindowStatusFooter: View {
+/// Wisp itself, alive, at the end of the top bar: the mark moves with what Wisp
+/// is doing (listening, thinking, acting) and the line beside it says so, then
+/// which model is answering and whether it's warm. Collapses to the mark alone
+/// when the window is narrow.
+private struct WispWindowStatusPill: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var stackReadout = ActiveStackReadout.shared
 
     var body: some View {
         let islandState = companionManager.islandState
-        HStack(spacing: 10) {
-            WispMark(state: islandState.markState, size: 26)
-                .frame(width: 30, height: 30)
-                .background(
-                    Circle()
-                        .fill(islandState.isActive ? WispColor.intelligence.opacity(0.18) : WispColor.accentSubtle)
-                )
-                .animation(WispMotion.smooth, value: islandState.isActive)
-            VStack(alignment: .leading, spacing: 1) {
+        ViewThatFits(in: .horizontal) {
+            pill(islandState: islandState, showsDetail: true)
+            pill(islandState: islandState, showsDetail: false)
+        }
+        .onAppear { stackReadout.startPolling() }
+        .onDisappear { stackReadout.stopPolling() }
+        .nativeTooltip(stackReadout.isEntirelyLocal ? "Running on this Mac" : "Uses a cloud service")
+    }
+
+    private func pill(islandState: WispIslandState, showsDetail: Bool) -> some View {
+        HStack(spacing: 8) {
+            WispMark(state: islandState.markState, size: 18)
+                .frame(width: 20, height: 20)
+            if showsDetail {
                 Text(companionManager.isListeningPaused ? "Listening paused" : islandState.label)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(WispColor.textPrimary)
                     .contentTransition(.opacity)
                     .animation(WispMotion.smooth, value: islandState.label)
                 HStack(spacing: 5) {
-                    Circle()
-                        .fill(residencyColor)
-                        .frame(width: 6, height: 6)
+                    Circle().fill(residencyColor).frame(width: 6, height: 6)
                     Text(stackReadout.chatModelName)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(WispColor.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                .nativeTooltip(stackReadout.isEntirelyLocal ? "Running on this Mac" : "Uses a cloud service")
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .onAppear { stackReadout.startPolling() }
-        .onDisappear { stackReadout.stopPolling() }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .wispBevel(Capsule(style: .continuous), fill: WispColor.surface2)
     }
 
     private var residencyColor: Color {
@@ -243,4 +292,16 @@ private struct WispWindowStatusFooter: View {
         case .unreachable: return WispColor.destructive
         }
     }
+}
+
+/// A transparent strip that moves the window when dragged. The title bar is
+/// transparent and the top bar sits in it, so this is what makes the bar behave
+/// like one.
+private struct WindowDragArea: NSViewRepresentable {
+    private final class DragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+    }
+
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

@@ -55,10 +55,10 @@ final class WispWindowController: NSObject, NSWindowDelegate {
             router: WispWindowRouter.shared
         )
 
-        // A hosting *controller* (not a bare hosting view) so SwiftUI can bridge
-        // the page's navigation title and toolbar into the real window toolbar.
+        // The shell draws its own top bar in place of the title bar, so nothing
+        // from SwiftUI is bridged into the window's title or toolbar.
         let hostingController = NSHostingController(rootView: rootView)
-        hostingController.sceneBridgingOptions = [.title, .toolbars]
+        hostingController.sceneBridgingOptions = []
 
         let wispWindow = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1040, height: 700),
@@ -68,7 +68,8 @@ final class WispWindowController: NSObject, NSWindowDelegate {
         )
         wispWindow.contentViewController = hostingController
         wispWindow.title = "Wisp"
-        wispWindow.toolbarStyle = .unified
+        wispWindow.titleVisibility = .hidden
+        wispWindow.titlebarAppearsTransparent = true
         wispWindow.minSize = NSSize(width: 780, height: 520)
         wispWindow.setContentSize(NSSize(width: 1040, height: 700))
         wispWindow.collectionBehavior = [.fullScreenPrimary]
@@ -79,9 +80,34 @@ final class WispWindowController: NSObject, NSWindowDelegate {
         wispWindow.setFrameAutosaveName("WispMainWindow")
 
         window = wispWindow
+        positionTrafficLights()
 
         WispWindowActivation.activateForWindow()
         wispWindow.makeKeyAndOrderFront(nil)
+    }
+
+    /// Centres the traffic lights on the top bar. The system sizes the title bar
+    /// for 28pt and puts the buttons in it; the bar is taller, so the title bar's
+    /// container is grown to match and the buttons re-centred. AppKit resets this
+    /// whenever the window lays out, so it runs again on resize and when the
+    /// window becomes key.
+    private func positionTrafficLights() {
+        guard let window,
+              let closeButton = window.standardWindowButton(.closeButton),
+              let titlebarView = closeButton.superview,
+              let titlebarContainer = titlebarView.superview else { return }
+        let barHeight = WispWindowView.topBarHeight
+        titlebarContainer.frame = NSRect(
+            x: titlebarContainer.frame.origin.x,
+            y: window.frame.height - barHeight,
+            width: titlebarContainer.frame.width,
+            height: barHeight
+        )
+        titlebarView.frame = NSRect(x: 0, y: 0, width: titlebarContainer.frame.width, height: barHeight)
+        for buttonKind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            guard let button = window.standardWindowButton(buttonKind) else { continue }
+            button.setFrameOrigin(NSPoint(x: button.frame.origin.x, y: (barHeight - button.frame.height) / 2))
+        }
     }
 
     func closeWindow() {
@@ -89,6 +115,9 @@ final class WispWindowController: NSObject, NSWindowDelegate {
     }
 
     // MARK: - NSWindowDelegate
+
+    func windowDidResize(_ notification: Notification) { positionTrafficLights() }
+    func windowDidBecomeKey(_ notification: Notification) { positionTrafficLights() }
 
     func windowWillClose(_ notification: Notification) {
         let closingWindow = window

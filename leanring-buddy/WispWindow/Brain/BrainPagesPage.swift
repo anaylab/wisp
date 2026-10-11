@@ -107,7 +107,7 @@ struct BrainPagesPage: View {
                     Label("New Page", systemImage: "plus")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .controlSize(.large)
                 .pointerCursor()
 
@@ -117,7 +117,7 @@ struct BrainPagesPage: View {
                     Image(systemName: "tray.and.arrow.down")
                         .frame(height: 16)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .controlSize(.large)
                 .pointerCursor()
                 .help("Add files, links or text to your brain")
@@ -345,7 +345,7 @@ struct BrainPagesPage: View {
         } actions: {
             HStack(spacing: 10) {
                 Button("Add to Brain") { WispWindowRouter.shared.select(.brainInbox) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(WispPillButtonStyle())
                     .controlSize(.large)
                     .pointerCursor()
                 Button("Start your Me page") {
@@ -354,7 +354,7 @@ struct BrainPagesPage: View {
                         navigator.isEditingSelectedPage = true
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .controlSize(.large)
                 .pointerCursor()
             }
@@ -421,7 +421,7 @@ struct BrainNewPageSheet: View {
                     .pointerCursor()
                 Button(existingPageWithSameName == nil ? "Create" : "Open") { createPage() }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(WispPillButtonStyle())
                     .disabled(trimmedTitle.isEmpty)
                     .pointerCursor(isEnabled: !trimmedTitle.isEmpty)
             }

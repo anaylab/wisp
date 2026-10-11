@@ -197,7 +197,7 @@ struct BrainHealthPage: View {
                         ProgressView().controlSize(.small)
                     }
                     Button("Run Check", systemImage: "stethoscope") { maintenance.runLint() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .disabled(maintenance.isWorking)
                         .pointerCursor(isEnabled: !maintenance.isWorking)
                 }
@@ -280,7 +280,7 @@ struct BrainHealthPage: View {
                     }
                     Spacer(minLength: 8)
                     Button("Fix") { maintenance.fix(issue) }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .controlSize(.small)
                         .disabled(!issue.isAutoFixable || maintenance.isWorking)
                         .pointerCursor(isEnabled: issue.isAutoFixable && !maintenance.isWorking)

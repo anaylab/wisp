@@ -230,7 +230,7 @@ private struct BrainChangeRecordRow: View {
             }
             if !record.isUndone {
                 Button("Undo", action: onUndo)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .controlSize(.small)
                     .pointerCursor()
                     .help("Put the pages back the way they were before this change")

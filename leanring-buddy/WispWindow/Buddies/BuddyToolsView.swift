@@ -110,7 +110,7 @@ struct BuddyToolsView: View {
                 .padding(.vertical, 6)
                 .background {
                     if isSelected {
-                        Color.clear.buddyBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface1)
+                        Color.clear.wispBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface1)
                             .transition(.opacity)
                     }
                 }

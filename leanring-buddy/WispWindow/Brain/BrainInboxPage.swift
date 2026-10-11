@@ -67,7 +67,7 @@ struct BrainInboxPage: View {
                 .foregroundStyle(WispColor.textSecondary)
             Spacer(minLength: 8)
             Button("Turn On") { brainPreferences.isBrainEnabled = true }
-                .buttonStyle(.bordered)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .pointerCursor()
         }
         .padding(12)
@@ -98,13 +98,13 @@ struct BrainInboxPage: View {
             }
             HStack(spacing: 8) {
                 Button("Add Files…", systemImage: "doc.badge.plus", action: chooseFilesToAdd)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(WispPillButtonStyle())
                     .pointerCursor()
                 Button("Add Link…", systemImage: "link.badge.plus") { isShowingAddLinkSheet = true }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .pointerCursor()
                 Button("Paste Text…", systemImage: "doc.on.clipboard") { isShowingPasteTextSheet = true }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .pointerCursor()
             }
             .controlSize(.large)
@@ -312,10 +312,10 @@ struct BrainInboxPage: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     Button("Choose Folder…", systemImage: "folder", action: chooseNotesFolder)
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .pointerCursor()
                     Button("Import Apple Notes", systemImage: "note.text") { notesImporter.importAppleNotes() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .disabled(notesImporter.isImporting)
                         .pointerCursor(isEnabled: !notesImporter.isImporting)
                         .help("Wisp asks macOS for permission to read Notes the first time")
@@ -523,7 +523,7 @@ private struct BrainIngestJobRow: View {
         switch job.state {
         case .failed, .cancelled:
             Button("Retry") { ingestQueue.retry(jobID: job.id) }
-                .buttonStyle(.bordered)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .controlSize(.small)
                 .pointerCursor()
         case .finished:
@@ -586,7 +586,7 @@ struct BrainAddLinkSheet: View {
                     .pointerCursor()
                 Button("Add", action: addLink)
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(WispPillButtonStyle())
                     .disabled(Self.webURL(from: linkText) == nil)
                     .pointerCursor(isEnabled: Self.webURL(from: linkText) != nil)
             }
@@ -664,7 +664,7 @@ struct BrainPasteTextSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(WispPillButtonStyle())
                 .disabled(trimmedText.isEmpty)
                 .pointerCursor(isEnabled: !trimmedText.isEmpty)
             }
