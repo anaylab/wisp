@@ -20,6 +20,8 @@ swiftc -target arm64-apple-macos14.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/calendar-event-command" \
   Tests/CalendarEventCommand/main.swift \
-  leanring-buddy/CalendarEventCommand.swift
+  leanring-buddy/CalendarEventCommand.swift \
+  leanring-buddy/SchedulingPhrasing.swift \
+  leanring-buddy/ClockQuestion.swift
 
 "$BUILD_DIR/calendar-event-command"

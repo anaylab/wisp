@@ -30,6 +30,10 @@ final class CreatedReminderStore: ObservableObject {
 
     @Published private(set) var createdRemindersByID: [String: CreatedReminder] = [:]
 
+    /// Called once an Undo has removed a reminder, with what it was, so the
+    /// reply line above the card can stop saying "Added …".
+    var onUndoCompleted: ((CreatedReminder) -> Void)?
+
     func record(
         createdReminderDetails: RemindersDataProvider.CreatedReminderDetails,
         draft: ReminderDraft,
@@ -79,6 +83,7 @@ final class CreatedReminderStore: ObservableObject {
             guard let self, var updatedReminder = self.createdRemindersByID[reminderID] else { return }
             updatedReminder.undoStatus = finalStatus
             self.createdRemindersByID[reminderID] = updatedReminder
+            if finalStatus == .removed { self.onUndoCompleted?(updatedReminder) }
         }
     }
 

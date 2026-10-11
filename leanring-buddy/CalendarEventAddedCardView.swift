@@ -2,13 +2,16 @@
 //  CalendarEventAddedCardView.swift
 //  leanring-buddy
 //
-//  The Siri-style result card shown after Wisp adds an event: the calendar's
-//  colour bar, the title, the day and time range, the place and calendar,
-//  then Open in Calendar and Undo. Drawn on the notch's dark palette (DS.*)
-//  like the other glance cards.
+//  The Siri-style result card shown in the notch after Wisp adds an event:
+//  "Added to Calendar", then the event as Calendar would show it — a date
+//  tile, the title, the day and time range, the place — with Open in Calendar
+//  and Undo. Drawn in the island's own palette (`WispColor.Island`: true
+//  black, white text, flat fills) so it reads as part of the notch rather than
+//  a grey panel dropped into it, and matches the confirmation panel's layout
+//  (`SchedulingConfirmationView`) so asking and confirming look like one thing.
 //
 //  The card holds only the event's id (`CalendarEventAddedCardState`). Its
-//  state, including whether Undo has run, lives in `CreatedCalendarEventStore`.
+//  details and Undo progress live in `CreatedCalendarEventStore`.
 //
 
 import SwiftUI
@@ -24,130 +27,142 @@ struct CalendarEventAddedCardView: View {
     @ObservedObject private var createdEventStore = CreatedCalendarEventStore.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Group {
             if let createdEvent = createdEventStore.event(withID: state.eventID) {
-                header(for: createdEvent)
-                eventSummary(for: createdEvent)
-                actionRow(for: createdEvent)
+                VStack(alignment: .leading, spacing: 12) {
+                    SchedulingResultHeader(
+                        isRemoved: createdEvent.undoStatus == .removed,
+                        addedTitle: "Added to Calendar",
+                        removedTitle: "Removed from Calendar",
+                        trailingText: createdEvent.calendarName,
+                        trailingColorHex: createdEvent.calendarColorHex
+                    )
+                    eventSummary(for: createdEvent)
+                    SchedulingResultActions(
+                        undoStatus: createdEvent.undoStatus,
+                        openTitle: "Open in Calendar",
+                        onOpen: { createdEventStore.openInCalendar(eventID: createdEvent.id) },
+                        onUndo: { createdEventStore.undo(eventID: createdEvent.id) }
+                    )
+                }
             } else {
                 Text("Event unavailable")
                     .font(.system(size: 12))
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundColor(WispColor.Island.textSecondary)
             }
-            attribution
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.large, style: .continuous)
-                .fill(DS.Colors.surface2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.large, style: .continuous)
-                .strokeBorder(DS.Colors.borderSubtle, lineWidth: 1)
-        )
-    }
-
-    private func header(for createdEvent: CreatedCalendarEvent) -> some View {
-        let isRemoved = createdEvent.undoStatus == .removed
-        return HStack(spacing: 8) {
-            Image(systemName: isRemoved ? "calendar.badge.minus" : "calendar.badge.checkmark")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(isRemoved ? DS.Colors.textSecondary : DS.Colors.accentText)
-            Text(isRemoved ? "Event Removed" : "Event Added")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(DS.Colors.textPrimary)
-        }
+        .schedulingResultCardSurface()
     }
 
     private func eventSummary(for createdEvent: CreatedCalendarEvent) -> some View {
         let isRemoved = createdEvent.undoStatus == .removed
-        return HStack(alignment: .top, spacing: 10) {
-            // Calendar's own colour, as the bar beside an event in Calendar.
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(Color(hex: createdEvent.calendarColorHex ?? "#5B8DEF"))
-                .frame(width: 3)
-                .opacity(isRemoved ? 0.4 : 1)
-
+        let draft = createdEvent.draft
+        return HStack(alignment: .top, spacing: 12) {
+            CalendarDateTile(date: draft.startDate, size: 46)
+                .opacity(isRemoved ? 0.45 : 1)
             VStack(alignment: .leading, spacing: 3) {
-                Text(createdEvent.draft.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(isRemoved ? DS.Colors.textTertiary : DS.Colors.textPrimary)
+                Text(draft.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(isRemoved ? WispColor.Island.textTertiary : WispColor.Island.textPrimary)
                     .strikethrough(isRemoved)
                     .lineLimit(2)
-                Text(Self.whenText(for: createdEvent.draft))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
+                Text(SchedulingPhrasing.fullDayText(for: draft.startDate))
+                    .font(.system(size: 12))
+                    .foregroundColor(WispColor.Island.textSecondary)
                     .lineLimit(1)
-                if let location = createdEvent.draft.location {
-                    Label(location, systemImage: "mappin.and.ellipse")
-                        .font(.system(size: 11))
-                        .foregroundColor(DS.Colors.textSecondary)
-                        .lineLimit(1)
+                Text(SchedulingPhrasing.timeRangeText(start: draft.startDate, end: draft.endDate, isAllDay: draft.isAllDay))
+                    .font(.system(size: 12))
+                    .foregroundColor(WispColor.Island.textSecondary)
+                    .lineLimit(1)
+                if let location = draft.location {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 10, weight: .medium))
+                        Text(location)
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundColor(WispColor.Island.textSecondary)
                 }
-                Text(createdEvent.calendarName)
-                    .font(.system(size: 11))
-                    .foregroundColor(DS.Colors.textTertiary)
-                    .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
+}
 
-    @ViewBuilder
-    private func actionRow(for createdEvent: CreatedCalendarEvent) -> some View {
-        switch createdEvent.undoStatus {
+// MARK: - Shared result-card pieces
+
+/// "✓ Added to Calendar ……… Home" — what happened, and where it landed.
+struct SchedulingResultHeader: View {
+    let isRemoved: Bool
+    let addedTitle: String
+    let removedTitle: String
+    let trailingText: String
+    let trailingColorHex: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: isRemoved ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(isRemoved ? WispColor.Island.textTertiary : WispColor.success)
+            Text(isRemoved ? removedTitle : addedTitle)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(WispColor.Island.textSecondary)
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(Color(hex: trailingColorHex ?? "#8E8E93"))
+                    .frame(width: 6, height: 6)
+                Text(trailingText)
+                    .font(.system(size: 11))
+                    .foregroundColor(WispColor.Island.textTertiary)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+/// Open … / Undo, or why Undo failed, or nothing once it's undone.
+struct SchedulingResultActions: View {
+    let undoStatus: CreatedCalendarEvent.UndoStatus
+    let openTitle: String
+    let onOpen: () -> Void
+    let onUndo: () -> Void
+
+    var body: some View {
+        switch undoStatus {
         case .added, .removing:
             HStack(spacing: 8) {
-                GlanceCardActionButton(title: "Open in Calendar") {
-                    createdEventStore.openInCalendar(eventID: createdEvent.id)
-                }
+                GlanceCardActionButton(title: openTitle, action: onOpen)
+                Spacer(minLength: 0)
                 GlanceCardActionButton(
-                    title: createdEvent.undoStatus == .removing ? "Undoing…" : "Undo",
-                    isEnabled: createdEvent.undoStatus == .added
-                ) {
-                    createdEventStore.undo(eventID: createdEvent.id)
-                }
+                    title: undoStatus == .removing ? "Undoing…" : "Undo",
+                    isEnabled: undoStatus == .added,
+                    action: onUndo
+                )
             }
         case .removed:
             EmptyView()
         case let .removeFailed(reason):
             Text(reason)
                 .font(.system(size: 11))
-                .foregroundColor(DS.Colors.destructiveText)
+                .foregroundColor(WispColor.destructiveText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
 
-    private var attribution: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(DS.Colors.textTertiary)
-                .frame(width: 5, height: 5)
-            Text("On this Mac · Calendar")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(DS.Colors.textTertiary)
-        }
-    }
-
-    /// "Friday, Oct 9 · 1:00 – 2:00 PM", "Friday, Oct 9 · All day", or a range
-    /// across days ("Fri, Oct 9, 11:00 PM – Sat, Oct 10, 1:00 AM").
-    static func whenText(for draft: CalendarEventDraft) -> String {
-        let dayFormatter = DateFormatter()
-        dayFormatter.setLocalizedDateFormatFromTemplate("EEEEMMMd")
-        let dayText = dayFormatter.string(from: draft.startDate)
-        if draft.isAllDay {
-            return "\(dayText) · All day"
-        }
-        let calendar = Calendar.current
-        if calendar.isDate(draft.startDate, inSameDayAs: draft.endDate) {
-            let intervalFormatter = DateIntervalFormatter()
-            intervalFormatter.dateStyle = .none
-            intervalFormatter.timeStyle = .short
-            return "\(dayText) · \(intervalFormatter.string(from: draft.startDate, to: draft.endDate))"
-        }
-        let intervalFormatter = DateIntervalFormatter()
-        intervalFormatter.dateTemplate = "EEEMMMdjmm"
-        return intervalFormatter.string(from: draft.startDate, to: draft.endDate)
+extension View {
+    /// The result cards' surface on the island: a flat, barely-lifted fill
+    /// on the black, no border — the island's own control language.
+    func schedulingResultCardSurface() -> some View {
+        self
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.07))
+            )
     }
 }

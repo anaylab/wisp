@@ -3,9 +3,10 @@
 //  leanring-buddy
 //
 //  The small capsule button on the result cards ("Open in Calendar", "Undo"),
-//  drawn on the notch's dark palette like the timer card's Cancel: pointer
-//  cursor and a hover fill so it reads as clickable in the notch, and dimmed
-//  while disabled (an Undo already running).
+//  in the island's control language (`WispColor.Island`: a flat white-alpha
+//  fill on the black, white text): pointer cursor and a brighter fill on hover
+//  so it reads as clickable in the notch, and dimmed while disabled (an Undo
+//  already running).
 //
 
 import SwiftUI
@@ -22,12 +23,12 @@ struct GlanceCardActionButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(showsHoverFill ? DS.Colors.textPrimary : DS.Colors.textSecondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .foregroundColor(WispColor.Island.textPrimary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
                 .background(
                     Capsule()
-                        .fill(showsHoverFill ? DS.Colors.surface4 : DS.Colors.surface3)
+                        .fill(showsHoverFill ? WispColor.Island.controlFillHovered : WispColor.Island.controlFill)
                 )
                 .contentShape(Capsule())
         }

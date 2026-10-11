@@ -201,5 +201,58 @@ let duration = CalendarEventCommandParser.removingDurationPhrase(from: "standup 
 check(duration.durationSeconds == 1800, "half an hour")
 check(duration.text == "standup tomorrow", "duration removed: \(duration.text)")
 
+// MARK: - Phrasing (fixed clock: Wednesday 7 Oct 2026, 11:00, en_US)
+
+var phrasingCalendar = Calendar(identifier: .gregorian)
+phrasingCalendar.timeZone = TimeZone(identifier: "America/New_York")!
+let phrasingLocale = Locale(identifier: "en_US")
+let fixedNow = phrasingCalendar.date(from: DateComponents(year: 2026, month: 10, day: 7, hour: 11))!
+func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+    phrasingCalendar.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+}
+func when(_ date: Date, timed: Bool = true) -> String {
+    SchedulingPhrasing.whenPhrase(for: date, includesTimeOfDay: timed, now: fixedNow, calendar: phrasingCalendar, locale: phrasingLocale)
+}
+check(when(at(7, 13)) == "today at 1 PM", "today: \(when(at(7, 13)))")
+check(when(at(8, 9, 30)) == "tomorrow at 9:30 AM", "tomorrow: \(when(at(8, 9, 30)))")
+check(when(at(9, 13)) == "Friday at 1 PM", "weekday: \(when(at(9, 13)))")
+check(when(at(19, 13)) == "Mon, Oct 19 at 1 PM", "further out: \(when(at(19, 13)))")
+check(when(at(12, 0), timed: false) == "Monday", "day only: \(when(at(12, 0), timed: false))")
+
+let rangeText = SchedulingPhrasing.timeRangeText(start: at(9, 13), end: at(9, 14), isAllDay: false, calendar: phrasingCalendar, locale: phrasingLocale)
+check(rangeText == "1:00 – 2:00 PM", "range with plain spaces: \(rangeText.unicodeScalars.map { String(format: "%04X", $0.value) })")
+check(!rangeText.unicodeScalars.contains { $0.value == 0x2009 || $0.value == 0x202F }, "no thin spaces")
+
+let eventReply = SchedulingPhrasing.eventAddedReply(title: "Lunch with Sam", startDate: at(9, 13), isAllDay: false, now: fixedNow, calendar: phrasingCalendar, locale: phrasingLocale)
+check(eventReply == "Added “Lunch with Sam” to your calendar for Friday at 1 PM.", "event reply: \(eventReply)")
+let timedReminderReply = SchedulingPhrasing.reminderAddedReply(title: "Call the bank", dueDate: at(8, 9), dueDateIncludesTimeOfDay: true, savedListName: "Reminders", missingListName: nil, now: fixedNow, calendar: phrasingCalendar, locale: phrasingLocale)
+check(timedReminderReply == "Okay, I'll remind you tomorrow at 9 AM.", "timed reminder reply: \(timedReminderReply)")
+let undatedReply = SchedulingPhrasing.reminderAddedReply(title: "Milk", dueDate: nil, dueDateIncludesTimeOfDay: false, savedListName: "Shopping", missingListName: nil, now: fixedNow, calendar: phrasingCalendar, locale: phrasingLocale)
+check(undatedReply == "Added “Milk” to Shopping.", "undated reply: \(undatedReply)")
+let missingListReply = SchedulingPhrasing.reminderAddedReply(title: "Milk", dueDate: nil, dueDateIncludesTimeOfDay: false, savedListName: "Reminders", missingListName: "Shopping", now: fixedNow, calendar: phrasingCalendar, locale: phrasingLocale)
+check(missingListReply == "Added “Milk” to Reminders — you don't have a Shopping list.", "missing list reply: \(missingListReply)")
+
+check(SchedulingPhrasing.eventRemovedReply(title: "Lunch with Sam") == "Removed “Lunch with Sam” from your calendar.", "event removed reply")
+check(SchedulingPhrasing.reminderRemovedReply(title: "Call the bank") == "Removed “Call the bank” from Reminders.", "reminder removed reply")
+
+// MARK: - Clock questions
+
+for timeQuestion in ["What time is it?", "what's the time", "whats the time right now", "hey wisp, what time is it now", "what is the time", "what’s the time?"] {
+    check(ClockQuestion.question(in: timeQuestion) == .time, "time question: \(timeQuestion)")
+}
+for dateQuestion in ["what's the date", "What's today's date?", "what date is it today"] {
+    check(ClockQuestion.question(in: dateQuestion) == .date, "date question: \(dateQuestion)")
+}
+check(ClockQuestion.question(in: "what day is it") == .dayOfWeek, "day question")
+for otherQuestion in ["what time is it in tokyo", "what time is my meeting", "what time does the store close", "time to go", "set a timer"] {
+    check(ClockQuestion.question(in: otherQuestion) == nil, "not a clock question: \(otherQuestion)")
+}
+let clockNow = phrasingCalendar.date(from: DateComponents(year: 2026, month: 10, day: 7, hour: 23, minute: 42))!
+check(ClockQuestion.time.answer(now: clockNow, calendar: phrasingCalendar, locale: phrasingLocale) == "It's 11:42 PM.", "time answer: \(ClockQuestion.time.answer(now: clockNow, calendar: phrasingCalendar, locale: phrasingLocale))")
+check(ClockQuestion.date.answer(now: clockNow, calendar: phrasingCalendar, locale: phrasingLocale) == "It's Wednesday, October 7.", "date answer")
+check(ClockQuestion.dayOfWeek.answer(now: clockNow, calendar: phrasingCalendar, locale: phrasingLocale) == "It's Wednesday.", "day answer")
+let momentText = ClockQuestion.currentMomentPromptText(now: clockNow, calendar: phrasingCalendar)
+check(momentText == "Current local time: Wednesday, October 7, 2026, 11:42 PM (America/New_York).", "moment line: \(momentText)")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

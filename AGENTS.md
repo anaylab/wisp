@@ -101,7 +101,9 @@ cloud dependency to the local path, without asking.
   Reusable components live in `Components/` (`WispGlassPanel`/`WispGlassButtonStyle`/`WispGlassIcon`,
   `WispMark`, `WispIcon`). **Do not reintroduce hardcoded hex** — reference the
   tokens.
-- **Light/dark**: the **Wisp window follows the system appearance** (its `WispColor` tokens resolve
+- **Light/dark**: the overlay panels and the notch panel also set `window.appearance = .darkAqua` — the adaptive
+  tokens are dynamic `NSColor`s, which resolve against AppKit's appearance, not SwiftUI's `colorScheme`, so pinning
+  only the colour scheme left them light in light mode. The **Wisp window follows the system appearance** (its `WispColor` tokens resolve
   light or dark). The **notch HUD, on-screen overlay, and menu-bar panel stay a dark glass
   material in every appearance** — they pin `.environment(\.colorScheme, .dark)` so their adaptive
   tokens resolve dark, keeping near-white text legible over any wallpaper. `wispGlassSurface` /
@@ -510,6 +512,26 @@ cloud dependency to the local path, without asking.
   **"Reminder Added" card** (`ReminderAddedCardView`: list-coloured ring, title, relative due text, list, Open
   Reminders, Undo — only reminders recorded there). After an agent turn, the newer of an event/reminder created
   this turn gets its card. Both result cards use `GlanceCardActionButton`.
+- **Siri-style look for both** (calendar + reminders): `ToolConfirmationView` hands any `create_calendar_event` /
+  `create_reminder` call whose input reads cleanly (`SchedulingConfirmationPreview`, from the fast path or the model)
+  to `SchedulingConfirmationView` instead of the generic tool panel — drawn on the island's **solid** black
+  (`WispColor.Island.surface`, glowing rim, island shadow), not `WispGlassPanel`'s see-through glass, which took on a
+  light window's colour behind it and read as washed-out grey — app label ("CALENDAR"/"REMINDERS") + countdown,
+  a Calendar-style `CalendarDateTile` (weekday on a red band, big day number) or a `ReminderCheckRing`, the title
+  edited in place (`InlineEditableTitle`), day / time range / place (place editable) / list, and Cancel / "Add to
+  Calendar" or "Add Reminder"; no raw call chip. The spoken question is "Add this to your calendar?" / "Add this
+  reminder?" (`ToolConfirmationCoordinator.spokenQuestionOverride`). The result cards are drawn in the island palette
+  (`WispColor.Island`, `schedulingResultCardSurface`, shared `SchedulingResultHeader` / `SchedulingResultActions`) and
+  reuse the tile and ring. Every user-facing line comes from `SchedulingPhrasing` (pure, tested in
+  `Tests/CalendarEventCommand`): sentence case, "Friday at 1 PM" / "tomorrow at 9:30 AM", and formatter output with its
+  thin / narrow no-break spaces (U+2009 / U+202F) replaced by plain spaces — "Added “Lunch with Sam” to your calendar
+  for Friday at 1 PM.", "Okay, I'll remind you tomorrow at 9 AM." Undo also rewrites that reply line ("Removed “…”
+  from your calendar.") via the stores' `onUndoCompleted`, set by `CompanionManager.observeScheduledItemUndos` and
+  applied only while that item's card is the one showing. A result card with buttons holds the notch open at least
+  `NotchWindowController.actionableCardHoldSeconds` (15s), and `autoPresentAnswer` only ever *extends* the hold — the
+  card's own present (6s floor) used to cut short the reply's longer one. The overlay's scheduled fade-out
+  (`scheduleTransientHideIfNeeded`) waits while a confirmation is pending, and a new confirmation cancels it: a typed
+  question doesn't cancel the previous reply's fade the way push-to-talk does, so it used to remove the prompt mid-decision.
 - **Window management** (`WindowManagement/`): "put Safari on the left and Xcode on the right",
   "maximize this", "make this window full screen", "move Chrome to the right half", "center this
   window", "move this to my other screen", "tile Notes and Mail" are recognised by
@@ -824,10 +846,13 @@ Grouped by what they do. Line counts are approximate.
 | `CalendarEventCommand.swift` | ~520 | Pure side of the calendar fast path: `CalendarEventDraft`, `CalendarEventCommandParser` (scheduling phrasing → draft / `.needsExtraction` / decline; duration, title/place split, checks on the on-device model's extraction) and `CalendarEventWhenResolver` (`NSDataDetector` + bare "at 6" + "in 2 hours", time-of-day vs all-day). Tested by `Tests/CalendarEventCommand`. |
 | `OnDeviceModelExtraction.swift` | ~135 | Apple's on-device model (Foundation Models) for fast-path requests the parsers can't split: the shared `extract(_:instructions:prompt:)` (availability check, 6s cap), and `CalendarEventDraftExtractor` / `ReminderDraftExtractor` with their `@Generable` field structs; answers go through the parsers' checks. |
 | `ReminderCommand.swift` | ~235 | Pure side of the reminders fast path: `ReminderDraft`, `ReminderCommandParser` ("remind me…", "create a reminder…", "add X to my … list"; undated vs needs-extraction; list names; checks on the on-device model's extraction). Tested by `Tests/ReminderCommand`. |
-| `CreatedReminderStore.swift` / `ReminderAddedCardView.swift` | ~90/~140 | Reminders Wisp created this session (Undo only for these, via `RemindersDataProvider.removeReminder`) and the "Reminder Added" result card. |
-| `GlanceCardActionButton.swift` | ~45 | The capsule button on the result cards (hover fill, pointer cursor, dimmed while disabled). |
+| `CreatedReminderStore.swift` / `ReminderAddedCardView.swift` | ~90/~90 | Reminders Wisp created this session (Undo only for these, via `RemindersDataProvider.removeReminder`) and the "Reminder Added" result card. |
+| `GlanceCardActionButton.swift` | ~45 | The capsule button on the result cards, in the island palette (hover fill, pointer cursor, dimmed while disabled). |
+| `SchedulingPhrasing.swift` | ~155 | Every user-facing calendar/reminder line: when-phrases, time ranges, full day, the added-event / added-reminder replies; plain spaces. |
+| `SchedulingCardComponents.swift` | ~125 | `CalendarDateTile`, `ReminderCheckRing`, `InlineEditableTitle` — shared by the confirmation panel and the result cards. |
+| `SchedulingConfirmationView.swift` | ~270 | `SchedulingConfirmationPreview` (tool input → event/reminder) and the Siri-style Add to Calendar / Add Reminder confirmation panel. |
 | `CreatedCalendarEventStore.swift` | ~120 | Events Wisp created this session (both paths), for the result card: Undo (only these events, via `CalendarDataProvider.removeEvent`) and Open in Calendar. |
-| `CalendarEventAddedCardView.swift` | ~155 | The Siri-style "Event Added" result card (colour bar, title, when, place, calendar, Open in Calendar / Undo, removed state). |
+| `CalendarEventAddedCardView.swift` | ~170 | The Siri-style "Added to Calendar" result card (date tile, title, day, time range, place, Open in Calendar / Undo, removed state) plus the shared result-card header, actions and island surface. |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
@@ -907,7 +932,8 @@ Grouped by what they do. Line counts are approximate.
 | `WispSoundPlayer.swift` | ~120 | The Dynamic Island's interaction sound cues (listening / thinking / reply / success / error), played as built-in macOS system sounds at low volume. `WispSoundPreference` is the UserDefaults-backed on/off gate (default on), toggled from the notch header's bell button. Separate from reply speech (`VoiceOutputPreference`). |
 | `SpokenLineParser.swift` | ~90 | Parses/strips the `[SAY: …]` tag — the model's per-reply "speak this" line. |
 | `GlanceCard.swift` | ~655 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`, incl. `RemindersCardRequest`/`TimerCardRequest`) and the generic block card. |
-| `FastCommandRouter.swift` | ~520 | Model-free handling of rigid commands (mute/volume, open an app, and "set a timer for …" via `TimerCommandParser`, whose `Outcome.glanceCardRequest` CompanionManager resolves like a `[CARD:]` tag). Biased toward not matching. |
+| `FastCommandRouter.swift` | ~525 | Model-free handling of rigid commands — the answer is shown in the notch as `currentReplyText` as well as spoken (mute/volume, open an app, "what time is it" via `ClockQuestion`, and "set a timer for …" via `TimerCommandParser`, whose `Outcome.glanceCardRequest` CompanionManager resolves like a `[CARD:]` tag). Biased toward not matching. |
+| `ClockQuestion.swift` | ~95 | "What time is it / what's the date / what day is it" (whole-utterance only) answered from the clock, and `currentMomentPromptText`, the "Current local time: …" line every model turn gets first in its per-turn context block (stripped from history with it), because the local model has no clock and guessed. |
 | `GlanceCardView.swift` | ~180 | Renderer for the generic block card (header/list/keyValue/stats). |
 | `GlanceCardDataPreference.swift` | ~40 | The single gate for **network** card data (weather, sources). Default on. |
 | `WeatherSnapshot.swift` / `WeatherDataProvider.swift` / `WeatherCardView.swift` | ~330/~200/~260 | Weather kind: Open-Meteo fetch → snapshot → Apple-Weather-style card. |

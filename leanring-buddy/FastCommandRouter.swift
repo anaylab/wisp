@@ -51,6 +51,10 @@ enum FastCommandRouter {
 
         guard !normalized.isEmpty else { return nil }
 
+        // "What time is it" — the local model has no clock and guesses.
+        if let clockQuestion = ClockQuestion.question(in: transcript) {
+            return Outcome(spokenConfirmation: clockQuestion.answer())
+        }
         if let outcome = handleAudioCommand(normalized) { return outcome }
         if let outcome = handleTimerCommand(normalized) { return outcome }
         if let outcome = handleAppLaunch(normalized) { return outcome }

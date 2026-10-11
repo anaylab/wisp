@@ -282,6 +282,14 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     /// A question worth hearing for tools whose generic "i'd need to run …"
     /// would hide the one thing to check — for a message, who it goes to.
     private static func spokenQuestionOverride(forToolNamed toolName: String, toolInput: JSONValue) -> String? {
+        // Adding to Calendar or Reminders is asked the way Siri asks, not as
+        // "i'd need to run create calendar event".
+        if let schedulingPreview = SchedulingConfirmationPreview(toolName: toolName, toolInput: toolInput) {
+            switch schedulingPreview {
+            case .event: return "Add this to your calendar?"
+            case .reminder: return "Add this reminder?"
+            }
+        }
         guard ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage,
               let recipientName = ToolCallInspection.stringValue(forAnyOf: ["to"], in: toolInput) else { return nil }
         return "send that to \(recipientName.lowercased())?"

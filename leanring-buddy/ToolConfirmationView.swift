@@ -82,6 +82,21 @@ struct ToolConfirmationView: View {
                 onSend: onApprove,
                 onCancel: onDeny
             )
+        } else if let toolInput = confirmation.toolInput,
+                  let schedulingPreview = SchedulingConfirmationPreview(toolName: confirmation.toolName, toolInput: toolInput) {
+            // An event or reminder is shown as what it will add, Siri-style.
+            SchedulingConfirmationView(
+                preview: schedulingPreview,
+                editableFields: confirmation.editableFields,
+                editedTextsByArgumentKey: confirmationCoordinator.editedTextsByArgumentKey,
+                expiryDate: confirmationCoordinator.pendingConfirmationExpiryDate,
+                onTextChange: { argumentKey, editedText in
+                    confirmationCoordinator.updateEditedText(editedText, forArgumentKey: argumentKey)
+                },
+                onEditingActivity: { confirmationCoordinator.extendTimeoutForEditing() },
+                onAdd: onApprove,
+                onCancel: onDeny
+            )
         } else {
             toolCallPanel
         }

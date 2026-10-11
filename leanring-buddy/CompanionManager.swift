@@ -301,6 +301,7 @@ final class CompanionManager: ObservableObject {
         startLocalModelKeepWarmLoopIfNeeded()
         observeScreenConfigurationChanges()
         observeToolConfirmations()
+        observeScheduledItemUndos()
         registerBackgroundWorkTool()
         // The browser step loop marks what it acts on; this is how it reaches
         // the overlay this object owns.
@@ -1207,6 +1208,10 @@ final class CompanionManager: ObservableObject {
             if let fastCommandGlanceCardRequest = fastOutcome.glanceCardRequest {
                 resolveAndPublishGlanceCard(fastCommandGlanceCardRequest)
             }
+            // Shown in the notch like any reply. Without it a fast answer
+            // ("It's 7:43 AM.") was only spoken, so with speech off or the
+            // volume down the notch flickered and showed nothing.
+            currentReplyText = fastOutcome.spokenConfirmation
             voiceState = .responding
             currentResponseTask = Task { [weak self] in
                 guard let self else { return }
@@ -1431,7 +1436,11 @@ final class CompanionManager: ObservableObject {
                     && BrainPreferences.shared.isPromptContextEnabled
                     ? BrainStore.shared.promptContext(forRequest: transcript)
                     : ""
-                let perTurnContextText = [accessibilityElementPromptText, brainPromptContextText]
+                // The model has no clock; without this it guessed the time in
+                // any time-relative answer. On the user message like the rest,
+                // so the system prompt (and its prefix cache) never changes.
+                let currentMomentPromptText = ClockQuestion.currentMomentPromptText()
+                let perTurnContextText = [currentMomentPromptText, accessibilityElementPromptText, brainPromptContextText]
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n\n")
 
@@ -2231,6 +2240,15 @@ final class CompanionManager: ObservableObject {
                 guard !Task.isCancelled else { return }
             }
 
+            // A permission prompt lives on this overlay. A hide scheduled by an
+            // earlier reply (a typed question doesn't cancel it the way a
+            // push-to-talk press does) must never fade it out from under the
+            // user mid-decision — wait until the prompt is answered.
+            while pendingToolConfirmation != nil {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
+            }
+
             // Pause 1s after everything finishes, then fade out
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
@@ -2292,6 +2310,24 @@ final class CompanionManager: ObservableObject {
     /// mouse events is a moment the desktop underneath does not. Interactivity
     /// is therefore switched on for exactly as long as there is something to
     /// click, and off again immediately after.
+    /// Undo on an "Added to Calendar/Reminders" card updates the reply line
+    /// above it, which otherwise kept saying "Added …" over a struck-out card.
+    /// Only while that card is still the one showing.
+    private func observeScheduledItemUndos() {
+        CreatedCalendarEventStore.shared.onUndoCompleted = { [weak self] removedEvent in
+            guard let self,
+                  case .calendarEventAdded(let shownCardState)? = self.resolvedGlanceCard,
+                  shownCardState.eventID == removedEvent.id else { return }
+            self.currentReplyText = SchedulingPhrasing.eventRemovedReply(title: removedEvent.draft.title)
+        }
+        CreatedReminderStore.shared.onUndoCompleted = { [weak self] removedReminder in
+            guard let self,
+                  case .reminderAdded(let shownCardState)? = self.resolvedGlanceCard,
+                  shownCardState.reminderID == removedReminder.id else { return }
+            self.currentReplyText = SchedulingPhrasing.reminderRemovedReply(title: removedReminder.draft.title)
+        }
+    }
+
     private func observeToolConfirmations() {
         toolConfirmationCancellable = ToolConfirmationCoordinator.shared
             .$pendingConfirmation
@@ -2301,6 +2337,12 @@ final class CompanionManager: ObservableObject {
 
                 withAnimation(.easeOut(duration: 0.18)) {
                     self.pendingToolConfirmation = confirmation
+                }
+                // An earlier reply's scheduled fade-out would take this prompt
+                // with it; the overlay stays until the prompt is answered.
+                if confirmation != nil {
+                    self.transientHideTask?.cancel()
+                    self.transientHideTask = nil
                 }
                 self.overlayWindowManager.setAcceptsMouseEvents(confirmation != nil)
                 // Typing into the card's editable fields needs key focus; the
@@ -3329,20 +3371,24 @@ extension CompanionManager {
                     )
                     CreatedCalendarEventStore.shared.record(createdEventDetails: createdEventDetails, draft: approvedDraft)
                     createdEventID = createdEventDetails.eventIdentifier
-                    replyText = "added \(approvedDraft.title.lowercased()), \(CalendarEventAddedCardView.whenText(for: approvedDraft).lowercased())."
+                    replyText = SchedulingPhrasing.eventAddedReply(
+                        title: approvedDraft.title,
+                        startDate: approvedDraft.startDate,
+                        isAllDay: approvedDraft.isAllDay
+                    )
                     didSucceed = true
                 } catch CalendarDataProvider.CalendarDataError.accessDenied {
-                    replyText = "i can't reach your calendar — allow Wisp under Privacy & Security → Calendars."
+                    replyText = "I can't reach your calendar. Allow Wisp in System Settings → Privacy & Security → Calendars."
                     didSucceed = false
                 } catch CalendarDataProvider.CalendarDataError.noWritableCalendar {
-                    replyText = "none of the calendars on this Mac accept new events."
+                    replyText = "None of the calendars on this Mac accept new events."
                     didSucceed = false
                 } catch {
-                    replyText = "i couldn't add that event: \(error.localizedDescription)"
+                    replyText = "I couldn't add that event: \(error.localizedDescription)"
                     didSucceed = false
                 }
             } else {
-                replyText = "okay, i didn't add it."
+                replyText = "Okay, I didn't add it."
                 didSucceed = false
                 wasDeclinedByUser = true
             }
@@ -3530,21 +3576,20 @@ extension CompanionManager {
                     CreatedReminderStore.shared.record(createdReminderDetails: createdReminderDetails, draft: approvedDraft)
                     createdReminderID = createdReminderDetails.reminderIdentifier
 
-                    var replyParts = ["added \(approvedDraft.title.lowercased())"]
-                    if let dueText = ReminderAddedCardView.dueText(for: approvedDraft) {
-                        replyParts.append(dueText.lowercased())
-                    }
-                    if let missingListName {
-                        replyParts.append("in \(createdReminderDetails.listName) — you don't have a \(missingListName) list")
-                    }
-                    replyText = replyParts.joined(separator: ", ") + "."
+                    replyText = SchedulingPhrasing.reminderAddedReply(
+                        title: approvedDraft.title,
+                        dueDate: approvedDraft.dueDate,
+                        dueDateIncludesTimeOfDay: approvedDraft.dueDateIncludesTimeOfDay,
+                        savedListName: createdReminderDetails.listName,
+                        missingListName: missingListName
+                    )
                     didSucceed = true
                 } catch {
                     replyText = error.localizedDescription
                     didSucceed = false
                 }
             } else {
-                replyText = "okay, i didn't add it."
+                replyText = "Okay, I didn't add it."
                 didSucceed = false
                 wasDeclinedByUser = true
             }

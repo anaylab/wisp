@@ -275,6 +275,12 @@ class OverlayWindowManager {
             let hostingView = FirstMouseHostingView(rootView: contentView.environment(\.colorScheme, .dark))
             hostingView.frame = screen.frame
             window.contentView = hostingView
+            // The colour scheme alone isn't enough: the adaptive tokens are
+            // dynamic `NSColor`s, which resolve against the window's AppKit
+            // appearance. Left at the system's light appearance, the glass tint
+            // resolved to its light value and the confirmation panels turned a
+            // washed-out grey over light windows.
+            window.appearance = NSAppearance(named: .darkAqua)
             window.ignoresMouseEvents = !currentlyAcceptsMouseEvents
             window.allowsBecomingKey = currentlyAllowsKeyboardFocus
 

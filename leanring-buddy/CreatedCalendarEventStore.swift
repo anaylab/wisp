@@ -41,6 +41,10 @@ final class CreatedCalendarEventStore: ObservableObject {
 
     @Published private(set) var createdEventsByID: [String: CreatedCalendarEvent] = [:]
 
+    /// Called once an Undo has removed an event, with what it was, so the
+    /// reply line above the card can stop saying "Added …".
+    var onUndoCompleted: ((CreatedCalendarEvent) -> Void)?
+
     func record(
         createdEventDetails: CalendarDataProvider.CreatedEventDetails,
         draft: CalendarEventDraft,
@@ -92,6 +96,7 @@ final class CreatedCalendarEventStore: ObservableObject {
             guard let self, var updatedEvent = self.createdEventsByID[eventID] else { return }
             updatedEvent.undoStatus = finalStatus
             self.createdEventsByID[eventID] = updatedEvent
+            if finalStatus == .removed { self.onUndoCompleted?(updatedEvent) }
         }
     }
 

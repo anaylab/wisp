@@ -107,6 +107,10 @@ final class NotchWindowController {
     private var answerLingeringSinceDate: Date?
     private let lingeringAnswerExpirySeconds: TimeInterval = 20
 
+    /// How long the notch holds open a result card with buttons ("Added to
+    /// Calendar" with Undo) before folding it away on its own.
+    static let actionableCardHoldSeconds: TimeInterval = 15
+
     /// The expanded panel's fixed size. Kept compact — it holds the scrollable
     /// answer surface, live activity and the footer, and the answer surface scrolls rather than growing the window.
     private let panelSize = CGSize(width: 360, height: 404)
@@ -218,6 +222,10 @@ final class NotchWindowController {
         notchPanel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         notchPanel.isOpaque = false
         notchPanel.backgroundColor = .clear
+        // The island is dark in every appearance. Its adaptive tokens are
+        // dynamic `NSColor`s that resolve against the window's AppKit
+        // appearance, not SwiftUI's colour scheme, so pin that dark too.
+        notchPanel.appearance = NSAppearance(named: .darkAqua)
         notchPanel.hasShadow = false
         notchPanel.hidesOnDeactivate = false
         notchPanel.isExcludedFromWindowsMenu = true
@@ -278,9 +286,18 @@ final class NotchWindowController {
         // when the turn produced no reply text (e.g. a card-only reply).
         cardPresentationObserver = companionManager.$resolvedGlanceCard
             .sink { [weak self] resolvedGlanceCard in
-                guard resolvedGlanceCard != nil else { return }
+                guard let resolvedGlanceCard else { return }
                 guard self?.viewModel.isWorkspaceOpen == false else { return }
-                self?.autoPresentAnswer(readingLength: 0)
+                // A card you act on (Undo, Open in Calendar) needs time to
+                // reach for, more than a reading-length hold gives a short reply.
+                let minimumHoldSeconds: TimeInterval
+                switch resolvedGlanceCard {
+                case .calendarEventAdded, .reminderAdded:
+                    minimumHoldSeconds = Self.actionableCardHoldSeconds
+                default:
+                    minimumHoldSeconds = 0
+                }
+                self?.autoPresentAnswer(readingLength: 0, minimumHoldSeconds: minimumHoldSeconds)
             }
 
         // A fresh morning briefing drops its banner from the notch — but only
@@ -668,11 +685,15 @@ final class NotchWindowController {
     /// answer, scaled by its length. Called from the reply/card observers the
     /// moment a new answer lands, so the notch presents results without the user
     /// having to hover it — the behaviour a dynamic island is expected to have.
-    private func autoPresentAnswer(readingLength: Int) {
+    private func autoPresentAnswer(readingLength: Int, minimumHoldSeconds: TimeInterval = 0) {
         // Floor of 6s so even a one-word answer is seen; ~22 characters/second
         // of reading time on top of that; capped at 20s so it never lingers.
-        let holdSeconds = min(max(6.0, Double(readingLength) / 22.0), 20.0)
-        presentationHoldUntil = Date().addingTimeInterval(holdSeconds)
+        let readingHoldSeconds = min(max(6.0, Double(readingLength) / 22.0), 20.0)
+        let holdSeconds = max(readingHoldSeconds, minimumHoldSeconds)
+        // Only ever extends. A reply and its card land a moment apart and each
+        // presents; the card's call (no text, so the 6s floor) used to replace
+        // the reply's longer hold, folding the answer away early.
+        presentationHoldUntil = max(presentationHoldUntil, Date().addingTimeInterval(holdSeconds))
         // The turn that produced this answer began with a force-collapse that
         // briefly suspends hover; clear that so the answer can open immediately.
         hoverSuspendedUntil = .distantPast
