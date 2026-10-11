@@ -224,8 +224,15 @@ private struct ModelProviderCard: View {
                     apiKeyField
                 }
 
-                if selectedProviderKind == .anthropic {
-                    ClaudeModelOptions(companionManager: companionManager)
+                if selectedProviderKind == .claudeSubscription {
+                    ClaudeSubscriptionStatusRow()
+                }
+
+                if selectedProviderKind == .anthropic || selectedProviderKind == .claudeSubscription {
+                    ClaudeModelOptions(
+                        companionManager: companionManager,
+                        offersWebAccess: selectedProviderKind == .anthropic
+                    )
                 }
             }
         }
@@ -326,11 +333,67 @@ private struct ModelProviderCard: View {
     }
 }
 
+/// Whether the `claude` CLI is installed and signed in — the only setup the
+/// subscription provider needs. Checked by asking the CLI, never by reading
+/// its credentials.
+private struct ClaudeSubscriptionStatusRow: View {
+    @State private var status: ClaudeSubscriptionStatus = .checking
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+                .font(.system(size: 10))
+                .foregroundStyle(isReady ? DS.Colors.success : DS.Colors.textTertiary)
+            Text(message)
+                .font(.system(size: 10))
+                .foregroundStyle(isReady ? DS.Colors.textSecondary : DS.Colors.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Check again") {
+                Task { await refresh() }
+            }
+            .buttonStyle(DSTextButtonStyle())
+            .pointerCursor()
+        }
+        .task { await refresh() }
+    }
+
+    private var isReady: Bool {
+        if case .signedIn = status { return true }
+        return false
+    }
+
+    private var iconName: String {
+        isReady ? "checkmark.circle.fill" : "circle.dashed"
+    }
+
+    private var message: String {
+        switch status {
+        case .checking:
+            return "Checking the Claude Code command line tool…"
+        case .notInstalled:
+            return "The Claude Code command line tool isn't installed. Install it, then run `claude` in Terminal once to sign in with your subscription."
+        case .signedOut:
+            return "Not signed in. Run `claude` in Terminal and sign in with your Claude subscription."
+        case .signedIn(let email):
+            return "Signed in\(email.map { " as \($0)" } ?? ""). Wisp runs your own `claude` tool for each reply; it never reads your login. Expect about 4 seconds of start-up per reply, and replies count against your subscription's usage limits."
+        }
+    }
+
+    private func refresh() async {
+        status = .checking
+        status = await ClaudeSubscriptionStatus.current()
+    }
+}
+
 /// Claude's own choices, shown under the provider picker while Claude is
 /// selected: which model, how hard it thinks, and whether it may use the web.
 /// Each change rebuilds the provider so the next turn uses it.
 private struct ClaudeModelOptions: View {
     @ObservedObject var companionManager: CompanionManager
+    /// The web switch is an API feature (server-side tools); the subscription
+    /// route runs the CLI with its tools off, so it has nothing to switch.
+    let offersWebAccess: Bool
 
     @State private var selectedModel: AnthropicModelChoice = AnthropicModelSettings.selectedModel
     @State private var effortLevel: AnthropicEffortLevel = AnthropicModelSettings.effortLevel
@@ -372,6 +435,7 @@ private struct ClaudeModelOptions: View {
                 companionManager.rebuildSelectedModelProvider()
             }
 
+            if offersWebAccess {
             SettingRow(
                 title: "Search the web",
                 detail: "Lets Claude search and read web pages itself during tasks, on Anthropic's servers — without using your browser."
@@ -384,6 +448,7 @@ private struct ClaudeModelOptions: View {
             .onChange(of: isWebAccessEnabled) { _, newValue in
                 AnthropicModelSettings.isWebAccessEnabled = newValue
                 companionManager.rebuildSelectedModelProvider()
+            }
             }
         }
     }

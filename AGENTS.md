@@ -63,7 +63,17 @@ cloud dependency to the local path, without asking.
   `BuddyChatProviderSelection` and built by `ModelProviderFactory`. Default is local Ollama
   `qwen2.5vl:3b` at `http://localhost:11434` (NDJSON streaming); the cloud providers
   (`AnthropicProvider`, `OpenAIProvider`, `GeminiProvider`) are bring-your-own-key, picked in
-  Settings → Model. The Info.plist `ChatProvider` key is now only a
+  Settings → Model. A fourth cloud option, **Claude (your subscription)** (`ClaudeSubscriptionProvider`,
+  `.claudeSubscription`, no API key), runs the user's own signed-in `claude` CLI once per turn instead of
+  calling the API: `-p --input-format stream-json` with the system prompt replaced by Wisp's, **every CLI tool,
+  MCP server, slash command and settings source switched off** (`--tools ""`, `--strict-mcp-config`,
+  `--setting-sources ""`, `--no-session-persistence`; never `--bare`, which ignores the subscription login),
+  the screenshot inline as a base64 image block on stdin, history flattened into the text, and tools via the
+  same `[TOOL:]` text-tag convention as the local model, so the registry/confirmation boundary is unchanged.
+  `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are stripped from the child env so it can't bill a key. Wisp never
+  reads or forwards the CLI's credentials (extracting a subscription login for a separate app isn't allowed);
+  Settings → Model shows install/sign-in state via `claude auth status` (`ClaudeSubscriptionStatus`). ~4s per
+  reply of CLI start-up; counts against subscription limits; labelled off-machine. The Info.plist `ChatProvider` key is now only a
   shipped-default hint — the live selection lives in `BuddyChatProviderSelection`.
 - **Speech-to-Text**: Apple Speech framework, on-device. Recognition **language** and a
   **custom dictionary** are user-configurable via `DictationSettingsStore` (Dictation tab):
@@ -737,6 +747,7 @@ Grouped by what they do. Line counts are approximate.
 | `OllamaProvider.swift` | ~294 | Presents `LocalOllamaAPI` as a `ModelProvider`; owns the `[TOOL:...]` text convention that fakes tool calls for the local model. |
 | `AnthropicProvider.swift` | ~680 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, adaptive thinking + `effort` (Opus/Sonnet 5.5), signed thinking and web blocks kept as `.providerReplay` and resent verbatim within a tool loop (`drop_block` for stale ones), prompt caching (system breakpoint + automatic), server-side `web_search`/`web_fetch` on tool-bearing turns (resumes `pause_turn`), `fallbacks: "default"` for refusals, no sampling params on models that reject them. |
 | `AnthropicModelSettings.swift` | ~140 | Claude's settings (UserDefaults): `AnthropicModelChoice` (Opus 5.5 default / Sonnet 5.5 / Haiku 4.5, with each model's API differences as data), `AnthropicEffortLevel` (low default), and the web-access switch. Edited in Settings → Model, read by `ModelProviderFactory`. |
+| `ClaudeSubscriptionProvider.swift` | ~430 | Claude over the user's own `claude` CLI (subscription, no key): per-turn stream-json process with all CLI tools off, inline screenshot, `[TOOL:]` text tags, failure-text → `BuddyChatError`, plus `ClaudeSubscriptionStatus` (`claude auth status`). Tested by `Tests/AgentRuntimeIntegration` (live round trip with `WISP_LIVE_CLAUDE=1`). |
 | `OpenAIProvider.swift` | ~435 | GPT as a bring-your-own-key `ModelProvider` over Chat Completions: tool results become separate `role:"tool"` messages. |
 | `GeminiProvider.swift` | ~415 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. |
 | `ModelProviderFactory.swift` | ~75 | Builds the `ModelProvider` for the current `BuddyChatProviderSelection`, reading a cloud provider's key from `ProviderKeychainStore`. Used by CompanionManager's turn path. |
