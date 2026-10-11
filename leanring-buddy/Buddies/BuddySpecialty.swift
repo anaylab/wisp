@@ -95,21 +95,34 @@ enum BuddySpecialty: String, Codable, CaseIterable, Identifiable, Equatable {
         }
     }
 
+    /// The connected apps (Composio toolkit slugs) this specialty starts with, or
+    /// nil for none. Only those the user has actually connected matter; the rest
+    /// of the apps stay a switch away in the buddy's Tools tab.
+    var suggestedAppSlugs: Set<String>? {
+        switch self {
+        case .inbox: return ["gmail", "outlook", "slack"]
+        case .planner: return ["googlecalendar", "todoist", "asana"]
+        case .writer: return ["googledocs", "notion", "gmail"]
+        case .coder: return ["github", "linear"]
+        case .researcher, .watcher, .organizer, .general: return nil
+        }
+    }
+
     /// The tool groups this specialty is limited to, or nil for every tool.
-    /// A connected Composio server is allowed for the roles that live in
-    /// connected apps (mail, calendar, docs).
+    /// Roles that live in connected apps (mail, calendar, docs, code hosting) get
+    /// the connected-apps server, limited to `suggestedAppSlugs`.
     var toolAccess: BuddyToolAccess? {
         let composioGroupID = BuddyToolAccessPolicy.groupID(forServerNamed: ComposioAccountStore.serverId)
-        let groups: Set<String>
+        var groups: Set<String>
         switch self {
         case .researcher:
             groups = [BuddyToolGroup.browser.rawValue, BuddyToolGroup.brain.rawValue]
         case .inbox:
-            groups = [BuddyToolGroup.messaging.rawValue, BuddyToolGroup.reminders.rawValue, composioGroupID]
+            groups = [BuddyToolGroup.messaging.rawValue, BuddyToolGroup.reminders.rawValue]
         case .planner:
-            groups = [BuddyToolGroup.reminders.rawValue, BuddyToolGroup.shortcuts.rawValue, composioGroupID]
+            groups = [BuddyToolGroup.reminders.rawValue, BuddyToolGroup.shortcuts.rawValue]
         case .writer:
-            groups = [BuddyToolGroup.browser.rawValue, BuddyToolGroup.brain.rawValue, composioGroupID]
+            groups = [BuddyToolGroup.browser.rawValue, BuddyToolGroup.brain.rawValue]
         case .coder:
             groups = [BuddyToolGroup.coding.rawValue, BuddyToolGroup.screen.rawValue, BuddyToolGroup.browser.rawValue]
         case .watcher:
@@ -119,7 +132,8 @@ enum BuddySpecialty: String, Codable, CaseIterable, Identifiable, Equatable {
         case .general:
             return nil
         }
-        return BuddyToolAccess(allowedGroupIDs: groups)
+        if suggestedAppSlugs != nil { groups.insert(composioGroupID) }
+        return BuddyToolAccess(allowedGroupIDs: groups, allowedAppSlugs: suggestedAppSlugs)
     }
 
     /// One line added to the buddy's system prompt so it works in character.

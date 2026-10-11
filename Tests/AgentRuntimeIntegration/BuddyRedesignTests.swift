@@ -46,6 +46,11 @@ import Foundation
                       BuddyToolGroup(rawValue: groupID) != nil || groupID.hasPrefix(BuddyToolAccessPolicy.mcpGroupPrefix)
                   }
               })
+        check("a coder starts with GitHub but not Gmail",
+              BuddySpecialty.coder.toolAccess?.allowsApp("github") == true && BuddySpecialty.coder.toolAccess?.allowsApp("gmail") == false)
+        check("a researcher gets no connected apps", BuddySpecialty.researcher.toolAccess?.allowsServer(named: ComposioAccountStore.serverId) == false)
+        check("every specialty with apps also has the Composio group",
+              BuddySpecialty.allCases.allSatisfy { $0.suggestedAppSlugs == nil || $0.toolAccess?.allowsServer(named: ComposioAccountStore.serverId) == true })
         check("every specialty has a starter job", BuddySpecialty.allCases.allSatisfy { !$0.starterJobs.isEmpty })
         check("the daily planner starter reads as daily",
               BuddySchedule.inferred(fromInstruction: BuddySpecialty.planner.starterJobs[0]) == .daily(hour: 9, minute: 0))

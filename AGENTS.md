@@ -237,7 +237,8 @@ cloud dependency to the local path, without asking.
   limit again when every connected app is allowed, so an app connected later is allowed too. UI: `BuddyToolsView`
   (Everything / Choose; app rows with real logos and switches; Wisp's own abilities; **Add app** sheet that asks for the
   Composio key if needed and embeds `ComposioAppsView`), used by the inspector's Tools tab and the summon flow; the
-  notch still uses `BuddyToolAccessEditor`.
+  notch still uses `BuddyToolAccessEditor`. Specialties start with sensible apps (`BuddySpecialty.suggestedAppSlugs`:
+  Coder → GitHub/Linear, Inbox → Gmail/Outlook/Slack, Planner → Calendar/Todoist/Asana, Writer → Docs/Notion/Gmail).
   **Per-buddy model** (`WispBuddy.modelChoice: BuddyModelChoice?`, nil = follow Wisp): local, a Claude model,
   GPT or Gemini, built by `ModelProviderFactory.make(_ choice:)`; picked with `BuddyModelEditor` (page + new
   form), which says what leaves the Mac. A buddy whose model is off this machine (`deployment.sendsDataOffThisMachine`)
