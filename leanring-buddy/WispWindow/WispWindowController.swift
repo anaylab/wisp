@@ -19,6 +19,7 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -29,6 +30,7 @@ final class WispWindowController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
     private let companionManager: CompanionManager
+    private var appearanceObservation: AnyCancellable?
 
     init(companionManager: CompanionManager) {
         self.companionManager = companionManager
@@ -81,6 +83,11 @@ final class WispWindowController: NSObject, NSWindowDelegate {
 
         window = wispWindow
         positionTrafficLights()
+
+        // Light, dark or system, for this window only.
+        appearanceObservation = WispAppearancePreference.shared.$mode.sink { [weak wispWindow] mode in
+            wispWindow?.appearance = mode.appKitAppearance
+        }
 
         WispWindowActivation.activateForWindow()
         wispWindow.makeKeyAndOrderFront(nil)

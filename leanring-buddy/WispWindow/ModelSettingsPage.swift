@@ -59,7 +59,7 @@ struct PerformanceTab: View {
             VStack(alignment: .leading, spacing: 8) {
                 LabeledReadout(label: "Loaded model", value: modelResidency)
                 LabeledReadout(label: "Memory", value: memoryReadout)
-                Text("Local models are held in memory to stay fast. When memory runs short the system evicts them, and the next request pays to rebuild — which is what a sudden slowdown usually means.")
+                Text("Local models stay in memory. When it runs short the system evicts them and the next reply is slow.")
                     .font(.system(size: 10))
                     .foregroundStyle(DS.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -247,7 +247,7 @@ private struct ModelProviderCard: View {
                 .font(.system(size: 11))
                 .foregroundStyle(DS.Colors.warning)
                 .padding(.top, 1)
-            Text("Screenshots and your voice transcript are sent to \(selectedProviderKind.displayName) over the network. Paid API tiers generally don't train on your data; free tiers often do. Local keeps everything on this machine.")
+            Text("Screenshots and your voice transcript go to \(selectedProviderKind.displayName) over the network. Local keeps everything on this Mac.")
                 .font(.system(size: 10))
                 .foregroundStyle(DS.Colors.warningText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -352,7 +352,8 @@ private struct ClaudeSubscriptionStatusRow: View {
             Button("Check again") {
                 Task { await refresh() }
             }
-            .buttonStyle(DSTextButtonStyle())
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
+            .controlSize(.small)
             .pointerCursor()
         }
         .task { await refresh() }
@@ -376,7 +377,7 @@ private struct ClaudeSubscriptionStatusRow: View {
         case .signedOut:
             return "Not signed in. Run `claude` in Terminal and sign in with your Claude subscription."
         case .signedIn(let email):
-            return "Signed in\(email.map { " as \($0)" } ?? ""). Wisp runs your own `claude` tool for each reply; it never reads your login. Expect about 4 seconds of start-up per reply, and replies count against your subscription's usage limits."
+            return "Signed in\(email.map { " as \($0)" } ?? ""). Replies take about 4 seconds longer and count against your subscription's limits."
         }
     }
 
@@ -419,15 +420,11 @@ private struct ClaudeModelOptions: View {
             }
 
             SettingRow(title: "Thinking", detail: thinkingDetail) {
-                Picker("Thinking", selection: $effortLevel) {
-                    ForEach(AnthropicEffortLevel.allCases) { effortLevel in
-                        Text(effortLevel.displayName).tag(effortLevel)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .pointerCursor()
+                WispSegmented(
+                    options: AnthropicEffortLevel.allCases,
+                    title: { $0.displayName },
+                    selection: $effortLevel
+                )
                 .disabled(!selectedModel.usesAdaptiveThinkingAndEffort)
             }
             .onChange(of: effortLevel) { _, newEffortLevel in

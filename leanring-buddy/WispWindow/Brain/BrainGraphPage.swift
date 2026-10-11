@@ -140,7 +140,7 @@ struct BrainGraphPage: View {
                 ContentUnavailableView {
                     Label("Nothing to map yet", systemImage: "point.3.connected.trianglepath.dotted")
                 } description: {
-                    Text("As Wisp fills your brain, each page becomes a dot here and each [[link]] a line between them.")
+                    Text("Each page becomes a dot, each [[link]] a line.")
                 } actions: {
                     Button("Add to Brain") { WispWindowRouter.shared.select(.brainInbox) }
                         .buttonStyle(WispPillButtonStyle())

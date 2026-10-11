@@ -38,7 +38,7 @@ struct SourcesTab: View {
                     Text("Fetch live data over the network")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(DS.Colors.textPrimary)
-                    Text("On, cards that need the network — weather and your saved sources — fetch live. Off keeps Wisp fully local: those cards don't appear. On-device cards (calendar, now playing) are unaffected.")
+                    Text("On, weather and your saved sources fetch live. Off keeps Wisp fully local. On-device cards are unaffected.")
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -57,7 +57,7 @@ struct SourcesTab: View {
     private var configuredSourcesCard: some View {
         DashboardCard(title: "Your sources") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Defined in ~/.wisp/sources.json. Each source names an HTTPS endpoint and which fields to show; ask Wisp for one by name to see it in the notch.")
+                Text("Defined in ~/.wisp/sources.json: an HTTPS endpoint and the fields to show. Ask Wisp for one by name.")
                     .font(.system(size: 11))
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -50,7 +50,7 @@ struct AgentTab: View {
                 Text("Agent mode is off")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Colors.textPrimary)
-                Text("These settings still apply once agent mode is enabled (AgentModeEnabled in Info.plist).")
+                Text("These apply once agent mode is on (AgentModeEnabled in Info.plist).")
                     .font(.system(size: 11))
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -73,7 +73,7 @@ struct AgentTab: View {
     private var agentFolderCard: some View {
         DashboardCard(title: "Agent Folder") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("The working directory the agent's file tasks run in.")
+                Text("Where the agent's file tasks run.")
                     .font(.system(size: 11))
                     .foregroundStyle(DS.Colors.textSecondary)
 
@@ -162,7 +162,7 @@ struct AgentTab: View {
                     Text("Auto-approve this session")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(DS.Colors.textPrimary)
-                    Text("Let the agent run its tools without asking each time, until Wisp restarts. Anything that can't be taken back — sending, posting, deleting, paying, inviting, running commands or shortcuts, or writing outside the agent folder — still asks. Off by default so you approve each step.")
+                    Text("Run tools without asking until Wisp restarts. Sending, posting, deleting, paying, inviting, running commands and writing outside the agent folder still ask.")
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -188,7 +188,7 @@ struct AgentTab: View {
                         Text("Morning suggestions")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(DS.Colors.textPrimary)
-                        Text("The first time you're at your Mac each day, the notch offers a few things Wisp can do — today's meetings, what's due, your pinned and recent routines. Built on this Mac, no model call.")
+                        Text("The first time you're at your Mac each day, the notch offers today's meetings, what's due and your routines. Built on this Mac, no model call.")
                             .font(.system(size: 11))
                             .foregroundStyle(DS.Colors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -245,7 +245,7 @@ struct AgentTab: View {
     }
 
     private var quietDuringCallsDetail: String {
-        let explanation = "While another app is using your microphone or a camera is on, Wisp holds its own announcements: no morning banner, and finished background tasks wait in the notch as \"new\" instead of notifying you. Anything you ask for still works."
+        let explanation = "While another app uses your microphone or camera, Wisp holds its announcements: finished tasks wait in the notch instead of notifying you. Anything you ask for still works."
         guard let activeQuietReason = quietModeMonitor.activeQuietReason else { return explanation }
         return "\(activeQuietReason.summary) — Wisp is keeping quiet right now. " + explanation
     }
@@ -312,7 +312,7 @@ struct AgentTab: View {
     private var appleShortcutsStatusDetail: String {
         switch shortcutsBridge.availability {
         case .notChecked, .available:
-            return "Ask Wisp to run one by name — \"run my morning routine\". Every run asks first, even with auto-approve on, since a shortcut can do anything it's built to do. Runs locally through the shortcuts command."
+            return "Ask Wisp to run one by name. Every run asks first, even with auto-approve on."
         case .unavailable(let reason):
             return reason
         }
@@ -377,7 +377,7 @@ struct AgentTab: View {
         case .notStarted, .waitingForExtension:
             return "In Chrome, turn on Developer mode in chrome://extensions, choose Load unpacked, and pick the chrome-extension folder in Wisp's source. It connects to Wisp on this Mac only (127.0.0.1)."
         case .connected:
-            return "Say \"organize my tabs\", \"group my tabs by site\" or \"close duplicate tabs\". Only loose tabs are grouped — pinned tabs and your own groups stay put."
+            return "Say \"organize my tabs\" or \"close duplicate tabs\". Pinned tabs and your own groups stay put."
         case .failed(let reason):
             return reason
         }

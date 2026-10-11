@@ -20,6 +20,7 @@ struct GeneralSettingsPage: View {
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
     @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
+    @ObservedObject private var windowAppearance = WispAppearancePreference.shared
 
     var body: some View {
         ScrollView {
@@ -28,6 +29,7 @@ struct GeneralSettingsPage: View {
                     PermissionsChecklist(companionManager: companionManager)
                 }
                 ActiveStackCard()
+                appearanceCard
                 islandCard
                 voiceCard
             }
@@ -38,26 +40,34 @@ struct GeneralSettingsPage: View {
         .background(WispColor.windowBackground)
     }
 
+    private var appearanceCard: some View {
+        DashboardCard(title: "Appearance") {
+            SettingRow(title: "Window", detail: "") {
+                WispSegmented(
+                    options: WispAppearancePreference.Mode.allCases,
+                    title: { $0.displayName },
+                    selection: $windowAppearance.mode
+                )
+            }
+        }
+    }
+
     private var islandCard: some View {
         DashboardCard(title: "Notch") {
             SettingRow(
                 title: "Island surface",
-                detail: "Black blends into the notch, like the iPhone's Dynamic Island. Liquid Glass lets the desktop show through."
+                detail: "Black blends into the notch. Liquid Glass lets the desktop show through."
             ) {
-                Picker("Island surface", selection: $islandStylePreference.surfaceStyle) {
-                    ForEach(NotchIslandSurfaceStyle.allCases) { surfaceStyle in
-                        Text(surfaceStyle.displayName).tag(surfaceStyle)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .pointerCursor()
+                WispSegmented(
+                    options: NotchIslandSurfaceStyle.allCases,
+                    title: { $0.displayName },
+                    selection: $islandStylePreference.surfaceStyle
+                )
             }
             Divider()
             SettingRow(
                 title: "Marker colour",
-                detail: "The colour of the markers, boxes and arrows Wisp draws on screen."
+                detail: "Markers, boxes and arrows Wisp draws on screen."
             ) {
                 HStack(spacing: 8) {
                     ForEach(WispCursorColor.allCases) { markerColor in
@@ -93,7 +103,7 @@ struct GeneralSettingsPage: View {
             VStack(alignment: .leading, spacing: 12) {
                 SettingRow(
                     title: "Speak replies",
-                    detail: "On, Wisp says a short line out loud when it helps. Off is silent mode: answers appear only in the notch."
+                    detail: "Wisp says a short line out loud when it helps. Off: answers appear only in the notch."
                 ) {
                     Toggle("Speak replies", isOn: $voiceOutputPreference.isReplySpeechEnabled)
                         .labelsHidden()
@@ -103,7 +113,7 @@ struct GeneralSettingsPage: View {
                 Divider()
                 SettingRow(
                     title: "Sound cues",
-                    detail: "Soft chimes as Wisp starts listening, thinks and replies."
+                    detail: "Soft chimes as Wisp listens, thinks and replies."
                 ) {
                     Toggle("Sound cues", isOn: $soundPreference.areSoundCuesEnabled)
                         .labelsHidden()
@@ -133,10 +143,12 @@ struct SettingRow<Control: View>: View {
                 Text(title)
                     .font(.body.weight(.medium))
                     .foregroundStyle(WispColor.textPrimary)
-                Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(WispColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.callout)
+                        .foregroundStyle(WispColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 0)
             control

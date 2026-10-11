@@ -82,7 +82,7 @@ struct BrainPageEditorView: View {
                 Text("Editing \(originalPage.title)")
                     .font(.headline)
                     .foregroundStyle(WispColor.textPrimary)
-                Text("Frontmatter first — title, kind, summary, aliases, tags. Link pages with [[Title]]; ## headings make sections.")
+                Text("Frontmatter first. Link pages with [[Title]]; ## starts a section.")
                     .font(.caption)
                     .foregroundStyle(WispColor.textSecondary)
                     .lineLimit(1)

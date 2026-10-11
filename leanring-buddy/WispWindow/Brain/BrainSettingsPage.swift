@@ -218,7 +218,7 @@ struct BrainSettingsPage: View {
             Button("Delete Activity", role: .destructive) { activityRecorder.deleteRecordedActivity() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every activity log on this Mac is deleted. Lines already written to your pages stay — remove those from the Log if you like.")
+            Text("Deletes every activity log on this Mac. Lines already in your pages stay.")
         }
     }
 
@@ -443,7 +443,7 @@ struct BrainSettingsPage: View {
     private var vaultCard: some View {
         DashboardCard(title: "Vault") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Your brain is a folder of plain markdown files — a valid Obsidian vault. Wisp re-reads it whenever it changes, so edits you make elsewhere apply straight away.")
+                Text("Your brain is a plain markdown folder, a valid Obsidian vault. Edits made elsewhere apply right away.")
                     .font(.callout)
                     .foregroundStyle(WispColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -518,7 +518,7 @@ struct ConversationHistorySettingsCard: View {
     var body: some View {
         DashboardCard(title: "Conversation history") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("The last \(ConversationHistoryCodec.maximumPersistedTurnCount) exchanges are saved on this Mac (text only — never screenshots) so Wisp can pick up where you left off. Only exchanges from the last \(resumeWindowDescription) are carried into a new session; older ones are kept for reference.")
+                Text("The last \(ConversationHistoryCodec.maximumPersistedTurnCount) exchanges are saved on this Mac, text only, so Wisp can pick up where you left off. Only the last \(resumeWindowDescription) carry into a new session.")
                     .font(.callout)
                     .foregroundStyle(WispColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -546,7 +546,7 @@ struct ConversationHistorySettingsCard: View {
             Button("Clear History", role: .destructive) { conversationHistoryStore.clearHistory() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Wisp forgets the current conversation and deletes the saved copy. Your brain's pages are not affected.")
+            Text("Forgets the current conversation and deletes the saved copy. Brain pages are unaffected.")
         }
     }
 

@@ -89,7 +89,7 @@ struct BrainInboxPage: View {
                 Text(isDropTargeted ? "Let go to add it" : "Drop anything worth remembering")
                     .font(WispFont.headline)
                     .foregroundStyle(WispColor.textPrimary)
-                Text("Files (\(supportedExtensionsDescription)), folders of notes, web links or text. Wisp reads each one on this Mac and files what matters into your pages.")
+                Text("Files (\(supportedExtensionsDescription)), note folders, links or text. Read on this Mac and filed into your pages.")
                     .font(.callout)
                     .foregroundStyle(WispColor.textSecondary)
                     .multilineTextAlignment(.center)
@@ -270,7 +270,7 @@ struct BrainInboxPage: View {
             .padding(.leading, 2)
 
             if ingestQueue.jobs.isEmpty {
-                Text("Nothing added this session. Whatever you add shows up here while Wisp reads it — one at a time, so your questions still get answered quickly.")
+                Text("Nothing added this session. Items show up here while Wisp reads them, one at a time.")
                     .font(.callout)
                     .foregroundStyle(WispColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -306,7 +306,7 @@ struct BrainInboxPage: View {
     private var notesImportCard: some View {
         DashboardCard(title: "Import notes") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Bring in notes you already keep — an Obsidian vault, a folder of markdown or text files, a Bear or Notes export — or your Apple Notes directly. Originals are copied into the vault's raw/notes folder and never changed.")
+                Text("Bring in an Obsidian vault, a folder of notes, a Bear or Notes export, or Apple Notes. Originals are copied, never changed.")
                     .font(.callout)
                     .foregroundStyle(WispColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -572,7 +572,7 @@ struct BrainAddLinkSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Add a link")
                 .font(.title3.weight(.semibold))
-            Text("Wisp fetches the page, reads it on this Mac and files what matters. Only the page's own address is contacted.")
+            Text("Wisp fetches the page and reads it on this Mac. Only the page's address is contacted.")
                 .font(.callout)
                 .foregroundStyle(WispColor.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

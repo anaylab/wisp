@@ -789,7 +789,7 @@ struct HomeTab: View {
                             BuddyAvatar(colorIndex: colorIndex, size: 34, isWorking: true)
                         }
                     }
-                    Text("A buddy takes one job off your hands — a morning digest, a page to watch — and runs it on a schedule.")
+                    Text("A buddy takes one job off your hands and runs it on a schedule.")
                         .font(WispFont.callout)
                         .foregroundStyle(WispColor.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -863,7 +863,7 @@ struct HomeTab: View {
                 ProgressView().controlSize(.small)
             case .needsAccess:
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("See your next meetings here. Wisp reads Calendar on this Mac; nothing is sent anywhere.")
+                    Text("Your next meetings appear here. Calendar is read on this Mac only.")
                         .font(WispFont.callout)
                         .foregroundStyle(WispColor.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
