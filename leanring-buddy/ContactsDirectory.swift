@@ -384,6 +384,95 @@ final class ContactsDirectory {
         )
     }
 
+    // MARK: - Personal context
+
+    /// Whether Contacts can be read without asking.
+    var isAccessGranted: Bool {
+        CNContactStore.authorizationStatus(for: .contacts) == .authorized
+    }
+
+    /// The person a family word means ("mom" → "Jane Doe") through the Me
+    /// card, or nil. Never prompts.
+    func resolvedNameWithoutPrompting(forRelationWord relationWord: String) async -> String? {
+        guard isAccessGranted, let resolution = try? await resolve(spokenName: relationWord, weakestAcceptedStrength: .exactFullNameOrNickname) else {
+            return nil
+        }
+        if case .matched(let matchedContact) = resolution { return matchedContact.displayName }
+        return nil
+    }
+
+    /// Contacts whose name, nickname, company or job title contains any of
+    /// `searchTerms`, with their numbers, addresses and birthday as the
+    /// detail, for personal context ("what's my dentist's address"). Never
+    /// prompts.
+    func personalContextHits(matchingAnyOf searchTerms: [String], maximumHitCount: Int) async -> [PersonalContextHit] {
+        guard isAccessGranted, !searchTerms.isEmpty else { return [] }
+        let contactStore = self.contactStore
+        return await Task.detached(priority: .userInitiated) { () -> [PersonalContextHit] in
+            let detailKeys: [CNKeyDescriptor] = Self.keysToFetch + [
+                CNContactJobTitleKey as CNKeyDescriptor,
+                CNContactPostalAddressesKey as CNKeyDescriptor,
+                CNContactBirthdayKey as CNKeyDescriptor,
+            ]
+            let fetchRequest = CNContactFetchRequest(keysToFetch: detailKeys)
+            var hits: [PersonalContextHit] = []
+            try? contactStore.enumerateContacts(with: fetchRequest) { contact, stopEnumerating in
+                let searchableName = [contact.givenName, contact.familyName, contact.nickname, contact.organizationName, contact.jobTitle]
+                    .joined(separator: " ")
+                guard PersonalContextTextMatching.text(searchableName, containsAnyOf: searchTerms) else { return }
+                hits.append(Self.personalContextHit(from: contact))
+                if hits.count >= maximumHitCount * 3 { stopEnumerating.pointee = true }
+            }
+            return hits
+        }.value
+    }
+
+    /// Contact names by normalized phone number or email, for naming who a
+    /// message came from. Empty without Contacts access; never prompts.
+    func displayNamesByNormalizedHandle() async -> [String: String] {
+        guard isAccessGranted else { return [:] }
+        let contactStore = self.contactStore
+        return await Task.detached(priority: .userInitiated) { () -> [String: String] in
+            guard let allContactRecords = try? Self.fetchAllContactRecords(from: contactStore) else { return [:] }
+            var displayNamesByHandle: [String: String] = [:]
+            for contactRecord in allContactRecords {
+                for contactHandle in contactRecord.phoneHandles + contactRecord.emailHandles {
+                    let normalizedHandle = MessagesHistoryDecoding.normalizedHandle(contactHandle.value)
+                    if !normalizedHandle.isEmpty { displayNamesByHandle[normalizedHandle] = contactRecord.displayName }
+                }
+            }
+            return displayNamesByHandle
+        }.value
+    }
+
+    nonisolated private static func personalContextHit(from contact: CNContact) -> PersonalContextHit {
+        let contactRecord = contactRecord(from: contact)
+        let organizationLine = [contact.jobTitle, contact.organizationName].filter { !$0.isEmpty }.joined(separator: ", ")
+        let handleDescriptions = (contactRecord.phoneHandles + contactRecord.emailHandles).prefix(3).map { contactHandle in
+            contactHandle.label.isEmpty ? contactHandle.value : "\(contactHandle.label) \(contactHandle.value)"
+        }
+        var excerptParts: [String] = []
+        if let firstPostalAddress = contact.postalAddresses.first {
+            let formattedAddress = CNPostalAddressFormatter.string(from: firstPostalAddress.value, style: .mailingAddress)
+            excerptParts.append("address: " + formattedAddress.replacingOccurrences(of: "\n", with: ", "))
+        }
+        if let birthdayComponents = contact.birthday, let birthdayDate = Calendar.current.date(from: birthdayComponents) {
+            let birthdayFormatter = DateFormatter()
+            birthdayFormatter.setLocalizedDateFormatFromTemplate(birthdayComponents.year == nil ? "MMMMd" : "yMMMMd")
+            excerptParts.append("birthday: " + birthdayFormatter.string(from: birthdayDate))
+        }
+        return PersonalContextHit(
+            id: "contacts:\(contact.identifier)",
+            sourceKind: .contacts,
+            title: [contactRecord.displayName, organizationLine.isEmpty ? "" : "(\(organizationLine))"]
+                .filter { !$0.isEmpty }
+                .joined(separator: " "),
+            detail: handleDescriptions.joined(separator: ", "),
+            excerpt: excerptParts.isEmpty ? nil : excerptParts.joined(separator: "; "),
+            relevantDate: nil
+        )
+    }
+
     nonisolated private static func fetchAllContactRecords(from contactStore: CNContactStore) throws -> [ContactRecord] {
         var contactRecords: [ContactRecord] = []
         let fetchRequest = CNContactFetchRequest(keysToFetch: keysToFetch)

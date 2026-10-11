@@ -86,24 +86,40 @@ The full Siri loop on one app, so the next apps reuse the same pieces.
    path and the agent tool (`CreatedReminderStore`). Reminders has no documented link to
    a single reminder, so the button opens the app.
 
-## Phase 3 — Personal context (the "knows my data" part)
+## Phase 3 — Personal context (done)
 
-A `PersonalContextSource` protocol with on-device sources, each gated by its own macOS
-permission and listed in Settings with a switch:
+"When is mom's flight?", "what's my dentist's address?", "find the invoice from Acme",
+"what did Sam text me about dinner": answered from the user's own data, searched on this
+Mac (`PersonalContext/`, `Tests/PersonalContext`).
 
 | Source | How | Gate |
 |---|---|---|
-| Calendar, Reminders | EventKit (exists) | Calendar/Reminders access |
-| Contacts | `ContactsDirectory` (exists) | Contacts access |
-| Files | `NSMetadataQuery` (the Spotlight index) | none beyond the query scope |
-| Mail | AppleScript with parameters (as `MessagesAppSender` does) | Automation → Mail |
-| Notes | AppleScript (as the brain's notes import does) | Automation → Notes |
-| Messages history | `chat.db`, read-only | Full Disk Access, opt-in, off by default |
+| Calendar, Reminders | EventKit | Calendar/Reminders access |
+| Contacts | `ContactsDirectory` (address, birthday; "mom" through the Me card) | Contacts access |
+| Files | `NSMetadataQuery`, scoped to Documents, Desktop, Downloads, iCloud Drive | Allow in Settings (see below) |
+| Mail | AppleScript: inbox by subject/sender, opening of the top two | Automation → Mail, and Mail open |
+| Notes | AppleScript: title or text | Automation → Notes, and Notes open |
+| Messages | `chat.db` via SQLite, read-only | Full Disk Access, and switched on (off by default) |
 
-Each turn, a ranked handful of hits (titles + one line, ~600 chars total) is added to
-the user message like `BrainPromptContext`, so the prefix cache is unaffected, and is
-stripped from history. A `search_personal_context` tool handles follow-ups. Results
-are framed as data, never instructions. Mail and messages are written by other people.
+What was learned building it:
+
+- **Searching never asks for anything.** Each source reports whether it can be searched
+  without a prompt and is skipped otherwise. Files needed an explicit setup: a Spotlight
+  query scoped to Documents raised macOS's folder prompt mid-search, and there is no API
+  to read that permission silently. So file search stays off until the user presses
+  Allow in Settings, which touches each folder once.
+- **Only personal questions search, and the slow sources only when named.** A question
+  qualifies by "my"/"mom's"/topic/source words; "how do I center a div" doesn't. Fast
+  sources get 0.8s, and Mail/Notes/Messages get 2.5s, only when the request mentions
+  them. A source still answering at the deadline is left out of that turn.
+- **The data goes before the question.** With the block after the question, the local
+  3B model answered "I couldn't find a specific event called Columbus Day" while the
+  entry was right there; placed first, with a header that leads with "answer from
+  these", it answered correctly.
+- **Visible and private.** History records "Searched your data on this Mac — N matches:
+  Calendar". The block is stripped from conversation history. Cloud models get none of
+  it unless the user turns on "Also with cloud models"; the `search_personal_context`
+  tool refuses then too, and cloud buddies never get it.
 
 ## Phase 4 — Wisp in Siri, Spotlight and Shortcuts
 

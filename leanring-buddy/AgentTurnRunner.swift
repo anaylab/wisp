@@ -142,6 +142,9 @@ final class AgentTurnRunner {
     ///     Shown, never spoken — speaking every intermediate thought would
     ///     make a multi-step request unbearable to listen to.
     ///   - onStep: Called as each step completes, for the dashboard timeline.
+    ///   - leadingContextText: Context the model should read *before* the
+    ///     question — the user's own data found for it (personal context). A
+    ///     small model reads what follows the question as an afterthought.
     ///   - screenContextText: Extra per-turn context about the screen (the
     ///     Accessibility element list), carried as its own text block on the
     ///     first user message, beside the screenshot. Kept out of `userText` so
@@ -150,6 +153,7 @@ final class AgentTurnRunner {
     func run(
         userText: String,
         images: [(data: Data, label: String)],
+        leadingContextText: String? = nil,
         screenContextText: String? = nil,
         systemPrompt: String,
         conversationHistory: [BuddyChatMessage],
@@ -184,6 +188,9 @@ final class AgentTurnRunner {
         // The screenshot rides on the first user message and nowhere else.
         var firstUserBlocks: [BuddyContentBlock] = images.map {
             .image(data: $0.data, label: $0.label)
+        }
+        if let leadingContextText, !leadingContextText.isEmpty {
+            firstUserBlocks.append(.text(leadingContextText))
         }
         firstUserBlocks.append(.text(userText))
         if let screenContextText, !screenContextText.isEmpty {

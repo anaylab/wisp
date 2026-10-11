@@ -219,6 +219,62 @@ actor RemindersDataProvider: GlanceCardDataProvider {
         return String(format: "#%02X%02X%02X", red, green, blue)
     }
 
+    // MARK: - Personal context
+
+    /// Asks for access (the system prompt) — only from Settings → Your Data,
+    /// when the user pressed Allow. Returns whether access is now granted.
+    func requestAccessForPersonalContext() async -> Bool {
+        (try? await ensureAccess()) != nil
+    }
+
+    /// Reminders — open ones, and ones completed in the last month — whose
+    /// title or notes contain any of `searchTerms`. Never prompts, like
+    /// `CalendarDataProvider.personalContextHits`.
+    func personalContextHits(
+        matchingAnyOf searchTerms: [String],
+        now: Date = Date(),
+        maximumHitCount: Int
+    ) async -> [PersonalContextHit] {
+        guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess, !searchTerms.isEmpty else { return [] }
+        let incompletePredicate = eventStore.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
+        let recentlyCompletedPredicate = eventStore.predicateForCompletedReminders(
+            withCompletionDateStarting: now.addingTimeInterval(-30 * 86_400),
+            ending: now,
+            calendars: nil
+        )
+        var hits: [PersonalContextHit] = []
+        for predicate in [incompletePredicate, recentlyCompletedPredicate] {
+            let matchingHits: [PersonalContextHit] = await withCheckedContinuation { continuation in
+                eventStore.fetchReminders(matching: predicate) { fetchedReminders in
+                    // On EventKit's queue: flatten right here, as the card path does.
+                    let dueFormatter = DateFormatter()
+                    dueFormatter.setLocalizedDateFormatFromTemplate("EEEMMMdjmm")
+                    let flattenedHits = (fetchedReminders ?? []).compactMap { reminder -> PersonalContextHit? in
+                        let searchableText = [reminder.title ?? "", reminder.notes ?? ""].joined(separator: " ")
+                        guard PersonalContextTextMatching.text(searchableText, containsAnyOf: searchTerms) else { return nil }
+                        let dueDate = reminder.dueDateComponents.flatMap { ($0.calendar ?? Calendar.current).date(from: $0) }
+                        var detailParts: [String] = []
+                        if let dueDate { detailParts.append("due \(dueFormatter.string(from: dueDate))") }
+                        if reminder.isCompleted { detailParts.append("done") }
+                        if let listName = reminder.calendar?.title { detailParts.append(listName) }
+                        let trimmedNotes = reminder.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        return PersonalContextHit(
+                            id: "reminders:\(reminder.calendarItemIdentifier)",
+                            sourceKind: .reminders,
+                            title: reminder.title ?? "(untitled)",
+                            detail: SchedulingPhrasing.plainSpaced(detailParts.joined(separator: " · ")),
+                            excerpt: trimmedNotes.isEmpty ? nil : String(trimmedNotes.prefix(300)),
+                            relevantDate: dueDate ?? reminder.completionDate
+                        )
+                    }
+                    continuation.resume(returning: flattenedHits)
+                }
+            }
+            hits.append(contentsOf: matchingHits)
+        }
+        return Array(hits.prefix(maximumHitCount * 3))
+    }
+
     /// Ensures the app can read and write reminders, requesting full access on
     /// first use. Write-only access is not enough: the card has to read.
     private func ensureAccess() async throws {

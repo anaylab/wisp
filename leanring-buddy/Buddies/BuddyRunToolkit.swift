@@ -20,6 +20,7 @@ enum BuddyRunToolPolicy {
         BrainToolNames.ingestIntoBrain,
         "remember",
         "forget",
+        PersonalContextAgentTool.toolName,
     ]
 
     static func excludedToolNames(modelSendsDataOffThisMachine: Bool) -> Set<String> {

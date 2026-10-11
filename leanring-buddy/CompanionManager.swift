@@ -1399,6 +1399,20 @@ final class CompanionManager: ObservableObject {
                         ? Task { await AccessibilityElementSnapshotter.captureFrontmostApplicationSnapshot() }
                         : nil
 
+                // The user's own Calendar, Reminders, Contacts and files (and
+                // Mail/Notes/Messages when the request names them), searched on
+                // this Mac alongside the capture — "when is mom's flight". It
+                // waits 0.8s at most (2.5s with a slow source); "" when the
+                // request isn't about the user's things. Off for a cloud model
+                // unless the user allowed it.
+                let isSelectedModelSendingDataOffThisMachine = !isSelectedModelProviderLocal
+                let personalContextTask = Task {
+                    await PersonalContextStore.shared.contextForTurn(
+                        request: transcript,
+                        modelSendsDataOffThisMachine: isSelectedModelSendingDataOffThisMachine
+                    )
+                }
+
                 // Capture all connected screens so the AI has full context
                 PerfMetricsRecorder.shared.beginPhase(.screenCapture)
                 let screenCaptures = try await claimScreenCaptures()
@@ -1440,6 +1454,18 @@ final class CompanionManager: ObservableObject {
                 // any time-relative answer. On the user message like the rest,
                 // so the system prompt (and its prefix cache) never changes.
                 let currentMomentPromptText = ClockQuestion.currentMomentPromptText()
+                let personalTurnContext = await personalContextTask.value
+                let personalContextPromptText = personalTurnContext.promptText
+                // Reading the user's data is worth seeing afterwards: History's
+                // "What Wisp did" names the sources that were read.
+                if let personalContextHistorySummary = personalTurnContext.historySummary {
+                    AgentTaskRegistry.shared.appendStep(
+                        AgentStepRecord(kind: .tool(name: PersonalContextAgentTool.toolName), summary: personalContextHistorySummary),
+                        to: taskID
+                    )
+                }
+                // The personal-context block goes *before* the question (see
+                // `leadingContextText`), so it isn't part of this one.
                 let perTurnContextText = [currentMomentPromptText, accessibilityElementPromptText, brainPromptContextText]
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n\n")
@@ -1490,6 +1516,7 @@ final class CompanionManager: ObservableObject {
                     let outcome = try await runner.run(
                         userText: transcript,
                         images: labeledImages,
+                        leadingContextText: personalContextPromptText,
                         screenContextText: perTurnContextText,
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
                             + ScreenAnnotationParser.promptInstructions
@@ -1536,9 +1563,16 @@ final class CompanionManager: ObservableObject {
                     let perTurnContextBlocks: [BuddyContentBlock] = perTurnContextText.isEmpty
                         ? []
                         : [.text(perTurnContextText)]
+                    // The user's own data comes before the question: the
+                    // local 3B model answered "I couldn't find it" with the
+                    // calendar entry right after the question it was reading.
+                    let personalContextBlocks: [BuddyContentBlock] = personalContextPromptText.isEmpty
+                        ? []
+                        : [.text(personalContextPromptText)]
                     let currentUserMessage = BuddyChatMessage(
                         role: .user,
-                        blocks: [.text(transcript)]
+                        blocks: personalContextBlocks
+                            + [.text(transcript)]
                             + perTurnContextBlocks
                             + labeledImages.map { .image(data: $0.data, label: $0.label) }
                     )
@@ -1738,12 +1772,16 @@ final class CompanionManager: ObservableObject {
                 // at `a12` next turn when `a12` has become a different element;
                 // the brain pages were picked for this request, and the next
                 // one picks its own.
-                if !perTurnContextText.isEmpty {
+                // The personal-context hits go too: they were found for this
+                // question, and kept in history they'd be resent (and could leave
+                // the Mac) with every later turn.
+                if !perTurnContextText.isEmpty || !personalContextPromptText.isEmpty {
                     recordedMessages = recordedMessages.map { recordedMessage in
                         var messageWithoutElementList = recordedMessage
                         messageWithoutElementList.blocks.removeAll { block in
-                            if case .text(let blockText) = block { return blockText == perTurnContextText }
-                            return false
+                            guard case .text(let blockText) = block else { return false }
+                            return (!perTurnContextText.isEmpty && blockText == perTurnContextText)
+                                || (!personalContextPromptText.isEmpty && blockText == personalContextPromptText)
                         }
                         return messageWithoutElementList
                     }

@@ -863,6 +863,7 @@ final class AgentToolRegistry: ObservableObject {
         registerMessagingTools()
         registerBrainTools()
         registerWindowManagementTools()
+        registerPersonalContextTool()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

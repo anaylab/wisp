@@ -41,7 +41,7 @@ cloud dependency to the local path, without asking.
   settings pages and the big menu bar panel, so every setting has exactly one home. It is a stock
   `NavigationSplitView` in an `NSWindow` whose `NSHostingController` bridges title + toolbar
   (`sceneBridgingOptions`); sidebar sections are `WispSection` (Today, Chat, Buddies, Brain, Routines,
-  History · Manage: Connections, Settings) and a multi-page section switches pages with a segmented
+  History · Manage: Connections (Marketplace, Servers & Tools, Sources, Your Data), Settings) and a multi-page section switches pages with a segmented
   control in the toolbar (`WispPage`). Anything opens it at a page with
   `WispWindowNavigator.open(_:)` (closes the notch workspace + quick panel first). On launch with a
   permission missing, the window opens on Today, which leads with the `PermissionsChecklist`.
@@ -532,6 +532,36 @@ cloud dependency to the local path, without asking.
   card's own present (6s floor) used to cut short the reply's longer one. The overlay's scheduled fade-out
   (`scheduleTransientHideIfNeeded`) waits while a confirmation is pending, and a new confirmation cancels it: a typed
   question doesn't cancel the previous reply's fade the way push-to-talk does, so it used to remove the prompt mid-decision.
+- **Personal context, Siri-style** (`PersonalContext/`, Phase 3 of `docs/siri-style-plan.md`): "when is mom's
+  flight?", "what's my dentist's address?", "find the invoice from Acme", "what did Sam text me about dinner" are
+  answered from the user's own data, searched **on this Mac**. `PersonalContextQueryBuilder` (pure) decides a request is
+  about the user's things (first-person/possessive/relation/topic/source words; not the screen; a bare "I" in a "how
+  do I…" how-to doesn't count), picks ≤4 search terms (longest first) and the sources it names. Sources:
+  Calendar/Reminders (`CalendarDataProvider`/`RemindersDataProvider.personalContextHits`), Contacts
+  (`ContactsDirectory.personalContextHits`, with address + birthday; "mom" → the Me card's relation), Files
+  (`SpotlightFileSearch`, `NSMetadataQuery` scoped to Documents/Desktop/Downloads/iCloud Drive, name or text), Mail
+  (`MailSearchBridge`, AppleScript on the inbox by subject/sender + the top two messages' opening), Notes
+  (`NotesSearchBridge`, title or text, Recently Deleted and locked notes skipped) and Messages
+  (`MessagesHistoryReader`, `chat.db` read-only via SQLite3, `attributedBody` typedstream decoded by the pure
+  `MessagesHistoryDecoding`, numbers named through Contacts). **Searching never prompts**: each source reports
+  `PersonalContextSourceAvailability` (EventKit/Contacts status; `AEDeterminePermissionToAutomateTarget` without asking
+  for Mail/Notes; Mail and Notes only while already open — never launched; Messages only with Full Disk Access and
+  switched on, off by default; Files only after the user pressed Allow, because a Spotlight query scoped to the
+  protected folders raised macOS's folder prompt mid-search and there's no API to read that permission silently, so
+  `SpotlightFileSearch.requestFolderAccess` touches each folder from Settings and remembers it). Fast sources run on
+  every personal question (0.8s deadline); Mail/Notes/Messages only when the request names them (2.5s).
+  `PersonalContextStore` runs the allowed sources as separate tasks against the deadline (`PersonalContextSearchRound`;
+  a task group would wait for an AppleScript that can't be cancelled), resolves relation words first, and ranks
+  (`PersonalContextRanking`: term matches, named-source bonus, recency, identical entries collapsed). The block
+  (`PersonalContextPromptBlock`, ≤900 chars, every hit one line, quotes/newlines neutralised, other people's writing
+  flagged as information not instructions) goes on the user message **before** the question
+  (`AgentTurnRunner.run(leadingContextText:)` / the single-call path) — the 3B model answered "I couldn't find it"
+  with the entry placed after the question — and is stripped from history. History gets a step: "Searched your data on
+  this Mac — 2 matches: Calendar". **Cloud models**: off unless "Also with cloud models" is on, and
+  `search_personal_context` (the agent tool for follow-ups; all enabled sources, longer wait) refuses then too and is in
+  `BuddyRunToolPolicy.privateKnowledgeToolNames`. Settings → Connections → **Your Data** (`PersonalContextPage`): master
+  and cloud switches, one row per source with status + Allow / Open System Settings / Open Full Disk Access, and a
+  "Try a search" box. `NSAppleEventsUsageDescription` names the Mail/Notes search.
 - **Window management** (`WindowManagement/`): "put Safari on the left and Xcode on the right",
   "maximize this", "make this window full screen", "move Chrome to the right half", "center this
   window", "move this to my other screen", "tile Notes and Mail" are recognised by
@@ -853,6 +883,12 @@ Grouped by what they do. Line counts are approximate.
 | `SchedulingConfirmationView.swift` | ~270 | `SchedulingConfirmationPreview` (tool input → event/reminder) and the Siri-style Add to Calendar / Add Reminder confirmation panel. |
 | `CreatedCalendarEventStore.swift` | ~120 | Events Wisp created this session (both paths), for the result card: Undo (only these events, via `CalendarDataProvider.removeEvent`) and Open in Calendar. |
 | `CalendarEventAddedCardView.swift` | ~170 | The Siri-style "Added to Calendar" result card (date tile, title, day, time range, place, Open in Calendar / Undo, removed state) plus the shared result-card header, actions and island surface. |
+| `PersonalContext/PersonalContextQuery.swift` | ~390 | Pure side of personal context: `PersonalContextSourceKind`, `PersonalContextHit`, `PersonalContextQuery` + `PersonalContextQueryBuilder` (is it about the user's things; terms; named sources; relation words), `PersonalContextRanking`, `PersonalContextTextMatching`, `PersonalContextPromptBlock`. Tested by `Tests/PersonalContext`. |
+| `PersonalContext/PersonalContextSources.swift` | ~555 | `PersonalContextSourceAvailability` + `PersonalContextSystemPermissions` (never-prompting status per source), `ScriptedAppPermission` (Automation status/request), `ScriptHandlerRunner` (parameterised AppleScript handlers on a serial queue), `MailSearchBridge`, `NotesSearchBridge`, `SpotlightFileSearch` (with the explicit folder-access setup) and `MessagesHistoryReader` (SQLite). |
+| `PersonalContext/MessagesHistoryDecoding.swift` | ~85 | Pure Messages helpers: typedstream `attributedBody` → text, Messages timestamps, handle normalisation. Tested against real `NSArchiver` archives. |
+| `PersonalContext/PersonalContextStore.swift` | ~265 | Switches (persisted), availability, access requests (Settings only), and the deadline-bounded search for a turn (`contextForTurn` → `TurnContext` with a History summary) and for the tool (`search`). |
+| `PersonalContext/PersonalContextAgentTool.swift` | ~90 | `search_personal_context` (read-only, local; refuses for cloud models unless allowed). |
+| `WispWindow/PersonalContextPage.swift` | ~230 | Connections → Your Data: master/cloud switches, per-source rows with status and the right grant button, and a trial search. |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
@@ -1054,6 +1090,7 @@ running):
 ./Tests/EditableConfirmation/run.sh      # editable confirmation fields: which, edit application, refusals
 ./Tests/CalendarEventCommand/run.sh      # calendar fast path: recognition, time resolution, title/place, extraction checks
 ./Tests/ReminderCommand/run.sh           # reminders fast path: recognition, due dates, lists, extraction checks
+./Tests/PersonalContext/run.sh           # personal context: which requests, terms, ranking, the model's block, Messages decoding
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a

@@ -176,6 +176,8 @@ struct WispWindowView: View {
             ToolsTab()
         case .sources:
             SourcesTab()
+        case .yourData:
+            PersonalContextPage()
         case .general:
             GeneralSettingsPage(companionManager: companionManager)
         case .shortcuts:

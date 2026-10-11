@@ -209,6 +209,60 @@ actor CalendarDataProvider: GlanceCardDataProvider {
         return true
     }
 
+    // MARK: - Personal context
+
+    /// Asks for access (the system prompt) — only from Settings → Your Data,
+    /// when the user pressed Allow. Returns whether access is now granted.
+    func requestAccessForPersonalContext() async -> Bool {
+        (try? await ensureAccess()) != nil
+    }
+
+    /// Events from a month back to four months ahead whose title, place or
+    /// notes contain any of `searchTerms`, for personal context ("when is
+    /// mom's flight"). Never prompts: without full access it returns nothing,
+    /// because it runs inside a turn nobody asked a permission question in.
+    func personalContextHits(
+        matchingAnyOf searchTerms: [String],
+        now: Date = Date(),
+        maximumHitCount: Int
+    ) -> [PersonalContextHit] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess, !searchTerms.isEmpty else { return [] }
+        let predicate = eventStore.predicateForEvents(
+            withStart: now.addingTimeInterval(-30 * 86_400),
+            end: now.addingTimeInterval(120 * 86_400),
+            calendars: nil
+        )
+        let whenFormatter = DateFormatter()
+        whenFormatter.setLocalizedDateFormatFromTemplate("EEEMMMdjmm")
+        let dayFormatter = DateFormatter()
+        dayFormatter.setLocalizedDateFormatFromTemplate("EEEMMMd")
+
+        return eventStore.events(matching: predicate)
+            .filter { event in
+                let searchableText = [event.title ?? "", event.location ?? "", event.notes ?? ""].joined(separator: " ")
+                return PersonalContextTextMatching.text(searchableText, containsAnyOf: searchTerms)
+            }
+            // Soonest to now first, so a cap keeps the relevant ones.
+            .sorted { abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now)) }
+            .prefix(maximumHitCount * 3)
+            .map { event in
+                let whenText = event.isAllDay
+                    ? "\(dayFormatter.string(from: event.startDate)), all day"
+                    : whenFormatter.string(from: event.startDate)
+                let detailParts = [whenText, event.location?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""]
+                    .filter { !$0.isEmpty }
+                let trimmedNotes = event.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return PersonalContextHit(
+                    id: "calendar:\(event.eventIdentifier ?? UUID().uuidString)",
+                    sourceKind: .calendar,
+                    title: event.title ?? "(no title)",
+                    detail: SchedulingPhrasing.plainSpaced(detailParts.joined(separator: " · ")),
+                    excerpt: trimmedNotes.isEmpty ? nil : String(trimmedNotes.prefix(300)),
+                    relevantDate: event.startDate
+                )
+            }
+    }
+
     /// Ensures the app can read events, requesting access on first use.
     private func ensureAccess() async throws {
         switch EKEventStore.authorizationStatus(for: .event) {
