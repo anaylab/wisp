@@ -26,6 +26,10 @@ enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codabl
     /// Anthropic's Claude, over the network, with a user-supplied API key.
     case anthropic
 
+    /// Anthropic's Claude, paid for by the user's Claude subscription by
+    /// driving their own signed-in `claude` command line tool. No API key.
+    case claudeSubscription
+
     /// OpenAI's GPT, over the network, with a user-supplied API key.
     case openAI
 
@@ -39,6 +43,7 @@ enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codabl
         switch self {
         case .localOllama: return "Local (Ollama)"
         case .anthropic:   return "Claude (Anthropic)"
+        case .claudeSubscription: return "Claude (your subscription)"
         case .openAI:      return "GPT (OpenAI)"
         case .gemini:      return "Gemini (Google)"
         }
@@ -57,10 +62,11 @@ enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codabl
 
     /// Whether this provider needs a user-supplied API key before it can run.
     ///
-    /// Only the local provider works without one. A cloud provider selected
+    /// Only the local provider and the subscription provider (which uses the
+    /// `claude` CLI's own sign-in) work without one. A cloud provider selected
     /// without a stored key is a configuration error the UI must surface rather
     /// than a request that silently fails.
     var requiresAPIKey: Bool {
-        self != .localOllama
+        self != .localOllama && self != .claudeSubscription
     }
 }

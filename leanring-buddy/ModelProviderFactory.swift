@@ -44,6 +44,12 @@ enum ModelProviderFactory {
                 isWebAccessEnabled: AnthropicModelSettings.isWebAccessEnabled
             )
 
+        case .claudeSubscription:
+            return ClaudeSubscriptionProvider(
+                modelChoice: claudeModelOverride ?? AnthropicModelSettings.selectedModel,
+                effortLevel: AnthropicModelSettings.effortLevel
+            )
+
         case .openAI:
             return OpenAIProvider(apiKey: ProviderKeychainStore.apiKey(for: .openAI))
         }
