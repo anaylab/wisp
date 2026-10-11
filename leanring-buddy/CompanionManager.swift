@@ -1315,6 +1315,19 @@ final class CompanionManager: ObservableObject {
             }
         }
 
+        // "Add a sticky note to my Freeform board saying buy milk", once the
+        // user has a shortcut named for it, runs that shortcut — with "buy
+        // milk" as its input — instead of hoping the model picks run_shortcut.
+        // Run Shortcut always asks first (the input is editable there), so a
+        // near miss costs a Cancel.
+        if let shortcutRunRequest = ShortcutRunRequestMatcher.runRequest(
+            forRequest: transcript,
+            shortcutNames: ShortcutsBridge.shared.cachedShortcutNames
+        ) {
+            runDirectShortcutCommand(shortcutRunRequest, transcript: transcript, historyTitle: historyTitle)
+            return
+        }
+
         // Browser commands go straight to the browser. The local model was
         // measured calling no tool at all for "open a new tab", "open youtube"
         // or "go to github.com" — it said "sure" and did nothing — so a plain
@@ -1332,6 +1345,23 @@ final class CompanionManager: ObservableObject {
                 runDirectBrowserRoute(browserRoute, transcript: transcript)
                 return
             }
+        }
+
+        // Asking another app for something Wisp can't do itself — "schedule a
+        // meeting in Teams" — when that app offers a fitting action to
+        // Shortcuts: show which, and the shortcut name that makes the next
+        // request run it, instead of a model guessing. Apps Wisp handles
+        // natively or an installed tool covers are left to those.
+        InstalledAppActionsCatalog.shared.scanInBackgroundIfStale()
+        let applicationsForSuggestions = InstalledAppActionsCatalog.shared.applicationsForSuggestions(
+            excludingAppsCoveredByToolNames: AgentToolRegistry.shared.toolNames
+        )
+        if let appActionSuggestion = AppActionRequestMatcher.suggestion(
+            forRequest: transcript,
+            installedApplications: applicationsForSuggestions
+        ) {
+            presentShortcutSuggestion(appActionSuggestion, transcript: transcript, historyTitle: historyTitle)
+            return
         }
 
         // "Where is X" / "point at X" is answered from what Wisp already knows
@@ -3495,6 +3525,138 @@ extension CompanionManager {
             isAllDay: askedDraft.isAllDay,
             location: approvedLocation
         )
+    }
+}
+
+// MARK: - Other apps through Shortcuts
+
+extension CompanionManager {
+    /// Runs a shortcut recognised by `ShortcutRunRequestMatcher`, after the
+    /// Run Shortcut confirmation (always shown, input editable), and says
+    /// what it returned.
+    fileprivate func runDirectShortcutCommand(
+        _ shortcutRunRequest: ShortcutRunRequest,
+        transcript: String,
+        historyTitle: String?
+    ) {
+        PerfMetricsRecorder.shared.abandonTurn()
+        voiceState = .processing
+        currentReplyText = ""
+        let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
+
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            let startedAt = Date()
+            let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+            let runShortcutToolName = ShortcutsToolRouting.runShortcutToolName
+            var askedToolFields: [String: JSONValue] = ["name": .string(shortcutRunRequest.shortcutName)]
+            if let textInput = shortcutRunRequest.textInput { askedToolFields["input"] = .string(textInput) }
+            let askedToolInput = JSONValue.object(askedToolFields)
+
+            let approvalOutcome = await ToolConfirmationCoordinator.shared.requestApprovalAllowingEdits(
+                toolName: runShortcutToolName,
+                toolInput: askedToolInput
+            )
+            guard !Task.isCancelled else {
+                AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+                return
+            }
+
+            let replyText: String
+            let wasDeclinedByUser = !approvalOutcome.isApproved
+            if approvalOutcome.isApproved {
+                // Only the input can be edited on the card; the shortcut is the one asked about.
+                let appliedEdits = approvalOutcome.approvedToolInput(forAskedToolInput: askedToolInput, toolName: runShortcutToolName)
+                var approvedTextInput = shortcutRunRequest.textInput
+                if case .object(let approvedFields) = appliedEdits.toolInput, case .string(let editedInput)? = approvedFields["input"] {
+                    approvedTextInput = editedInput.isEmpty ? nil : editedInput
+                }
+                let shortcutResultText = await ShortcutsBridge.shared.runShortcut(
+                    named: shortcutRunRequest.shortcutName,
+                    textInput: approvedTextInput
+                )
+                replyText = Self.userFacingShortcutResult(shortcutResultText, shortcutName: shortcutRunRequest.shortcutName)
+            } else {
+                replyText = "Okay, I didn't run it."
+            }
+
+            let didSucceed = replyText.hasPrefix("Ran ")
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(
+                    kind: .tool(name: runShortcutToolName),
+                    summary: wasDeclinedByUser ? "Shortcut not run" : "Ran the \"\(shortcutRunRequest.shortcutName)\" shortcut — no model call",
+                    startedAt: startedAt,
+                    durationSeconds: Date().timeIntervalSince(startedAt),
+                    isError: !didSucceed && !wasDeclinedByUser
+                ),
+                to: taskID
+            )
+            AgentTaskRegistry.shared.finishTask(
+                taskID,
+                status: didSucceed || wasDeclinedByUser ? .succeeded : .failed(replyText),
+                finalText: replyText
+            )
+            self.conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                BuddyChatMessage(role: .user, text: transcript),
+                BuddyChatMessage(role: .assistant, text: replyText),
+            ]))
+            self.conversationTranscript.trimToRecentTurns(10)
+
+            self.currentReplyText = replyText
+            if !wasDeclinedByUser { self.flashIsland(didSucceed ? .success : .error) }
+            if isReplySpeechEnabled {
+                self.voiceState = .responding
+                try? await self.ttsProvider.speakText(replyText)
+            }
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
+    }
+
+    /// `ShortcutsBridge`'s result is written for the model ("ran the shortcut
+    /// … its output:"); the notch gets "Ran “Log Water.” 500 ml logged."
+    fileprivate static func userFacingShortcutResult(_ shortcutResultText: String, shortcutName: String) -> String {
+        let ranPrefix = "ran the shortcut \"\(shortcutName)\"."
+        guard shortcutResultText.hasPrefix(ranPrefix) else {
+            guard let firstCharacter = shortcutResultText.first else { return "That shortcut didn't run." }
+            return firstCharacter.uppercased() + shortcutResultText.dropFirst()
+        }
+        let afterPrefix = shortcutResultText.dropFirst(ranPrefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+        let outputMarker = "its output:"
+        if afterPrefix.hasPrefix(outputMarker) {
+            let outputText = afterPrefix.dropFirst(outputMarker.count).trimmingCharacters(in: .whitespacesAndNewlines)
+            return "Ran “\(shortcutName).” \(outputText)"
+        }
+        return "Ran “\(shortcutName).”"
+    }
+
+    /// Shows the "Make it a Shortcut" card for a request another app could
+    /// do through Shortcuts. No model call, nothing run.
+    fileprivate func presentShortcutSuggestion(_ appActionSuggestion: AppActionSuggestion, transcript: String, historyTitle: String?) {
+        PerfMetricsRecorder.shared.abandonTurn()
+        let shortApplicationName = AppActionRequestMatcher.shortName(of: appActionSuggestion.application.applicationName)
+        let bestActionTitle = appActionSuggestion.matchedActions.first?.title ?? ""
+        let replyText = "I can't control \(shortApplicationName) directly, but it offers “\(bestActionTitle)” to Shortcuts. "
+            + "Make a shortcut named “\(appActionSuggestion.suggestedShortcutName)” and I'll run it whenever you ask."
+
+        let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
+        AgentTaskRegistry.shared.appendStep(
+            AgentStepRecord(kind: .modelCall, summary: "Suggested a \(shortApplicationName) shortcut — no model call"),
+            to: taskID
+        )
+        AgentTaskRegistry.shared.finishTask(taskID, status: .succeeded, finalText: replyText)
+        conversationTranscript.append(ConversationTranscript.Turn(messages: [
+            BuddyChatMessage(role: .user, text: transcript),
+            BuddyChatMessage(role: .assistant, text: replyText),
+        ]))
+        conversationTranscript.trimToRecentTurns(10)
+
+        resolvedGlanceCard = .shortcutSuggestion(appActionSuggestion)
+        currentReplyText = replyText
+        voiceState = .idle
+        scheduleTransientHideIfNeeded()
     }
 }
 

@@ -864,6 +864,8 @@ final class AgentToolRegistry: ObservableObject {
         registerBrainTools()
         registerWindowManagementTools()
         registerPersonalContextTool()
+        // What other apps can do through Shortcuts, for shortcut suggestions.
+        InstalledAppActionsCatalog.shared.scanInBackgroundIfStale()
         register(
             BuddyToolDefinition(
                 name: "read_clipboard",

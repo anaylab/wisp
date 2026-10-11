@@ -1339,6 +1339,8 @@ struct NotchHUDView: View {
                 CalendarEventAddedCardView(state: calendarEventAddedCardState)
             case let .reminderAdded(reminderAddedCardState):
                 ReminderAddedCardView(state: reminderAddedCardState)
+            case let .shortcutSuggestion(appActionSuggestion):
+                ShortcutSuggestionCardView(suggestion: appActionSuggestion)
             }
         }
     }

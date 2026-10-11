@@ -234,6 +234,9 @@ enum ResolvedGlanceCard: Equatable {
     case calendarEventAdded(CalendarEventAddedCardState)
     /// The result of adding a reminder, with Undo; details in `CreatedReminderStore`.
     case reminderAdded(ReminderAddedCardState)
+    /// "Make it a Shortcut": another app's actions that would do what was
+    /// asked, and the shortcut name to give it.
+    case shortcutSuggestion(AppActionSuggestion)
 }
 
 // MARK: - Tag parsing

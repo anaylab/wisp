@@ -576,6 +576,25 @@ cloud dependency to the local path, without asking.
   the model — answers an intent with no per-route plumbing; past 75s it returns "still working" and the answer still
   lands in the notch. Buddy runs return "<name> is on it" (they run in the background). Xcode's App Intents metadata step
   writes `Wisp.app/Contents/Resources/Metadata.appintents`; verified there and as Spotlight's "Ask Wisp — Run" action.
+- **Other apps through Shortcuts** (`OtherAppActions/`, Phase 5 of `docs/siri-style-plan.md`): macOS won't let Wisp
+  call another app's App Intents, but apps ship them as metadata (`Contents/Resources/Metadata.appintents/
+  extract.actionsdata`), so Wisp *reads* what each installed app can do. `InstalledAppActionsCatalog` scans
+  /Applications, /System/Applications (+ Utilities) and ~/Applications off the main actor (~0.07s, 21 apps here; at launch
+  and when 10 min stale), parsed by the pure `AppIntentsMetadataParser` (discoverable, not assistant-only, no Apple
+  "Test:" or generated "…AppEntity…" titles; titles via the app's own strings across a few tables, else
+  `AppActionTitleHumanizer`: "PlayMusicItemSiriIntent_Title" → "Play Music Item"). `AppActionRequestMatcher` (pure)
+  recognises a verb-led request naming an app — right after the verb, after a preposition, or after "my" in either place
+  (app names are often ordinary words: Teams, Word, Flow) — whose actions share a non-verb word with it, and suggests a
+  shortcut name ("Add Sticky Note to Board in Freeform"; a title naming the app keeps its wording). Checked in
+  `sendTranscriptToClaudeWithScreenshot` after the browser router; apps Wisp drives itself (Calendar, Reminders, Messages,
+  Safari, Chrome, Shortcuts) and apps an installed tool covers (by tool name) are excluded. The notch shows
+  `ShortcutSuggestionCardView` (`.shortcutSuggestion` card: app icon, matching actions + descriptions, NAME IT, Open
+  Shortcuts via `shortcuts://create-shortcut`, Copy Name; held 15s) and the reply says what to build. **Next time**
+  `ShortcutRunRequestMatcher` (pure, checked right after the reminders route) runs a user shortcut when every meaningful
+  word of its name (≥2) is in the request and the request starts with the name's first word or "run"; the input is
+  quoted text, else what follows ":"/"saying"/"called", else the leftover words. It goes through the Run Shortcut
+  confirmation (always asks; input editable) and `ShortcutsBridge.runShortcut`, and the notch says "Ran “Log Water.”
+  <output>". Checked against the user's 20 real shortcuts: none fires on ordinary requests.
 - **Window management** (`WindowManagement/`): "put Safari on the left and Xcode on the right",
   "maximize this", "make this window full screen", "move Chrome to the right half", "center this
   window", "move this to my other screen", "tile Notes and Mail" are recognised by
@@ -905,6 +924,9 @@ Grouped by what they do. Line counts are approximate.
 | `WispWindow/PersonalContextPage.swift` | ~230 | Connections → Your Data: master/cloud switches, per-source rows with status and the right grant button, and a trial search. |
 | `AppIntents/WispAppIntents.swift` | ~300 | App Intents for Siri/Spotlight/Shortcuts: `AskWispIntent`, `RunRoutineIntent` + `RoutineEntity`, `RunBuddyIntent` + `BuddyEntity`, `AddToBrainIntent`, and the `WispAppShortcuts` phrases. |
 | `AppIntents/WispIntentBridge.swift` | ~90 | `CompanionManager.answerForIntent`: runs a question or routine like a typed one and waits for its History record's answer (75s cap). |
+| `OtherAppActions/AppActionMatching.swift` | ~410 | Pure Phase 5: `InstalledAppAction`/`InstalledApplicationActions`, `AppIntentsMetadataParser`, `AppActionTitleHumanizer`, `AppActionRequestMatcher` (request → app + actions + shortcut name), `ShortcutRunRequestMatcher` (request → shortcut + input). Tested by `Tests/AppActions`. |
+| `OtherAppActions/InstalledAppActionsCatalog.swift` | ~135 | Background scan of installed apps' App Intents metadata, localized titles, and the apps eligible for suggestions. |
+| `OtherAppActions/ShortcutSuggestionCardView.swift` | ~105 | The "Make it a Shortcut" notch card. |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
@@ -1107,6 +1129,7 @@ running):
 ./Tests/CalendarEventCommand/run.sh      # calendar fast path: recognition, time resolution, title/place, extraction checks
 ./Tests/ReminderCommand/run.sh           # reminders fast path: recognition, due dates, lists, extraction checks
 ./Tests/PersonalContext/run.sh           # personal context: which requests, terms, ranking, the model's block, Messages decoding
+./Tests/AppActions/run.sh                # other apps' App Intents metadata, shortcut suggestions, running a shortcut by request
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a

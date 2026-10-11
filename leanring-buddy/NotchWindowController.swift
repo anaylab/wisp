@@ -292,7 +292,7 @@ final class NotchWindowController {
                 // reach for, more than a reading-length hold gives a short reply.
                 let minimumHoldSeconds: TimeInterval
                 switch resolvedGlanceCard {
-                case .calendarEventAdded, .reminderAdded:
+                case .calendarEventAdded, .reminderAdded, .shortcutSuggestion:
                     minimumHoldSeconds = Self.actionableCardHoldSeconds
                 default:
                     minimumHoldSeconds = 0

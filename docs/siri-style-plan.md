@@ -140,11 +140,25 @@ the bridge waits for the History record the request started rather than adding
 plumbing to each route. Past 75 seconds (a confirmation nobody answered, a long agent
 task) it says it's still working, and the answer still lands in the notch.
 
-## Phase 5 — Other apps' actions through Shortcuts
+## Phase 5 — Other apps' actions through Shortcuts (done)
 
-macOS doesn't let a third-party app call another app's App Intents directly; Shortcuts
-is the bridge, and `run_shortcut` already exists. When a request names an app action
-Wisp has no tool for, suggest the shortcut to build, and match it by name next time.
+macOS doesn't let an app call another app's App Intents; Siri and Shortcuts can.
+Apps do ship their actions as metadata inside the bundle, though, so Wisp reads what
+each installed app can do (`OtherAppActions/`, `Tests/AppActions`).
+
+- **Suggest.** A request asking an app for something ("add a sticky note to my
+  Freeform board saying buy milk", "schedule a meeting in Teams") gets a "Make it a
+  Shortcut" card. It shows that app's matching actions as Shortcuts names them, the
+  shortcut name to use ("Add Sticky Note to Board in Freeform"), and Open Shortcuts /
+  Copy Name. Apps Wisp drives itself, and apps an installed tool covers, are left out.
+- **Run.** Once a shortcut with that name exists, the same kind of request runs it, with
+  the request's content as input ("buy milk"). It goes through the Run Shortcut
+  confirmation, which always asks and lets the input be edited.
+- **Guarding against misfires.** App names are often ordinary words (Teams, Word,
+  Flow), so a name only counts in an app-like position: right after the verb, after a
+  preposition, or after "my" there. A shortcut runs only when every meaningful word of
+  its name (at least two) is present and the request starts like the name or with
+  "run". None of the user's 20 real shortcuts fired on a set of ordinary requests.
 
 ## Out of scope for now
 
