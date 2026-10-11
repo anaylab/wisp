@@ -2,24 +2,25 @@
 //  BuddyCharacter.swift
 //  leanring-buddy
 //
-//  The buddies' cloud characters, brought to life. One `Canvas` draws the whole
-//  character from a clock, so every motion is a pure function of time and costs
-//  one draw pass:
+//  The buddies' cloud characters. One `Canvas` draws the whole character from a
+//  clock, so every motion is a pure function of time and costs one draw pass.
+//
+//  The look is deliberately quiet: a soft tonal body (one hue, small range), a
+//  faint highlight and a grounded shadow beneath it, simple dark eyes. No glow,
+//  no sparkle, no confetti. What gives it life is motion and expression:
 //
 //    · breathing and a slow float, a blink every few seconds (offset per colour
 //      so a row of buddies never blinks in unison)
 //    · eyes that follow the pointer, when `looksAtPointer` is on
-//    · a mood (`BuddyMood`) that changes the eyes, mouth and little extras:
-//      scanning eyes and orbiting dots while working, closed smiling eyes and
-//      a burst of sparkles when happy, drooping brows when something failed,
-//      wide eyes and a "?" when it needs the user's ok, closed eyes and drifting
-//      "z"s when sleepy
-//    · a squish-and-settle when `bounceTrigger` changes or the pointer arrives
+//    · a mood (`BuddyMood`): scanning eyes and a thin turning ring while working,
+//      closed smiling eyes after finishing, worried brows after a failure, wide
+//      eyes and an amber badge when it needs the user's ok, closed eyes and
+//      slower breathing when sleepy
+//    · a small squish when `bounceTrigger` changes or the pointer arrives
 //
 //  `Liveliness` is the cost dial: `.still` draws one frame and never runs a
 //  clock (long lists), `.working` animates only the work state (the compact
-//  avatar), `.full` animates everything (the rail, headers, empty states).
-//  Reduce Motion freezes it to a still frame in every case.
+//  avatar), `.full` animates everything. Reduce Motion freezes it.
 //
 
 import AppKit
@@ -31,8 +32,8 @@ import SwiftUI
 final class BuddyScreenFrameBox {
     weak var view: NSView?
 
-    /// A unit-ish vector from the character toward the pointer, 0 when the
-    /// pointer is on top of it and growing to length 1 about 180pt away.
+    /// A vector from the character toward the pointer: 0 when the pointer is on
+    /// top of it, growing to length 1 about 180pt away.
     func pointerDirection() -> CGSize {
         guard let view, let window = view.window, window.isVisible else { return .zero }
         let rectOnScreen = window.convertToScreen(view.convert(view.bounds, to: nil))
@@ -71,18 +72,18 @@ struct BuddyCharacter: View {
     var size: CGFloat = 48
     var mood: BuddyMood = .idle
     var liveliness: Liveliness = .full
-    /// Change this value to make the buddy squish and bounce (a selection, a click).
+    /// Change this value to make the buddy squish (a selection, a click).
     var bounceTrigger: Int = 0
     var looksAtPointer: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var moodChangedAt: TimeInterval = 0
     @State private var bounceStartedAt: TimeInterval = -10
     @State private var isHovering = false
     @State private var frameBox = BuddyScreenFrameBox()
 
-    private static let inkColor = Color(red: 0.13, green: 0.10, blue: 0.24)
-    private static let cheekColor = Color(red: 1.0, green: 0.50, blue: 0.62)
+    private static let inkColor = Color(red: 0.15, green: 0.13, blue: 0.20)
+    private static let cheekColor = Color(red: 0.95, green: 0.55, blue: 0.60)
+    private static let badgeColor = Color(red: 0.96, green: 0.68, blue: 0.20)
 
     private var isAnimating: Bool {
         guard !reduceMotion else { return false }
@@ -100,13 +101,11 @@ struct BuddyCharacter: View {
             Canvas { context, canvasSize in
                 draw(in: &context, canvasSize: canvasSize, now: now, pointerDirection: pointerDirection)
             }
-            // Room for sparkles and orbiting dots outside the cloud itself.
-            .frame(width: size * 1.45, height: size * 1.45)
+            // Room for the working ring and the badge outside the cloud itself.
+            .frame(width: size * 1.4, height: size * 1.4)
         }
         .frame(width: size, height: size)
         .background(BuddyScreenFrameReader(box: frameBox))
-        .scaleEffect(isHovering && liveliness == .full ? 1.06 : 1)
-        .animation(WispMotion.quick, value: isHovering)
         .onHover { isNowHovering in
             isHovering = isNowHovering
             if isNowHovering && liveliness == .full && !reduceMotion {
@@ -115,9 +114,6 @@ struct BuddyCharacter: View {
         }
         .onChange(of: bounceTrigger) { _, _ in
             bounceStartedAt = Date.timeIntervalSinceReferenceDate
-        }
-        .onChange(of: mood) { _, _ in
-            moodChangedAt = Date.timeIntervalSinceReferenceDate
         }
         .accessibilityHidden(true)
     }
@@ -129,51 +125,96 @@ struct BuddyCharacter: View {
         let seed = Double(colorIndex % 8)
         let animationTime = isAnimating ? now : 0
 
-        // Motion, all derived from the clock.
-        let breathing = 1 + 0.018 * sin(animationTime * 1.8 + seed)
+        let breathingSpeed = mood == .sleepy ? 1.0 : 1.7
+        let breathing = 1 + 0.014 * sin(animationTime * breathingSpeed + seed)
         let floatOffset: CGFloat = {
             switch mood {
-            case .working: return CGFloat(sin(animationTime * 3.4) * 0.035) * bodySize
-            case .sleepy: return CGFloat(sin(animationTime * 0.9 + seed) * 0.012) * bodySize
-            default: return CGFloat(sin(animationTime * 1.3 + seed) * 0.022) * bodySize
+            case .working: return CGFloat(sin(animationTime * 3.0) * 0.025) * bodySize
+            case .sleepy: return CGFloat(sin(animationTime * 0.8 + seed) * 0.01) * bodySize
+            default: return CGFloat(sin(animationTime * 1.2 + seed) * 0.018) * bodySize
             }
         }()
-        let tilt: Double = mood == .working ? sin(animationTime * 2.1) * 2.5 : (mood == .oops ? sin(animationTime * 30) * 2.0 : 0)
+        let tilt: Double = mood == .oops ? sin(animationTime * 26) * 1.2 : 0
 
         let bounceElapsed = animationTime - bounceStartedAt
-        let bounceAmount: CGFloat = (isAnimating && bounceElapsed >= 0 && bounceElapsed < 1.4)
-            ? CGFloat(exp(-3.6 * bounceElapsed) * cos(bounceElapsed * 17))
+        let bounceAmount: CGFloat = (isAnimating && bounceElapsed >= 0 && bounceElapsed < 1.2)
+            ? CGFloat(exp(-4.2 * bounceElapsed) * cos(bounceElapsed * 16))
             : 0
-        let squishX = breathing + Double(bounceAmount) * 0.16
-        let squishY = breathing - Double(bounceAmount) * 0.16
+        let squishX = breathing + Double(bounceAmount) * 0.09
+        let squishY = breathing - Double(bounceAmount) * 0.09
 
-        context.translateBy(x: canvasSize.width / 2, y: canvasSize.height / 2 + floatOffset)
+        let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+
+        // A soft shadow on the ground, drawn before the character moves so it
+        // stays put while the cloud floats above it.
+        context.drawLayer { shadowContext in
+            shadowContext.addFilter(.blur(radius: bodySize * 0.05))
+            let shadowWidth = bodySize * (0.50 - floatOffset / bodySize * 2)
+            shadowContext.fill(
+                Path(ellipseIn: CGRect(
+                    x: center.x - shadowWidth / 2,
+                    y: center.y + bodySize * 0.43,
+                    width: shadowWidth,
+                    height: bodySize * 0.07
+                )),
+                with: .color(.black.opacity(0.14))
+            )
+        }
+
+        if mood == .working { drawWorkingRing(in: &context, center: center, bodySize: bodySize, time: animationTime) }
+
+        context.translateBy(x: center.x, y: center.y + floatOffset)
         context.rotate(by: .degrees(tilt))
         context.scaleBy(x: squishX, y: squishY)
 
         let bodyPath = Self.cloudPath(bodySize: bodySize)
         let lightColor = BuddyAppearance.lightColor(forColorIndex: colorIndex)
         let deepColor = BuddyAppearance.deepColor(forColorIndex: colorIndex)
+        let lowerColor = lightColor.mix(with: deepColor, by: 0.38)
 
-        // Glow, then the gradient body, then a soft highlight and rim.
-        context.drawLayer { glowContext in
-            glowContext.addFilter(.shadow(color: deepColor.opacity(mood == .working ? 0.75 : 0.5), radius: bodySize * 0.16))
-            glowContext.fill(bodyPath, with: .color(deepColor))
-        }
         context.fill(
             bodyPath,
             with: .linearGradient(
-                Gradient(colors: [lightColor, deepColor]),
+                Gradient(colors: [lightColor, lowerColor]),
                 startPoint: CGPoint(x: 0, y: -bodySize * 0.42),
                 endPoint: CGPoint(x: 0, y: bodySize * 0.42)
             )
         )
-        let highlightRect = CGRect(x: -bodySize * 0.28, y: -bodySize * 0.30, width: bodySize * 0.30, height: bodySize * 0.14)
-        context.fill(Path(ellipseIn: highlightRect), with: .color(.white.opacity(0.38)))
-        context.stroke(bodyPath, with: .color(.white.opacity(0.16)), lineWidth: max(0.6, bodySize * 0.015))
+        // Light from the top left: one faint highlight, one hairline rim.
+        context.fill(
+            Path(ellipseIn: CGRect(x: -bodySize * 0.27, y: -bodySize * 0.30, width: bodySize * 0.26, height: bodySize * 0.11)),
+            with: .color(.white.opacity(0.22))
+        )
+        context.stroke(bodyPath, with: .color(.white.opacity(0.14)), lineWidth: max(0.5, bodySize * 0.012))
 
         drawFace(in: &context, bodySize: bodySize, time: animationTime, pointerDirection: pointerDirection)
-        drawExtras(in: &context, bodySize: bodySize, time: animationTime, light: lightColor)
+
+        if mood == .waiting {
+            let badgeRadius = bodySize * 0.075
+            let badgeCenter = CGPoint(x: bodySize * 0.40, y: -bodySize * 0.36)
+            context.fill(
+                Path(ellipseIn: CGRect(x: badgeCenter.x - badgeRadius, y: badgeCenter.y - badgeRadius, width: badgeRadius * 2, height: badgeRadius * 2)),
+                with: .color(Self.badgeColor)
+            )
+            context.stroke(
+                Path(ellipseIn: CGRect(x: badgeCenter.x - badgeRadius, y: badgeCenter.y - badgeRadius, width: badgeRadius * 2, height: badgeRadius * 2)),
+                with: .color(.white.opacity(0.9)),
+                lineWidth: max(0.8, bodySize * 0.02)
+            )
+        }
+    }
+
+    /// A thin arc turning around the character: "busy", without decoration.
+    private func drawWorkingRing(in context: inout GraphicsContext, center: CGPoint, bodySize: CGFloat, time: TimeInterval) {
+        let radius = bodySize * 0.64
+        let startAngle = Angle.radians(time * 2.6)
+        var arc = Path()
+        arc.addArc(center: center, radius: radius, startAngle: startAngle, endAngle: startAngle + .degrees(110), clockwise: false)
+        context.stroke(
+            arc,
+            with: .color(BuddyAppearance.deepColor(forColorIndex: colorIndex).opacity(0.75)),
+            style: StrokeStyle(lineWidth: max(1.2, bodySize * 0.035), lineCap: .round)
+        )
     }
 
     /// Overlapping puffs make the cloud, centred on the origin.
@@ -201,34 +242,31 @@ struct BuddyCharacter: View {
         let ink = Self.inkColor
         let eyeSpacing = bodySize * 0.17
         let eyeCenterY = bodySize * 0.05
-        let strokeWidth = max(1.2, bodySize * 0.05)
+        let strokeWidth = max(1.1, bodySize * 0.045)
 
-        // Where the eyes look: the pointer, or a scan while working.
         var lookX = pointerDirection.width
         var lookY = pointerDirection.height
         if mood == .working {
-            lookX = sin(time * 2.4) * 0.9
-            lookY = -0.15
+            lookX = sin(time * 2.2) * 0.85
+            lookY = -0.1
         }
-        let pupilShift = CGSize(width: lookX * bodySize * 0.028, height: lookY * bodySize * 0.02)
+        let pupilShift = CGSize(width: lookX * bodySize * 0.026, height: lookY * bodySize * 0.018)
 
-        // Blink: a short close every few seconds, staggered per colour.
-        let blinkPeriod = 3.4 + Double(colorIndex % 4) * 0.7
+        let blinkPeriod = 3.6 + Double(colorIndex % 4) * 0.7
         let blinkPhase = time.truncatingRemainder(dividingBy: blinkPeriod)
-        let blinkLength = 0.14
+        let blinkLength = 0.13
         let eyeOpenness: CGFloat = blinkPhase < blinkLength
             ? 1 - CGFloat(sin(.pi * blinkPhase / blinkLength)) * 0.92
             : 1
 
-        // Cheeks first, so the eyes sit on top.
         for side in [-1.0, 1.0] {
             let cheekRect = CGRect(
-                x: CGFloat(side) * bodySize * 0.265 - bodySize * 0.06,
-                y: bodySize * 0.13 - bodySize * 0.035,
-                width: bodySize * 0.12,
-                height: bodySize * 0.07
+                x: CGFloat(side) * bodySize * 0.26 - bodySize * 0.045,
+                y: bodySize * 0.13 - bodySize * 0.025,
+                width: bodySize * 0.09,
+                height: bodySize * 0.05
             )
-            context.fill(Path(ellipseIn: cheekRect), with: .color(Self.cheekColor.opacity(mood == .happy ? 0.55 : 0.36)))
+            context.fill(Path(ellipseIn: cheekRect), with: .color(Self.cheekColor.opacity(mood == .happy ? 0.30 : 0.18)))
         }
 
         for side in [-1.0, 1.0] {
@@ -236,24 +274,24 @@ struct BuddyCharacter: View {
             switch mood {
             case .happy:
                 var arc = Path()
-                let halfWidth = bodySize * 0.065
-                arc.move(to: CGPoint(x: eyeCenter.x - halfWidth, y: eyeCenter.y + bodySize * 0.025))
+                let halfWidth = bodySize * 0.055
+                arc.move(to: CGPoint(x: eyeCenter.x - halfWidth, y: eyeCenter.y + bodySize * 0.02))
                 arc.addQuadCurve(
-                    to: CGPoint(x: eyeCenter.x + halfWidth, y: eyeCenter.y + bodySize * 0.025),
-                    control: CGPoint(x: eyeCenter.x, y: eyeCenter.y - bodySize * 0.075)
+                    to: CGPoint(x: eyeCenter.x + halfWidth, y: eyeCenter.y + bodySize * 0.02),
+                    control: CGPoint(x: eyeCenter.x, y: eyeCenter.y - bodySize * 0.065)
                 )
                 context.stroke(arc, with: .color(ink), style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round))
             case .sleepy:
                 var arc = Path()
-                let halfWidth = bodySize * 0.06
+                let halfWidth = bodySize * 0.055
                 arc.move(to: CGPoint(x: eyeCenter.x - halfWidth, y: eyeCenter.y))
                 arc.addQuadCurve(
                     to: CGPoint(x: eyeCenter.x + halfWidth, y: eyeCenter.y),
-                    control: CGPoint(x: eyeCenter.x, y: eyeCenter.y + bodySize * 0.06)
+                    control: CGPoint(x: eyeCenter.x, y: eyeCenter.y + bodySize * 0.05)
                 )
                 context.stroke(arc, with: .color(ink), style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round))
             default:
-                let radius = bodySize * (mood == .waiting ? 0.072 : 0.058)
+                let radius = bodySize * (mood == .waiting ? 0.064 : 0.053)
                 let eyeRect = CGRect(
                     x: eyeCenter.x - radius + pupilShift.width,
                     y: eyeCenter.y - radius * 1.2 * eyeOpenness + pupilShift.height,
@@ -262,146 +300,69 @@ struct BuddyCharacter: View {
                 )
                 context.fill(Path(ellipseIn: eyeRect), with: .color(ink))
                 if eyeOpenness > 0.5 {
-                    let sparkleRadius = radius * 0.4
+                    let sparkleRadius = radius * 0.34
                     context.fill(
                         Path(ellipseIn: CGRect(
-                            x: eyeCenter.x + pupilShift.width + radius * 0.15,
-                            y: eyeCenter.y + pupilShift.height - radius * 0.75,
+                            x: eyeCenter.x + pupilShift.width + radius * 0.18,
+                            y: eyeCenter.y + pupilShift.height - radius * 0.7,
                             width: sparkleRadius * 2,
                             height: sparkleRadius * 2
                         )),
-                        with: .color(.white.opacity(0.95))
+                        with: .color(.white.opacity(0.9))
                     )
                 }
                 if mood == .oops {
-                    // Brows slanted up toward the middle: worried.
                     var brow = Path()
                     let inward = CGFloat(-side)
-                    brow.move(to: CGPoint(x: eyeCenter.x - inward * bodySize * 0.06, y: eyeCenter.y - bodySize * 0.075))
-                    brow.addLine(to: CGPoint(x: eyeCenter.x + inward * bodySize * 0.06, y: eyeCenter.y - bodySize * 0.12))
-                    context.stroke(brow, with: .color(ink), style: StrokeStyle(lineWidth: strokeWidth * 0.8, lineCap: .round))
+                    brow.move(to: CGPoint(x: eyeCenter.x - inward * bodySize * 0.055, y: eyeCenter.y - bodySize * 0.07))
+                    brow.addLine(to: CGPoint(x: eyeCenter.x + inward * bodySize * 0.055, y: eyeCenter.y - bodySize * 0.11))
+                    context.stroke(brow, with: .color(ink), style: StrokeStyle(lineWidth: strokeWidth * 0.75, lineCap: .round))
                 }
             }
         }
 
-        // Mouth.
-        let mouthCenter = CGPoint(x: 0, y: bodySize * 0.155)
+        let mouthCenter = CGPoint(x: 0, y: bodySize * 0.15)
         switch mood {
-        case .idle:
+        case .idle, .waiting:
             var smile = Path()
-            smile.move(to: CGPoint(x: mouthCenter.x - bodySize * 0.055, y: mouthCenter.y))
+            smile.move(to: CGPoint(x: mouthCenter.x - bodySize * 0.045, y: mouthCenter.y))
             smile.addQuadCurve(
-                to: CGPoint(x: mouthCenter.x + bodySize * 0.055, y: mouthCenter.y),
-                control: CGPoint(x: mouthCenter.x, y: mouthCenter.y + bodySize * 0.05)
+                to: CGPoint(x: mouthCenter.x + bodySize * 0.045, y: mouthCenter.y),
+                control: CGPoint(x: mouthCenter.x, y: mouthCenter.y + (mood == .waiting ? 0.02 : 0.04) * bodySize)
             )
-            context.stroke(smile, with: .color(ink), style: StrokeStyle(lineWidth: strokeWidth * 0.8, lineCap: .round))
+            context.stroke(smile, with: .color(ink), style: StrokeStyle(lineWidth: strokeWidth * 0.75, lineCap: .round))
         case .happy:
             var openSmile = Path()
-            openSmile.move(to: CGPoint(x: mouthCenter.x - bodySize * 0.07, y: mouthCenter.y - bodySize * 0.01))
+            openSmile.move(to: CGPoint(x: mouthCenter.x - bodySize * 0.06, y: mouthCenter.y - bodySize * 0.005))
             openSmile.addQuadCurve(
-                to: CGPoint(x: mouthCenter.x + bodySize * 0.07, y: mouthCenter.y - bodySize * 0.01),
-                control: CGPoint(x: mouthCenter.x, y: mouthCenter.y + bodySize * 0.13)
+                to: CGPoint(x: mouthCenter.x + bodySize * 0.06, y: mouthCenter.y - bodySize * 0.005),
+                control: CGPoint(x: mouthCenter.x, y: mouthCenter.y + bodySize * 0.11)
             )
             openSmile.closeSubpath()
             context.fill(openSmile, with: .color(ink))
-            context.fill(
-                Path(ellipseIn: CGRect(x: mouthCenter.x - bodySize * 0.03, y: mouthCenter.y + bodySize * 0.045, width: bodySize * 0.06, height: bodySize * 0.035)),
-                with: .color(Self.cheekColor)
-            )
         case .working:
-            // A tiny talking/chewing mouth.
-            let openness = 0.6 + 0.4 * abs(sin(time * 7))
+            let openness = 0.6 + 0.4 * abs(sin(time * 6))
             context.fill(
                 Path(ellipseIn: CGRect(
-                    x: mouthCenter.x - bodySize * 0.025,
-                    y: mouthCenter.y - bodySize * 0.02 * openness,
-                    width: bodySize * 0.05,
-                    height: bodySize * 0.04 * openness + bodySize * 0.01
+                    x: mouthCenter.x - bodySize * 0.022,
+                    y: mouthCenter.y - bodySize * 0.016 * openness,
+                    width: bodySize * 0.044,
+                    height: bodySize * 0.034 * openness + bodySize * 0.008
                 )),
-                with: .color(ink)
-            )
-        case .waiting:
-            context.fill(
-                Path(ellipseIn: CGRect(x: mouthCenter.x - bodySize * 0.03, y: mouthCenter.y - bodySize * 0.02, width: bodySize * 0.06, height: bodySize * 0.055)),
                 with: .color(ink)
             )
         case .oops:
             var wobble = Path()
-            wobble.move(to: CGPoint(x: mouthCenter.x - bodySize * 0.06, y: mouthCenter.y + bodySize * 0.02))
-            wobble.addQuadCurve(to: CGPoint(x: mouthCenter.x, y: mouthCenter.y + bodySize * 0.02), control: CGPoint(x: mouthCenter.x - bodySize * 0.03, y: mouthCenter.y - bodySize * 0.02))
-            wobble.addQuadCurve(to: CGPoint(x: mouthCenter.x + bodySize * 0.06, y: mouthCenter.y + bodySize * 0.02), control: CGPoint(x: mouthCenter.x + bodySize * 0.03, y: mouthCenter.y + bodySize * 0.06))
-            context.stroke(wobble, with: .color(ink), style: StrokeStyle(lineWidth: strokeWidth * 0.8, lineCap: .round))
+            wobble.move(to: CGPoint(x: mouthCenter.x - bodySize * 0.05, y: mouthCenter.y + bodySize * 0.02))
+            wobble.addQuadCurve(to: CGPoint(x: mouthCenter.x, y: mouthCenter.y + bodySize * 0.02), control: CGPoint(x: mouthCenter.x - bodySize * 0.025, y: mouthCenter.y - bodySize * 0.015))
+            wobble.addQuadCurve(to: CGPoint(x: mouthCenter.x + bodySize * 0.05, y: mouthCenter.y + bodySize * 0.02), control: CGPoint(x: mouthCenter.x + bodySize * 0.025, y: mouthCenter.y + bodySize * 0.055))
+            context.stroke(wobble, with: .color(ink), style: StrokeStyle(lineWidth: strokeWidth * 0.75, lineCap: .round))
         case .sleepy:
-            let breathe = 0.8 + 0.2 * sin(time * 1.6)
+            let breathe = 0.8 + 0.2 * sin(time * 1.2)
             context.fill(
-                Path(ellipseIn: CGRect(x: mouthCenter.x - bodySize * 0.022 * breathe, y: mouthCenter.y - bodySize * 0.01, width: bodySize * 0.044 * breathe, height: bodySize * 0.04 * breathe)),
-                with: .color(ink.opacity(0.85))
+                Path(ellipseIn: CGRect(x: mouthCenter.x - bodySize * 0.018 * breathe, y: mouthCenter.y - bodySize * 0.008, width: bodySize * 0.036 * breathe, height: bodySize * 0.032 * breathe)),
+                with: .color(ink.opacity(0.8))
             )
         }
-    }
-
-    private func drawExtras(in context: inout GraphicsContext, bodySize: CGFloat, time: TimeInterval, light: Color) {
-        switch mood {
-        case .working:
-            // Three dots orbiting: "busy" legible even at list size.
-            for dotIndex in 0..<3 {
-                let angle = time * 2.3 + Double(dotIndex) * 2 * .pi / 3
-                let orbitRadius = bodySize * 0.6
-                let dotCenter = CGPoint(x: cos(angle) * orbitRadius, y: sin(angle) * orbitRadius * 0.55 - bodySize * 0.04)
-                let dotRadius = bodySize * (0.045 + 0.012 * CGFloat(dotIndex))
-                context.fill(
-                    Path(ellipseIn: CGRect(x: dotCenter.x - dotRadius, y: dotCenter.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2)),
-                    with: .color(light.opacity(0.95))
-                )
-            }
-        case .sleepy:
-            for zIndex in 0..<2 {
-                let phase = (time * 0.45 + Double(zIndex) * 0.5).truncatingRemainder(dividingBy: 1)
-                let letterSize = bodySize * (0.14 + 0.07 * CGFloat(phase))
-                let position = CGPoint(x: bodySize * (0.38 + 0.12 * CGFloat(phase)), y: -bodySize * (0.30 + 0.25 * CGFloat(phase)))
-                context.draw(
-                    Text("z").font(.system(size: letterSize, weight: .bold, design: .rounded)).foregroundColor(.white.opacity(0.9 - 0.7 * phase)),
-                    at: position
-                )
-            }
-        case .waiting:
-            let bubbleCenter = CGPoint(x: bodySize * 0.46, y: -bodySize * 0.42)
-            let bubbleRadius = bodySize * 0.13
-            context.fill(
-                Path(ellipseIn: CGRect(x: bubbleCenter.x - bubbleRadius, y: bubbleCenter.y - bubbleRadius, width: bubbleRadius * 2, height: bubbleRadius * 2)),
-                with: .color(.white)
-            )
-            context.draw(
-                Text("?").font(.system(size: bubbleRadius * 1.5, weight: .heavy, design: .rounded)).foregroundColor(Self.inkColor),
-                at: bubbleCenter
-            )
-        case .happy:
-            let elapsed = time - moodChangedAt
-            guard elapsed >= 0, elapsed < 1.5 else { return }
-            let progress = elapsed / 1.5
-            for sparkleIndex in 0..<6 {
-                let angle = Double(sparkleIndex) * .pi / 3 + 0.4
-                let distance = bodySize * (0.45 + 0.35 * CGFloat(progress))
-                let center = CGPoint(x: cos(angle) * distance, y: sin(angle) * distance * 0.9 - bodySize * 0.05)
-                let starRadius = bodySize * 0.085 * CGFloat(1 - progress * 0.7)
-                context.fill(Self.sparklePath(center: center, radius: starRadius), with: .color(.white.opacity(1 - progress * 0.6)))
-            }
-        case .idle, .oops:
-            break
-        }
-    }
-
-    /// A four-pointed star.
-    private static func sparklePath(center: CGPoint, radius: CGFloat) -> Path {
-        var path = Path()
-        let innerRadius = radius * 0.35
-        for pointIndex in 0..<8 {
-            let angle = Double(pointIndex) * .pi / 4 - .pi / 2
-            let pointRadius = pointIndex % 2 == 0 ? radius : innerRadius
-            let point = CGPoint(x: center.x + cos(angle) * pointRadius, y: center.y + sin(angle) * pointRadius)
-            if pointIndex == 0 { path.move(to: point) } else { path.addLine(to: point) }
-        }
-        path.closeSubpath()
-        return path
     }
 }

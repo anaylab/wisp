@@ -75,7 +75,7 @@ struct BuddiesPage: View {
                             isInspectorOpen: $isInspectorOpen,
                             onRequestClearConversation: { buddyIDPendingClear = selectedBuddyID },
                             onRequestDeletion: { buddyIDPendingDeletion = selectedBuddyID },
-                            onDuplicated: showBuddy
+                            onOpenBuddy: showBuddy
                         )
                         .id(selectedBuddyID)
                         .transition(.opacity)
@@ -96,6 +96,7 @@ struct BuddiesPage: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(WispColor.windowBackground)
+        .background(shortcutButtons)
         .onAppear {
             takeRequestFromOtherPages()
             if selectedBuddyID == nil {
@@ -130,6 +131,23 @@ struct BuddiesPage: View {
         } message: {
             Text("Its thread, notes and files are removed. Its runs stay in History.")
         }
+    }
+
+    /// ⌘1–⌘9 open the buddy at that position in the rail; ⌘N summons a new one.
+    /// Invisible buttons, because SwiftUI only registers shortcuts on views.
+    private var shortcutButtons: some View {
+        let orderedBuddies = buddyStore.orderedBuddies(in: taskRegistry)
+        return ZStack {
+            ForEach(Array(orderedBuddies.prefix(9).enumerated()), id: \.element.id) { index, buddy in
+                Button("") { showBuddy(buddy.id) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+            }
+            Button("") { withAnimation(WispMotion.smooth) { isCreatingBuddy = true } }
+                .keyboardShortcut("n", modifiers: .command)
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private func showBuddy(_ buddyID: UUID) {

@@ -2,10 +2,10 @@
 //  BuddyRailView.swift
 //  leanring-buddy
 //
-//  The strip of buddies down the left of the Buddies page, like the server rail
-//  of a chat app: each buddy is its living character with its name and what it
-//  is up to. A working buddy glows, an unread one wears a dot, the open one sits
-//  in a coloured pill, and the + at the bottom summons a new one.
+//  The strip of buddies down the left of the Buddies page. Each is its
+//  character and its name; what it is doing is in its face (a turning ring
+//  while it works, an amber badge when it needs you), and an unread buddy wears
+//  a dot. ⌘1–9 jump to a buddy by position.
 //
 
 import SwiftUI
@@ -22,11 +22,12 @@ struct BuddyRailView: View {
 
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
+    @State private var isNewHovering = false
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 6) {
+                VStack(spacing: 4) {
                     ForEach(buddies) { buddy in
                         BuddyRailItem(
                             buddy: buddy,
@@ -52,33 +53,24 @@ struct BuddyRailView: View {
             }
 
             Button(action: onNewBuddy) {
-                VStack(spacing: 4) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Color.white)
-                        .frame(width: 40, height: 40)
-                        .background(
-                            Circle().fill(LinearGradient(
-                                colors: [BuddyAppearance.deepColor(forColorIndex: 7), BuddyAppearance.deepColor(forColorIndex: 3)],
-                                startPoint: .bottomLeading, endPoint: .topTrailing))
-                        )
-                        .shadow(color: BuddyAppearance.deepColor(forColorIndex: 7).opacity(isCreating ? 0.6 : 0.3), radius: isCreating ? 10 : 6, y: 3)
-                        .scaleEffect(isCreating ? 1.08 : 1)
-                    Text("New")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(WispColor.textSecondary)
-                }
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isCreating ? WispColor.textPrimary : WispColor.textSecondary)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(WispColor.surface3.opacity(isCreating || isNewHovering ? 1 : 0.6)))
+                    .contentShape(Circle())
             }
-            .buttonStyle(PressableScaleButtonStyle())
+            .buttonStyle(.plain)
             .pointerCursor()
+            .onHover { isNewHovering = $0 }
             .accessibilityLabel("New buddy")
-            .nativeTooltip("Summon a new buddy")
-            .padding(.vertical, 12)
-            .animation(WispMotion.quick, value: isCreating)
+            .nativeTooltip("New buddy (⌘N)")
+            .padding(.vertical, 14)
+            .animation(WispMotion.quick, value: isNewHovering)
         }
-        .frame(width: 92)
-        .background(WispColor.groupedCardBackground.opacity(0.7))
-        .overlay(alignment: .trailing) { Divider().opacity(0.6) }
+        .frame(width: 78)
+        .background(WispColor.groupedCardBackground.opacity(0.6))
+        .overlay(alignment: .trailing) { Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(width: 0.5) }
     }
 }
 
@@ -97,62 +89,45 @@ private struct BuddyRailItem: View {
             bounceCount += 1
             onSelect()
         } label: {
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 ZStack(alignment: .topTrailing) {
                     BuddyCharacter(
                         colorIndex: buddy.colorIndex,
-                        size: 44,
+                        size: 38,
                         mood: mood,
                         liveliness: .full,
                         bounceTrigger: bounceCount,
                         looksAtPointer: isSelected
                     )
-                    .frame(width: 52, height: 52)
+                    .frame(width: 46, height: 46)
 
                     if isUnread && !isSelected {
                         Circle()
                             .fill(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex))
-                            .frame(width: 11, height: 11)
-                            .overlay(Circle().strokeBorder(WispColor.windowBackground, lineWidth: 2))
+                            .frame(width: 9, height: 9)
+                            .overlay(Circle().strokeBorder(WispColor.windowBackground, lineWidth: 1.5))
                             .transition(.scale)
-                    }
-                    if buddy.isPinnedInList {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(WispColor.textTertiary)
-                            .rotationEffect(.degrees(35))
-                            .offset(x: -40, y: 2)
                     }
                 }
 
                 Text(buddy.name)
-                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(isSelected ? BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex) : WispColor.textPrimary)
-                    .lineLimit(1)
-                Text(BuddyFormatting.moodWord(mood, specialty: buddy.specialty))
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(BuddyFormatting.moodColor(mood, colorIndex: buddy.colorIndex).opacity(mood == .idle ? 0.7 : 1))
+                    .font(.system(size: 10.5, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? WispColor.textPrimary : WispColor.textSecondary)
                     .lineLimit(1)
             }
-            .frame(width: 80)
-            .padding(.vertical, 8)
+            .frame(width: 66)
+            .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(isSelected
-                          ? AnyShapeStyle(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex).opacity(0.16))
-                          : AnyShapeStyle(isHovering ? WispColor.surface3.opacity(0.7) : Color.clear))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(WispColor.surface3.opacity(isSelected ? 1 : (isHovering ? 0.55 : 0)))
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex).opacity(isSelected ? 0.55 : 0), lineWidth: 1.2)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .buttonStyle(PressableScaleButtonStyle())
+        .buttonStyle(.plain)
         .pointerCursor()
-        .accessibilityLabel("\(buddy.name), \(BuddyFormatting.moodWord(mood, specialty: buddy.specialty))\(isUnread ? ", unread" : "")")
         .onHover { isHovering = $0 }
         .animation(WispMotion.quick, value: isSelected)
         .animation(WispMotion.quick, value: isHovering)
+        .accessibilityLabel("\(buddy.name)\(isUnread ? ", unread" : "")")
     }
 }

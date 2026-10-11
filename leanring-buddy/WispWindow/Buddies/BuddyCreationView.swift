@@ -2,17 +2,16 @@
 //  BuddyCreationView.swift
 //  leanring-buddy
 //
-//  Summoning a buddy, in two steps. First pick what it is good at — a grid of
-//  specialty cards, each with its own coloured character that wiggles when you
-//  look at it. Then name it, give it a mission and a schedule, and watch it come
-//  to life. Picking a specialty fills in everything sensible (colour, tools,
-//  starter mission, schedule); every field stays editable.
+//  Summoning a buddy, in two steps. First pick what it's good at, from a quiet
+//  grid of specialty cards. Then name it and give it a mission and a schedule,
+//  with everything the specialty implies already filled in and every field
+//  editable.
 //
 
 import SwiftUI
 
 struct BuddyCreationView: View {
-    /// True when there are no buddies yet, for a warmer heading.
+    /// True when there are no buddies yet (no Cancel, since there is nothing to go back to).
     let isFirstBuddy: Bool
     var onCreated: (UUID) -> Void
     var onCancel: () -> Void
@@ -39,7 +38,7 @@ struct BuddyCreationView: View {
 
     var body: some View {
         ZStack {
-            BuddyAmbientBackground(colorIndex: step == .pickSpecialty ? (hoveredSpecialty?.preferredColorIndex ?? 7) : colorIndex)
+            BuddyAmbientBackground(colorIndex: step == .pickSpecialty ? (hoveredSpecialty?.preferredColorIndex ?? 1) : colorIndex)
             ScrollView {
                 Group {
                     switch step {
@@ -48,8 +47,8 @@ struct BuddyCreationView: View {
                     }
                 }
                 .padding(.horizontal, 36)
-                .padding(.vertical, 30)
-                .frame(maxWidth: 900)
+                .padding(.vertical, 28)
+                .frame(maxWidth: 860)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -59,75 +58,56 @@ struct BuddyCreationView: View {
 
     private var pickSpecialtyStep: some View {
         VStack(alignment: .leading, spacing: 22) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(isFirstBuddy ? "Meet your buddies" : "Summon a buddy")
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
-                        .foregroundStyle(WispColor.textPrimary)
-                    Text("A buddy takes one job and keeps at it — now, or on a schedule. Pick what it's good at.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(WispColor.textSecondary)
-                }
+            HStack {
+                Text("New buddy")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(WispColor.textPrimary)
                 Spacer()
                 if !isFirstBuddy {
-                    Button("Cancel", action: onCancel).buttonStyle(.bordered).pointerCursor()
+                    Button("Cancel", action: onCancel).buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
                 }
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 14)], spacing: 14) {
-                ForEach(BuddySpecialty.allCases) { candidate in
-                    specialtyCard(candidate)
-                }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
+                ForEach(BuddySpecialty.allCases) { candidate in specialtyCard(candidate) }
             }
         }
     }
 
     private func specialtyCard(_ candidate: BuddySpecialty) -> some View {
         let isHovered = hoveredSpecialty == candidate
-        return Button {
-            choose(candidate)
-        } label: {
-            VStack(spacing: 10) {
+        return Button { choose(candidate) } label: {
+            VStack(alignment: .leading, spacing: 12) {
                 BuddyCharacter(
                     colorIndex: candidate.preferredColorIndex,
-                    size: 76,
-                    mood: isHovered ? .happy : .idle,
-                    liveliness: .full,
+                    size: 52,
+                    mood: .idle,
+                    liveliness: isHovered ? .full : .still,
                     looksAtPointer: true
                 )
-                .frame(height: 84)
-                VStack(spacing: 4) {
-                    HStack(spacing: 5) {
-                        Image(systemName: candidate.symbolName).font(.system(size: 11, weight: .bold))
-                        Text(candidate.title).font(.system(size: 15, weight: .bold, design: .rounded))
-                    }
-                    .foregroundStyle(BuddyAppearance.deepColor(forColorIndex: candidate.preferredColorIndex))
+                .frame(width: 60, height: 60, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(candidate.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(WispColor.textPrimary)
                     Text(candidate.tagline)
-                        .font(.system(size: 11.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(WispColor.textSecondary)
-                        .multilineTextAlignment(.center)
+                        .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 0)
             }
             .padding(16)
-            .frame(maxWidth: .infinity)
-            .frame(height: 212)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(WispColor.surface2.opacity(0.9))
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 164)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface2.opacity(isHovered ? 1 : 0.7)))
             .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(
-                        isHovered
-                            ? AnyShapeStyle(BuddyAppearance.accentGradient(forColorIndex: candidate.preferredColorIndex))
-                            : AnyShapeStyle(WispColor.cardSeparator.opacity(0.5)),
-                        lineWidth: isHovered ? 2 : 0.8
-                    )
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(isHovered ? BuddyAppearance.deepColor(forColorIndex: candidate.preferredColorIndex).opacity(0.6) : WispColor.cardSeparator.opacity(0.5), lineWidth: isHovered ? 1 : 0.5)
             )
-            .shadow(color: BuddyAppearance.deepColor(forColorIndex: candidate.preferredColorIndex).opacity(isHovered ? 0.3 : 0), radius: 16, y: 6)
-            .scaleEffect(isHovered ? 1.025 : 1)
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(PressableScaleButtonStyle())
         .pointerCursor()
@@ -167,55 +147,46 @@ struct BuddyCreationView: View {
             Button {
                 withAnimation(WispMotion.island) { step = .pickSpecialty }
             } label: {
-                Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .semibold))
+                Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .medium))
             }
             .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
 
-            HStack(alignment: .center, spacing: 22) {
-                BuddyCharacter(colorIndex: colorIndex, size: 120, mood: .happy, liveliness: .full, looksAtPointer: true)
-                    .frame(width: 130, height: 130)
+            HStack(alignment: .center, spacing: 18) {
+                BuddyCharacter(colorIndex: colorIndex, size: 84, mood: .idle, liveliness: .full, looksAtPointer: true)
+                    .frame(width: 96, height: 96)
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 6) {
-                        BuddyChip(symbolName: specialty.symbolName, text: specialty.title, colorIndex: colorIndex)
-                    }
                     TextField("Name", text: $nameText)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .font(.system(size: 26, weight: .semibold))
                         .foregroundStyle(WispColor.textPrimary)
                         .onChange(of: nameText) { _, _ in
-                            if nameText != suggestedNameIfUnedited { hasEditedName = true }
+                            if nameText != suggestedName() { hasEditedName = true }
                         }
-                    HStack(spacing: 8) {
+                    HStack(spacing: 9) {
                         ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { index in
                             Button { withAnimation(WispMotion.quick) { colorIndex = index } } label: {
                                 Circle()
-                                    .fill(BuddyAppearance.gradient(forColorIndex: index))
-                                    .frame(width: 22, height: 22)
-                                    .overlay(Circle().strokeBorder(Color.white, lineWidth: colorIndex == index ? 2.5 : 0))
-                                    .scaleEffect(colorIndex == index ? 1.15 : 1)
+                                    .fill(BuddyAppearance.lightColor(forColorIndex: index))
+                                    .frame(width: 20, height: 20)
+                                    .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(colorIndex == index ? 0.85 : 0), lineWidth: 1.5).padding(-3))
                             }
-                            .buttonStyle(.plain).pointerCursor()
+                            .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(index + 1)")
                         }
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("MISSION")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2)
-                    .foregroundStyle(BuddyAppearance.deepColor(forColorIndex: colorIndex))
+            VStack(alignment: .leading, spacing: 10) {
                 TextField("What should it do? e.g. Every morning, summarize what's new on Hacker News", text: $instructionText, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 14))
                     .lineLimit(3...6)
                     .focused($isInstructionFocused)
                     .padding(14)
-                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface2.opacity(0.9)))
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(WispColor.surface2.opacity(0.9)))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(isInstructionFocused
-                                ? AnyShapeStyle(BuddyAppearance.accentGradient(forColorIndex: colorIndex))
-                                : AnyShapeStyle(WispColor.cardSeparator.opacity(0.5)), lineWidth: isInstructionFocused ? 1.6 : 0.8)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(isInstructionFocused ? BuddyAppearance.deepColor(forColorIndex: colorIndex).opacity(0.7) : WispColor.cardSeparator.opacity(0.7), lineWidth: isInstructionFocused ? 1 : 0.5)
                     )
                     .onChange(of: instructionText) { _, newText in
                         if !hasChosenScheduleByHand { schedule = BuddySchedule.inferred(fromInstruction: newText) }
@@ -227,10 +198,10 @@ struct BuddyCreationView: View {
                             ForEach(specialty.starterJobs, id: \.self) { starterJob in
                                 Button { instructionText = starterJob } label: {
                                     Text(starterJob)
-                                        .font(.system(size: 11.5)).lineLimit(1)
+                                        .font(.system(size: 12)).lineLimit(1)
                                         .foregroundStyle(WispColor.textSecondary)
                                         .padding(.horizontal, 11).padding(.vertical, 6)
-                                        .background(Capsule().fill(WispColor.surface2))
+                                        .overlay(Capsule().strokeBorder(WispColor.cardSeparator.opacity(0.8), lineWidth: 0.5))
                                 }
                                 .buttonStyle(PressableScaleButtonStyle()).pointerCursor()
                             }
@@ -239,7 +210,7 @@ struct BuddyCreationView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 BuddyScheduleEditor(schedule: Binding(
                     get: { schedule },
                     set: { hasChosenScheduleByHand = true; schedule = $0 }
@@ -252,12 +223,12 @@ struct BuddyCreationView: View {
                     )
                     .padding(.top, 6)
                 } label: {
-                    Text("Tools · \(toolAccess == nil ? "everything" : "limited to what fits the job")")
-                        .font(.system(size: 12, weight: .medium)).foregroundStyle(WispColor.textSecondary)
+                    Text(toolAccess == nil ? "Tools · all" : "Tools · limited")
+                        .font(.system(size: 12.5, weight: .medium)).foregroundStyle(WispColor.textSecondary)
                 }
             }
             .padding(16)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface2.opacity(0.7)))
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(WispColor.surface2.opacity(0.6)))
 
             HStack {
                 Spacer()
@@ -275,20 +246,15 @@ struct BuddyCreationView: View {
                     )
                     onCreated(newBuddy.id)
                 } label: {
-                    Label(schedule.isRepeating ? "Create" : "Create & run", systemImage: "sparkles")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .padding(.horizontal, 6)
+                    Text(schedule.isRepeating ? "Create" : "Create & run")
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 2)
                 }
                 .buttonStyle(BuddyPillButtonStyle(colorIndex: colorIndex))
-                .controlSize(.large)
                 .pointerCursor()
                 .disabled(trimmedInstruction.isEmpty)
                 .opacity(trimmedInstruction.isEmpty ? 0.5 : 1)
             }
         }
     }
-
-    /// The name the generator would currently propose, so typing over it can be
-    /// told apart from the instruction changing underneath it.
-    private var suggestedNameIfUnedited: String { suggestedName() }
 }

@@ -3,10 +3,9 @@
 //  leanring-buddy
 //
 //  The panel beside a buddy's chat: everything about the buddy that isn't the
-//  conversation, in five tabs — Automation (its schedule, next run, recent
-//  runs), Files (its library), Memory (what it chose to remember), Tools (what
-//  it may use) and About (name, specialty, colour, model, job). It edits the
-//  same stores the rest of the app reads, so nothing here is a copy.
+//  conversation. Five icon tabs — Automation, Files, Memory, Tools, About — and
+//  no explanatory prose; each tab is the controls and the data, nothing else.
+//  It edits the same stores the rest of the app reads.
 //
 
 import AppKit
@@ -33,11 +32,11 @@ enum BuddyInspectorTab: String, CaseIterable, Identifiable {
 
     var symbolName: String {
         switch self {
-        case .automation: return "clock.arrow.2.circlepath"
-        case .files: return "folder.fill"
-        case .memory: return "brain.head.profile"
-        case .tools: return "wrench.and.screwdriver.fill"
-        case .about: return "person.crop.circle.fill"
+        case .automation: return "clock"
+        case .files: return "folder"
+        case .memory: return "brain"
+        case .tools: return "wrench.and.screwdriver"
+        case .about: return "person.crop.circle"
         }
     }
 }
@@ -55,7 +54,6 @@ struct BuddyInspectorView: View {
 
     @State private var editedName = ""
     @State private var editedInstruction = ""
-    @State private var didLoadDrafts = false
 
     private var selectedTab: BuddyInspectorTab { BuddyInspectorTab(rawValue: selectedTabRawValue) ?? .automation }
 
@@ -63,9 +61,9 @@ struct BuddyInspectorView: View {
         if let buddy = buddyStore.buddy(withID: buddyID) {
             VStack(spacing: 0) {
                 tabBar(for: buddy)
-                Divider().opacity(0.5)
+                Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(height: 0.5)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 18) {
                         switch selectedTab {
                         case .automation: automationTab(for: buddy)
                         case .files: filesTab(for: buddy)
@@ -77,11 +75,11 @@ struct BuddyInspectorView: View {
                     .padding(18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .id(selectedTab)
-                    .transition(.opacity.combined(with: .offset(y: 6)))
+                    .transition(.opacity)
                 }
                 .animation(WispMotion.smooth, value: selectedTab)
             }
-            .background(WispColor.groupedCardBackground.opacity(0.55))
+            .background(WispColor.groupedCardBackground.opacity(0.5))
             .onAppear { loadDrafts(from: buddy) }
             .onChange(of: buddyID) { _, _ in
                 if let newBuddy = buddyStore.buddy(withID: buddyID) { loadDrafts(from: newBuddy) }
@@ -92,73 +90,55 @@ struct BuddyInspectorView: View {
     private func loadDrafts(from buddy: WispBuddy) {
         editedName = buddy.name
         editedInstruction = buddy.instruction
-        didLoadDrafts = true
     }
 
-    // MARK: - Tabs
+    // MARK: - Pieces
 
     private func tabBar(for buddy: WispBuddy) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             ForEach(BuddyInspectorTab.allCases) { tab in
                 let isSelected = tab == selectedTab
-                Button {
-                    selectedTabRawValue = tab.rawValue
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: tab.symbolName).font(.system(size: 13, weight: .semibold))
-                        Text(tab.title).font(.system(size: 9.5, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundStyle(isSelected ? Color.white : WispColor.textSecondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(isSelected ? AnyShapeStyle(BuddyAppearance.accentGradient(forColorIndex: buddy.colorIndex)) : AnyShapeStyle(Color.clear))
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                Button { selectedTabRawValue = tab.rawValue } label: {
+                    Image(systemName: tab.symbolName)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(isSelected ? BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex) : WispColor.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(WispColor.surface3.opacity(isSelected ? 1 : 0)))
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .pointerCursor()
                 .accessibilityLabel(tab.title)
+                .nativeTooltip(tab.title)
             }
         }
-        .padding(10)
+        .padding(8)
         .animation(WispMotion.quick, value: selectedTab)
     }
 
-    private func sectionTitle(_ title: String, symbolName: String? = nil) -> some View {
-        HStack(spacing: 5) {
-            if let symbolName { Image(systemName: symbolName).font(.system(size: 10, weight: .bold)) }
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .tracking(1.1)
-        }
-        .foregroundStyle(WispColor.textTertiary)
+    private func header(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(WispColor.textSecondary)
     }
 
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10, content: content)
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(WispColor.surface2.opacity(0.8)))
+    private func row(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title).font(.system(size: 13)).foregroundStyle(WispColor.textSecondary)
+            Spacer()
+            Text(value).font(.system(size: 13, weight: .medium)).foregroundStyle(WispColor.textPrimary)
+        }
     }
 
     // MARK: - Automation
 
     private func automationTab(for buddy: WispBuddy) -> some View {
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
-        return VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                sectionTitle("Next run", symbolName: "clock")
-                Text(buddy.schedule.isRepeating ? BuddyFormatting.nextRunPhrase(for: buddy).capitalizedFirst : "When you ask")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex))
-                Text(buddy.schedule.isRepeating ? "\(buddy.schedule.summary()) · while Wisp is running" : "Set a schedule and it works on its own.")
-                    .font(.system(size: 11.5)).foregroundStyle(WispColor.textSecondary)
-            }
-
-            card {
-                sectionTitle("Schedule")
+        let runRecords = Array(buddyStore.runRecords(of: buddy, in: taskRegistry).suffix(6).reversed())
+        return VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                row("Next run", value: buddy.schedule.isRepeating ? BuddyFormatting.nextRunPhrase(for: buddy).capitalizedFirst : "On request")
                 BuddyScheduleEditor(schedule: Binding(
                     get: { buddy.schedule },
                     set: { buddyStore.updateSchedule(ofBuddyWithID: buddy.id, to: $0) }
@@ -167,45 +147,40 @@ struct BuddyInspectorView: View {
                     get: { buddy.postsNotificationWhenFinished },
                     set: { buddyStore.setNotifiesWhenFinished(buddyWithID: buddy.id, notifiesWhenFinished: $0) }
                 )) {
-                    Text("Notify me when it finishes").font(.system(size: 12))
+                    Text("Notify when finished").font(.system(size: 13))
                 }
                 .toggleStyle(.switch).controlSize(.small).tint(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex))
                 .pointerCursor()
             }
 
-            HStack(spacing: 8) {
-                if isRunning {
-                    Button { buddyStore.stopRun(ofBuddyWithID: buddy.id) } label: { Label("Stop", systemImage: "stop.fill") }
-                        .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()
-                } else {
-                    Button { buddyStore.runNow(buddyWithID: buddy.id) } label: { Label("Run now", systemImage: "play.fill") }
-                        .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex)).pointerCursor()
-                }
+            if isRunning {
+                Button { buddyStore.stopRun(ofBuddyWithID: buddy.id) } label: { Label("Stop", systemImage: "stop.fill") }
+                    .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()
+            } else {
+                Button { buddyStore.runNow(buddyWithID: buddy.id) } label: { Label("Run now", systemImage: "play.fill") }
+                    .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex)).pointerCursor()
             }
 
-            let runRecords = buddyStore.runRecords(of: buddy, in: taskRegistry).suffix(6).reversed()
-            VStack(alignment: .leading, spacing: 8) {
-                sectionTitle("Recent runs", symbolName: "list.bullet")
-                if runRecords.isEmpty {
-                    Text("No runs yet.").font(.system(size: 11.5)).foregroundStyle(WispColor.textTertiary)
-                }
-                ForEach(Array(runRecords), id: \.id) { record in
-                    HStack(spacing: 9) {
-                        Circle().fill(runColor(record.status, buddy: buddy)).frame(width: 8, height: 8)
-                        Text(runLabel(record.status)).font(.system(size: 12, weight: .semibold, design: .rounded))
-                        Spacer()
-                        Text(BuddyFormatting.timeText(record.startedAt))
-                            .font(.system(size: 11, design: .rounded).monospacedDigit())
-                            .foregroundStyle(WispColor.textTertiary)
+            if !runRecords.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    header("Recent runs")
+                    ForEach(runRecords, id: \.id) { record in
+                        HStack(spacing: 8) {
+                            Circle().fill(runColor(record.status)).frame(width: 6, height: 6)
+                            Text(runLabel(record.status)).font(.system(size: 12.5))
+                            Spacer()
+                            Text(BuddyFormatting.timeText(record.startedAt))
+                                .font(.system(size: 11.5).monospacedDigit()).foregroundStyle(WispColor.textTertiary)
+                        }
                     }
                 }
             }
         }
     }
 
-    private func runColor(_ status: AgentTaskRecord.Status, buddy: WispBuddy) -> Color {
+    private func runColor(_ status: AgentTaskRecord.Status) -> Color {
         switch status {
-        case .running, .waitingForApproval: return BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex)
+        case .running, .waitingForApproval: return DS.Colors.warning
         case .succeeded: return DS.Colors.success
         case .failed: return DS.Colors.destructive
         case .cancelled, .interrupted: return WispColor.textTertiary
@@ -227,12 +202,7 @@ struct BuddyInspectorView: View {
 
     private func filesTab(for buddy: WispBuddy) -> some View {
         let attachments = fileLibrary.attachments(ofBuddyWithID: buddy.id)
-        return VStack(alignment: .leading, spacing: 14) {
-            sectionTitle("Library", symbolName: "folder")
-            Text("Files you send \(buddy.name) are kept here, so it can open them again in later runs without you attaching them twice.")
-                .font(.system(size: 11.5)).foregroundStyle(WispColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
+        return VStack(alignment: .leading, spacing: 12) {
             Button {
                 let openPanel = NSOpenPanel()
                 openPanel.allowsMultipleSelection = true
@@ -243,32 +213,27 @@ struct BuddyInspectorView: View {
                 .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex)).pointerCursor()
 
             if attachments.isEmpty {
-                Text("Nothing yet. Drop a file on the chat, or add one here.")
-                    .font(.system(size: 11.5)).foregroundStyle(WispColor.textTertiary)
+                Text("Files you send in chat are kept here.")
+                    .font(.system(size: 12.5)).foregroundStyle(WispColor.textTertiary)
             }
             ForEach(attachments) { attachment in
                 HStack(spacing: 10) {
-                    Image(systemName: attachment.kind == .image ? "photo.fill" : "doc.text.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex))
-                        .frame(width: 24)
+                    Image(systemName: attachment.kind == .image ? "photo" : "doc.text")
+                        .font(.system(size: 15)).foregroundStyle(WispColor.textSecondary).frame(width: 22)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(attachment.fileName).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
-                        Text("\(BuddyFormatting.byteText(attachment.byteCount)) · \(BuddyFormatting.timeText(attachment.addedAt))")
-                            .font(.system(size: 10.5)).foregroundStyle(WispColor.textTertiary)
+                        Text(attachment.fileName).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        Text(BuddyFormatting.byteText(attachment.byteCount))
+                            .font(.system(size: 11)).foregroundStyle(WispColor.textTertiary)
                     }
                     Spacer(minLength: 4)
-                    Button {
+                    BuddyIconButton(symbolName: "magnifyingglass", label: "Show in Finder", size: 24) {
                         NSWorkspace.shared.activateFileViewerSelecting([fileLibrary.fileURL(of: attachment, buddyID: buddy.id)])
-                    } label: { Image(systemName: "magnifyingglass") }
-                        .buttonStyle(.plain).foregroundStyle(WispColor.textTertiary).pointerCursor().nativeTooltip("Show in Finder")
-                    Button {
+                    }
+                    BuddyIconButton(symbolName: "trash", label: "Remove", size: 24) {
                         withAnimation(WispMotion.smooth) { fileLibrary.remove(attachment, fromBuddyWithID: buddy.id) }
-                    } label: { Image(systemName: "trash") }
-                        .buttonStyle(.plain).foregroundStyle(WispColor.textTertiary).pointerCursor().nativeTooltip("Remove")
+                    }
                 }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(WispColor.surface2.opacity(0.8)))
+                .padding(.vertical, 2)
             }
         }
     }
@@ -277,27 +242,19 @@ struct BuddyInspectorView: View {
 
     private func memoryTab(for buddy: WispBuddy) -> some View {
         let notes = memoryStore.facts(ofBuddyWithID: buddy.id)
-        return VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("What \(buddy.name) remembers", symbolName: "brain.head.profile")
-            Text("Short notes it saves for its own future runs — what it already reported, what to skip. Private to this buddy.")
-                .font(.system(size: 11.5)).foregroundStyle(WispColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+        return VStack(alignment: .leading, spacing: 10) {
             if notes.isEmpty {
-                Text("Nothing saved yet.").font(.system(size: 11.5)).foregroundStyle(WispColor.textTertiary)
+                Text("Nothing saved yet.").font(.system(size: 12.5)).foregroundStyle(WispColor.textTertiary)
             }
             ForEach(notes, id: \.self) { note in
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "sparkle").font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex)).padding(.top, 4)
-                    Text(note).font(.system(size: 12.5)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    Text(note).font(.system(size: 13)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 4)
-                    Button { withAnimation(WispMotion.smooth) { memoryStore.forgetExactFact(note, forBuddyWithID: buddy.id) } } label: {
-                        Image(systemName: "xmark.circle.fill")
+                    BuddyIconButton(symbolName: "xmark", label: "Forget this", size: 22) {
+                        withAnimation(WispMotion.smooth) { memoryStore.forgetExactFact(note, forBuddyWithID: buddy.id) }
                     }
-                    .buttonStyle(.plain).foregroundStyle(WispColor.textTertiary).pointerCursor().nativeTooltip("Forget this")
                 }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(WispColor.surface2.opacity(0.8)))
+                .padding(.vertical, 2)
             }
         }
     }
@@ -305,85 +262,74 @@ struct BuddyInspectorView: View {
     // MARK: - Tools
 
     private func toolsTab(for buddy: WispBuddy) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("What it can use", symbolName: "wrench.and.screwdriver")
-            Text("A smaller toolbox helps the model choose well. \(buddy.specialty.map { "\($0.title) buddies start with a set that fits the job." } ?? "")")
-                .font(.system(size: 11.5)).foregroundStyle(WispColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            BuddyToolAccessEditor(
-                toolAccess: Binding(
-                    get: { buddy.toolAccess },
-                    set: { buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: $0) }
-                ),
-                modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice)
-            )
-        }
+        BuddyToolAccessEditor(
+            toolAccess: Binding(
+                get: { buddy.toolAccess },
+                set: { buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: $0) }
+            ),
+            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice)
+        )
     }
 
     // MARK: - About
 
     private func aboutTab(for buddy: WispBuddy) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            card {
-                sectionTitle("Name")
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                header("Name")
                 TextField("Name", text: $editedName)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { buddyStore.rename(buddyWithID: buddy.id, to: editedName) }
-                sectionTitle("Colour")
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 8), spacing: 8) {
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                header("Colour")
+                HStack(spacing: 9) {
                     ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { colorIndex in
-                        Button {
-                            buddyStore.updateColor(ofBuddyWithID: buddy.id, to: colorIndex)
-                        } label: {
+                        Button { buddyStore.updateColor(ofBuddyWithID: buddy.id, to: colorIndex) } label: {
                             Circle()
-                                .fill(BuddyAppearance.gradient(forColorIndex: colorIndex))
-                                .frame(width: 22, height: 22)
-                                .overlay(Circle().strokeBorder(Color.white, lineWidth: buddy.colorIndex == colorIndex ? 2.5 : 0))
-                                .shadow(color: BuddyAppearance.deepColor(forColorIndex: colorIndex).opacity(buddy.colorIndex == colorIndex ? 0.6 : 0), radius: 5)
-                                .scaleEffect(buddy.colorIndex == colorIndex ? 1.12 : 1)
+                                .fill(BuddyAppearance.lightColor(forColorIndex: colorIndex))
+                                .frame(width: 20, height: 20)
+                                .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(buddy.colorIndex == colorIndex ? 0.85 : 0), lineWidth: 1.5).padding(-3))
                         }
-                        .buttonStyle(.plain).pointerCursor()
+                        .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(colorIndex + 1)")
                     }
                 }
                 .animation(WispMotion.quick, value: buddy.colorIndex)
             }
 
-            card {
-                sectionTitle("Specialty")
+            VStack(alignment: .leading, spacing: 8) {
+                header("Specialty")
                 Picker("Specialty", selection: Binding(
                     get: { buddy.specialty ?? .general },
-                    set: { newSpecialty in
-                        buddyStore.updateSpecialty(ofBuddyWithID: buddy.id, to: newSpecialty, appliesToolLimits: true)
-                    }
+                    set: { buddyStore.updateSpecialty(ofBuddyWithID: buddy.id, to: $0, appliesToolLimits: true) }
                 )) {
                     ForEach(BuddySpecialty.allCases) { specialty in
                         Label(specialty.title, systemImage: specialty.symbolName).tag(specialty)
                     }
                 }
-                .labelsHidden().pickerStyle(.menu).pointerCursor()
-                Text("Changing it re-sets the tools to that specialty's set.")
-                    .font(.system(size: 10.5)).foregroundStyle(WispColor.textTertiary)
+                .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
             }
 
-            card {
-                sectionTitle("Model")
+            VStack(alignment: .leading, spacing: 8) {
+                header("Model")
                 BuddyModelEditor(modelChoice: Binding(
                     get: { buddy.modelChoice },
                     set: { buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: $0) }
                 ))
             }
 
-            card {
-                sectionTitle("Mission")
+            VStack(alignment: .leading, spacing: 8) {
+                header("Mission")
                 TextField("What should it do?", text: $editedInstruction, axis: .vertical)
                     .textFieldStyle(.roundedBorder).lineLimit(2...6)
-                HStack {
-                    Spacer()
-                    Button("Save mission") { buddyStore.updateInstruction(ofBuddyWithID: buddy.id, to: editedInstruction) }
+                if editedInstruction != buddy.instruction && !editedInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button("Save") { buddyStore.updateInstruction(ofBuddyWithID: buddy.id, to: editedInstruction) }
                         .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex)).pointerCursor()
-                        .disabled(editedInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedInstruction == buddy.instruction)
+                        .transition(.opacity)
                 }
             }
+            .animation(WispMotion.quick, value: editedInstruction == buddy.instruction)
 
             HStack(spacing: 8) {
                 Button("Clear conversation…", action: onRequestClearConversation).buttonStyle(.bordered).pointerCursor()

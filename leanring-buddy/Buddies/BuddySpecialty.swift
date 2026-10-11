@@ -41,14 +41,14 @@ enum BuddySpecialty: String, Codable, CaseIterable, Identifiable, Equatable {
 
     var tagline: String {
         switch self {
-        case .researcher: return "Digs through the web and reports back with sources"
-        case .inbox: return "Keeps on top of your email and messages"
-        case .planner: return "Your day, your calendar, your reminders"
-        case .writer: return "Drafts, rewrites and polishes"
-        case .coder: return "Hands real coding work to Claude Code"
-        case .watcher: return "Keeps an eye on a screen or a page and tells you"
-        case .organizer: return "Tidies files, windows and routines"
-        case .general: return "Anything. Has every tool you've enabled"
+        case .researcher: return "Researches the web and cites sources"
+        case .inbox: return "Triages email and messages"
+        case .planner: return "Calendar, reminders, your day"
+        case .writer: return "Drafts and polishes"
+        case .coder: return "Hands work to Claude Code"
+        case .watcher: return "Watches a screen or a page"
+        case .organizer: return "Tidies files and windows"
+        case .general: return "Any task, every tool"
         }
     }
 
