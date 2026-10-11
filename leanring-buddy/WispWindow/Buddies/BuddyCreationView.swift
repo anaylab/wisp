@@ -233,7 +233,7 @@ struct BuddyCreationView: View {
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel).buttonStyle(.bordered).controlSize(.large).pointerCursor()
+                Button("Cancel", action: onCancel).buttonStyle(BuddyPillButtonStyle(colorIndex: colorIndex, isProminent: false)).pointerCursor()
                 Button {
                     let newBuddy = buddyStore.createBuddy(
                         instruction: trimmedInstruction,

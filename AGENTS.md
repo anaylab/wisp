@@ -193,7 +193,11 @@ cloud dependency to the local path, without asking.
   with a small tonal range, a faint highlight, a ground shadow — no glow, sparkle or confetti. `Liveliness` is the cost dial (`.still` = one frame, `.working`, `.full`); Reduce Motion
   freezes it. `BuddyAvatar` is the compact form (still unless working). The buddy palette (`BuddyAppearance`) is
   eight calm, slightly warm hues; a buddy's colour is an accent used once per surface (the user's bubble, a
-  selected state, an icon), never a fill gradient. **Specialties** (`Buddies/BuddySpecialty.swift`, `WispBuddy.specialty`, optional): colour, tool
+  selected state, an icon), never a fill gradient.
+  **Buttons** share one treatment (`BuddyBevel` + `BuddyPillButtonStyle` in `WispWindow/Buddies/BuddyHubComponents.swift`):
+  a soft fill with faint light from above, a thin lit top edge and a hairline outline; prominent = tinted with the
+  buddy's colour, otherwise neutral; a touch of lift on hover and a dip on press, nothing more. Tabs and segments
+  use the same bevel when selected, and the Composio app list (`ComposioAppsView`) uses the same pills. **Specialties** (`Buddies/BuddySpecialty.swift`, `WispBuddy.specialty`, optional): colour, tool
   groups, persona line (`BuddyThreadPolicy.systemPromptAddendum(specialtyLine:)`), starter jobs. **Files**
   (`Buddies/BuddyFiles.swift`): attachments are copied to `~/Library/Application Support/Wisp/buddy-files/<id>/`
   (`BuddyFileLibrary`), documents are read with `BrainTextExtractor` and fenced as data in the message

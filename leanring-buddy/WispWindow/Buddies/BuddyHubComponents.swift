@@ -10,27 +10,92 @@
 import AppKit
 import SwiftUI
 
-/// A capsule button. Prominent = the buddy's colour, solid; otherwise a quiet tint.
+/// The surface treatment shared by every pill, tab and segment: a soft fill with
+/// a faint light from above, a thin lit top edge and a hairline outline. The
+/// edge is what makes it feel like a physical, pressable thing without being
+/// glossy.
+struct BuddyBevel<S: InsettableShape>: ViewModifier {
+    let shape: S
+    let fill: Color
+    var outline: Color = WispColor.cardSeparator.opacity(0.8)
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                shape.fill(fill)
+                    .overlay(
+                        shape.fill(LinearGradient(
+                            colors: [.white.opacity(colorScheme == .dark ? 0.08 : 0.28), .clear],
+                            startPoint: .top, endPoint: .center))
+                    )
+            )
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(colorScheme == .dark ? 0.24 : 0.75), .white.opacity(0)],
+                        startPoint: .top, endPoint: .bottom),
+                    lineWidth: 1)
+            )
+            .overlay(shape.strokeBorder(outline, lineWidth: 0.5))
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.07), radius: 1.5, y: 1)
+    }
+}
+
+extension View {
+    func buddyBevel<S: InsettableShape>(_ shape: S, fill: Color, outline: Color = WispColor.cardSeparator.opacity(0.8)) -> some View {
+        modifier(BuddyBevel(shape: shape, fill: fill, outline: outline))
+    }
+}
+
+/// A capsule button. Prominent = tinted with the buddy's colour; otherwise
+/// neutral. Both lift a touch on hover and settle on press, and nothing more.
 struct BuddyPillButtonStyle: ButtonStyle {
     let colorIndex: Int
     var isProminent = true
 
     func makeBody(configuration: Configuration) -> some View {
+        BuddyPillBody(configuration: configuration, colorIndex: colorIndex, isProminent: isProminent)
+    }
+}
+
+private struct BuddyPillBody: View {
+    let configuration: ButtonStyle.Configuration
+    let colorIndex: Int
+    let isProminent: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    private var accent: Color { BuddyAppearance.deepColor(forColorIndex: colorIndex) }
+
+    /// The deep accent reads on light surfaces; on dark ones the lighter body
+    /// tone keeps the label legible.
+    private var tintedTextColor: Color {
+        colorScheme == .dark ? BuddyAppearance.lightColor(forColorIndex: colorIndex) : accent
+    }
+
+    var body: some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(isProminent ? Color.white : BuddyAppearance.deepColor(forColorIndex: colorIndex))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isProminent
-                          ? BuddyAppearance.deepColor(forColorIndex: colorIndex)
-                          : BuddyAppearance.deepColor(forColorIndex: colorIndex).opacity(0.12))
+            .foregroundStyle(isProminent ? tintedTextColor : WispColor.textPrimary)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 6.5)
+            .buddyBevel(
+                Capsule(style: .continuous),
+                fill: isProminent ? accent.opacity(colorScheme == .dark ? 0.30 : 0.16) : WispColor.surface3,
+                outline: isProminent ? accent.opacity(0.30) : WispColor.cardSeparator.opacity(0.8)
             )
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .brightness(configuration.isPressed ? -0.05 : (isHovering ? 0.03 : 0))
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(WispMotion.quick, value: configuration.isPressed)
+            .offset(y: isHovering && !configuration.isPressed ? -0.5 : 0)
+            .opacity(isEnabled ? 1 : 0.5)
             .contentShape(Capsule())
+            .onHover { isHovering = $0 }
+            .animation(WispMotion.quick, value: isHovering)
+            .animation(WispMotion.quick, value: configuration.isPressed)
     }
 }
 
@@ -50,7 +115,11 @@ struct BuddyIconButton: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: size, height: size)
-                .background(Circle().fill(WispColor.surface3.opacity(isHovering ? 0.9 : 0)))
+                .background {
+                    if isHovering {
+                        Color.clear.buddyBevel(Circle(), fill: WispColor.surface3).transition(.opacity)
+                    }
+                }
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

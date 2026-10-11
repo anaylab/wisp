@@ -95,7 +95,8 @@ struct BuddyToolsView: View {
             }
         }
         .padding(3)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(WispColor.surface3.opacity(0.7)))
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(WispColor.surface3.opacity(0.6)))
+        .animation(WispMotion.quick, value: toolAccess == nil)
     }
 
     private func modeButton(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -107,11 +108,12 @@ struct BuddyToolsView: View {
                 .foregroundStyle(isSelected ? WispColor.textPrimary : WispColor.textSecondary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isSelected ? WispColor.surface1 : .clear)
-                        .shadow(color: .black.opacity(isSelected ? 0.08 : 0), radius: 2, y: 1)
-                )
+                .background {
+                    if isSelected {
+                        Color.clear.buddyBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface1)
+                            .transition(.opacity)
+                    }
+                }
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -340,8 +342,7 @@ struct BuddyConnectAppsSheet: View {
                     keyDraft = ""
                     Task { await composio.connect(apiKey: key) }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(WispColor.accentText)
+                .buttonStyle(BuddyPillButtonStyle(colorIndex: 0))
                 .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                 .pointerCursor()
             }

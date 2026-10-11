@@ -104,7 +104,12 @@ struct BuddyInspectorView: View {
                         .foregroundStyle(isSelected ? BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex) : WispColor.textSecondary)
                         .frame(maxWidth: .infinity)
                         .frame(height: 30)
-                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(WispColor.surface3.opacity(isSelected ? 1 : 0)))
+                        .background {
+                            if isSelected {
+                                Color.clear.buddyBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface3)
+                                    .transition(.opacity)
+                            }
+                        }
                         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
@@ -333,10 +338,12 @@ struct BuddyInspectorView: View {
             .animation(WispMotion.quick, value: editedInstruction == buddy.instruction)
 
             HStack(spacing: 8) {
-                Button("Clear conversation…", action: onRequestClearConversation).buttonStyle(.bordered).pointerCursor()
-                Button("Delete…", role: .destructive, action: onRequestDeletion).buttonStyle(.bordered).pointerCursor()
+                Button("Clear conversation…", action: onRequestClearConversation)
+                    .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()
+                Button("Delete…", action: onRequestDeletion)
+                    .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false))
+                    .pointerCursor()
             }
-            .controlSize(.small)
         }
     }
 }
