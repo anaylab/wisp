@@ -281,21 +281,20 @@ struct MarketplaceTab: View {
     }
 
     private var composioConnectedView: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 12))
                     .foregroundStyle(DS.Colors.success)
-                Text(composio.isServerInstalled
-                     ? "Connected — the universal server is installed."
-                     : "Key saved.")
+                Text("Composio is on. Connect the apps you want Wisp to reach.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(DS.Colors.textPrimary)
                 Spacer()
                 Button {
                     composio.disconnect()
+                    ComposioConnectionsStore.shared.reset()
                 } label: {
-                    Text("Disconnect")
+                    Text("Remove key")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(DS.Colors.destructiveText)
                 }
@@ -303,7 +302,9 @@ struct MarketplaceTab: View {
                 .pointerCursor()
             }
 
-            Text("Its tools (search, execute, manage-connections) appear under Installed above and count against the tool budget. The model finds any of Composio's 500+ apps through them; Composio prompts you to sign in to an app the first time it's used.")
+            ComposioAppsView()
+
+            Text("Connect opens the app's sign-in page in your browser; this list updates when you finish. The model reaches connected apps through Composio's search and execute tools, which count against the tool budget.")
                 .font(.system(size: 10))
                 .foregroundStyle(DS.Colors.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
