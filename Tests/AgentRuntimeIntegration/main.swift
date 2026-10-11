@@ -879,6 +879,7 @@ func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
 
     await anthropicProviderSuite()
     await claudeSubscriptionProviderSuite()
+    composioConnectionsSuite()
     await buddyBotSuite()
 
     print("\n\(String(repeating: "─", count: 52))")
