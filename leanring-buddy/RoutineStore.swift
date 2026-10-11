@@ -17,6 +17,7 @@
 //  something to show; after that the file is the user's, deletions included.
 //
 
+import AppIntents
 import Combine
 import Foundation
 
@@ -207,6 +208,8 @@ final class RoutineStore: ObservableObject {
     }
 
     private func saveRoutines() {
+        // "Run <routine> in Wisp" phrases follow the routines' names.
+        WispAppShortcuts.updateAppShortcutParameters()
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

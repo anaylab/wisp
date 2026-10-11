@@ -121,11 +121,24 @@ What was learned building it:
   it unless the user turns on "Also with cloud models"; the `search_personal_context`
   tool refuses then too, and cloud buddies never get it.
 
-## Phase 4 — Wisp in Siri, Spotlight and Shortcuts
+## Phase 4 — Wisp in Siri, Spotlight and Shortcuts (done)
 
-App Intents exposed *by* Wisp: **Ask Wisp** (text in, answer out), **Run Routine**
-(an `AppEntity` over `RoutineStore`), **Run Buddy**, **Add to Brain** (file/URL).
-macOS 26 shows these in Spotlight and the Shortcuts app, and lets Siri call them.
+App Intents exposed by Wisp (`AppIntents/`):
+
+- **Ask Wisp**: a question in, the answer out, as text for Shortcuts and a dialog for
+  Siri and Spotlight. It runs exactly like a typed question, so the calendar,
+  reminders, personal context and the model all work through it.
+- **Run Wisp Routine** and **Run Wisp Buddy**: routines and buddies are App Entities,
+  so Siri, Spotlight and Shortcuts can name them.
+- **Add to Wisp Brain**: a file or a web address goes onto the brain's ingest queue.
+- **No-setup phrases** (`WispAppShortcuts`): "Ask Wisp", "Run <routine> in Wisp",
+  "Add to my Wisp brain". The routine and buddy names in phrases refresh whenever
+  routines or buddies change.
+
+How an intent gets its answer: every route already records its answer in History, so
+the bridge waits for the History record the request started rather than adding
+plumbing to each route. Past 75 seconds (a confirmation nobody answered, a long agent
+task) it says it's still working, and the answer still lands in the notch.
 
 ## Phase 5 — Other apps' actions through Shortcuts
 

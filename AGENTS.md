@@ -562,6 +562,20 @@ cloud dependency to the local path, without asking.
   `BuddyRunToolPolicy.privateKnowledgeToolNames`. Settings → Connections → **Your Data** (`PersonalContextPage`): master
   and cloud switches, one row per source with status + Allow / Open System Settings / Open Full Disk Access, and a
   "Try a search" box. `NSAppleEventsUsageDescription` names the Mail/Notes search.
+- **Siri, Spotlight and Shortcuts** (`AppIntents/`, Phase 4 of `docs/siri-style-plan.md`): Wisp's App Intents —
+  **Ask Wisp** (question in, answer out as text + dialog), **Run Wisp Routine** and **Run Wisp Buddy** (`RoutineEntity`
+  / `BuddyEntity` over `RoutineStore` / `BuddyStore`, `EntityStringQuery` so names match), and **Add to Wisp Brain** (an
+  `IntentFile`, copied to `~/Library/Application Support/Wisp/IntentImports/` because the queue reads later, and/or a web
+  address → `BrainIngestQueue`). `WispAppShortcuts` gives Siri/Spotlight phrases with no setup ("Ask Wisp", "Run
+  <routine> in Wisp"); `updateAppShortcutParameters()` runs at launch and on every routine/buddy save so phrases follow
+  their names. Intents run in the menu bar process (no window, `openAppWhenRun = false`) and reach the live
+  `CompanionManager` through `AppDependencyManager` (registered in `CompanionAppDelegate.init`, before any intent can
+  run). `WispIntentBridge` (`answerForIntent(question:)` / `(runningRoutineWithID:)`) sends the request down the normal
+  typed-question path and **waits for the History record it started** (matched by title and start time, newest-first,
+  machine tags stripped via `AnswerDisplayText`), so every route — fast commands, calendar/reminders, personal context,
+  the model — answers an intent with no per-route plumbing; past 75s it returns "still working" and the answer still
+  lands in the notch. Buddy runs return "<name> is on it" (they run in the background). Xcode's App Intents metadata step
+  writes `Wisp.app/Contents/Resources/Metadata.appintents`; verified there and as Spotlight's "Ask Wisp — Run" action.
 - **Window management** (`WindowManagement/`): "put Safari on the left and Xcode on the right",
   "maximize this", "make this window full screen", "move Chrome to the right half", "center this
   window", "move this to my other screen", "tile Notes and Mail" are recognised by
@@ -889,6 +903,8 @@ Grouped by what they do. Line counts are approximate.
 | `PersonalContext/PersonalContextStore.swift` | ~265 | Switches (persisted), availability, access requests (Settings only), and the deadline-bounded search for a turn (`contextForTurn` → `TurnContext` with a History summary) and for the tool (`search`). |
 | `PersonalContext/PersonalContextAgentTool.swift` | ~90 | `search_personal_context` (read-only, local; refuses for cloud models unless allowed). |
 | `WispWindow/PersonalContextPage.swift` | ~230 | Connections → Your Data: master/cloud switches, per-source rows with status and the right grant button, and a trial search. |
+| `AppIntents/WispAppIntents.swift` | ~300 | App Intents for Siri/Spotlight/Shortcuts: `AskWispIntent`, `RunRoutineIntent` + `RoutineEntity`, `RunBuddyIntent` + `BuddyEntity`, `AddToBrainIntent`, and the `WispAppShortcuts` phrases. |
+| `AppIntents/WispIntentBridge.swift` | ~90 | `CompanionManager.answerForIntent`: runs a question or routine like a typed one and waits for its History record's answer (75s cap). |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |

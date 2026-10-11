@@ -19,6 +19,7 @@
 //  Stored at `~/Library/Application Support/Wisp/buddies.json`.
 //
 
+import AppIntents
 import Combine
 import Foundation
 
@@ -566,6 +567,8 @@ final class BuddyStore: ObservableObject {
     }
 
     private func saveBuddies() {
+        // "Run <buddy> in Wisp" phrases follow the buddies' names.
+        WispAppShortcuts.updateAppShortcutParameters()
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

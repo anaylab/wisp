@@ -9,6 +9,7 @@
 
 import ServiceManagement
 import SwiftUI
+import AppIntents
 
 @main
 struct leanring_buddyApp: App {
@@ -33,6 +34,15 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private let companionManager = CompanionManager()
     private var wispWindowController: WispWindowController?
 
+    override init() {
+        super.init()
+        // Siri, Spotlight and Shortcuts run Wisp's App Intents in this process
+        // (`WispAppIntents.swift`); they reach the live companion through this.
+        // Registered at init, before any intent can be performed.
+        let liveCompanionManager = companionManager
+        AppDependencyManager.shared.add(dependency: liveCompanionManager)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("🎯 Wisp: Starting...")
         print("🎯 Wisp: Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
@@ -54,6 +64,8 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
 
         companionManager.start()
         startBrainServicesIfEnabled()
+        // Siri's phrases that name a routine or buddy use their current names.
+        WispAppShortcuts.updateAppShortcutParameters()
         // Open the window only when the user still needs to do something, which
         // means one of the permissions is missing; Today leads with the checklist.
         if !companionManager.allPermissionsGranted {
