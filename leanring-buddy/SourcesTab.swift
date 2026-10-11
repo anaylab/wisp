@@ -78,10 +78,10 @@ struct SourcesTab: View {
 
                 HStack(spacing: 8) {
                     Button("Reveal config file") { revealConfigFile() }
-                        .buttonStyle(DSSecondaryButtonStyle())
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .pointerCursor()
                     Button("Reload") { sourceStore.reload() }
-                        .buttonStyle(DSSecondaryButtonStyle())
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .pointerCursor()
                     Spacer()
                 }

@@ -36,9 +36,9 @@ struct ChatPage: View {
     var body: some View {
         HStack(spacing: 0) {
             threadColumn
-            Divider().background(DS.Colors.borderSubtle)
+            Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(width: 0.5)
             tasksSidebar
-                .frame(width: 240)
+                .frame(width: 232)
         }
         .onAppear {
             isFollowUpFieldFocused = true
@@ -81,8 +81,10 @@ struct ChatPage: View {
                                 .frame(height: 1)
                                 .id(threadBottomAnchorID)
                         }
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 16)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 20)
+                        .frame(maxWidth: 760)
+                        .frame(maxWidth: .infinity)
                     }
                     .onAppear {
                         scrollProxy.scrollTo(threadBottomAnchorID, anchor: .bottom)
@@ -94,23 +96,18 @@ struct ChatPage: View {
                     }
                 }
             }
-            Divider().background(DS.Colors.borderSubtle)
             followUpComposer
         }
     }
 
     private var emptyThread: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             Spacer()
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 24))
-                .foregroundStyle(DS.Colors.textTertiary)
-            Text("Nothing in the last few hours")
-                .font(WispFont.bodyMedium)
-                .foregroundStyle(DS.Colors.textSecondary)
-            Text("Ask below, or hold your talk shortcut anywhere.")
-                .font(WispFont.callout)
-                .foregroundStyle(DS.Colors.textTertiary)
+            WispMark(state: .idle, size: 44)
+                .frame(width: 52, height: 52)
+            Text("Ask anything")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(WispColor.textPrimary)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -130,43 +127,42 @@ struct ChatPage: View {
             HStack(spacing: 6) {
                 // A routine run's title is a label, not something the user typed.
                 if !record.isUsersOwnQuestion {
-                    Image(systemName: "bolt")
+                    Image(systemName: "bolt.fill")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(DS.Colors.accentText)
+                        .foregroundStyle(Color.white.opacity(0.85))
                 }
                 Text(record.title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(DS.Colors.textPrimary)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Color.white)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 13)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(DS.Colors.accentSubtle)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(WispColor.accent)
             )
         }
     }
 
     @ViewBuilder
     private func answerBubble(_ record: AgentTaskRecord) -> some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 8) {
+            WispMark(state: record.status.isTerminal ? .idle : .thinking, size: 20)
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 5) {
                 answerBody(record)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(WispColor.surface2.opacity(0.9))
+                    )
                 answerFooter(record)
+                    .padding(.leading, 4)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(DS.Colors.surface1)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(DS.Colors.borderSubtle, lineWidth: 1)
-            )
-            Spacer(minLength: 80)
+            Spacer(minLength: 60)
         }
     }
 
@@ -194,9 +190,9 @@ struct ChatPage: View {
                 .foregroundStyle(DS.Colors.textTertiary)
         case .succeeded:
             Text(answerText.isEmpty ? "Done." : answerText)
-                .font(.system(size: 13))
+                .font(.system(size: 13.5))
                 .foregroundStyle(DS.Colors.textPrimary)
-                .lineSpacing(2)
+                .lineSpacing(3)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -263,50 +259,56 @@ struct ChatPage: View {
 
     private var followUpComposer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 6) {
                 TextField("Ask a follow-up…", text: $followUpText, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13.5))
                     .lineLimit(1...5)
                     .focused($isFollowUpFieldFocused)
+                    .padding(.vertical, 7)
+                    .padding(.leading, 6)
                     .onSubmit(sendFollowUp)
                 Button(action: sendFollowUp) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(isFollowUpEmpty ? DS.Colors.textTertiary : DS.Colors.accentText)
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(isFollowUpEmpty ? WispColor.textTertiary : Color.white)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(isFollowUpEmpty ? WispColor.surface4.opacity(0.7) : WispColor.accent))
+                        .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableScaleButtonStyle())
                 .disabled(isFollowUpEmpty)
                 .pointerCursor(isEnabled: !isFollowUpEmpty)
-                .nativeTooltip("Send (Return)")
+                .accessibilityLabel("Send")
+                .nativeTooltip("Send (Return). Wisp sees your screen behind this window.")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: WispRadius.panel, style: .continuous)
-                    .fill(DS.Colors.surface1)
-            )
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(WispColor.surface2.opacity(0.9)))
             .overlay(
-                RoundedRectangle(cornerRadius: WispRadius.panel, style: .continuous)
-                    .strokeBorder(isFollowUpFieldFocused ? DS.Colors.accent.opacity(0.5) : DS.Colors.borderSubtle,
-                                  lineWidth: 1)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(isFollowUpFieldFocused ? WispColor.accent.opacity(0.7) : WispColor.cardSeparator.opacity(0.7),
+                                  lineWidth: isFollowUpFieldFocused ? 1 : 0.5)
             )
+            .animation(WispMotion.smooth, value: isFollowUpFieldFocused)
 
-            Text(chatStatusLine)
-                .font(.system(size: 10.5))
-                .foregroundStyle(DS.Colors.textTertiary)
-                .padding(.horizontal, 4)
+            if let statusLine = chatStatusLine {
+                Text(statusLine)
+                    .font(.system(size: 11))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                    .padding(.horizontal, 6)
+            }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 28)
+        .padding(.top, 6)
+        .padding(.bottom, 18)
+        .frame(maxWidth: .infinity)
     }
 
     /// What Wisp is doing right now while a turn runs; otherwise how to talk.
-    private var chatStatusLine: String {
-        if companionManager.islandState.isActive {
-            return companionManager.islandState.label
-        }
-        return "Return to send · Wisp looks at your screen behind this window · or hold \(bindingStore.primaryHoldChord.displayText) to talk"
+    private var chatStatusLine: String? {
+        companionManager.islandState.isActive ? companionManager.islandState.label : nil
     }
 
     private var isFollowUpEmpty: Bool {
@@ -341,7 +343,7 @@ struct ChatPage: View {
     private var tasksSidebar: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 10) {
-                sidebarLabel("WORKING ON")
+                sidebarLabel("Working")
                 if taskRegistry.runningRecords.isEmpty {
                     Text("Nothing running")
                         .font(WispFont.callout)
@@ -355,7 +357,7 @@ struct ChatPage: View {
 
             if !recentlyFinishedTasks.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    sidebarLabel("RECENTLY DONE")
+                    sidebarLabel("Recently done")
                     ForEach(recentlyFinishedTasks) { finishedRecord in
                         finishedTaskRow(finishedRecord)
                     }
@@ -368,14 +370,13 @@ struct ChatPage: View {
         .padding(.horizontal, 14)
         .padding(.bottom, 14)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(WispColor.groupedCardBackground.opacity(0.6))
+        .background(WispColor.groupedCardBackground.opacity(0.5))
     }
 
     private func sidebarLabel(_ text: String) -> some View {
         Text(text)
-            .font(WispFont.overline)
-            .tracking(0.6)
-            .foregroundStyle(DS.Colors.textTertiary)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(WispColor.textSecondary)
     }
 
     private func runningTaskRow(_ runningRecord: AgentTaskRecord) -> some View {
@@ -403,7 +404,7 @@ struct ChatPage: View {
                 Label("Stop", systemImage: "stop.fill")
                     .font(.system(size: 10.5, weight: .medium))
             }
-            .buttonStyle(WispGlassButtonStyle())
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
             .pointerCursor()
         }
         .padding(10)

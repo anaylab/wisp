@@ -45,12 +45,6 @@ struct RoutinesTab: View {
 
     private var routineList: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Saved instructions Wisp runs from the notch or a shortcut.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DS.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             Button {
                 let newRoutine = routineStore.addRoutine(
                     WispRoutine(name: "New routine", instruction: "")
@@ -61,7 +55,7 @@ struct RoutinesTab: View {
                     .font(.system(size: 12, weight: .medium))
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(WispGlassButtonStyle())
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
             .pointerCursor()
 
             ScrollView {
@@ -221,7 +215,7 @@ struct RoutinesTab: View {
                 Label("Run now", systemImage: "play.fill")
                     .font(.system(size: 12, weight: .medium))
             }
-            .buttonStyle(WispGlassButtonStyle(prominence: .prominent))
+            .buttonStyle(WispPillButtonStyle())
             .disabled(routine.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .pointerCursor()
             .nativeTooltip("Close the dashboard and run this on what's behind it")
@@ -281,7 +275,7 @@ struct RoutinesTab: View {
                                 .fill(DS.Colors.surface2)
                         )
                 }
-                Text("Sent with a screenshot of your screen and the name of the app you're in, like a question you typed.")
+                Text("Sent with a screenshot, like a typed question.")
                     .font(.system(size: 11))
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -297,9 +291,6 @@ struct RoutinesTab: View {
                         Text("Keyboard shortcut")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(DS.Colors.textPrimary)
-                        Text("Hold your talk chord and press the number.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(DS.Colors.textSecondary)
                     }
                     Spacer(minLength: 0)
                     shortcutMenu(routine)
@@ -310,7 +301,7 @@ struct RoutinesTab: View {
                             Text("Always show in the notch")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(DS.Colors.textPrimary)
-                            Text("Otherwise it only appears in the apps below.")
+                            Text("Otherwise only in the apps below.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(DS.Colors.textSecondary)
                         }
@@ -373,7 +364,7 @@ struct RoutinesTab: View {
     private func suggestedAppsCard(_ routine: WispRoutine) -> some View {
         DashboardCard(title: "Suggest it in") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("When one of these apps is in front, the notch offers this routine.")
+                Text("Offered in the notch when one of these is in front.")
                     .font(.system(size: 11))
                     .foregroundStyle(DS.Colors.textSecondary)
 
