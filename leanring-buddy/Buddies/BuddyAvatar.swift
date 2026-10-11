@@ -2,26 +2,25 @@
 //  BuddyAvatar.swift
 //  leanring-buddy
 //
-//  A buddy's face: a soft cloud in the buddy's colour with two happy, closed
-//  "^ ^" eyes, after HeyClicky's cloud characters but in Wisp's muted palette.
-//  While the buddy is working it bobs gently and its eyes open; at rest it is
-//  still, and its clock is paused so an idle sidebar of avatars costs nothing.
+//  A buddy's face. `BuddyAvatar` is the small, cheap form used in lists and the
+//  notch (still at rest, bobbing while it works); the full expressive character
+//  is `BuddyCharacter`. Colours are the buddies' vivid palette.
 //
 
 import SwiftUI
 
-/// The buddies' colours: soft tones that sit with Wisp's sage/lavender brand
-/// and stay distinct from one another at avatar size.
+/// The buddies' colours: bright, saturated tones that pop on Wisp's dark and
+/// light surfaces and stay distinct from one another at avatar size.
 enum BuddyAppearance {
     private static let palette: [(light: Color, deep: Color)] = [
-        (Color(red: 0.80, green: 0.87, blue: 0.80), Color(red: 0.55, green: 0.68, blue: 0.56)), // sage
-        (Color(red: 0.86, green: 0.82, blue: 0.95), Color(red: 0.62, green: 0.56, blue: 0.82)), // lavender
-        (Color(red: 0.98, green: 0.85, blue: 0.76), Color(red: 0.90, green: 0.62, blue: 0.48)), // peach
-        (Color(red: 0.96, green: 0.80, blue: 0.84), Color(red: 0.85, green: 0.52, blue: 0.62)), // rose
-        (Color(red: 0.78, green: 0.88, blue: 0.96), Color(red: 0.46, green: 0.64, blue: 0.84)), // sky
-        (Color(red: 0.94, green: 0.89, blue: 0.74), Color(red: 0.82, green: 0.70, blue: 0.42)), // sand
-        (Color(red: 0.76, green: 0.92, blue: 0.87), Color(red: 0.42, green: 0.72, blue: 0.64)), // mint
-        (Color(red: 0.90, green: 0.80, blue: 0.92), Color(red: 0.72, green: 0.52, blue: 0.76)), // lilac
+        (Color(red: 0.50, green: 0.96, blue: 0.74), Color(red: 0.08, green: 0.72, blue: 0.55)), // mint
+        (Color(red: 0.76, green: 0.64, blue: 1.00), Color(red: 0.47, green: 0.31, blue: 0.96)), // violet
+        (Color(red: 1.00, green: 0.76, blue: 0.46), Color(red: 1.00, green: 0.43, blue: 0.28)), // coral
+        (Color(red: 1.00, green: 0.64, blue: 0.80), Color(red: 0.95, green: 0.27, blue: 0.54)), // pink
+        (Color(red: 0.52, green: 0.84, blue: 1.00), Color(red: 0.14, green: 0.50, blue: 0.98)), // sky
+        (Color(red: 1.00, green: 0.91, blue: 0.42), Color(red: 0.98, green: 0.67, blue: 0.08)), // sun
+        (Color(red: 0.42, green: 0.93, blue: 0.93), Color(red: 0.04, green: 0.63, blue: 0.78)), // teal
+        (Color(red: 0.93, green: 0.62, blue: 0.99), Color(red: 0.72, green: 0.24, blue: 0.88)), // orchid
     ]
 
     static var paletteCount: Int { palette.count }
@@ -33,92 +32,41 @@ enum BuddyAppearance {
     static func deepColor(forColorIndex colorIndex: Int) -> Color {
         palette[abs(colorIndex) % palette.count].deep
     }
+
+    /// Top-to-bottom body gradient.
+    static func gradient(forColorIndex colorIndex: Int) -> LinearGradient {
+        LinearGradient(
+            colors: [lightColor(forColorIndex: colorIndex), deepColor(forColorIndex: colorIndex)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    /// Diagonal gradient for chat bubbles, headers and buttons that belong to a buddy.
+    static func accentGradient(forColorIndex colorIndex: Int) -> LinearGradient {
+        LinearGradient(
+            colors: [deepColor(forColorIndex: colorIndex), lightColor(forColorIndex: colorIndex).opacity(0.9)],
+            startPoint: .bottomLeading,
+            endPoint: .topTrailing
+        )
+    }
 }
 
+/// The compact avatar for lists, the notch and Today. Now the same character
+/// as everywhere else: still at rest (so a long list costs nothing), lively
+/// while working.
 struct BuddyAvatar: View {
     let colorIndex: Int
     var size: CGFloat = 32
     var isWorking: Bool = false
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isWorking || reduceMotion)) { timeline in
-            let elapsedSeconds = timeline.date.timeIntervalSinceReferenceDate
-            let bobOffset = isWorking && !reduceMotion ? sin(elapsedSeconds * 3.2) * size * 0.04 : 0
-            ZStack {
-                cloudBody
-                eyes
-            }
-            .offset(y: bobOffset)
-        }
-        .frame(width: size, height: size)
+        BuddyCharacter(
+            colorIndex: colorIndex,
+            size: size,
+            mood: isWorking ? .working : .idle,
+            liveliness: isWorking ? .working : .still
+        )
         .accessibilityHidden(true)
-    }
-
-    /// Overlapping puffs make the cloud; one gradient fills them all so the
-    /// seams disappear.
-    private var cloudBody: some View {
-        let puffLayout: [(x: CGFloat, y: CGFloat, diameter: CGFloat)] = [
-            (0.30, 0.56, 0.50),
-            (0.50, 0.42, 0.60),
-            (0.71, 0.55, 0.50),
-            (0.50, 0.64, 0.56),
-        ]
-        return ZStack {
-            ForEach(Array(puffLayout.enumerated()), id: \.offset) { _, puff in
-                Circle()
-                    .frame(width: size * puff.diameter, height: size * puff.diameter)
-                    .position(x: size * puff.x, y: size * puff.y)
-            }
-        }
-        .frame(width: size, height: size)
-        .foregroundStyle(
-            LinearGradient(
-                colors: [
-                    BuddyAppearance.lightColor(forColorIndex: colorIndex),
-                    BuddyAppearance.deepColor(forColorIndex: colorIndex),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .shadow(color: BuddyAppearance.deepColor(forColorIndex: colorIndex).opacity(0.45), radius: size * 0.12)
-    }
-
-    /// Happy closed "^ ^" eyes at rest; small open dots while working.
-    private var eyes: some View {
-        let eyeSpacing = size * 0.17
-        let eyeCenterY = size * 0.55
-        return ZStack {
-            ForEach([-1.0, 1.0], id: \.self) { side in
-                Group {
-                    if isWorking {
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: size * 0.09, height: size * 0.09)
-                    } else {
-                        HappyClosedEyeShape()
-                            .stroke(Color.white, style: StrokeStyle(lineWidth: max(1.2, size * 0.055), lineCap: .round))
-                            .frame(width: size * 0.13, height: size * 0.07)
-                    }
-                }
-                .position(x: size / 2 + CGFloat(side) * eyeSpacing, y: eyeCenterY)
-            }
-        }
-        .frame(width: size, height: size)
-    }
-}
-
-/// A "^": an upward arc, the curve of a smiling closed eye.
-private struct HappyClosedEyeShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.maxY),
-            control: CGPoint(x: rect.midX, y: rect.minY - rect.height * 0.6)
-        )
-        return path
     }
 }

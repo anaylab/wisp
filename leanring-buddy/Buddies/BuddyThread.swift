@@ -42,6 +42,9 @@ struct BuddyThreadExchange: Codable, Identifiable, Equatable {
     var answerText: String?
     /// The buddy that asked, for a `.delegated` exchange.
     var requesterName: String? = nil
+    /// Names of files attached to the user's message, shown as chips.
+    /// Optional so threads saved before attachments existed still load.
+    var attachmentNames: [String]? = nil
 
     var id: UUID { taskID }
 }
@@ -96,8 +99,8 @@ enum BuddyThreadPolicy {
 
     /// Appended to the shared companion prompt so the buddy knows who it is and
     /// that it is continuing a conversation rather than starting one.
-    static func systemPromptAddendum(buddyName: String, job: String) -> String {
-        """
+    static func systemPromptAddendum(buddyName: String, job: String, specialtyLine: String? = nil) -> String {
+        (specialtyLine.map { "\n\n" + $0 } ?? "") + """
 
         You are \(buddyName), a persistent assistant inside Wisp with one standing job: \(job)
         You keep a single ongoing conversation with the user. Earlier exchanges are above. \
@@ -154,7 +157,8 @@ final class BuddyThreadStore: ObservableObject {
         taskID: UUID,
         origin: BuddyThreadExchange.Origin,
         userText: String,
-        requesterName: String? = nil
+        requesterName: String? = nil,
+        attachmentNames: [String] = []
     ) {
         let newExchange = BuddyThreadExchange(
             taskID: taskID,
@@ -162,7 +166,8 @@ final class BuddyThreadStore: ObservableObject {
             origin: origin,
             userText: userText,
             answerText: nil,
-            requesterName: requesterName
+            requesterName: requesterName,
+            attachmentNames: attachmentNames.isEmpty ? nil : attachmentNames
         )
         exchangesByBuddyID[buddyID] = BuddyThreadPolicy.appending(newExchange, to: exchanges(ofBuddyWithID: buddyID))
         saveThreads()

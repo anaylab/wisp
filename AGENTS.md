@@ -177,6 +177,27 @@ cloud dependency to the local path, without asking.
   Settings button opens the window's Settings. The quick panel's middle sections scroll within the fixed window so its
   footer stays reachable. `nativeTooltip`'s overlay view returns nil from `hitTest` — before, it
   swallowed clicks on the button beneath it.
+- **Buddies page = messenger** (`WispWindow/BuddiesPage.swift` + `WispWindow/Buddies/`): a rail of living
+  characters (`BuddyRailView`: mood word, unread dot, pin, context menu, + New), the selected buddy's own chat in
+  its colour (`BuddyChatView`: living header character, mission card, bubbles in the buddy's gradient, typing dots,
+  handoff cards for `.delegated` exchanges, composer with a paperclip + drag-and-drop files, `BuddyDropOverlay`),
+  and a toggleable inspector (`BuddyInspectorView`, tabs Automation / Files / Memory / Tools / About — reuses
+  `BuddyScheduleEditor`/`BuddyToolAccessEditor`/`BuddyModelEditor`). Summoning is `BuddyCreationView`: a grid of
+  `BuddySpecialty` cards, then name/colour/mission/schedule. The notch chat still uses `BuddyDetailView` and
+  `NewBuddyForm`. **Characters** (`Buddies/BuddyCharacter.swift`): one `Canvas` drawn from a clock — breathing,
+  blink (staggered per colour), eyes that follow the pointer (`looksAtPointer`, via the character's screen frame and
+  `NSEvent.mouseLocation`), squish on `bounceTrigger`/hover, and a `BuddyMood` (idle/working/happy/sleepy/oops/waiting,
+  derived by the pure `BuddyMoodPolicy` from the latest run) that changes eyes, mouth and extras (orbiting dots,
+  sparkles, "z"s, "?"). `Liveliness` is the cost dial (`.still` = one frame, `.working`, `.full`); Reduce Motion
+  freezes it. `BuddyAvatar` is the compact form (still unless working). The buddy palette (`BuddyAppearance`) is
+  now vivid. **Specialties** (`Buddies/BuddySpecialty.swift`, `WispBuddy.specialty`, optional): colour, tool
+  groups, persona line (`BuddyThreadPolicy.systemPromptAddendum(specialtyLine:)`), starter jobs. **Files**
+  (`Buddies/BuddyFiles.swift`): attachments are copied to `~/Library/Application Support/Wisp/buddy-files/<id>/`
+  (`BuddyFileLibrary`), documents are read with `BrainTextExtractor` and fenced as data in the message
+  (`BuddyAttachmentPolicy`), pictures are downscaled and sent as images (`BackgroundTaskLauncher.start(images:)`),
+  the thread shows only the user's words plus file chips (`BuddyThreadExchange.attachmentNames`), and a buddy with a
+  library gets the run-only `read_my_file` tool. `BuddyStore.sendMessage(_:attachmentFileURLs:toBuddyWithID:)` is the
+  async entry point. Tested by `Tests/AgentRuntimeIntegration/BuddyRedesignTests.swift`.
 - **Buddies** (HeyClicky's "Clickys"): named, coloured agents that each own one job, listed under
   BUDDIES in the notch chat's sidebar (+ to summon). `BuddyStore` (`~/Library/Application
   Support/Wisp/buddies.json`) holds identity (name from `BuddyNameGenerator` — subject + role word,
@@ -945,7 +966,12 @@ names forward here.
 | `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyStore.swift` | ~580 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
 | `Buddies/BuddyListPolicy.swift` | ~105 | Pure buddy-list rules (Rakazo-style): unread (a succeeded/failed run finishing after the last read, or marked by hand), ordering (pinned → latest activity → newest), copy names, which task ids make up the visible thread (stored exchanges, not just runs History still holds), starter jobs, and `BuddyAnswerFormatting` (inline markdown for answers). Tested by `Tests/BuddyThread`. |
-| `Buddies/BuddyAvatar.swift` | ~130 | `BuddyAppearance` (the 8-colour palette) and `BuddyAvatar` (cloud + happy eyes, bobs while working, clock paused at rest). |
+| `Buddies/BuddyCharacter.swift` | ~330 | The expressive cloud character (Canvas, clock-driven): breathing, blink, pointer-following eyes, squish, moods and their extras; `Liveliness` cost dial. |
+| `Buddies/BuddyMood.swift` | ~55 | `BuddyMood` + pure `BuddyMoodPolicy` (run state/time → mood). |
+| `Buddies/BuddySpecialty.swift` | ~170 | Specialty templates: colour, tool groups, persona line, starter jobs. |
+| `Buddies/BuddyFiles.swift` | ~290 | `BuddyAttachment`, pure `BuddyAttachmentPolicy` (prompt text, caps, name resolution) and the per-buddy `BuddyFileLibrary`. |
+| `WispWindow/Buddies/*.swift` | ~1500 | The messenger: `BuddyRailView`, `BuddyChatView`, `BuddyInspectorView`, `BuddyCreationView`, `BuddyHubComponents` (pill/icon buttons, chips, typing dots, ambient backdrop, drop overlay, formatting). |
+| `Buddies/BuddyAvatar.swift` | ~85 | `BuddyAppearance` (the 8 vivid colours + gradients) and `BuddyAvatar` (compact `BuddyCharacter`: still at rest, lively while working). |
 | `Buddies/BuddyViews.swift` | ~1285 | `BuddyScheduleEditor`, model/tool editors, `BuddyStatusText` and `BuddyActionsMenuItems` (shared by the window list's right-click menu and the page's ⋯ menu), `BuddyDetailView` (the whole stored thread, editable job, inline clear/delete confirmation since the notch panel can't host sheets; marks the buddy read while open) and `NewBuddyForm` (with starter jobs). |
 | `DynamicIsland/MorningBriefing.swift` | ~255 | The morning notch: `MorningSuggestion`, the pure `MorningSuggestionBuilder` and `MorningBriefingSchedule` (once a day, daytime, user present), and `MorningBriefingController` (1-min check, pending suggestions, `presentationSequenceNumber` the notch drops the banner on, `perform`). |
 | `DynamicIsland/QuietModeMonitor.swift` | ~280 | Quiet mode: `QuietModeDetection` (CoreAudio processes capturing input, CoreMediaIO camera running, system-listener filter) and the polling `QuietModeMonitor` publishing `activeQuietReason`. |
