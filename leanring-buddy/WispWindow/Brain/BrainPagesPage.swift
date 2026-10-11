@@ -341,7 +341,7 @@ struct BrainPagesPage: View {
         ContentUnavailableView {
             Label("Your brain is empty", systemImage: "brain")
         } description: {
-            Text("Wisp files what it learns here — lasting facts from your conversations, things you add to the Inbox, notes you import. Every page is a plain markdown file on this Mac that you can read and edit.")
+            Text("Everything Wisp learns is filed here as plain markdown you can read and edit.")
         } actions: {
             HStack(spacing: 10) {
                 Button("Add to Brain") { WispWindowRouter.shared.select(.brainInbox) }

@@ -54,6 +54,9 @@ cloud dependency to the local path, without asking.
   neutral; lift on hover, dip on press, sizes follow `controlSize`). Use it instead of `.bordered` /
   `.borderedProminent` / the notch's glass button style in window pages (the glass style is white-on-dark and
   nearly invisible in light mode). Wisp colours are accents only (`.tint(WispColor.accentText)`).
+  ⌥⌘1–8 switch sections (plain ⌘1–9 are the buddy rail's). Settings → General → Appearance
+  (`WispAppearancePreference`: System / Light / Dark) sets the window's `NSAppearance` only; the notch, overlay and menu bar
+  stay dark glass.
   Copy is kept to what earns its place: no explanatory paragraphs under controls whose label already says it.
 - **Framework**: SwiftUI (macOS native) with AppKit bridging for the notch, cursor overlay, menu
   bar item and the Wisp window
@@ -939,6 +942,8 @@ Grouped by what they do. Line counts are approximate.
 | `WispWindow/WispNavigation.swift` | ~175 | `WispSection` (sidebar destinations, grouped use/manage) + `WispPage` (every page and its section), `WispWindowRouter` (shared selection, last page per section) and `WispWindowNavigator.open(_:)`. Also the `.wispDismissPanel` / `.wispCloseNotchWorkspace` notification names. |
 | `WispWindow/WispWindowController.swift` | ~125 | The Wisp window: `NSWindow` + `NSHostingController` with title/toolbar bridging, unified toolbar, frame autosave, full-screen capable. `WispWindowActivation` raises `.regular` while a titled window is open and drops back to `.accessory` after. |
 | `WispWindow/WispWindowView.swift` | ~330 | The shell: the top bar of section tabs (dot badges: running tasks on History, working buddies on Buddies, ingest on Brain, a missing permission on Settings), the page strip, the page switch, and the status pill (mark + state + model, collapsing to the mark when narrow). |
+| `Components/WispSegmented.swift` | ~50 | The window's segmented control (quiet track, raised sliding thumb); replaces the system segmented picker in settings pages. |
+| `WispWindow/WispAppearancePreference.swift` | ~55 | Window appearance: System / Light / Dark, applied to the Wisp `NSWindow` only. |
 | `Components/WispPill.swift` | ~140 | `WispBevel` (raised surface) and `WispPillButtonStyle` (the window's one button style). |
 | `WispWindow/ChatPage.swift` | ~440 | Chat: the last 6 hours of interactive exchanges as a thread (running turns show the live browser step + Stop, answers have Copy), a follow-up box (`askTypedQuestion`; capture excludes Wisp's own windows), and a side column of running and recently finished tasks. Opened by the notch's expand button via `openConversationWindow()`. |
 | `WispWindow/BuddiesPage.swift` | ~150 | Buddies: a list of buddies + the selected one's `BuddyDetailView` or `NewBuddyForm`; a single invitation when there are none. |

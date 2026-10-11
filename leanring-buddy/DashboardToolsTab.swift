@@ -50,7 +50,7 @@ struct ToolsTab: View {
                 Text("Agent mode is off")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Colors.textPrimary)
-                Text("Wisp answers questions but will not call any of the tools below. Set AgentModeEnabled to true in Info.plist and rebuild to turn it on.")
+                Text("Agent mode is off, so none of these tools are called. Set AgentModeEnabled in Info.plist and rebuild.")
                     .font(.system(size: 11))
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -81,7 +81,7 @@ struct ToolsTab: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
 
                 if mcpManager.serverStatuses.isEmpty {
-                    Text("No servers configured. Add them to ~/.wisp/mcp.json using the same format Claude Desktop uses, then restart Wisp.")
+                    Text("No servers yet. Add them to ~/.wisp/mcp.json (Claude Desktop's format) and restart Wisp.")
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)

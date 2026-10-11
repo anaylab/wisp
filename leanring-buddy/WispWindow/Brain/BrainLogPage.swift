@@ -54,7 +54,7 @@ struct BrainLogPage: View {
                 ContentUnavailableView {
                     Label("No changes yet", systemImage: "list.bullet.rectangle")
                 } description: {
-                    Text("Every change to your brain — by Wisp or by you — is listed here with where it came from, and can be undone.")
+                    Text("Every change to your brain, with where it came from. Undo any of them.")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if visibleRecords.isEmpty {

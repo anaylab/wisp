@@ -55,8 +55,23 @@ struct WispWindowView: View {
         }
         .background(WispColor.windowBackground)
         .animation(reduceMotion ? nil : WispMotion.smooth, value: router.selectedSection)
+        .background(sectionShortcutButtons)
         .tint(WispColor.accentText)
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// ⌥⌘1–⌥⌘8 open the sections in bar order. (Plain ⌘1–⌘9 belong to the buddy
+    /// rail.) Invisible buttons, because SwiftUI only registers shortcuts on views.
+    private var sectionShortcutButtons: some View {
+        ZStack {
+            ForEach(Array(WispSection.allCases.enumerated()), id: \.element) { index, section in
+                Button("") { router.select(section) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
+            }
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     // MARK: - Top bar
@@ -129,7 +144,7 @@ struct WispWindowView: View {
         .buttonStyle(.plain)
         .pointerCursor()
         .accessibilityLabel(section.title)
-        .nativeTooltip(isSelected ? nil : section.title)
+        .nativeTooltip(isSelected ? nil : "\(section.title)  ⌥⌘\((WispSection.allCases.firstIndex(of: section) ?? 0) + 1)")
     }
 
     /// Running work shows where the user would go to see it.

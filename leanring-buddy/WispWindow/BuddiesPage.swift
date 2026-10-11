@@ -119,7 +119,7 @@ struct BuddiesPage: View {
                 if let buddyIDPendingClear { buddyStore.clearConversation(ofBuddyWithID: buddyIDPendingClear) }
             }
         } message: {
-            Text("It starts fresh. Its mission, notes, files and settings stay, and its runs stay in History.")
+            Text("It starts fresh. Mission, notes, files and settings stay.")
         }
         .confirmationDialog(
             "Delete \(pendingBuddyName(buddyIDPendingDeletion))?",

@@ -56,7 +56,7 @@ struct BrainPageReaderView: View {
             Button("Delete Page", role: .destructive, action: deletePage)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The file is removed from your brain. Wisp keeps a copy, so you can bring it back from Brain → Log.")
+            Text("Removes the page from your brain. You can restore it from Brain → Log.")
         }
         .confirmationDialog(
             "“\(unresolvedLinkTargetToCreate ?? "")” doesn't have a page yet",

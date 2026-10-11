@@ -33,7 +33,7 @@ struct DictationTab: View {
                     Text("Recognition language")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(DS.Colors.textPrimary)
-                    Text("Automatic follows your Mac's language. Pick a specific language if you dictate in one Wisp keeps mishearing.")
+                    Text("Automatic follows your Mac's language. Pick one if Wisp mishears you.")
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -93,7 +93,7 @@ struct DictationTab: View {
     private var dictionaryCard: some View {
         DashboardCard(title: "Dictionary") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Custom words Wisp should spell right — names, jargon, product names. Added as context for the recogniser.")
+                Text("Words Wisp should spell right: names, jargon, products.")
                     .font(.system(size: 11))
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
