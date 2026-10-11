@@ -177,6 +177,34 @@ cloud dependency to the local path, without asking.
   Settings button opens the window's Settings. The quick panel's middle sections scroll within the fixed window so its
   footer stays reachable. `nativeTooltip`'s overlay view returns nil from `hitTest` — before, it
   swallowed clicks on the button beneath it.
+- **Buddies page = messenger** (`WispWindow/BuddiesPage.swift` + `WispWindow/Buddies/`): a rail of living
+  characters (`BuddyRailView`: mood word, unread dot, pin, context menu, + New), the selected buddy's own chat in
+  its colour (`BuddyChatView`: plain header, mission row, the user's bubble in the buddy's colour, typing dots, handoff
+  rows for `.delegated` exchanges, hover actions under an answer — copy, run again, hand off to another buddy via
+  `BuddyStore.startDelegatedRun` — and a composer with a paperclip + drag-and-drop files),
+  and a toggleable inspector (`BuddyInspectorView`, icon tabs Automation / Files / Memory / Tools / About — reuses
+  `BuddyScheduleEditor`/`BuddyToolAccessEditor`/`BuddyModelEditor`). Summoning is `BuddyCreationView`: a grid of
+  `BuddySpecialty` cards, then name/colour/mission/schedule. ⌘1–9 jump to a buddy, ⌘N summons one. The notch chat still uses `BuddyDetailView` and
+  `NewBuddyForm`. **Characters** (`Buddies/BuddyCharacter.swift`): one `Canvas` drawn from a clock — breathing,
+  blink (staggered per colour), eyes that follow the pointer (`looksAtPointer`, via the character's screen frame and
+  `NSEvent.mouseLocation`), squish on `bounceTrigger`/hover, and a `BuddyMood` (idle/working/happy/sleepy/oops/waiting,
+  derived by the pure `BuddyMoodPolicy` from the latest run) that changes eyes and mouth, plus a thin turning
+  ring while working and an amber badge when it needs the user's ok. The look is deliberately restrained: one hue
+  with a small tonal range, a faint highlight, a ground shadow — no glow, sparkle or confetti. `Liveliness` is the cost dial (`.still` = one frame, `.working`, `.full`); Reduce Motion
+  freezes it. `BuddyAvatar` is the compact form (still unless working). The buddy palette (`BuddyAppearance`) is
+  eight calm, slightly warm hues; a buddy's colour is an accent used once per surface (the user's bubble, a
+  selected state, an icon), never a fill gradient.
+  **Buttons** share one treatment (`BuddyBevel` + `BuddyPillButtonStyle` in `WispWindow/Buddies/BuddyHubComponents.swift`):
+  a soft fill with faint light from above, a thin lit top edge and a hairline outline; prominent = tinted with the
+  buddy's colour, otherwise neutral; a touch of lift on hover and a dip on press, nothing more. Tabs and segments
+  use the same bevel when selected, and the Composio app list (`ComposioAppsView`) uses the same pills. **Specialties** (`Buddies/BuddySpecialty.swift`, `WispBuddy.specialty`, optional): colour, tool
+  groups, persona line (`BuddyThreadPolicy.systemPromptAddendum(specialtyLine:)`), starter jobs. **Files**
+  (`Buddies/BuddyFiles.swift`): attachments are copied to `~/Library/Application Support/Wisp/buddy-files/<id>/`
+  (`BuddyFileLibrary`), documents are read with `BrainTextExtractor` and fenced as data in the message
+  (`BuddyAttachmentPolicy`), pictures are downscaled and sent as images (`BackgroundTaskLauncher.start(images:)`),
+  the thread shows only the user's words plus file chips (`BuddyThreadExchange.attachmentNames`), and a buddy with a
+  library gets the run-only `read_my_file` tool. `BuddyStore.sendMessage(_:attachmentFileURLs:toBuddyWithID:)` is the
+  async entry point. Tested by `Tests/AgentRuntimeIntegration/BuddyRedesignTests.swift`.
 - **Buddies** (HeyClicky's "Clickys"): named, coloured agents that each own one job, listed under
   BUDDIES in the notch chat's sidebar (+ to summon). `BuddyStore` (`~/Library/Application
   Support/Wisp/buddies.json`) holds identity (name from `BuddyNameGenerator` — subject + role word,
@@ -205,7 +233,17 @@ cloud dependency to the local path, without asking.
   so a limited buddy still gets a full set of relevant tools) and again by name at call time (so a tool that
   registers after the run began is held to it too). Edited with `BuddyToolAccessEditor` ("Tools · Browser, Screen"
   on the page and in the new-buddy form); Brain/Your memory show as unavailable for a cloud-model buddy.
-    **Per-buddy model** (`WispBuddy.modelChoice: BuddyModelChoice?`, nil = follow Wisp): local, a Claude model,
+    **Per-buddy app access** (`BuddyToolAccess.allowedAppSlugs`, nil = every connected app): which connected Composio
+  apps (toolkit slugs) a limited buddy may use. Enforced at call time, not just hidden: `AgentRunToolkit.refusalForCall`
+  (checked in `AgentTurnRunner.runToolWithTimeout` after the name check) runs `BuddyToolAccessPolicy.appRefusalReason`,
+  which unwraps Composio's execute gateway into the apps its tools belong to and refuses any not in the list, refuses a
+  call it can't read, and refuses Composio's shell/workbench tools (they could reach any app). `settingApp` drops the
+  limit again when every connected app is allowed, so an app connected later is allowed too. UI: `BuddyToolsView`
+  (Everything / Choose; app rows with real logos and switches; Wisp's own abilities; **Add app** sheet that asks for the
+  Composio key if needed and embeds `ComposioAppsView`), used by the inspector's Tools tab and the summon flow; the
+  notch still uses `BuddyToolAccessEditor`. Specialties start with sensible apps (`BuddySpecialty.suggestedAppSlugs`:
+  Coder → GitHub/Linear, Inbox → Gmail/Outlook/Slack, Planner → Calendar/Todoist/Asana, Writer → Docs/Notion/Gmail).
+  **Per-buddy model** (`WispBuddy.modelChoice: BuddyModelChoice?`, nil = follow Wisp): local, a Claude model,
   GPT or Gemini, built by `ModelProviderFactory.make(_ choice:)`; picked with `BuddyModelEditor` (page + new
   form), which says what leaves the Mac. A buddy whose model is off this machine (`deployment.sendsDataOffThisMachine`)
   gets `BuddyRunToolPolicy.privateKnowledgeToolNames` removed — the brain tools plus `remember`/`forget` — both
@@ -945,7 +983,13 @@ names forward here.
 | `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyStore.swift` | ~580 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
 | `Buddies/BuddyListPolicy.swift` | ~105 | Pure buddy-list rules (Rakazo-style): unread (a succeeded/failed run finishing after the last read, or marked by hand), ordering (pinned → latest activity → newest), copy names, which task ids make up the visible thread (stored exchanges, not just runs History still holds), starter jobs, and `BuddyAnswerFormatting` (inline markdown for answers). Tested by `Tests/BuddyThread`. |
-| `Buddies/BuddyAvatar.swift` | ~130 | `BuddyAppearance` (the 8-colour palette) and `BuddyAvatar` (cloud + happy eyes, bobs while working, clock paused at rest). |
+| `Buddies/BuddyCharacter.swift` | ~290 | The cloud character (Canvas, clock-driven): breathing, blink, pointer-following eyes, squish, moods, working ring, ground shadow; `Liveliness` cost dial. |
+| `Buddies/BuddyMood.swift` | ~55 | `BuddyMood` + pure `BuddyMoodPolicy` (run state/time → mood). |
+| `Buddies/BuddySpecialty.swift` | ~170 | Specialty templates: colour, tool groups, persona line, starter jobs. |
+| `Buddies/BuddyFiles.swift` | ~290 | `BuddyAttachment`, pure `BuddyAttachmentPolicy` (prompt text, caps, name resolution) and the per-buddy `BuddyFileLibrary`. |
+| `WispWindow/Buddies/BuddyToolsView.swift` | ~330 | What a buddy may use: Everything/Choose, app rows with logos + switches, Wisp's abilities, and the Add-app connect sheet. |
+| `WispWindow/Buddies/*.swift` | ~1500 | The messenger: `BuddyRailView`, `BuddyChatView`, `BuddyInspectorView`, `BuddyCreationView`, `BuddyHubComponents` (pill/icon buttons, chips, typing dots, ambient backdrop, drop overlay, formatting). |
+| `Buddies/BuddyAvatar.swift` | ~85 | `BuddyAppearance` (the 8 calm colours + tonal gradient) and `BuddyAvatar` (compact `BuddyCharacter`: still at rest, lively while working). |
 | `Buddies/BuddyViews.swift` | ~1285 | `BuddyScheduleEditor`, model/tool editors, `BuddyStatusText` and `BuddyActionsMenuItems` (shared by the window list's right-click menu and the page's ⋯ menu), `BuddyDetailView` (the whole stored thread, editable job, inline clear/delete confirmation since the notch panel can't host sheets; marks the buddy read while open) and `NewBuddyForm` (with starter jobs). |
 | `DynamicIsland/MorningBriefing.swift` | ~255 | The morning notch: `MorningSuggestion`, the pure `MorningSuggestionBuilder` and `MorningBriefingSchedule` (once a day, daytime, user present), and `MorningBriefingController` (1-min check, pending suggestions, `presentationSequenceNumber` the notch drops the banner on, `perform`). |
 | `DynamicIsland/QuietModeMonitor.swift` | ~280 | Quiet mode: `QuietModeDetection` (CoreAudio processes capturing input, CoreMediaIO camera running, system-listener filter) and the polling `QuietModeMonitor` publishing `activeQuietReason`. |

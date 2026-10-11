@@ -120,6 +120,11 @@ enum BuddyToolGroup: String, CaseIterable, Identifiable {
 /// value, or `mcp:<server>` for a connected server (`BuddyToolAccessPolicy`).
 struct BuddyToolAccess: Codable, Equatable {
     var allowedGroupIDs: Set<String>
+    /// Which connected Composio apps (their toolkit slugs: "gmail",
+    /// "googlecalendar") this buddy may use. Nil means every connected app, as
+    /// before; an empty set means none. Only meaningful while the Composio
+    /// server's group is allowed. Optional so older files still load.
+    var allowedAppSlugs: Set<String>? = nil
 
     func allows(_ group: BuddyToolGroup) -> Bool {
         allowedGroupIDs.contains(group.rawValue)
@@ -129,11 +134,46 @@ struct BuddyToolAccess: Codable, Equatable {
         allowedGroupIDs.contains(BuddyToolAccessPolicy.groupID(forServerNamed: serverName))
     }
 
+    /// Whether one connected app is usable: the Composio server must be allowed
+    /// and the app not excluded.
+    func allowsApp(_ appSlug: String) -> Bool {
+        allowsServer(named: ComposioAccountStore.serverId) && (allowedAppSlugs?.contains(appSlug) ?? true)
+    }
+
+    /// The access with one connected app switched on or off. `connectedAppSlugs`
+    /// is what is connected right now: when every one of them ends up allowed the
+    /// restriction is dropped (nil), so an app connected later is allowed too —
+    /// "all apps" stays all apps. The Composio group follows: allowed while any
+    /// app is.
+    func settingApp(_ appSlug: String, isAllowed: Bool, connectedAppSlugs: Set<String>) -> BuddyToolAccess {
+        let currentlyAllowed = allowedAppSlugs
+            ?? (allowsServer(named: ComposioAccountStore.serverId) ? connectedAppSlugs : [])
+        var updatedAllowed = currentlyAllowed
+        if isAllowed { updatedAllowed.insert(appSlug) } else { updatedAllowed.remove(appSlug) }
+
+        var updatedAccess = setting(groupID: BuddyToolAccessPolicy.groupID(forServerNamed: ComposioAccountStore.serverId), isAllowed: !updatedAllowed.isEmpty)
+        updatedAccess.allowedAppSlugs = (!connectedAppSlugs.isEmpty && updatedAllowed.isSuperset(of: connectedAppSlugs)) ? nil : updatedAllowed
+        return updatedAccess
+    }
+
     /// The access with one group switched on or off.
     func setting(groupID: String, isAllowed: Bool) -> BuddyToolAccess {
         var updatedGroupIDs = allowedGroupIDs
         if isAllowed { updatedGroupIDs.insert(groupID) } else { updatedGroupIDs.remove(groupID) }
         return BuddyToolAccess(allowedGroupIDs: updatedGroupIDs)
+    }
+
+    /// The "Choose" mode's starting point: everything on, so switching from
+    /// "Everything" doesn't blank the buddy and the user turns things off from there.
+    static func everythingAsChoices(
+        connectedAppSlugs: Set<String>,
+        availableGroupIDs: [String],
+        serverIDs: [String],
+        composioGroupID: String
+    ) -> BuddyToolAccess {
+        var groupIDs = Set(availableGroupIDs).union(serverIDs)
+        if !connectedAppSlugs.isEmpty { groupIDs.insert(composioGroupID) }
+        return BuddyToolAccess(allowedGroupIDs: groupIDs, allowedAppSlugs: nil)
     }
 
     /// What a buddy limited to nothing starts as: no group, just the basics.
@@ -205,6 +245,34 @@ enum BuddyToolAccessPolicy {
     }
 
     /// "All tools", "No extra tools", or "Browser, Screen +1".
+    /// Why a call must be refused because of the buddy's app limits, or nil when
+    /// it may go ahead. Composio's execute gateway is unwrapped into the apps its
+    /// tools belong to; a call whose tools can't be read is refused, and so are
+    /// Composio's shell and workbench tools, which could reach any app past the
+    /// list. Only applies when the buddy has an app limit.
+    static func appRefusalReason(toolName: String, toolInput: JSONValue, access: BuddyToolAccess?) -> String? {
+        guard let allowedAppSlugs = access?.allowedAppSlugs else { return nil }
+        let bareName = ToolCallInspection.bareToolName(toolName)
+        guard ToolCallInspection.isComposioMetaTool(bareToolName: bareName) else { return nil }
+
+        let uppercasedName = bareName.uppercased()
+        if uppercasedName.contains("BASH") || uppercasedName.contains("WORKBENCH") {
+            return "the \(bareName) tool isn't available to you, because your apps are limited."
+        }
+        guard ToolCallInspection.isComposioExecuteMetaTool(bareToolName: bareName) else { return nil }
+
+        let allowedList = allowedAppSlugs.sorted().joined(separator: ", ")
+        guard let actions = ToolCallInspection.composioExecutedActions(in: toolInput) else {
+            return "that call couldn't be checked against your allowed apps (\(allowedList.isEmpty ? "none" : allowedList))."
+        }
+        for action in actions {
+            guard let appSlug = action.serviceName, allowedAppSlugs.contains(appSlug) else {
+                return "you aren't allowed to use \(action.serviceName ?? "that app"). your apps: \(allowedList.isEmpty ? "none" : allowedList)."
+            }
+        }
+        return nil
+    }
+
     static func summary(of access: BuddyToolAccess?) -> String {
         guard let access else { return "All tools" }
         let allowedTitles = BuddyToolGroup.allCases.filter(access.allows).map(\.title)

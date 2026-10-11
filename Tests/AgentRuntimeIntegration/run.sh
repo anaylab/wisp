@@ -55,6 +55,7 @@ swiftc -target arm64-apple-macos26.0 \
   -I "$BUILD_DIR/stub" \
   -o "$BUILD_DIR/integration" \
   Tests/AgentRuntimeIntegration/main.swift \
+  Tests/AgentRuntimeIntegration/BuddyRedesignTests.swift \
   Tests/AgentRuntimeIntegration/AnthropicProviderTests.swift \
   Tests/AgentRuntimeIntegration/BuddyBotTests.swift \
   Tests/AgentRuntimeIntegration/ClaudeSubscriptionProviderTests.swift \

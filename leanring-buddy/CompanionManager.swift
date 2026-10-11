@@ -2338,10 +2338,18 @@ final class CompanionManager: ObservableObject {
             title: AgentTaskRecord.buddyRunTitlePrefix + buddy.name,
             modelProvider: buddyModelProvider,
             systemPrompt: Self.companionVoiceResponseSystemPrompt
-                + BuddyThreadPolicy.systemPromptAddendum(buddyName: buddy.name, job: buddy.instruction)
+                + BuddyThreadPolicy.systemPromptAddendum(
+                    buddyName: buddy.name,
+                    job: buddy.instruction,
+                    specialtyLine: buddy.specialty?.personaLine
+                )
                 + (request.requesterName.map(BuddyThreadPolicy.delegatedRequestAddendum(requesterName:)) ?? "")
-                + BuddyMemoryStore.shared.promptInstructions(forBuddyWithID: buddyID),
+                + BuddyMemoryStore.shared.promptInstructions(forBuddyWithID: buddyID)
+                + BuddyAttachmentPolicy.libraryPromptLine(
+                    fileNames: BuddyFileLibrary.shared.attachments(ofBuddyWithID: buddyID).map(\.fileName)
+                ),
             conversationHistory: buddyThreadStore.historyMessages(forBuddyWithID: buddyID),
+            images: request.images,
             toolkit: BuddyRunToolkitBuilder.toolkit(
                 forBuddyWithID: buddyID,
                 modelSendsDataOffThisMachine: runsOffThisMachine,
@@ -2372,8 +2380,9 @@ final class CompanionManager: ObservableObject {
             forBuddyWithID: buddyID,
             taskID: runTaskID,
             origin: request.origin,
-            userText: request.text,
-            requesterName: request.requesterName
+            userText: request.displayText ?? request.text,
+            requesterName: request.requesterName,
+            attachmentNames: request.attachmentNames
         )
         return runTaskID
     }

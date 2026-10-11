@@ -59,6 +59,7 @@ enum BackgroundTaskLauncher {
         modelProvider: any ModelProvider,
         systemPrompt: String,
         conversationHistory: [BuddyChatMessage] = [],
+        images: [(data: Data, label: String)] = [],
         toolkit: AgentRunToolkit = .none,
         onSucceeded: (@MainActor (UUID, String) -> Void)? = nil,
         completionNotification: CompletionNotificationStyle? = .generic,
@@ -88,8 +89,9 @@ enum BackgroundTaskLauncher {
                     userText: request,
                     // No screenshot: the screen at completion time is not the
                     // screen the request was made about, and attaching one is
-                    // the most expensive thing a request can do.
-                    images: [],
+                    // the most expensive thing a request can do. Only pictures
+                    // the user attached to a buddy's message go along.
+                    images: images,
                     systemPrompt: systemPrompt,
                     conversationHistory: conversationHistory,
                     onNarration: { narration in

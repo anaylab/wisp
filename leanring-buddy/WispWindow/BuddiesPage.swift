@@ -2,11 +2,13 @@
 //  BuddiesPage.swift
 //  leanring-buddy
 //
-//  The Wisp window's Buddies page: every buddy in a list on the left, and the
-//  selected buddy's thread (or the new-buddy form) on the right. Buddies used to
-//  be reachable only from the notch chat's sidebar; they're scheduled jobs the
-//  user manages, so they now have a page of their own. The thread and form are
-//  the same views the notch used (`BuddyDetailView`, `NewBuddyForm`).
+//  The Wisp window's Buddies page, as a messenger. A rail of living characters
+//  down the left, the selected buddy's own chat in the middle (files, replies,
+//  handoffs), and an inspector on the right for its automation, files, memory,
+//  tools and settings — or, in place of the chat, the summon-a-buddy flow with
+//  its specialty cards. Notch chat still uses the compact thread and form
+//  (`BuddyDetailView`, `NewBuddyForm`); this page is where buddies are lived with
+//  and managed.
 //
 
 import SwiftUI
@@ -18,12 +20,15 @@ struct BuddiesPage: View {
 
     @State private var selectedBuddyID: UUID?
     @State private var isCreatingBuddy = false
+    @AppStorage("BuddyInspectorOpen") private var isInspectorOpen = true
     /// The buddy a right-click asked to clear or delete, awaiting confirmation.
     @State private var buddyIDPendingClear: UUID?
     @State private var buddyIDPendingDeletion: UUID?
 
-    /// Today's Buddies tile can ask for a particular buddy, or the new-buddy
-    /// form; take the request once and clear it.
+    private let inspectorWidth: CGFloat = 330
+
+    /// Other pages can ask for a particular buddy, or the summon flow; take the
+    /// request once and clear it.
     private func takeRequestFromOtherPages() {
         if router.isNewBuddyFormRequested {
             router.isNewBuddyFormRequested = false
@@ -35,22 +40,63 @@ struct BuddiesPage: View {
         }
     }
 
+    private var showsCreation: Bool { isCreatingBuddy || buddyStore.buddies.isEmpty }
+
     var body: some View {
-        Group {
-            if buddyStore.buddies.isEmpty && !isCreatingBuddy {
-                // Nothing to list yet: one invitation, not an empty list beside
-                // an empty detail pane.
-                summonInvitation
-            } else {
-                HStack(spacing: 0) {
-                    buddyList
-                        .frame(width: 250)
-                    Divider()
-                    detail
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        HStack(spacing: 0) {
+            BuddyRailView(
+                buddies: buddyStore.orderedBuddies(in: taskRegistry),
+                selectedBuddyID: selectedBuddyID,
+                isCreating: showsCreation,
+                onSelect: { buddyID in
+                    withAnimation(WispMotion.smooth) {
+                        isCreatingBuddy = false
+                        selectedBuddyID = buddyID
+                    }
+                },
+                onNewBuddy: { withAnimation(WispMotion.smooth) { isCreatingBuddy = true } },
+                onDuplicated: showBuddy,
+                onRequestClearConversation: { buddyIDPendingClear = $0 },
+                onRequestDeletion: { buddyIDPendingDeletion = $0 }
+            )
+
+            Group {
+                if showsCreation {
+                    BuddyCreationView(
+                        isFirstBuddy: buddyStore.buddies.isEmpty,
+                        onCreated: showBuddy,
+                        onCancel: { withAnimation(WispMotion.smooth) { isCreatingBuddy = false } }
+                    )
+                    .transition(.opacity)
+                } else if let selectedBuddyID {
+                    HStack(spacing: 0) {
+                        BuddyChatView(
+                            buddyID: selectedBuddyID,
+                            isInspectorOpen: $isInspectorOpen,
+                            onRequestClearConversation: { buddyIDPendingClear = selectedBuddyID },
+                            onRequestDeletion: { buddyIDPendingDeletion = selectedBuddyID },
+                            onOpenBuddy: showBuddy
+                        )
+                        .id(selectedBuddyID)
+                        .transition(.opacity)
+
+                        if isInspectorOpen {
+                            Divider().opacity(0.6)
+                            BuddyInspectorView(
+                                buddyID: selectedBuddyID,
+                                onRequestClearConversation: { buddyIDPendingClear = selectedBuddyID },
+                                onRequestDeletion: { buddyIDPendingDeletion = selectedBuddyID }
+                            )
+                            .frame(width: inspectorWidth)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(WispColor.windowBackground)
+        .background(shortcutButtons)
         .onAppear {
             takeRequestFromOtherPages()
             if selectedBuddyID == nil {
@@ -73,7 +119,7 @@ struct BuddiesPage: View {
                 if let buddyIDPendingClear { buddyStore.clearConversation(ofBuddyWithID: buddyIDPendingClear) }
             }
         } message: {
-            Text("It starts fresh. Its job, notes and settings stay, and its runs stay in History.")
+            Text("It starts fresh. Its mission, notes, files and settings stay, and its runs stay in History.")
         }
         .confirmationDialog(
             "Delete \(pendingBuddyName(buddyIDPendingDeletion))?",
@@ -83,7 +129,31 @@ struct BuddiesPage: View {
                 if let buddyIDPendingDeletion { buddyStore.deleteBuddy(withID: buddyIDPendingDeletion) }
             }
         } message: {
-            Text("Its thread and notes are removed. Its runs stay in History.")
+            Text("Its thread, notes and files are removed. Its runs stay in History.")
+        }
+    }
+
+    /// ⌘1–⌘9 open the buddy at that position in the rail; ⌘N summons a new one.
+    /// Invisible buttons, because SwiftUI only registers shortcuts on views.
+    private var shortcutButtons: some View {
+        let orderedBuddies = buddyStore.orderedBuddies(in: taskRegistry)
+        return ZStack {
+            ForEach(Array(orderedBuddies.prefix(9).enumerated()), id: \.element.id) { index, buddy in
+                Button("") { showBuddy(buddy.id) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+            }
+            Button("") { withAnimation(WispMotion.smooth) { isCreatingBuddy = true } }
+                .keyboardShortcut("n", modifiers: .command)
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func showBuddy(_ buddyID: UUID) {
+        withAnimation(WispMotion.island) {
+            isCreatingBuddy = false
+            selectedBuddyID = buddyID
         }
     }
 
@@ -96,133 +166,5 @@ struct BuddiesPage: View {
             get: { pendingBuddyID.wrappedValue != nil },
             set: { isPresented in if !isPresented { pendingBuddyID.wrappedValue = nil } }
         )
-    }
-
-    // MARK: - List
-
-    private var listSelection: Binding<UUID?> {
-        Binding(
-            get: { isCreatingBuddy ? nil : selectedBuddyID },
-            set: { newBuddyID in
-                isCreatingBuddy = false
-                selectedBuddyID = newBuddyID
-            }
-        )
-    }
-
-    private var buddyList: some View {
-        VStack(spacing: 0) {
-            List(selection: listSelection) {
-                ForEach(buddyStore.orderedBuddies(in: taskRegistry)) { buddy in
-                    buddyRow(buddy)
-                        .tag(buddy.id)
-                        .contextMenu {
-                            BuddyActionsMenuItems(
-                                buddy: buddy,
-                                isRunning: buddyStore.isRunning(buddy, in: taskRegistry),
-                                showsReadState: true,
-                                onDuplicated: showBuddy,
-                                onRequestClearConversation: { buddyIDPendingClear = buddy.id },
-                                onRequestDeletion: { buddyIDPendingDeletion = buddy.id }
-                            )
-                        }
-                }
-            }
-            .listStyle(.inset)
-            .scrollContentBackground(.hidden)
-
-            Divider()
-
-            Button {
-                selectedBuddyID = nil
-                isCreatingBuddy = true
-            } label: {
-                Label("New Buddy", systemImage: "plus")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .pointerCursor()
-            .padding(12)
-        }
-        .background(WispColor.groupedCardBackground.opacity(0.6))
-    }
-
-    private func showBuddy(_ buddyID: UUID) {
-        isCreatingBuddy = false
-        selectedBuddyID = buddyID
-    }
-
-    private func buddyRow(_ buddy: WispBuddy) -> some View {
-        let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
-        // The open buddy is being read, so it never shows the dot.
-        let isUnread = buddyStore.isUnread(buddy, in: taskRegistry) && !(buddy.id == selectedBuddyID && !isCreatingBuddy)
-        return HStack(spacing: 10) {
-            BuddyAvatar(colorIndex: buddy.colorIndex, size: 30, isWorking: isRunning)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(buddy.name)
-                        .font(.body.weight(isUnread ? .bold : .semibold))
-                        .lineLimit(1)
-                    if buddy.isPinnedInList {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                            .accessibilityLabel("Pinned")
-                    }
-                }
-                Text(BuddyStatusText.line(
-                    for: buddy,
-                    isRunning: isRunning,
-                    latestRunRecord: buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
-                ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            if isUnread {
-                Circle()
-                    .fill(WispColor.accentText)
-                    .frame(width: 8, height: 8)
-                    .accessibilityLabel("New")
-            }
-        }
-        .padding(.vertical, 3)
-    }
-
-    // MARK: - Detail
-
-    @ViewBuilder
-    private var detail: some View {
-        if isCreatingBuddy {
-            NewBuddyForm(
-                topInset: 0,
-                onCreated: { newBuddyID in
-                    isCreatingBuddy = false
-                    selectedBuddyID = newBuddyID
-                },
-                onCancel: { isCreatingBuddy = false }
-            )
-        } else if let selectedBuddyID, buddyStore.buddy(withID: selectedBuddyID) != nil {
-            BuddyDetailView(buddyID: selectedBuddyID, topInset: 0, onDuplicated: showBuddy)
-                .id(selectedBuddyID)
-        } else {
-            summonInvitation
-        }
-    }
-
-    private var summonInvitation: some View {
-        ContentUnavailableView {
-            Label("Summon a buddy", systemImage: "person.2")
-        } description: {
-            Text("A buddy owns one job — a morning digest, a weekly check — and runs it on a schedule in the background while Wisp is running.")
-        } actions: {
-            Button("New Buddy") { isCreatingBuddy = true }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .pointerCursor()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

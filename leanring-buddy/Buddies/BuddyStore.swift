@@ -102,6 +102,13 @@ struct BuddyRunRequest {
     let text: String
     /// The buddy that asked, for a `.delegated` run.
     var requesterName: String? = nil
+    /// What the thread shows as the user's words, when `text` also carries file
+    /// contents the model needs but the thread shouldn't repeat.
+    var displayText: String? = nil
+    /// Names of the files attached to this message, shown as chips in the thread.
+    var attachmentNames: [String] = []
+    /// Attached pictures (downscaled JPEG data and a label) for a vision model.
+    var images: [(data: Data, label: String)] = []
 }
 
 struct WispBuddy: Codable, Identifiable, Equatable {
@@ -124,6 +131,9 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// The tool groups this buddy is limited to; nil means every tool, as
     /// before. Optional for the same reason as `modelChoice`.
     var toolAccess: BuddyToolAccess?
+    /// What this buddy is good at (`BuddySpecialty`); nil for buddies made before
+    /// specialties existed, which read as an all-rounder.
+    var specialty: BuddySpecialty?
 
     // List state, as Rakazo's bot list. All optional so older files still load.
     /// Kept at the top of the list.
@@ -213,7 +223,7 @@ enum BuddyNameGenerator {
         return meaningfulWord.prefix(1).uppercased() + meaningfulWord.dropFirst().lowercased()
     }
 
-    private static func uniqueName(_ baseName: String, avoiding existingNames: [String]) -> String {
+    static func uniqueName(_ baseName: String, avoiding existingNames: [String]) -> String {
         let takenNames = Set(existingNames.map { $0.lowercased() })
         guard takenNames.contains(baseName.lowercased()) else { return baseName }
         var suffixNumber = 2
@@ -348,6 +358,20 @@ final class BuddyStore: ObservableObject {
         )
     }
 
+    /// How the buddy feels right now, for its face (`BuddyMood`).
+    func mood(of buddy: WispBuddy, in taskRegistry: AgentTaskRegistry = .shared, now: Date = Date()) -> BuddyMood {
+        let latestRun = latestRunRecord(of: buddy, in: taskRegistry)
+        let lastActivityAt = latestRun?.startedAt
+            ?? BuddyThreadStore.shared.exchanges(ofBuddyWithID: buddy.id).last?.startedAt
+            ?? buddy.createdAt
+        return BuddyMoodPolicy.mood(
+            latestRunStatus: latestRun?.status,
+            latestRunFinishedAt: latestRun?.finishedAt,
+            lastActivityAt: lastActivityAt,
+            now: now
+        )
+    }
+
     /// Buddies that are working or have news — what the sidebar badge counts.
     func buddiesNeedingAttentionCount(in taskRegistry: AgentTaskRegistry = .shared) -> Int {
         buddies.filter { isRunning($0, in: taskRegistry) || isUnread($0, in: taskRegistry) }.count
@@ -364,21 +388,28 @@ final class BuddyStore: ObservableObject {
         schedule: BuddySchedule,
         modelChoice: BuddyModelChoice? = nil,
         toolAccess: BuddyToolAccess? = nil,
+        specialty: BuddySpecialty? = nil,
+        name chosenName: String? = nil,
+        colorIndex chosenColorIndex: Int? = nil,
         runImmediately: Bool
     ) -> WispBuddy {
         let trimmedInstruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedChosenName = chosenName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let now = Date()
         let newBuddy = WispBuddy(
             id: UUID(),
-            name: BuddyNameGenerator.name(forInstruction: trimmedInstruction, existingNames: buddies.map(\.name)),
+            name: trimmedChosenName.isEmpty
+                ? BuddyNameGenerator.name(forInstruction: trimmedInstruction, existingNames: buddies.map(\.name))
+                : trimmedChosenName,
             instruction: trimmedInstruction,
-            colorIndex: nextColorIndex(),
+            colorIndex: chosenColorIndex ?? nextColorIndex(),
             schedule: schedule,
             createdAt: now,
             runTaskIDs: [],
             nextScheduledRunAt: schedule.nextRunDate(after: now, calendar: .current),
             modelChoice: modelChoice,
-            toolAccess: toolAccess
+            toolAccess: toolAccess,
+            specialty: specialty
         )
         buddies.insert(newBuddy, at: 0)
         saveBuddies()
@@ -402,6 +433,58 @@ final class BuddyStore: ObservableObject {
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessageText.isEmpty, let buddy = buddy(withID: buddyID) else { return false }
         return startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText))
+    }
+
+    /// Sends a message with files attached. The files are copied into the
+    /// buddy's library, documents are read (off the main actor) and put in front
+    /// of the model with the message, pictures go as images. Returns false when
+    /// the buddy is mid-run or the run couldn't start.
+    @discardableResult
+    func sendMessage(
+        _ messageText: String,
+        attachmentFileURLs: [URL],
+        toBuddyWithID buddyID: UUID,
+        fileLibrary: BuddyFileLibrary = .shared
+    ) async -> Bool {
+        guard !attachmentFileURLs.isEmpty else { return sendMessage(messageText, toBuddyWithID: buddyID) }
+        let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let buddy = buddy(withID: buddyID), !isRunning(buddy) else { return false }
+
+        let (addedAttachments, skippedFileNames) = fileLibrary.add(fileURLs: attachmentFileURLs, toBuddyWithID: buddyID)
+        var documents: [(fileName: String, text: String)] = []
+        var unreadableFileNames = skippedFileNames
+        var images: [(data: Data, label: String)] = []
+        for attachment in addedAttachments {
+            switch attachment.kind {
+            case .document:
+                if let text = await fileLibrary.extractedText(
+                    of: attachment, buddyID: buddyID,
+                    maximumCharacters: BuddyAttachmentPolicy.maximumCharactersPerFileInMessage + 1
+                ) {
+                    documents.append((attachment.fileName, text))
+                } else {
+                    unreadableFileNames.append(attachment.fileName)
+                }
+            case .image:
+                if let imageData = fileLibrary.imageData(of: attachment, buddyID: buddyID) {
+                    images.append((imageData, attachment.fileName))
+                } else {
+                    unreadableFileNames.append(attachment.fileName)
+                }
+            }
+        }
+
+        let sentText = trimmedMessageText.isEmpty
+            ? (addedAttachments.count == 1 ? "Take a look at this file." : "Take a look at these files.")
+            : trimmedMessageText
+        let request = BuddyRunRequest(
+            origin: .message,
+            text: BuddyAttachmentPolicy.messageText(userText: sentText, documents: documents, skippedFileNames: unreadableFileNames),
+            displayText: sentText,
+            attachmentNames: addedAttachments.map(\.fileName),
+            images: images
+        )
+        return startRun(of: buddy, request: request)
     }
 
     /// Starts a run of `buddyID` for another buddy's `ask_buddy` request and
@@ -445,6 +528,19 @@ final class BuddyStore: ObservableObject {
 
     func updateToolAccess(ofBuddyWithID buddyID: UUID, to newToolAccess: BuddyToolAccess?) {
         mutateBuddy(withID: buddyID) { $0.toolAccess = newToolAccess }
+    }
+
+    /// Changing the specialty re-applies its tool limits and persona; the
+    /// buddy's job, thread and notes are untouched.
+    func updateSpecialty(ofBuddyWithID buddyID: UUID, to newSpecialty: BuddySpecialty?, appliesToolLimits: Bool) {
+        mutateBuddy(withID: buddyID) { buddy in
+            buddy.specialty = newSpecialty
+            if appliesToolLimits { buddy.toolAccess = newSpecialty?.toolAccess }
+        }
+    }
+
+    func updateColor(ofBuddyWithID buddyID: UUID, to newColorIndex: Int) {
+        mutateBuddy(withID: buddyID) { $0.colorIndex = abs(newColorIndex) % BuddyAppearance.paletteCount }
     }
 
     func updateModelChoice(ofBuddyWithID buddyID: UUID, to newModelChoice: BuddyModelChoice?) {
@@ -510,6 +606,7 @@ final class BuddyStore: ObservableObject {
             nextScheduledRunAt: originalBuddy.schedule.nextRunDate(after: now, calendar: .current),
             modelChoice: originalBuddy.modelChoice,
             toolAccess: originalBuddy.toolAccess,
+            specialty: originalBuddy.specialty,
             notifiesWhenFinished: originalBuddy.notifiesWhenFinished
         )
         buddies.insert(duplicatedBuddy, at: 0)
@@ -535,6 +632,7 @@ final class BuddyStore: ObservableObject {
         stopRun(ofBuddyWithID: buddyID)
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
         BuddyMemoryStore.shared.deleteMemory(ofBuddyWithID: buddyID)
+        BuddyFileLibrary.shared.deleteLibrary(ofBuddyWithID: buddyID)
         buddies.removeAll { $0.id == buddyID }
         saveBuddies()
     }

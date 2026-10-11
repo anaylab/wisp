@@ -256,39 +256,33 @@ private struct ComposioAppRow: View {
         switch status {
         case .connected:
             Button("Disconnect") { Task { await store.disconnect(app) } }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(BuddyPillButtonStyle(colorIndex: 0, isProminent: false))
                 .pointerCursor()
         case .needsReconnect:
             HStack(spacing: 6) {
                 Button("Reconnect") { Task { await store.connect(app) } }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(WispColor.accentText)
+                    .buttonStyle(BuddyPillButtonStyle(colorIndex: 0))
                     .pointerCursor()
                 Button {
                     Task { await store.disconnect(app) }
                 } label: {
-                    Image(systemName: "xmark")
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(BuddyPillButtonStyle(colorIndex: 0, isProminent: false))
                 .help("Remove this connection")
+                .accessibilityLabel("Remove connection")
                 .pointerCursor()
             }
         case .connecting:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Button("Cancel") { store.cancelConnecting(app) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .buttonStyle(BuddyPillButtonStyle(colorIndex: 0, isProminent: false))
                     .pointerCursor()
             }
         default:
             Button("Connect") { Task { await store.connect(app) } }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(WispColor.accentText)
+                .buttonStyle(BuddyPillButtonStyle(colorIndex: 0))
                 .pointerCursor()
         }
     }
