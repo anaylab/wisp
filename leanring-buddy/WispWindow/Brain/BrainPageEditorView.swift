@@ -104,7 +104,7 @@ struct BrainPageEditorView: View {
             .keyboardShortcut(.cancelAction)
             .pointerCursor()
             Button("Save", action: save)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(WispPillButtonStyle())
                 .keyboardShortcut("s", modifiers: .command)
                 .pointerCursor()
                 .help("Save (⌘S)")

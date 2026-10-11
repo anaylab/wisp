@@ -673,7 +673,7 @@ struct HomeTab: View {
             Spacer(minLength: 4)
             if let actionTitle = alert.actionTitle, let action = alert.action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .pointerCursor()
             }
             Button {
@@ -750,7 +750,7 @@ struct HomeTab: View {
                 Label("Stop", systemImage: "stop.fill")
                     .font(WispFont.caption)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
             .pointerCursor()
         }
     }
@@ -870,7 +870,7 @@ struct HomeTab: View {
                     Button("Connect Calendar") {
                         Task { await loadCalendar(requestingAccess: true) }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(WispPillButtonStyle())
                     .pointerCursor()
                 }
             case .accessDenied:

@@ -115,7 +115,7 @@ struct BrainPageReaderView: View {
                 Image(systemName: page.isLocked ? "lock.fill" : "lock.open")
                     .foregroundStyle(page.isLocked ? WispColor.accentText : WispColor.textSecondary)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
             .pointerCursor()
             .help(page.isLocked
                   ? "Locked — Wisp won't change this page. Click to let Wisp add to it again."
@@ -126,7 +126,7 @@ struct BrainPageReaderView: View {
             } label: {
                 Label("Edit", systemImage: "pencil")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
             .keyboardShortcut("e", modifiers: .command)
             .pointerCursor()
             .help("Edit the page's markdown (⌘E)")

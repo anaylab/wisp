@@ -33,14 +33,13 @@ struct MarketplaceTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                budgetSection
+                composioSection
 
                 if !store.records.isEmpty {
                     installedSection
                 }
 
                 browseSection
-                composioSection
             }
             .padding(16)
         }
@@ -53,31 +52,16 @@ struct MarketplaceTab: View {
         }
     }
 
-    // MARK: - Budget
-
-    private var budgetSection: some View {
-        DashboardCard(title: "Model tools") {
-            let available = mcpManager.registeredToolCount
-            let perTurn = AgentToolScope.maximumExposedTools
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("\(available) tool\(available == 1 ? "" : "s") available")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DS.Colors.textPrimary)
-
-                Text("Install as many as you like. Each turn the model is shown only the ~\(perTurn) most relevant to your request — chosen by the router — so the prompt stays short and its tool choice stays sharp. Turn off a server's tools below to keep them from ever being offered.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(DS.Colors.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     // MARK: - Installed
 
     private var installedSection: some View {
-        DashboardCard(title: "Installed") {
-            VStack(spacing: 8) {
+        DashboardCard(title: "Servers") {
+            VStack(alignment: .leading, spacing: 10) {
+                // The one fact worth knowing about the budget: how many tools there
+                // are, and that the model is only ever shown a few per turn.
+                Text("\(mcpManager.registeredToolCount) tools · the model sees the \(AgentToolScope.maximumExposedTools) most relevant each turn")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(WispColor.textSecondary)
                 ForEach(store.records) { record in
                     InstalledServerRow(
                         record: record,
@@ -158,13 +142,15 @@ struct MarketplaceTab: View {
             selectedCategory = value
         } label: {
             Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(isSelected ? DS.Colors.background : DS.Colors.textSecondary)
-                .padding(.horizontal, 10)
+                .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? WispColor.textPrimary : WispColor.textSecondary)
+                .padding(.horizontal, 11)
                 .padding(.vertical, 5)
-                .background(
-                    Capsule().fill(isSelected ? DS.Colors.accent : DS.Colors.surface2)
-                )
+                .background {
+                    if isSelected {
+                        Color.clear.wispBevel(Capsule(style: .continuous), fill: WispColor.surface3)
+                    }
+                }
         }
         .buttonStyle(.plain)
         .pointerCursor()
@@ -173,13 +159,13 @@ struct MarketplaceTab: View {
     // MARK: - Composio
 
     private var composioSection: some View {
-        DashboardCard(title: "Composio · cloud toolkits") {
+        DashboardCard(title: "Apps") {
             VStack(alignment: .leading, spacing: 12) {
                 offMachineNote
 
                 switch composio.state {
                 case .notConfigured:
-                    composioKeyEntry(prompt: "Paste your Composio API key (sent as x-consumer-api-key) to connect the universal server.")
+                    composioKeyEntry(prompt: "Paste your Composio key to connect apps like Gmail, Calendar and Notion.")
                 case .validating:
                     Text("Connecting…")
                         .font(.system(size: 11))
@@ -189,7 +175,7 @@ struct MarketplaceTab: View {
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.destructiveText)
                         .fixedSize(horizontal: false, vertical: true)
-                    composioKeyEntry(prompt: "Re-enter your Composio API key.")
+                    composioKeyEntry(prompt: "Enter your Composio key again.")
                 case .ready:
                     composioConnectedView
                 }
@@ -204,110 +190,63 @@ struct MarketplaceTab: View {
         }
     }
 
+    /// One line: the thing worth knowing before connecting an app.
     private var offMachineNote: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "cloud")
-                .font(.system(size: 12))
-                .foregroundStyle(DS.Colors.warningText)
-            Text("Composio runs in the cloud. Its servers send your transcript and tool calls off this Mac to Composio and the connected app. Local servers stay the default.")
-                .font(.system(size: 10))
-                .foregroundStyle(DS.Colors.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                .fill(DS.Colors.warning.opacity(0.08))
-        )
+        Label("Apps run through Composio's cloud", systemImage: "cloud")
+            .font(.system(size: 11.5))
+            .foregroundStyle(WispColor.textSecondary)
     }
 
     private func composioKeyEntry(prompt: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(prompt)
-                .font(.system(size: 11))
-                .foregroundStyle(DS.Colors.textSecondary)
+                .font(.system(size: 12.5))
+                .foregroundStyle(WispColor.textSecondary)
             HStack(spacing: 8) {
-                SecureField("Composio API key", text: $composioKeyDraft)
+                SecureField("Composio key", text: $composioKeyDraft)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(DS.Colors.textPrimary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
+                    .font(.system(size: 12.5))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                     .background(
-                        RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                            .fill(DS.Colors.surface2)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(WispColor.surface2)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(WispColor.cardSeparator.opacity(0.7), lineWidth: 0.5)
                     )
 
-                Button {
+                Button("Connect") {
                     let key = composioKeyDraft
                     composioKeyDraft = ""
                     Task { await composio.connect(apiKey: key) }
-                } label: {
-                    Text("Connect")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(DS.Colors.background)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(DS.Colors.accent))
                 }
-                .buttonStyle(.plain)
-                .pointerCursor()
+                .buttonStyle(WispPillButtonStyle())
                 .disabled(composioKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-                .opacity(composioKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+                .pointerCursor()
             }
             if composio.hasAPIKey {
-                HStack(spacing: 8) {
-                    Button {
-                        Task { await composio.connect() }
-                    } label: {
-                        Text("Connect saved key")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(DS.Colors.accentText)
-                    }
+                Button("Use the saved key") { Task { await composio.connect() } }
                     .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(WispColor.accentText)
                     .pointerCursor()
-
-                    Text("— a key is already saved; connect it without re-entering.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(DS.Colors.textTertiary)
-                }
             }
-
-            Text("The key is saved to your login Keychain, never to the config file.")
-                .font(.system(size: 10))
-                .foregroundStyle(DS.Colors.textTertiary)
         }
     }
 
     private var composioConnectedView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(DS.Colors.success)
-                Text("Composio is on. Connect the apps you want Wisp to reach.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DS.Colors.textPrimary)
-                Spacer()
-                Button {
-                    composio.disconnect()
-                    ComposioConnectionsStore.shared.reset()
-                } label: {
-                    Text("Remove key")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(DS.Colors.destructiveText)
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-            }
-
             ComposioAppsView()
 
-            Text("Connect opens the app's sign-in page in your browser; this list updates when you finish. The model reaches connected apps through Composio's search and execute tools, which count against the tool budget.")
-                .font(.system(size: 10))
-                .foregroundStyle(DS.Colors.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            Button("Remove key") {
+                composio.disconnect()
+                ComposioConnectionsStore.shared.reset()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11.5))
+            .foregroundStyle(WispColor.textTertiary)
+            .pointerCursor()
         }
     }
 
@@ -420,13 +359,9 @@ private struct CatalogEntryRow: View {
             } else {
                 Button(action: onInstall) {
                     Text("Install")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(DS.Colors.background)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(DS.Colors.accent))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(WispPillButtonStyle())
+                .controlSize(.small)
                 .pointerCursor()
             }
         }
@@ -455,7 +390,7 @@ private struct InstalledServerRow: View {
                     .frame(width: 7, height: 7)
 
                 Text(record.name)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(DS.Colors.textPrimary)
 
                 if record.source == "composio" {
@@ -486,7 +421,8 @@ private struct InstalledServerRow: View {
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .controlSize(.mini)
+                .controlSize(.small)
+                .tint(WispColor.accentText)
                 .pointerCursor()
             }
 
@@ -516,14 +452,13 @@ private struct InstalledServerRow: View {
 
                 Spacer(minLength: 0)
 
-                Button(role: .destructive) {
+                Button {
                     uninstall()
                 } label: {
                     Text("Remove")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(DS.Colors.destructiveText)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
+                .controlSize(.small)
                 .pointerCursor()
             }
 

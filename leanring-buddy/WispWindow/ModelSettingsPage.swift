@@ -288,7 +288,7 @@ private struct ModelProviderCard: View {
                 Button("Save") {
                     saveTypedAPIKey()
                 }
-                .buttonStyle(DSSecondaryButtonStyle())
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .pointerCursor()
                 .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }

@@ -38,16 +38,23 @@ cloud dependency to the local path, without asking.
   still work. It isn't persisted, dims the menu bar icon (`appearsDisabled`), and shows a Resume
   banner on Today and "Listening paused" in the notch chat's talk pill. The window
   (`WispWindow/`) replaced the old dashboard, the pop-out conversation window, the notch's own
-  settings pages and the big menu bar panel, so every setting has exactly one home. It is a stock
-  `NavigationSplitView` in an `NSWindow` whose `NSHostingController` bridges title + toolbar
-  (`sceneBridgingOptions`); sidebar sections are `WispSection` (Today, Chat, Buddies, Brain, Routines,
-  History · Manage: Connections, Settings) and a multi-page section switches pages with a segmented
-  control in the toolbar (`WispPage`). Anything opens it at a page with
+  settings pages and the big menu bar panel, so every setting has exactly one home. It has no sidebar:
+  a slim top bar (`WispWindowView`) holds the eight `WispSection`s as icons (Today, Chat, Buddies, Brain, Routines,
+  History, Connections, Settings) — the open one expands to its name and the pill slides between tabs
+  (`matchedGeometryEffect`) — with a status pill (mark + state + model) at the end, and a section with several
+  pages (`WispPage`) gets a segmented strip beneath. The `NSWindow` is full-size-content with a transparent title
+  bar and hidden title; the bar sits in it, doubles as the drag handle (`WindowDragArea`), and
+  `WispWindowController.positionTrafficLights` grows the title bar container and centres the traffic lights on it
+  (re-run on resize/key, since AppKit resets it). Nothing from SwiftUI is bridged into the title or toolbar
+  (`sceneBridgingOptions = []`). Anything opens it at a page with
   `WispWindowNavigator.open(_:)` (closes the notch workspace + quick panel first). On launch with a
   permission missing, the window opens on Today, which leads with the `PermissionsChecklist`.
-  Look: native macOS (system sidebar, unified toolbar, `WispColor.windowBackground` /
-  `groupedCardBackground` / `cardSeparator` system colours, native `.bordered` /
-  `.borderedProminent` controls), Wisp colours only as the accent (`.tint(WispColor.accentText)`).
+  Look: calm and tactile — `WispColor` surface tokens, hairlines, and **one button treatment**: the lit-edge pill
+  (`Components/WispPill.swift`: `WispBevel` + `WispPillButtonStyle`, prominent = tinted with the accent, otherwise
+  neutral; lift on hover, dip on press, sizes follow `controlSize`). Use it instead of `.bordered` /
+  `.borderedProminent` / the notch's glass button style in window pages (the glass style is white-on-dark and
+  nearly invisible in light mode). Wisp colours are accents only (`.tint(WispColor.accentText)`).
+  Copy is kept to what earns its place: no explanatory paragraphs under controls whose label already says it.
 - **Framework**: SwiftUI (macOS native) with AppKit bridging for the notch, cursor overlay, menu
   bar item and the Wisp window
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
@@ -931,7 +938,8 @@ Grouped by what they do. Line counts are approximate.
 |------|-------|---------|
 | `WispWindow/WispNavigation.swift` | ~175 | `WispSection` (sidebar destinations, grouped use/manage) + `WispPage` (every page and its section), `WispWindowRouter` (shared selection, last page per section) and `WispWindowNavigator.open(_:)`. Also the `.wispDismissPanel` / `.wispCloseNotchWorkspace` notification names. |
 | `WispWindow/WispWindowController.swift` | ~125 | The Wisp window: `NSWindow` + `NSHostingController` with title/toolbar bridging, unified toolbar, frame autosave, full-screen capable. `WispWindowActivation` raises `.regular` while a titled window is open and drops back to `.accessory` after. |
-| `WispWindow/WispWindowView.swift` | ~200 | The shell: `NavigationSplitView` with a system sidebar (badges: running tasks on History, working buddies on Buddies, a missing permission on Settings), the page switch, the toolbar's segmented page picker, and a sidebar status footer (model + warm/cold + local). |
+| `WispWindow/WispWindowView.swift` | ~330 | The shell: the top bar of section tabs (dot badges: running tasks on History, working buddies on Buddies, ingest on Brain, a missing permission on Settings), the page strip, the page switch, and the status pill (mark + state + model, collapsing to the mark when narrow). |
+| `Components/WispPill.swift` | ~140 | `WispBevel` (raised surface) and `WispPillButtonStyle` (the window's one button style). |
 | `WispWindow/ChatPage.swift` | ~440 | Chat: the last 6 hours of interactive exchanges as a thread (running turns show the live browser step + Stop, answers have Copy), a follow-up box (`askTypedQuestion`; capture excludes Wisp's own windows), and a side column of running and recently finished tasks. Opened by the notch's expand button via `openConversationWindow()`. |
 | `WispWindow/BuddiesPage.swift` | ~150 | Buddies: a list of buddies + the selected one's `BuddyDetailView` or `NewBuddyForm`; a single invitation when there are none. |
 | `WispWindow/GeneralSettingsPage.swift` | ~330 | Settings → General: `PermissionsChecklist` (mic / accessibility / screen recording / screen content with Grant buttons — also shown on Today until granted), `ActiveStackCard` (model + residency, speech, voice, agent mode, local-only assurance), island surface, speak replies, sound cues and `VoiceUpgradeHint`. `SettingRow` is the shared title/detail/control row. |
@@ -941,7 +949,7 @@ Grouped by what they do. Line counts are approximate.
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
 | `MarketplaceTab.swift` | ~700 | Connections → Marketplace: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
 | `ShortcutsTab.swift` | ~250 | Settings → Shortcuts: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
-| `ActiveStackReadout.swift` | ~100 | "What's running": configured model/STT/TTS names from Info.plist plus Ollama residency, for the Wisp window's sidebar footer and Settings → General's What's running card. Also labels perf timings and "Asking …" steps. |
+| `ActiveStackReadout.swift` | ~100 | "What's running": configured model/STT/TTS names from Info.plist plus Ollama residency, for the Wisp window's status pill and Settings → General's What's running card. Also labels perf timings and "Asking …" steps. |
 | `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |

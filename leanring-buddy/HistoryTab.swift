@@ -372,7 +372,7 @@ struct HistoryTab: View {
                 } label: {
                     Label("Stop", systemImage: "stop.fill")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .pointerCursor()
             }
             if !answerText.isEmpty {
@@ -388,7 +388,7 @@ struct HistoryTab: View {
                     Label(isAnswerJustCopied ? "Copied" : "Copy answer",
                           systemImage: isAnswerJustCopied ? "checkmark" : "doc.on.doc")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .pointerCursor()
             }
             // Asking again and saving as a routine only make sense for the
@@ -399,7 +399,7 @@ struct HistoryTab: View {
                 } label: {
                     Label("Ask again", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
                 .pointerCursor()
                 .nativeTooltip("Close the dashboard and ask this again about what's on screen now")
 
@@ -408,7 +408,7 @@ struct HistoryTab: View {
                 } label: {
                     Label("Save as routine", systemImage: "bolt")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(WispPillButtonStyle())
                 .pointerCursor()
                 .nativeTooltip("Turn this question into a routine you can run in one click")
             }

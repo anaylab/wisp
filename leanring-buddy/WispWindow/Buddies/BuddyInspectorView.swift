@@ -106,7 +106,7 @@ struct BuddyInspectorView: View {
                         .frame(height: 30)
                         .background {
                             if isSelected {
-                                Color.clear.buddyBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface3)
+                                Color.clear.wispBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface3)
                                     .transition(.opacity)
                             }
                         }

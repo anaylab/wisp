@@ -110,7 +110,7 @@ struct BrainSettingsPage: View {
                         ProgressView().controlSize(.small)
                     }
                     Button("Digest Now") { conversationDigester.digestNow() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .disabled(!canDigestConversations)
                         .pointerCursor(isEnabled: canDigestConversations)
                         .help("File what's worth keeping from finished conversations right away")
@@ -136,7 +136,7 @@ struct BrainSettingsPage: View {
                         brainStore.ensureVaultExists()
                         NSWorkspace.shared.open(brainStore.inboxURL)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .pointerCursor()
                     Toggle("Read files dropped in the inbox", isOn: $brainPreferences.isInboxWatchingEnabled)
                         .labelsHidden()
@@ -203,13 +203,13 @@ struct BrainSettingsPage: View {
                 Divider()
                 HStack(spacing: 8) {
                     Button("Allow Browser Access…") { activityRecorder.requestBrowserAccess() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .disabled(!brainPreferences.isActivityRecordingEnabled)
                         .pointerCursor(isEnabled: brainPreferences.isActivityRecordingEnabled)
                         .help("macOS asks once per browser before Wisp can read the front tab's address")
                     Spacer()
                     Button("Delete Recorded Activity…", role: .destructive) { isConfirmingDeleteActivity = true }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .pointerCursor()
                 }
             }
@@ -249,7 +249,7 @@ struct BrainSettingsPage: View {
                     ProgressView().controlSize(.small)
                 }
                 Button("Summarize Today") { activityRecorder.digestToday() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .disabled(activityRecorder.todaySampleCount == 0 || activityRecorder.isDigesting)
                     .pointerCursor(isEnabled: activityRecorder.todaySampleCount > 0 && !activityRecorder.isDigesting)
                     .help("Write today's activity into your pages now instead of tonight")
@@ -409,7 +409,7 @@ struct BrainSettingsPage: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(addExcludedSite)
                 Button("Add", action: addExcludedSite)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .disabled(normalizedNewExcludedSite.isEmpty)
                     .pointerCursor(isEnabled: !normalizedNewExcludedSite.isEmpty)
             }
@@ -453,18 +453,18 @@ struct BrainSettingsPage: View {
                     .textSelection(.enabled)
                 HStack(spacing: 8) {
                     Button("Reveal in Finder", systemImage: "folder") { brainStore.revealVaultInFinder() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .pointerCursor()
                     if brainStore.isObsidianInstalled {
                         Button("Open in Obsidian", systemImage: "arrow.up.forward.app") { brainStore.openInObsidian() }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(WispPillButtonStyle(isProminent: false))
                             .pointerCursor()
                     }
                     Button("Edit Schema", systemImage: "list.bullet.rectangle") {
                         brainStore.ensureVaultExists()
                         NSWorkspace.shared.open(brainStore.schemaFileURL)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .pointerCursor()
                     .help("SCHEMA.md: the conventions Wisp follows when it writes pages")
                 }
@@ -529,11 +529,11 @@ struct ConversationHistorySettingsCard: View {
 
                 HStack(spacing: 8) {
                     Button("Clear Conversation History…", role: .destructive) { isConfirmingClearConversationHistory = true }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .disabled(conversationHistoryStore.persistedTurns.isEmpty)
                         .pointerCursor(isEnabled: !conversationHistoryStore.persistedTurns.isEmpty)
                     Button("Reveal in Finder") { conversationHistoryStore.revealHistoryFileInFinder() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
                         .pointerCursor()
                     Spacer()
                 }
@@ -603,7 +603,7 @@ struct LegacyMemoryFactsCard: View {
                     }
                 }
                 Button("Reveal memory.md in Finder") { memoryStore.revealMemoryFileInFinder() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
                     .pointerCursor()
             }
         }
