@@ -428,6 +428,9 @@ final class AgentTurnRunner {
                 isError: true, wasDeclined: false
             )
         }
+        if let refusalReason = runToolkit.refusalForCall?(name, input) {
+            return AgentToolRegistry.Outcome(content: refusalReason, isError: true, wasDeclined: false)
+        }
         return await withTaskGroup(of: AgentToolRegistry.Outcome?.self) { group in
             group.addTask { @MainActor in
                 if let runTool = runToolkit.additionalTool(named: name) {

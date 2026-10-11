@@ -60,6 +60,9 @@ enum BuddyRunToolkitBuilder {
                     modelSendsDataOffThisMachine: modelSendsDataOffThisMachine
                 )
             },
+            refusalForCall: { toolName, toolInput in
+                BuddyToolAccessPolicy.appRefusalReason(toolName: toolName, toolInput: toolInput, access: toolAccess)
+            },
             additionalTools: [
                 rememberTool(forBuddyWithID: buddyID, memoryStore: memoryStore),
                 forgetTool(forBuddyWithID: buddyID, memoryStore: memoryStore),

@@ -217,11 +217,12 @@ struct BuddyCreationView: View {
                 ))
                 BuddyModelEditor(modelChoice: $modelChoice)
                 DisclosureGroup(isExpanded: $isShowingTools) {
-                    BuddyToolAccessEditor(
+                    BuddyToolsView(
                         toolAccess: $toolAccess,
-                        modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(modelChoice)
+                        modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(modelChoice),
+                        colorIndex: colorIndex
                     )
-                    .padding(.top, 6)
+                    .padding(.top, 10)
                 } label: {
                     Text(toolAccess == nil ? "Tools · all" : "Tools · limited")
                         .font(.system(size: 12.5, weight: .medium)).foregroundStyle(WispColor.textSecondary)

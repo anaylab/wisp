@@ -262,12 +262,13 @@ struct BuddyInspectorView: View {
     // MARK: - Tools
 
     private func toolsTab(for buddy: WispBuddy) -> some View {
-        BuddyToolAccessEditor(
+        BuddyToolsView(
             toolAccess: Binding(
                 get: { buddy.toolAccess },
                 set: { buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: $0) }
             ),
-            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice)
+            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice),
+            colorIndex: buddy.colorIndex
         )
     }
 

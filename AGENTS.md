@@ -229,7 +229,16 @@ cloud dependency to the local path, without asking.
   so a limited buddy still gets a full set of relevant tools) and again by name at call time (so a tool that
   registers after the run began is held to it too). Edited with `BuddyToolAccessEditor` ("Tools · Browser, Screen"
   on the page and in the new-buddy form); Brain/Your memory show as unavailable for a cloud-model buddy.
-    **Per-buddy model** (`WispBuddy.modelChoice: BuddyModelChoice?`, nil = follow Wisp): local, a Claude model,
+    **Per-buddy app access** (`BuddyToolAccess.allowedAppSlugs`, nil = every connected app): which connected Composio
+  apps (toolkit slugs) a limited buddy may use. Enforced at call time, not just hidden: `AgentRunToolkit.refusalForCall`
+  (checked in `AgentTurnRunner.runToolWithTimeout` after the name check) runs `BuddyToolAccessPolicy.appRefusalReason`,
+  which unwraps Composio's execute gateway into the apps its tools belong to and refuses any not in the list, refuses a
+  call it can't read, and refuses Composio's shell/workbench tools (they could reach any app). `settingApp` drops the
+  limit again when every connected app is allowed, so an app connected later is allowed too. UI: `BuddyToolsView`
+  (Everything / Choose; app rows with real logos and switches; Wisp's own abilities; **Add app** sheet that asks for the
+  Composio key if needed and embeds `ComposioAppsView`), used by the inspector's Tools tab and the summon flow; the
+  notch still uses `BuddyToolAccessEditor`.
+  **Per-buddy model** (`WispBuddy.modelChoice: BuddyModelChoice?`, nil = follow Wisp): local, a Claude model,
   GPT or Gemini, built by `ModelProviderFactory.make(_ choice:)`; picked with `BuddyModelEditor` (page + new
   form), which says what leaves the Mac. A buddy whose model is off this machine (`deployment.sendsDataOffThisMachine`)
   gets `BuddyRunToolPolicy.privateKnowledgeToolNames` removed — the brain tools plus `remember`/`forget` — both
@@ -973,6 +982,7 @@ names forward here.
 | `Buddies/BuddyMood.swift` | ~55 | `BuddyMood` + pure `BuddyMoodPolicy` (run state/time → mood). |
 | `Buddies/BuddySpecialty.swift` | ~170 | Specialty templates: colour, tool groups, persona line, starter jobs. |
 | `Buddies/BuddyFiles.swift` | ~290 | `BuddyAttachment`, pure `BuddyAttachmentPolicy` (prompt text, caps, name resolution) and the per-buddy `BuddyFileLibrary`. |
+| `WispWindow/Buddies/BuddyToolsView.swift` | ~330 | What a buddy may use: Everything/Choose, app rows with logos + switches, Wisp's abilities, and the Add-app connect sheet. |
 | `WispWindow/Buddies/*.swift` | ~1500 | The messenger: `BuddyRailView`, `BuddyChatView`, `BuddyInspectorView`, `BuddyCreationView`, `BuddyHubComponents` (pill/icon buttons, chips, typing dots, ambient backdrop, drop overlay, formatting). |
 | `Buddies/BuddyAvatar.swift` | ~85 | `BuddyAppearance` (the 8 calm colours + tonal gradient) and `BuddyAvatar` (compact `BuddyCharacter`: still at rest, lively while working). |
 | `Buddies/BuddyViews.swift` | ~1285 | `BuddyScheduleEditor`, model/tool editors, `BuddyStatusText` and `BuddyActionsMenuItems` (shared by the window list's right-click menu and the page's ⋯ menu), `BuddyDetailView` (the whole stored thread, editable job, inline clear/delete confirmation since the notch panel can't host sheets; marks the buddy read while open) and `NewBuddyForm` (with starter jobs). |

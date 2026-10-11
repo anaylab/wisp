@@ -137,3 +137,48 @@ import Foundation
         check("a buddy saved before specialties still loads", legacyStore.buddies.count == 1 && legacyStore.buddies[0].specialty == nil)
     }
 }
+
+@MainActor func buddyToolAppAccessSuite() {
+    section("Buddies: per-app tool access")
+    let composioGroup = BuddyToolAccessPolicy.groupID(forServerNamed: ComposioAccountStore.serverId)
+    let connected: Set<String> = ["gmail", "notion", "googlecalendar"]
+
+    let allApps = BuddyToolAccess(allowedGroupIDs: [composioGroup])
+    check("no app limit allows every app", allApps.allowsApp("gmail") && allApps.allowsApp("notion"))
+    check("an app is refused when the Composio group is off", !BuddyToolAccess(allowedGroupIDs: []).allowsApp("gmail"))
+
+    let withoutNotion = allApps.settingApp("notion", isAllowed: false, connectedAppSlugs: connected)
+    check("turning one app off keeps the others", withoutNotion.allowsApp("gmail") && !withoutNotion.allowsApp("notion"))
+    check("the app list is now explicit", withoutNotion.allowedAppSlugs == ["gmail", "googlecalendar"])
+    let backOn = withoutNotion.settingApp("notion", isAllowed: true, connectedAppSlugs: connected)
+    check("turning it back on restores 'all apps'", backOn.allowedAppSlugs == nil)
+
+    let noneLeft = ["gmail", "notion", "googlecalendar"].reduce(allApps) { $0.settingApp($1, isAllowed: false, connectedAppSlugs: connected) }
+    check("turning every app off drops the Composio group", !noneLeft.allowsServer(named: ComposioAccountStore.serverId) && noneLeft.allowedAppSlugs == [])
+
+    let started = BuddyToolAccess.everythingAsChoices(connectedAppSlugs: connected, availableGroupIDs: ["browser", "screen"], serverIDs: ["mcp:fetch"], composioGroupID: composioGroup)
+    check("'Choose' starts with everything on", started.allows(.browser) && started.allowsServer(named: "fetch") && started.allowsApp("gmail"))
+    check("with no connected app the Composio group isn't added", !BuddyToolAccess.everythingAsChoices(connectedAppSlugs: [], availableGroupIDs: [], serverIDs: [], composioGroupID: composioGroup).allowsServer(named: ComposioAccountStore.serverId))
+
+    func execute(_ slugs: [String]) -> JSONValue {
+        .object(["tools": .array(slugs.map { .object(["tool_slug": .string($0), "arguments": .object([:])]) })])
+    }
+    let limited = BuddyToolAccess(allowedGroupIDs: [composioGroup], allowedAppSlugs: ["gmail"])
+    func refusal(_ name: String, _ input: JSONValue, _ access: BuddyToolAccess?) -> String? {
+        BuddyToolAccessPolicy.appRefusalReason(toolName: name, toolInput: input, access: access)
+    }
+    let executeName = "composio-connect__COMPOSIO_MULTI_EXECUTE_TOOL"
+    check("an allowed app's call goes through", refusal(executeName, execute(["GMAIL_FETCH_EMAILS"]), limited) == nil)
+    check("another app's call is refused by name", refusal(executeName, execute(["NOTION_CREATE_PAGE"]), limited)?.contains("notion") == true)
+    check("one bad tool in a batch refuses the batch", refusal(executeName, execute(["GMAIL_SEND_EMAIL", "SLACK_POST"]), limited) != nil)
+    check("an unreadable call is refused", refusal(executeName, .object(["tools": .string("???")]), limited) != nil)
+    check("no app limit never refuses", refusal(executeName, execute(["NOTION_CREATE_PAGE"]), allApps) == nil)
+    check("no access limit at all never refuses", refusal(executeName, execute(["NOTION_CREATE_PAGE"]), nil) == nil)
+    check("the shell tool is refused under an app limit", refusal("composio-connect__COMPOSIO_REMOTE_BASH_TOOL", .object([:]), limited) != nil)
+    check("the workbench is refused under an app limit", refusal("composio-connect__COMPOSIO_REMOTE_WORKBENCH", .object([:]), limited) != nil)
+    check("searching for tools is still allowed", refusal("composio-connect__COMPOSIO_SEARCH_TOOLS", .object([:]), limited) == nil)
+    check("non-Composio tools are untouched", refusal("fetch__get", .object([:]), limited) == nil)
+
+    let legacy = try? JSONDecoder().decode(BuddyToolAccess.self, from: Data(#"{"allowedGroupIDs":["browser"]}"#.utf8))
+    check("an access saved before app limits still loads, with no limit", legacy?.allowedAppSlugs == nil && legacy?.allows(.browser) == true)
+}

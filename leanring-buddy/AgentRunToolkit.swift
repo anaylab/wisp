@@ -26,6 +26,10 @@ struct AgentRunToolkit: Sendable {
     /// registers after the run starts (an MCP server finishing its connect) is
     /// held to it too. Nil allows everything not excluded.
     var permitsRegistryTool: (@Sendable (String) -> Bool)?
+    /// Judges one call by its arguments, after the name check: returns the reason
+    /// to refuse it, or nil. Used for limits a tool's name can't express (which
+    /// connected app a Composio call touches).
+    var refusalForCall: (@Sendable (String, JSONValue) -> String?)?
     /// Tools offered on every pass of this run, whatever the request says.
     var additionalTools: [AgentRunTool] = []
 
