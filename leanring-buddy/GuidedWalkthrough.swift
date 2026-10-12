@@ -183,3 +183,28 @@ nonisolated enum GuidedWalkthroughClickMatcher {
         return reachedRegion.contains(clickInScreenshotPixels)
     }
 }
+
+// MARK: - Where to click when Wisp does a step
+
+nonisolated enum GuidedWalkthroughAutoClickPoint {
+    /// The centre of a step's region as a point in Quartz global coordinates
+    /// (origin top-left of the primary display), which is what a synthesised
+    /// mouse event takes. The region is in the screenshot's pixel space on
+    /// `displayFrame`, an AppKit frame (origin bottom-left of the primary).
+    static func quartzGlobalPoint(
+        displayFrameInAppKitCoordinates displayFrame: CGRect,
+        screenshotSize: CGSize,
+        regionInScreenshotPixels region: CGRect,
+        primaryDisplayHeight: CGFloat
+    ) -> CGPoint? {
+        guard screenshotSize.width > 0, screenshotSize.height > 0,
+              displayFrame.width > 0, displayFrame.height > 0 else { return nil }
+
+        let offsetFromDisplayLeftInPoints = region.midX * displayFrame.width / screenshotSize.width
+        let offsetFromDisplayTopInPoints = region.midY * displayFrame.height / screenshotSize.height
+
+        let appKitX = displayFrame.minX + offsetFromDisplayLeftInPoints
+        let appKitY = displayFrame.maxY - offsetFromDisplayTopInPoints
+        return CGPoint(x: appKitX, y: primaryDisplayHeight - appKitY)
+    }
+}

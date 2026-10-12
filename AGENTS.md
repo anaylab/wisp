@@ -428,7 +428,11 @@ cloud dependency to the local path, without asking.
   deterministic AX + OCR matcher, retried every ~0.9s for up to 40s (a capture + OCR per try; "can't see it" shown after 5) and
   drawn as a numbered box. A step completes on a global `leftMouseDown` landing on the marked target
   (`GuidedWalkthroughClickMatcher`, AppKit-points → screenshot-pixels, no extra permission), or on the checklist's Next; Stop
-  ends it. No model call per step. The notch shows `GuidedWalkthroughChecklistView` in place of the reply text
+  ends it. **Do it for me** (`performCurrentGuidedStepForUser`) has Wisp click the marked target itself (a synthesised
+  `CGEvent` click at the box centre, `GuidedWalkthroughAutoClickPoint`) and moves on; it refuses a control whose label or
+  instruction names an irreversible action (`ToolCallSafety.namesIrreversibleAction`: Send, Delete, Pay…) and says so under
+  the step. Steps come from `[STEP:label]` tags (no coordinates — the model can't place a control that isn't on screen yet)
+  or numbered BOX/ARROW tags. No model call per step. The notch shows `GuidedWalkthroughChecklistView` in place of the reply text
   (`answerSurfaceWithReplyActions`); the overlay isn't faded and the lingering-answer expiry is held while one runs, and a new
   question (`clearScreenAnnotations`) ends it. Tested by `Tests/GuidedWalkthrough`.
 - **Fast pointing** ("where is X" / "point at X" / "where do I click to X"): recognised by

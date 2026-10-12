@@ -1184,6 +1184,7 @@ struct NotchHUDView: View {
                 // the place of the reply text it was drawn from.
                 GuidedWalkthroughChecklistView(
                     guidedWalkthrough: companionManager.guidedWalkthrough,
+                    onDoItForMe: { companionManager.performCurrentGuidedStepForUser() },
                     onNextStep: { companionManager.completeGuidedWalkthroughStep() },
                     onStop: { companionManager.endGuidedWalkthrough() }
                 )

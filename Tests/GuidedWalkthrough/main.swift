@@ -127,5 +127,29 @@ check(GuidedWalkthroughClickMatcher.clickLandsOnRegion(
     regionInScreenshotPixels: box
 ), "the same position on the target display counts")
 
+// MARK: Auto-click point
+
+// Same 1440×900 display, region centre at screenshot (150, 120).
+let autoClickRegion = CGRect(x: 100, y: 100, width: 100, height: 40)
+let autoClickPoint = GuidedWalkthroughAutoClickPoint.quartzGlobalPoint(
+    displayFrameInAppKitCoordinates: displayFrame,
+    screenshotSize: screenshotSize,
+    regionInScreenshotPixels: autoClickRegion,
+    primaryDisplayHeight: 900
+)!
+check(abs(autoClickPoint.x - 241.07) < 0.1 && abs(autoClickPoint.y - 192.86) < 0.1, "centre of the box in Quartz points")
+// A display to the right of and above the primary (primary is 900 tall):
+// AppKit frame x 1440…2880, y 900…1800.
+let displayAbovePrimary = CGRect(x: 1440, y: 900, width: 1440, height: 900)
+let pointOnUpperDisplay = GuidedWalkthroughAutoClickPoint.quartzGlobalPoint(
+    displayFrameInAppKitCoordinates: displayAbovePrimary,
+    screenshotSize: screenshotSize,
+    regionInScreenshotPixels: autoClickRegion,
+    primaryDisplayHeight: 900
+)!
+check(abs(pointOnUpperDisplay.x - (1440 + 241.07)) < 0.1 && abs(pointOnUpperDisplay.y - (192.86 - 900)) < 0.1, "a display above the primary has negative Quartz y")
+// The click point must land back on the region under the click test.
+check(clickLands(autoClickPoint.x, topLeftY: autoClickPoint.y, region: autoClickRegion), "the auto-click point passes the click test")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)
