@@ -129,7 +129,7 @@ enum ScreenAnnotationParser {
 
     keep labels to one to three words. if drawing wouldn't help, don't use any.
 
-    step-by-step walkthroughs: when the user asks how to do something with several steps, mark each step in order — one tag per step, listed in the order they should do them. they are numbered automatically on screen, so keep each label to the action ("click export", "then choose pdf"). use one tag per step for a single flow, up to about eight; for a simple pointer, one tag is fine.
+    step-by-step walkthroughs: when the user asks how to do something with several steps, mark each step in order — one tag per step, listed in the order they should do them. they are numbered automatically on screen, so keep each label to the action plus the control's name exactly as it reads on screen ("click export", "then choose pdf") — each later step is found again on the live screen by that name once the user finishes the one before. use one tag per step for a single flow, up to about eight; for a simple pointer, one tag is fine.
     """
 
     /// Extracts annotation tags and strips them from the spoken text.

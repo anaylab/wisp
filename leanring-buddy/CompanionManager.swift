@@ -104,6 +104,9 @@ final class CompanionManager: ObservableObject {
     /// Pixel size of the screenshot each display's annotations came from,
     /// needed to scale them onto that display.
     @Published var annotationScreenshotSizeByDisplayFrame: [CGRect: CGSize] = [:]
+    /// The live guided walkthrough, when a multi-step answer is being walked
+    /// through one step at a time (see GuidedWalkthroughController.swift).
+    let guidedWalkthrough = GuidedWalkthroughSession()
 
     let buddyDictationManager = BuddyDictationManager()
     let globalPushToTalkShortcutMonitor = GlobalPushToTalkShortcutMonitor()
@@ -341,6 +344,8 @@ final class CompanionManager: ObservableObject {
     /// question starts, since annotations describe one answer and leaving them up
     /// during the next would be misleading.
     func clearScreenAnnotations() {
+        // A new question replaces a walkthrough in progress along with its marks.
+        guidedWalkthrough.reset()
         activeAnnotationsByDisplayFrame.removeAll()
         annotationScreenshotSizeByDisplayFrame.removeAll()
     }
@@ -1637,7 +1642,15 @@ final class CompanionManager: ObservableObject {
                 }
 
                 if !annotationsToDraw.isEmpty {
-                    applyAnnotations(annotationsToDraw, from: screenCaptures)
+                    // A multi-step answer is walked through one step at a time
+                    // rather than drawn all at once.
+                    let didStartGuidedWalkthrough = beginGuidedWalkthrough(
+                        from: annotationsToDraw,
+                        screenCaptures: screenCaptures
+                    )
+                    if !didStartGuidedWalkthrough {
+                        applyAnnotations(annotationsToDraw, from: screenCaptures)
+                    }
                 }
 
                 // Save this exchange to the transcript.
@@ -2149,8 +2162,10 @@ final class CompanionManager: ObservableObject {
     /// annotations a moment to be seen, then fades out the overlay after a
     /// 1-second pause. Cancelled automatically if the user starts another
     /// push-to-talk interaction.
-    private func scheduleTransientHideIfNeeded() {
+    func scheduleTransientHideIfNeeded() {
         guard !isCursorAlwaysVisible && isOverlayVisible else { return }
+        // The overlay carries a walkthrough's marks; it fades when that ends.
+        guard !guidedWalkthrough.isActive else { return }
 
         transientHideTask?.cancel()
         transientHideTask = Task {
@@ -2657,7 +2672,7 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    private func applyAnnotations(
+    func applyAnnotations(
         _ annotations: [ScreenAnnotation],
         from screenCaptures: [CompanionScreenCapture]
     ) {

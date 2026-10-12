@@ -644,6 +644,7 @@ final class NotchWindowController {
             && !viewModel.isExpanded
             && companionManager.voiceState == .idle
             && Date() >= presentationHoldUntil
+            && !companionManager.guidedWalkthrough.isActive
         guard isAnswerOutOfSight, !isShowingRunningTimerCard else {
             answerLingeringSinceDate = nil
             return

@@ -1179,9 +1179,19 @@ struct NotchHUDView: View {
     /// answer's scroll view so it stays visible when a long reply scrolls.
     private var answerSurfaceWithReplyActions: some View {
         VStack(alignment: .leading, spacing: 10) {
-            answerSurface
-            if hasReplyText {
-                replyActionRow
+            if companionManager.guidedWalkthrough.isActive {
+                // A multi-step answer is walked through, so the checklist takes
+                // the place of the reply text it was drawn from.
+                GuidedWalkthroughChecklistView(
+                    guidedWalkthrough: companionManager.guidedWalkthrough,
+                    onNextStep: { companionManager.completeGuidedWalkthroughStep() },
+                    onStop: { companionManager.endGuidedWalkthrough() }
+                )
+            } else {
+                answerSurface
+                if hasReplyText {
+                    replyActionRow
+                }
             }
         }
         .onChange(of: companionManager.currentReplyText) { _, _ in
