@@ -42,6 +42,8 @@ struct GuidedWalkthroughTargetLocation {
 final class GuidedWalkthroughSession: ObservableObject {
     @Published private(set) var plan: GuidedWalkthroughPlan?
     @Published private(set) var currentTargetStatus: GuidedWalkthroughTargetStatus = .searching
+    /// What the user asked for, kept so a re-plan can say what the steps were for.
+    private(set) var originalRequestText: String?
     /// Why "Do it for me" didn't click, shown under the current step.
     @Published private(set) var autoClickNote: String?
     /// Set for a moment after the last step so the checklist can say it's done.
@@ -54,8 +56,9 @@ final class GuidedWalkthroughSession: ObservableObject {
 
     var isActive: Bool { plan != nil }
 
-    func begin(with newPlan: GuidedWalkthroughPlan) {
+    func begin(with newPlan: GuidedWalkthroughPlan, requestText: String) {
         reset()
+        originalRequestText = requestText
         plan = newPlan
         currentTargetStatus = .located
     }
@@ -90,6 +93,7 @@ final class GuidedWalkthroughSession: ObservableObject {
         currentTargetLocation = nil
         didFinishAllSteps = false
         autoClickNote = nil
+        originalRequestText = nil
         plan = nil
         currentTargetStatus = .searching
     }
@@ -117,7 +121,8 @@ extension CompanionManager {
     /// caller must not also draw the whole set.
     func beginGuidedWalkthrough(
         from annotations: [ScreenAnnotation],
-        screenCaptures: [CompanionScreenCapture]
+        screenCaptures: [CompanionScreenCapture],
+        requestText: String
     ) -> Bool {
         guard !screenCaptures.isEmpty,
               let newPlan = GuidedWalkthroughPlan(annotations: annotations),
@@ -127,7 +132,7 @@ extension CompanionManager {
             return false
         }
 
-        guidedWalkthrough.begin(with: newPlan)
+        guidedWalkthrough.begin(with: newPlan, requestText: requestText)
         keepOverlayVisibleForGuidedWalkthrough()
         if firstStepAnnotation.isUnplacedWalkthroughStep {
             // A [STEP:] tag has only words, so even the first step is found on
@@ -318,6 +323,32 @@ extension CompanionManager {
         )
     }
 
+    // MARK: - Re-planning
+
+    /// The model plans from the one screenshot it saw, so a step can name a
+    /// control that isn't where it guessed. This asks again from the screen as it
+    /// is now, saying which steps are done and which one can't be found.
+    func replanGuidedWalkthrough() {
+        guard let plan = guidedWalkthrough.plan,
+              let currentStep = plan.currentStep else { return }
+
+        let finishedInstructions = plan.steps
+            .filter { $0.status == .done }
+            .map(\.instruction)
+        var question = "I\u{2019}m following your steps to"
+            + " \u{201C}\(guidedWalkthrough.originalRequestText ?? "do this")\u{201D}"
+            + " but I can\u{2019}t find \u{201C}\(currentStep.instruction)\u{201D} on my screen."
+        if !finishedInstructions.isEmpty {
+            question += " I\u{2019}ve already done: \(finishedInstructions.joined(separator: ", "))."
+        }
+        question += " Looking at my screen now, what are the remaining steps?"
+        print("🧭 Re-planning from step \"\(currentStep.instruction)\"")
+        // The new answer starts a fresh walkthrough; end this one now so a reply
+        // with no steps doesn't leave the old checklist up.
+        endGuidedWalkthrough()
+        askTypedQuestion(question)
+    }
+
     // MARK: - Doing a step for the user
 
     /// "Do it for me": Wisp clicks the marked control itself, then moves on.
@@ -407,6 +438,7 @@ extension CompanionManager {
 struct GuidedWalkthroughChecklistView: View {
     @ObservedObject var guidedWalkthrough: GuidedWalkthroughSession
     let onDoItForMe: () -> Void
+    let onReplan: () -> Void
     let onNextStep: () -> Void
     let onStop: () -> Void
 
@@ -510,11 +542,20 @@ struct GuidedWalkthroughChecklistView: View {
                 .help("Wisp clicks the highlighted spot for you")
             }
 
+            if guidedWalkthrough.currentTargetStatus == .notFound {
+                Button(action: onReplan) {
+                    Text("Re-plan")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(WispIslandButtonStyle(prominence: .prominent))
+                .help("Ask again, from the screen as it is now")
+            }
+
             Button(action: onNextStep) {
                 Text("Next")
                     .font(.system(size: 12, weight: .semibold))
             }
-            .buttonStyle(WispIslandButtonStyle(prominence: guidedWalkthrough.currentTargetStatus == .located ? .subtle : .prominent))
+            .buttonStyle(WispIslandButtonStyle(prominence: guidedWalkthrough.currentTargetStatus == .searching ? .prominent : .subtle))
             .disabled(guidedWalkthrough.currentTargetStatus == .searching)
             .opacity(guidedWalkthrough.currentTargetStatus == .searching ? 0.4 : 1)
             .help(guidedWalkthrough.currentTargetStatus == .searching

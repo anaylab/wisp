@@ -1185,6 +1185,7 @@ struct NotchHUDView: View {
                 GuidedWalkthroughChecklistView(
                     guidedWalkthrough: companionManager.guidedWalkthrough,
                     onDoItForMe: { companionManager.performCurrentGuidedStepForUser() },
+                    onReplan: { companionManager.replanGuidedWalkthrough() },
                     onNextStep: { companionManager.completeGuidedWalkthroughStep() },
                     onStop: { companionManager.endGuidedWalkthrough() }
                 )

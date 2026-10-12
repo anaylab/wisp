@@ -1646,7 +1646,8 @@ final class CompanionManager: ObservableObject {
                     // rather than drawn all at once.
                     let didStartGuidedWalkthrough = beginGuidedWalkthrough(
                         from: annotationsToDraw,
-                        screenCaptures: screenCaptures
+                        screenCaptures: screenCaptures,
+                        requestText: transcript
                     )
                     if !didStartGuidedWalkthrough {
                         // A lone [STEP:] has no position and nothing to draw.
