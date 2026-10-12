@@ -53,6 +53,10 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         wispWindowController = WispWindowController(companionManager: companionManager)
 
         companionManager.start()
+        // Parakeet (dictation) and Kokoro (voice) download on first launch and
+        // load in the background; until each is ready, Apple's on-device
+        // recogniser and synthesizer stand in, so launch never waits on them.
+        FluidAudioSpeechModels.shared.preloadConfiguredModelsInBackground()
         startBrainServicesIfEnabled()
         // Open the window only when the user still needs to do something, which
         // means one of the permissions is missing; Today leads with the checklist.

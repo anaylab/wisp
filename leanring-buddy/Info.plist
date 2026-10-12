@@ -5,9 +5,9 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>VoiceTranscriptionProvider</key>
-	<string>apple</string>
+	<string>fluidaudio</string>
 	<key>VoiceTTSProvider</key>
-	<string>apple</string>
+	<string>fluid</string>
 	<key>ChatterboxTTSServerURL</key>
 	<string>http://localhost:8004</string>
 	<key>ChatProvider</key>

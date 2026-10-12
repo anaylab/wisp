@@ -51,18 +51,18 @@ extension BuddyTTSProvider {
 }
 
 enum BuddyTTSProviderFactory {
-    /// Chatterbox if the user is running the server, otherwise the system
-    /// synthesizer.
+    /// Kokoro (FluidAudio, on the Neural Engine) when Info.plist says `fluid`
+    /// — the shipped default — Chatterbox if it says `chatterbox`, otherwise
+    /// the system synthesizer.
     ///
-    /// Apple is the default because it costs no resident memory: Chatterbox
-    /// sounds warmer but held several gigabytes and grew with use, which on a
-    /// machine shared with a local model is most of the headroom.
+    /// Kokoro is the default because it sounds close to a person while running
+    /// in-process with a fixed footprint. Chatterbox sounds warm too but held
+    /// several gigabytes of Python and grew with use, which on a machine
+    /// shared with a local model is most of the headroom. `apple` remains for
+    /// anyone who wants no model memory at all, and is Kokoro's automatic
+    /// fallback until its model is ready.
     static func makeDefaultProvider() -> any BuddyTTSProvider {
-        let preferred = AppBundleConfiguration
-            .stringValue(forKey: "VoiceTTSProvider")?
-            .lowercased()
-
-        if preferred == "chatterbox" {
+        if configuredProviderName == "chatterbox" {
             let baseURL = AppBundleConfiguration
                 .stringValue(forKey: "ChatterboxTTSServerURL")
                 ?? "http://localhost:8004"
@@ -70,6 +70,22 @@ enum BuddyTTSProviderFactory {
             return LocalChatterboxTTSClient(baseURL: baseURL)
         }
 
+        if isKokoroConfigured {
+            return KokoroSpeechSynthesisClient()
+        }
+
         return AppleSpeechSynthesisClient()
+    }
+
+    /// Whether `VoiceTTSProvider` selects Kokoro (`fluid`; `fluidaudio` and
+    /// `kokoro` are accepted as spellings of the same thing).
+    static var isKokoroConfigured: Bool {
+        ["fluid", "fluidaudio", "kokoro"].contains(configuredProviderName)
+    }
+
+    private static var configuredProviderName: String? {
+        AppBundleConfiguration
+            .stringValue(forKey: "VoiceTTSProvider")?
+            .lowercased()
     }
 }

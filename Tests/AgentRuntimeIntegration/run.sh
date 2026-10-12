@@ -3,8 +3,8 @@
 # Integration tests for the migrated agent loop.
 #
 # Links the real application sources — everything except the @main entry point,
-# which would clash with the suite's own main.swift. PostHog is the only
-# third-party import and is stubbed, so this needs no SwiftPM checkout and,
+# which would clash with the suite's own main.swift. The third-party imports
+# (PostHog, FluidAudio) are stubbed, so this needs no SwiftPM checkout and,
 # critically, never invokes xcodebuild (which would invalidate the app's TCC
 # permissions — see CLAUDE.md).
 #
@@ -32,6 +32,16 @@ swiftc -emit-module -module-name PostHog -target arm64-apple-macos26.0 \
 swiftc -c -parse-as-library -module-name PostHog -target arm64-apple-macos26.0 \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
   "$BUILD_DIR/stub/PostHog.swift" -o "$BUILD_DIR/stub/PostHog.o"
+
+# FluidAudio (Parakeet + Kokoro) is a SwiftPM package in the app; here it's
+# replaced by a stub declaring just the API Wisp uses, built the same way.
+swiftc -emit-module -module-name FluidAudio -target arm64-apple-macos26.0 \
+  -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+  Tests/AgentRuntimeIntegration/FluidAudioStub.swift \
+  -emit-module-path "$BUILD_DIR/stub/FluidAudio.swiftmodule"
+swiftc -c -parse-as-library -module-name FluidAudio -target arm64-apple-macos26.0 \
+  -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+  Tests/AgentRuntimeIntegration/FluidAudioStub.swift -o "$BUILD_DIR/stub/FluidAudio.o"
 
 # Every Swift file under leanring-buddy/, subfolders included (DesignSystem/,
 # Components/, DynamicIsland/, WispWindow/, …). The agent runtime reaches
@@ -61,6 +71,7 @@ swiftc -target arm64-apple-macos26.0 \
   Tests/AgentRuntimeIntegration/ClaudeSubscriptionProviderTests.swift \
   Tests/AgentRuntimeIntegration/ComposioConnectionsTests.swift \
   "${APP_SOURCES[@]}" \
-  "$BUILD_DIR/stub/PostHog.o"
+  "$BUILD_DIR/stub/PostHog.o" \
+  "$BUILD_DIR/stub/FluidAudio.o"
 
 "$BUILD_DIR/integration"

@@ -29,8 +29,14 @@ final class ActiveStackReadout: ObservableObject {
     @Published private(set) var residency: SystemReadouts.ModelResidency = .notLoaded
 
     private var pollingTask: Task<Void, Never>?
+    private var speechModelStateSubscription: AnyCancellable?
 
-    private init() {}
+    private init() {
+        // The Speech and Voice rows read the FluidAudio models' load state, so
+        // a download finishing (or failing) re-renders them.
+        speechModelStateSubscription = FluidAudioSpeechModels.shared.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+    }
 
     // MARK: - Configured stack
 
@@ -42,20 +48,47 @@ final class ActiveStackReadout: ObservableObject {
     var chatProviderName: String { "Ollama · local" }
 
     var speechProviderName: String {
-        switch AppBundleConfiguration.stringValue(forKey: "VoiceTranscriptionProvider")?.lowercased() {
-        case "apple": return "Apple Speech · on-device"
-        case "fluidaudio", "parakeet": return "Parakeet · on-device"
-        case let other?: return other
-        case nil: return "unknown"
+        guard BuddyTranscriptionProviderFactory.isParakeetConfigured else {
+            return "Apple Speech · on-device"
         }
+        return Self.fluidAudioModelDescription(
+            modelName: "Parakeet",
+            fallbackName: "Apple Speech",
+            loadState: FluidAudioSpeechModels.shared.speechRecognitionLoadState
+        )
     }
 
     var voiceProviderName: String {
+        if BuddyTTSProviderFactory.isKokoroConfigured {
+            return Self.fluidAudioModelDescription(
+                modelName: "Kokoro",
+                fallbackName: "Apple voice",
+                loadState: FluidAudioSpeechModels.shared.speechSynthesisLoadState
+            )
+        }
         switch AppBundleConfiguration.stringValue(forKey: "VoiceTTSProvider")?.lowercased() {
         case "chatterbox": return "Chatterbox · local"
         case "apple": return "Apple voice · on-device"
         case let other?: return other
         case nil: return "unknown"
+        }
+    }
+
+    /// "Parakeet · on-device" once the model is loaded; until then (or if it
+    /// failed) names the Apple engine actually doing the work, so the row
+    /// never claims a model that isn't running.
+    private static func fluidAudioModelDescription(
+        modelName: String,
+        fallbackName: String,
+        loadState: FluidAudioModelLoadState
+    ) -> String {
+        switch loadState {
+        case .ready:
+            return "\(modelName) · on-device"
+        case .failed:
+            return "\(fallbackName) · on-device (\(modelName) failed to load)"
+        case .notStarted, .downloading, .loading:
+            return "\(fallbackName) · on-device (\(modelName) \(loadState.shortStatusDescription))"
         }
     }
 

@@ -120,7 +120,10 @@ struct GeneralSettingsPage: View {
                         .toggleStyle(.switch)
                         .pointerCursor()
                 }
-                if !AppleSpeechSynthesisClient.hasHighQualityVoiceInstalled {
+                // The system-voice upgrade only matters when the system voice
+                // is what speaks; with Kokoro it's just the brief fallback.
+                if !BuddyTTSProviderFactory.isKokoroConfigured
+                    && !AppleSpeechSynthesisClient.hasHighQualityVoiceInstalled {
                     Divider()
                     VoiceUpgradeHint()
                 }
