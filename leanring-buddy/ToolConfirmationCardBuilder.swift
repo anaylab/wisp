@@ -25,7 +25,7 @@
 //  of their rows. Recipients, paths and the like are never editable.
 //
 
-import Foundation
+import AppKit
 
 enum ToolConfirmationCardBuilder {
 
@@ -465,7 +465,10 @@ enum ToolConfirmationCardBuilder {
     static func cuaDriverActionCard(
         bareToolName: String,
         toolInput: JSONValue,
-        elementCache: CuaDriverElementCache
+        elementCache: CuaDriverElementCache,
+        applicationNameForProcessIdentifier: (Int) -> String? = { processIdentifier in
+            NSRunningApplication(processIdentifier: pid_t(processIdentifier))?.localizedName
+        }
     ) -> GlanceCard {
         let elementToken = ToolCallInspection.stringValue(forAnyOf: ["element_token"], in: toolInput)
         let resolvedElement = elementToken.flatMap { elementCache.elementDescription(forToken: $0) }
@@ -544,6 +547,16 @@ enum ToolConfirmationCardBuilder {
             ))
         }
 
+        // The app the call acts on, by name. Without a cached element it used
+        // to show as raw "Pid 85279 / Window id 17444" rows, which say nothing
+        // to the person deciding.
+        let processIdentifierText = ToolCallInspection.stringValue(forAnyOf: ["pid"], in: toolInput)
+        let targetApplicationName = resolvedElement?.appName
+            ?? processIdentifierText.flatMap { Int($0) }.flatMap(applicationNameForProcessIdentifier)
+        // When the app can't be named (no longer running), the raw pid is the
+        // only thing saying what the call targets, so it stays on the card.
+        let isTargetApplicationNamed = targetApplicationName != nil
+
         // Clicks and typing at a pixel position have no element to name.
         if resolvedElement == nil,
            let pointX = ToolCallInspection.stringValue(forAnyOf: ["x"], in: toolInput),
@@ -555,8 +568,9 @@ enum ToolConfirmationCardBuilder {
         if let elementToken, resolvedElement == nil {
             // Unknown target: show what was sent, so the user at least sees the
             // raw call, and say plainly that Wisp can't name the element.
-            keyValuePairs.append(contentsOf: scalarArgumentPairs(in: toolInput, maximumPairs: 4)
-                .filter { $0.key != "Element token" })
+            keyValuePairs.append(contentsOf: scalarArgumentPairs(in: toolInput, maximumPairs: 6)
+                .filter { $0.key != "Element token" && !(isTargetApplicationNamed && cuaDriverAddressingArgumentKeys.contains($0.key)) }
+                .prefix(4))
             keyValuePairs.insert(GlanceKeyValuePair(key: "Element", value: truncatedFieldValue(elementToken), tone: .neutral), at: 0)
             warningRows.append(GlanceListRow(
                 text: "Wisp hasn't seen this element on screen, so it can't say what it is",
@@ -564,7 +578,9 @@ enum ToolConfirmationCardBuilder {
                 tone: .bad
             ))
         } else if elementToken == nil && keyValuePairs.isEmpty && previewBlock == nil {
-            keyValuePairs.append(contentsOf: scalarArgumentPairs(in: toolInput, maximumPairs: 4))
+            keyValuePairs.append(contentsOf: scalarArgumentPairs(in: toolInput, maximumPairs: 6)
+                .filter { !(isTargetApplicationNamed && cuaDriverAddressingArgumentKeys.contains($0.key)) }
+                .prefix(4))
         }
 
         let committingLabelWords = committingLabel.map { Set(ToolCallInspection.words(inIdentifier: $0)) } ?? []
@@ -572,7 +588,7 @@ enum ToolConfirmationCardBuilder {
         if isIrreversible { iconName = "exclamationmark.triangle" }
 
         var blocks: [GlanceBlock] = [
-            .header(title: titleText, iconName: iconName, trailingText: resolvedElement?.appName)
+            .header(title: titleText, iconName: iconName, trailingText: targetApplicationName)
         ]
         if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
         if let previewBlock { blocks.append(previewBlock) }
@@ -580,6 +596,12 @@ enum ToolConfirmationCardBuilder {
         if isIrreversible { blocks.append(cannotBeUndoneWarningBlock) }
         return GlanceCard(blocks: blocks)
     }
+
+    /// Arguments that only address the target for the driver. Once the app is
+    /// named in the card's header, they say the same thing less readably.
+    private static let cuaDriverAddressingArgumentKeys: Set<String> = [
+        "Pid", "Window id", "Session", "Capture id", "Element token", "Delivery mode",
+    ]
 
     /// `“Send” button`, `“Subject” text field`, or `unlabelled button`.
     static func describedCuaDriverElement(_ elementDescription: CuaDriverElementDescription) -> String {
