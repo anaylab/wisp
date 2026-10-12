@@ -71,6 +71,7 @@ swiftc -target arm64-apple-macos26.0 \
   Tests/AgentRuntimeIntegration/ClaudeSubscriptionProviderTests.swift \
   Tests/AgentRuntimeIntegration/ComposioConnectionsTests.swift \
   Tests/AgentRuntimeIntegration/CuaToolRoutingTests.swift \
+  Tests/AgentRuntimeIntegration/ConfirmationTimingTests.swift \
   "${APP_SOURCES[@]}" \
   "$BUILD_DIR/stub/PostHog.o" \
   "$BUILD_DIR/stub/FluidAudio.o"
