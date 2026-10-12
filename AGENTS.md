@@ -647,8 +647,10 @@ cloud dependency to the local path, without asking.
   which owns `~/.wisp/mcp.json` (preserving unknown keys) and reloads the manager live. Installing
   is separate from exposing: `MCPManager` registers **all** allowed tools (the per-server
   allow-list is applied at registration; the connection no longer filters), and the **per-turn
-  tool router** (`AgentToolRouter.swift`) shows the model only the ~6 most relevant to the request
-  (`AgentToolScope.maximumExposedTools`), ranked by lexical relevance with a bonus for built-in
+  tool router** (`AgentToolRouter.swift`) shows the model only the most relevant to the request —
+  6 for the local model (`AgentToolScope.maximumExposedTools`), 16 for a cloud model
+  (`maximumExposedToolsForCloudModels`, chosen in `AgentTurnRunner` from
+  `deployment.sendsDataOffThisMachine`) — ranked by lexical relevance with a bonus for built-in
   scope membership. So a large installed library costs nothing until a request is about it. The
   tab shows how many tools are available + per-tool toggles (the allow-list). A **Composio** section
   (opt-in, off-machine, labelled) lets a user paste a Composio API key (`ComposioKeychainStore`),
@@ -678,7 +680,12 @@ cloud dependency to the local path, without asking.
   is on by default). Start with the reads in `allowedTools` (`list_apps`, `list_windows`,
   `get_window_state`, `verify_state`); to let Wisp act in native apps, add `click`, `type_text`,
   `press_key`, `hotkey`, `scroll`, `set_value` and `invoke_menu`. Every action asks (see the
-  destructive-action floor) with a card naming the element. Keep `kill_app`, `clipboard_*`,
+  destructive-action floor) with a card naming the element. **Routing:** "click" is a browser-scope
+  word, so before `CuaDriverToolRouting` a request like "click the New Note button in Notes" got the
+  browser tools and no cua tool. Now a request that names cua, or names a running non-browser app
+  together with a UI word (click/type/button/menu/field/window…), boosts every registered cua-driver
+  tool and drops the browser scope's bonus (`AgentToolRouter.select(scopeOverride:)`); a request that
+  names a browser or website is left to the browser tools. Keep `kill_app`, `clipboard_*`,
   `browser_*`, `install_*` and `replay_trajectory` off. Ask `get_window_state` for `max_elements`
   — one window can be 300+ elements.
 - **Apple Shortcuts as agent tools** (local, no server): `list_shortcuts` (read-only) and
@@ -937,12 +944,12 @@ Grouped by what they do. Line counts are approximate.
 | `BrowserAgentLoop.swift` | ~720 | Long-horizon browser agent for cloud providers: observe→act loop (cap 30), line-grammar actions incl. batched form fills, stuck detection, untrusted-page prompt rules. Also `BrowserActionSafety` (which clicks/sends need the always-ask confirmation). |
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
 | `AgentToolRegistry.swift` | ~710 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. `register(_:preparingInputWith:)` takes an optional `ToolInputPreparer` that turns the model's arguments into the concrete ones *before* the approval (the card then describes what will really run) or ends the call with a reason. |
-| `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/messaging/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
+| `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/messaging/general) + `alwaysAvailableToolNames` + the per-turn budgets (`maximumExposedTools` = 6 local, `maximumExposedToolsForCloudModels` = 16). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership (or a caller's `boostedToolNames`, e.g. `run_shortcut` when the request names a shortcut) adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~445 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. `MCPStartupTimeoutPolicy` gives a package runner's `initialize` a long first-run budget. `callToolReturningContent` keeps a result's text blocks and `structuredContent` apart; `callTool` returns the text only. |
 | `MCPToolResultRendering.swift` | ~290 | Pure: an MCP result → the model's text. Element lists (token + role) as one line each under a scalar-field header, other structured content as sorted compact JSON, 4000/5000-char caps, duplicate-JSON text dropped; no `structuredContent` → unchanged. Tested by `Tests/MCPStructuredContent`. |
-| `CuaDriverSupport.swift` | ~155 | cua-driver specifics: `CuaDriverToolNames` (server-namespace match, read-only allow-list, `mustAlwaysAsk`) and `CuaDriverElementCache` (token → role/label/app from the last 4 element lists, fed by `MCPManager`, read by the confirmation card). |
+| `CuaDriverSupport.swift` | ~215 | cua-driver specifics: `CuaDriverToolNames` (server-namespace match, read-only allow-list, `mustAlwaysAsk`), `CuaDriverToolRouting` (when a request is about operating a native app, so its tools are offered) and `CuaDriverElementCache` (token → role/label/app from the last 4 element lists, fed by `MCPManager`, read by the confirmation card). |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
 | `MCPStdioTransport.swift` | ~300 | Stdio transport: child process over stdin/stdout as NDJSON (pipes read via `readabilityHandler`, framed by the pure `NewlineDelimitedLineBuffer`), login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
 | `MCPStreamableHTTPTransport.swift` | ~230 | Remote transport: JSON-RPC over MCP Streamable HTTP (one POST per message; parses JSON + SSE replies; `Mcp-Session-Id`, auth headers). |

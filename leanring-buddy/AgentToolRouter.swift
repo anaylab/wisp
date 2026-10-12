@@ -56,11 +56,16 @@ enum AgentToolRouter {
     ///   what words alone show — e.g. `run_shortcut` when the request names one
     ///   of the user's Apple Shortcuts. They get the same bonus as scope
     ///   membership (not stacked with it).
+    /// - Parameter scopeOverride: The scope to use instead of the one the
+    ///   request's words pick — for a caller that knows better, e.g. `.general`
+    ///   for "click the New Note button in Notes", whose "click" would otherwise
+    ///   give the browser tools a bonus they can't use on a native app.
     static func select(
         from tools: [BuddyToolDefinition],
         for transcript: String,
         limit: Int,
-        boostedToolNames: Set<String> = []
+        boostedToolNames: Set<String> = [],
+        scopeOverride: AgentToolScope? = nil
     ) -> [BuddyToolDefinition] {
         guard limit > 0, !tools.isEmpty else { return [] }
 
@@ -68,7 +73,7 @@ enum AgentToolRouter {
         let alwaysNames = AgentToolScope.alwaysAvailableToolNames
         let alwaysTools = tools.filter { alwaysNames.contains($0.name) }
 
-        let scope = AgentToolScope.forRequest(transcript)
+        let scope = scopeOverride ?? AgentToolScope.forRequest(transcript)
         let queryTerms = terms(from: transcript)
 
         var scored: [ScoredTool] = []

@@ -27,6 +27,7 @@ swiftc -target arm64-apple-macos14.0 \
   leanring-buddy/ToolCallInspection.swift \
   leanring-buddy/ToolCallSafety.swift \
   leanring-buddy/CuaDriverSupport.swift \
+  leanring-buddy/WindowManagement/WindowLayoutCommand.swift \
   leanring-buddy/MCPToolResultRendering.swift \
   leanring-buddy/GlanceCard.swift \
   leanring-buddy/BuddyChatTypes.swift \

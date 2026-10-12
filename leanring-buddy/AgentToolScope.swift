@@ -160,4 +160,12 @@ enum AgentToolScope: String, CaseIterable {
     /// A small model's selection accuracy falls off well before this, so the
     /// limit is a backstop for a scope growing unnoticed rather than a target.
     static let maximumExposedTools = 6
+
+    /// The ceiling for a cloud model (Claude, GPT, Gemini, or Claude through
+    /// the user's subscription). The limit above exists for the small local
+    /// model, whose tool choice degrades and whose prompt evaluation slows as
+    /// the list grows. A cloud model chooses well from many more, and at six —
+    /// three of them always-available — a connected app's tools (cua-driver,
+    /// Composio) were routinely crowded out by built-ins.
+    static let maximumExposedToolsForCloudModels = 16
 }
