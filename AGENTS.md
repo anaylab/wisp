@@ -195,8 +195,14 @@ cloud dependency to the local path, without asking.
   it from `voiceState` + `pendingToolConfirmation` + whether an answer is lingering, plus a
   transient `islandFlash` (`flashIsland(_:)`) for success/error moments. It drives the notch
   mark's motion, the state dot, and the label. The tool-confirmation card
-  (`ToolConfirmationView`) is the island's glass confirmation panel, still presented via the
-  existing overlay plumbing (so the prompt is seen even when the cursor is hidden). On a
+  (`ToolConfirmationView`) is an island-surface card (solid black, or Liquid Glass when chosen
+  for the island) hung by its top edge just below the notch (`OverlayContentView.confirmationCardTopInset`
+  — it used to be centred at a fixed y and grew up behind the notch), still presented via the
+  existing overlay plumbing (so the prompt is seen even when the cursor is hidden). Its countdown is
+  derived from the expiry in a `TimelineView`, never a `Timer`/`@State` in the view (overlay re-renders
+  rebuilt those and the number jumped); it animates in and out (`WispMotion.island`, keyed on the
+  confirmation id); and for VoiceOver it is a modal group, the overlay window is titled "Wisp needs your
+  OK" while a card is up, and its appearance is announced (`announceConfirmationForVoiceOver`). On a
   **notched Mac the island wraps the physical notch** rather than sitting behind it: at idle
   nothing shows (`NotchHUDView.islandIsVisible` is false — the notch is untouched); when Wisp is
   active a small status surface with **flush top / rounded bottom** corners
@@ -981,7 +987,7 @@ Grouped by what they do. Line counts are approximate.
 | `ConversationHistoryStore.swift` | ~420 | Persists the last 20 transcript turns to `~/Library/Application Support/Wisp/conversation.json` (Codable `Persisted*` shapes, images dropped, debounced + flushed on quit) and hands back the ≤6h-old ones to resume on launch. `ConversationHistoryCodec` holds the pure encode/decode/merge/resume policy. |
 | `MemoryStore.swift` | ~330 | `~/.wisp/memory.md` user memory: `MemoryFileFormat` (pure bullet parse/append/remove), `MemoryIndex` (the ≤800-char system-prompt block, newest facts first), and the `MemoryStore` ObservableObject behind the `remember`/`forget` tools and the Memory tab. |
 | `ToolConfirmationCoordinator.swift` | ~530 | Permission requests with a 45s timeout and spoken-affirmative parsing. `requestApproval(toolName:toolInput:)` applies the `ToolCallSafety` floor under session auto-approve and attaches the `ToolConfirmationCardBuilder` card to `PendingConfirmation.confirmationCard`. `requestApprovalAllowingEdits` also offers the call's editable fields and returns a `ToolApprovalOutcome` (decision + edits); holds the typed edits and the movable expiry (`updateEditedText`, `extendTimeoutForEditing`). Defines `ToolPermissionBroker` and `ToolApprovalOutcome`. |
-| `ToolConfirmationView.swift` | ~240 | The Dynamic-Island glass confirmation panel (`WispGlassPanel` + `WispMark`): request-dominant, the optional confirmation card (`GlanceCardView`, minus the rows its editable fields replace), the editable fields, exact call (with edits) in a chip, Cancel / Allow→ (Cmd-Return), "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
+| `ToolConfirmationView.swift` | ~285 | The confirmation card on the island's surface (`wispNotchIslandSurface` + warning rim + `WispMark`): a plain-words headline (not the lowercase spoken question), the optional confirmation card (`GlanceCardView`, minus the rows its editable fields replace), the editable fields, the exact call (with edits) folded into one line, island-style Cancel / Allow→ (Cmd-Return, accessibility-labelled), "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
 | `EditableConfirmationFields.swift` | ~250 | Pure rule for inline-editable confirmation fields: which top-level string arguments a call offers (by tool name or card shape), `applyingEdits` (ignores any non-editable key, blank or unchanged edits), the tool-result note telling the model what the user changed, and hiding the card rows the fields replace. Tested by `Tests/EditableConfirmation`. |
 | `EditableConfirmationFieldView.swift` | ~125 | One editable card field: reads as card text until hovered (fill, pencil, I-beam), single-line `TextField` or multi-line `TextEditor`, focus counts as editing activity, "edited" mark (`EditedConfirmationFieldMark`). |
 | `ToolCallInspection.swift` | ~325 | Deterministic reading of a tool call: `server__` namespace stripping, identifier → words (camelCase/underscores), Composio execute-meta-tool unwrapping into `InspectedToolAction`s (tolerates JSON-string arguments), lenient case/underscore-insensitive argument lookup, display text for arrays/objects, path-argument extraction and `..`-safe path containment. |
