@@ -262,7 +262,7 @@ final class MCPManager: ObservableObject {
             BuddyToolDefinition(
                 name: namespacedName,
                 description: isCuaDriverServer
-                    ? CuaDriverToolNames.modelFacingDescription(originalDescription: serverDescription, inputSchema: tool.inputSchema)
+                    ? CuaDriverToolNames.modelFacingDescription(originalDescription: serverDescription, inputSchema: tool.inputSchema, bareToolName: tool.name)
                     : serverDescription,
                 inputSchema: tool.inputSchema,
                 // MCP servers do not describe whether a tool changes anything,
@@ -282,13 +282,77 @@ final class MCPManager: ObservableObject {
             if isCuaDriverServer, let structuredContent = toolCallContent.structuredContent {
                 CuaDriverElementCache.shared.recordElements(fromStructuredContent: structuredContent)
             }
-            return MCPToolResultRendering.modelText(
+            let actionResultText = MCPToolResultRendering.modelText(
                 flattenedContentText: toolCallContent.flattenedContentText,
                 structuredContent: toolCallContent.structuredContent
+            )
+            guard isCuaDriverServer, CuaDriverPostActionCheck.shouldCheck(afterBareToolName: tool.name) else {
+                return actionResultText
+            }
+            return await Self.cuaDriverResultCheckedAfterAction(
+                actionResultText: actionResultText,
+                bareToolName: tool.name,
+                actionInput: input,
+                connection: connection
             )
         }
 
         registeredToolNames.insert(namespacedName)
+    }
+
+    /// Re-reads the app a cua-driver action just acted on and appends what it
+    /// shows (see `CuaDriverPostActionCheck`). A failed read is reported, never
+    /// thrown: the action itself already happened and its result must reach
+    /// the model either way.
+    private static func cuaDriverResultCheckedAfterAction(
+        actionResultText: String,
+        bareToolName: String,
+        actionInput: JSONValue,
+        connection: MCPServerConnection
+    ) async -> String {
+        try? await Task.sleep(for: .seconds(CuaDriverPostActionCheck.settleDelaySeconds))
+
+        var windowListText: String?
+        var windowStateText: String?
+        var lookFailureDescriptions: [String] = []
+
+        if let windowListArguments = CuaDriverPostActionCheck.windowListArguments(actionInput: actionInput) {
+            do {
+                let windowListContent = try await connection.callToolReturningContent(name: "list_windows", arguments: windowListArguments)
+                windowListText = MCPToolResultRendering.modelText(
+                    flattenedContentText: windowListContent.flattenedContentText,
+                    structuredContent: windowListContent.structuredContent
+                )
+            } catch {
+                lookFailureDescriptions.append("listing its windows failed: \(error.localizedDescription)")
+            }
+        }
+        if let windowStateArguments = CuaDriverPostActionCheck.windowStateArguments(bareToolName: bareToolName, actionInput: actionInput) {
+            do {
+                let windowStateContent = try await connection.callToolReturningContent(name: "get_window_state", arguments: windowStateArguments)
+                // The new read supersedes the old tokens, so the next card
+                // names elements from what is on screen now.
+                if let structuredContent = windowStateContent.structuredContent {
+                    CuaDriverElementCache.shared.recordElements(fromStructuredContent: structuredContent)
+                }
+                windowStateText = MCPToolResultRendering.modelText(
+                    flattenedContentText: windowStateContent.flattenedContentText,
+                    structuredContent: windowStateContent.structuredContent
+                )
+            } catch {
+                lookFailureDescriptions.append("reading the window failed: \(error.localizedDescription)")
+            }
+        }
+        if windowListText == nil && windowStateText == nil && lookFailureDescriptions.isEmpty {
+            lookFailureDescriptions.append("the action didn't name an app (no pid)")
+        }
+
+        return CuaDriverPostActionCheck.resultText(
+            actionResultText: actionResultText,
+            windowListText: windowListText,
+            windowStateText: windowStateText,
+            lookFailureDescription: lookFailureDescriptions.isEmpty ? nil : lookFailureDescriptions.joined(separator: "; ")
+        )
     }
 
     /// Trims a server name to what tool names allow.

@@ -101,12 +101,15 @@ enum CuaDriverToolNames {
     /// model called `click {"pid": 0, "element_token": "a13"}` — one of Wisp's
     /// own Accessibility ids, and no process at all. The driver can't resolve
     /// either, so the call would fail after the user had approved it.
-    static func modelFacingDescription(originalDescription: String, inputSchema: JSONValue) -> String {
+    static func modelFacingDescription(originalDescription: String, inputSchema: JSONValue, bareToolName: String? = nil) -> String {
+        var guidance: [String] = []
+        if let bareToolName, CuaDriverPostActionCheck.shouldCheck(afterBareToolName: bareToolName) {
+            guidance.append("After it runs, Wisp re-reads the app and adds what it sees to the result; check that before saying it worked.")
+        }
         guard case .object(let schemaFields) = inputSchema,
               case .object(let properties)? = schemaFields["properties"] else {
-            return originalDescription
+            return guidance.isEmpty ? originalDescription : originalDescription + "\n\n" + guidance.joined(separator: " ")
         }
-        var guidance: [String] = []
         if properties["element_token"] != nil {
             guidance.append("element_token values come only from this server's get_window_state result; Wisp's on-screen ids like a12 or t3 are not tokens.")
         }
@@ -197,6 +200,84 @@ private extension Array where Element == String {
             return true
         }
         return false
+    }
+}
+
+/// After a cua-driver action, Wisp looks again and hands the model what it
+/// sees, so the model checks its work instead of assuming it.
+///
+/// Measured live: after `invoke_menu File › New Note` the driver answered
+/// `"effect": "unverifiable"`, and the model told the user "a blank note should
+/// be open… I can't confirm it from here" — although one more read would have
+/// shown it. Doing that read inside the same tool call, rather than asking the
+/// model to make it, costs no extra trip round the agent loop (capped at four)
+/// and can't be skipped. The read is the same looking-only kind that runs
+/// without a card.
+nonisolated enum CuaDriverPostActionCheck {
+
+    /// How long the app gets to redraw before Wisp looks. A menu pick or a
+    /// click that opens something takes a few frames to show.
+    static let settleDelaySeconds: Double = 0.5
+
+    /// Elements in the after-action read: enough to see what changed, small
+    /// enough to keep the result readable (the rendering caps it again).
+    static let maximumElementsInCheck = 60
+
+    /// Actions whose effect can be seen in the app. `kill_app` is checked by
+    /// its window list alone (its window is meant to disappear); clipboard
+    /// writes and replays have nothing on screen to compare.
+    static func shouldCheck(afterBareToolName bareToolName: String) -> Bool {
+        // Reads (scroll included: it only moves a view) change nothing to check.
+        guard !CuaDriverToolNames.readOnlyBareToolNames.contains(bareToolName) else { return false }
+        return !["clipboard_write", "replay_trajectory"].contains(bareToolName)
+    }
+
+    /// `get_window_state` for the window the action targeted, when the call
+    /// named one and the app's windows still matter (not after a force quit).
+    static func windowStateArguments(bareToolName: String, actionInput: JSONValue) -> JSONValue? {
+        guard bareToolName != "kill_app",
+              case .object(let arguments) = actionInput,
+              case .number(let processIdentifier)? = arguments["pid"],
+              case .number(let windowIdentifier)? = arguments["window_id"] else { return nil }
+        return .object([
+            "pid": .number(processIdentifier),
+            "window_id": .number(windowIdentifier),
+            "include_screenshot": .bool(false),
+            "max_elements": .number(Double(maximumElementsInCheck)),
+        ])
+    }
+
+    /// `list_windows` for the action's app: shows a window the action opened
+    /// (⌘N in TextEdit) or closed, which a read of the old window can't.
+    static func windowListArguments(actionInput: JSONValue) -> JSONValue? {
+        guard case .object(let arguments) = actionInput,
+              case .number(let processIdentifier)? = arguments["pid"] else { return nil }
+        return .object([
+            "pid": .number(processIdentifier),
+            "on_screen_only": .bool(true),
+        ])
+    }
+
+    /// The action's own result followed by what Wisp saw afterwards and what
+    /// the model should do with it.
+    static func resultText(
+        actionResultText: String,
+        windowListText: String?,
+        windowStateText: String?,
+        lookFailureDescription: String?
+    ) -> String {
+        var sections = [actionResultText, "", "Wisp looked again after this action, because the action's own result can't always tell whether it worked:"]
+        if let windowListText {
+            sections.append("The app's windows now:\n\(windowListText)")
+        }
+        if let windowStateText {
+            sections.append("The window now:\n\(windowStateText)")
+        }
+        if let lookFailureDescription {
+            sections.append("(Wisp couldn't read the app afterwards: \(lookFailureDescription))")
+        }
+        sections.append("Compare this with what you meant to do before telling the user it's done. If it didn't take effect, say so plainly or try once more another way; don't claim success you can't see. Element tokens from the earlier read may be stale; use the ones above.")
+        return sections.joined(separator: "\n")
     }
 }
 

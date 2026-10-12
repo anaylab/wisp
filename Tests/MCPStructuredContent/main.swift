@@ -380,6 +380,48 @@ check(CuaDriverToolNames.refusalForMisaddressedCall(toolInput: object(["pid": .n
 check(CuaDriverToolNames.refusalForMisaddressedCall(toolInput: object(["pid": .number(85279), "keys": .array([.string("cmd"), .string("n")])])) == nil,
       "a call without a token goes ahead")
 
+// MARK: - Checking an action's effect
+
+section("actions are checked afterwards; reads and off-screen actions aren't")
+for bareToolName in ["click", "double_click", "type_text", "press_key", "hotkey", "set_value", "invoke_menu", "drag", "kill_app"] {
+    check(CuaDriverPostActionCheck.shouldCheck(afterBareToolName: bareToolName), "\(bareToolName) is checked")
+}
+for bareToolName in ["get_window_state", "list_windows", "scroll", "clipboard_write", "replay_trajectory"] {
+    check(!CuaDriverPostActionCheck.shouldCheck(afterBareToolName: bareToolName), "\(bareToolName) is not checked")
+}
+
+section("the check reads the same window and the app's window list")
+let menuActionInput = object(["pid": .number(85279), "window_id": .number(17444), "path": .array([.string("File"), .string("New Note")])])
+let windowStateCheckArguments = CuaDriverPostActionCheck.windowStateArguments(bareToolName: "invoke_menu", actionInput: menuActionInput)
+check(windowStateCheckArguments == object([
+    "pid": .number(85279), "window_id": .number(17444),
+    "include_screenshot": .bool(false), "max_elements": .number(60),
+]), "get_window_state for the acted-on window, without a screenshot")
+check(CuaDriverPostActionCheck.windowListArguments(actionInput: menuActionInput) == object(["pid": .number(85279), "on_screen_only": .bool(true)]),
+      "list_windows for the app")
+check(CuaDriverPostActionCheck.windowStateArguments(bareToolName: "kill_app", actionInput: object(["pid": .number(4242), "window_id": .number(1)])) == nil,
+      "a force quit only lists windows (its window is meant to go)")
+check(CuaDriverPostActionCheck.windowStateArguments(bareToolName: "hotkey", actionInput: object(["pid": .number(85279), "keys": .array([.string("cmd"), .string("n")])])) == nil,
+      "no window named → no window read")
+check(CuaDriverPostActionCheck.windowListArguments(actionInput: object(["x": .number(10)])) == nil, "no pid → no window list")
+
+section("the result keeps the action's own text and tells the model to compare")
+let checkedResultText = CuaDriverPostActionCheck.resultText(
+    actionResultText: "effect: unverifiable",
+    windowListText: "Notes — New Note",
+    windowStateText: "s1:4 TextArea \"New Note\"",
+    lookFailureDescription: nil
+)
+check(checkedResultText.hasPrefix("effect: unverifiable"), "the action's result comes first")
+check(checkedResultText.contains("Notes — New Note") && checkedResultText.contains("s1:4 TextArea"), "both reads are included")
+check(checkedResultText.contains("before telling the user it's done"), "the model is told to compare before claiming success")
+let failedLookText = CuaDriverPostActionCheck.resultText(actionResultText: "ok", windowListText: nil, windowStateText: nil, lookFailureDescription: "reading the window failed: timed out")
+check(failedLookText.contains("couldn't read the app afterwards") && failedLookText.contains("timed out"), "a failed read is said, not hidden")
+check(CuaDriverToolNames.modelFacingDescription(originalDescription: "Click.", inputSchema: object([:]), bareToolName: "click").contains("re-reads the app"),
+      "an action's description says it will be checked")
+check(!CuaDriverToolNames.modelFacingDescription(originalDescription: "List.", inputSchema: object([:]), bareToolName: "list_windows").contains("re-reads"),
+      "a read's description doesn't")
+
 // MARK: - MCPClient
 
 await runScriptedTransportChecks(structuredToolResult: fixtureResult)
