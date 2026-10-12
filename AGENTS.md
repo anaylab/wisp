@@ -5,17 +5,21 @@
 macOS menu bar companion app. Lives entirely in the macOS status bar
 (no dock icon, no main window). Clicking the menu bar icon opens a custom floating panel
 with companion voice controls. Uses push-to-talk (ctrl+option) to capture voice input,
-transcribes it on-device, and sends the transcript + a screenshot to a local model. The
+transcribes it on-device (Parakeet via FluidAudio), and sends the transcript + a screenshot
+to a local model. The
 model responds with text, shown in the notch; speech is optional (voice/silent mode, and in
 voice mode only the short line the model tags with `[SAY: …]` is spoken, by the on-device
-macOS voice by default). A transparent screen
+Kokoro voice via FluidAudio by default). A transparent screen
 overlay can mark UI elements the model references on any connected monitor with a pulsing
 marker, and can draw boxes, arrows and highlights on screen.
 
 **Local-first and private by default.** Out of the box everything runs on this machine: the
-local Ollama model, on-device speech recognition, and on-device speech synthesis (macOS
-voices), with the model traffic being HTTP to `localhost` (Ollama on 11434; Chatterbox TTS on
-8004 only if opted into) — no Cloudflare Worker and no analytics. The only other default
+local Ollama model, on-device speech recognition (FluidAudio's Parakeet on the Neural Engine,
+Apple Speech as fallback), and on-device speech synthesis (FluidAudio's Kokoro, the macOS
+voices as fallback), with the model traffic being HTTP to `localhost` (Ollama on 11434;
+Chatterbox TTS on 8004 only if opted into) — no Cloudflare Worker and no analytics. The
+Parakeet/Kokoro model files are downloaded from HuggingFace once, on first launch; audio and
+text never leave the Mac. The only other default
 network use is live glance-card data (weather, places, configured sources), gated by
 `GlanceCardDataPreference`, which sends a place name or search query (plus, for places, the
 location to Apple Maps), never a screenshot. The model backend is now *selectable*: a user
@@ -85,16 +89,58 @@ cloud dependency to the local path, without asking.
   Settings → Model shows install/sign-in state via `claude auth status` (`ClaudeSubscriptionStatus`). ~4s per
   reply of CLI start-up; counts against subscription limits; labelled off-machine. The Info.plist `ChatProvider` key is now only a
   shipped-default hint — the live selection lives in `BuddyChatProviderSelection`.
-- **Speech-to-Text**: Apple Speech framework, on-device. Recognition **language** and a
-  **custom dictionary** are user-configurable via `DictationSettingsStore` (Dictation tab):
-  the language chooses the recogniser's locale, and the dictionary words are passed as
-  `SFSpeechAudioBufferRecognitionRequest.contextualStrings` to bias spelling (this was a
-  no-op before — the provider accepted keyterms and dropped them). Both are read on the main
-  actor by `BuddyDictationManager` and threaded into `startStreamingSession`.
+- **On-device speech models (FluidAudio)**: the FluidAudio SwiftPM package (Apache-2.0,
+  pinned 0.15.6 in `Package.resolved`) runs Parakeet and Kokoro as CoreML on the Apple
+  Neural Engine, in-process. `FluidAudioSpeechModels` is their one owner: started from
+  `applicationDidFinishLaunching` (`preloadConfiguredModelsInBackground`), it downloads the
+  model files from HuggingFace on first use only (Parakeet to
+  `~/Library/Application Support/FluidAudio/Models/`, Kokoro to `~/.cache/fluidaudio/Models/`),
+  loads each **once**, warms it (the ANE compile is paid at launch, not on the first
+  push-to-talk/reply), and publishes `speechRecognitionLoadState`/`speechSynthesisLoadState`
+  (downloading % / ready / failed) for Settings → General → What's running
+  (`ActiveStackReadout`, which names the Apple engine actually working until a model is ready).
+  Parakeet loads first, then Kokoro, so first-run downloads/compiles don't compete. Launch never
+  waits: until an engine is ready, if it failed, or (STT) for a language Parakeet lacks, the
+  provider falls back to Apple's engine automatically and logs why. The engines are actors with
+  a serial decode/synthesis chain, because FluidAudio's managers suspend inside a call and two
+  overlapping calls could interleave. Memory, measured with `footprint` on an M3 Pro with
+  Parakeet + the boosting model + Kokoro loaded: ~170 MB dirty in-process plus ~650 MB of
+  Neural Engine model memory (listed as "neural, nofootprint", so Activity Monitor's figure
+  understates it) and ~190 MB of clean mapped model files. The swiftc test suites stub the
+  package (`Tests/AgentRuntimeIntegration/FluidAudioStub.swift`).
+- **Speech-to-Text**: `ParakeetTranscriptionProvider` (Info.plist `VoiceTranscriptionProvider`
+  = `fluidaudio`, the default; `apple` = Apple Speech only). Parakeet TDT 0.6B **v3** (25
+  European languages, int8 encoder) is a batch model, so while the hotkey is held the session
+  re-decodes everything captured so far every ~0.45s (backing off to 3× the last decode time on
+  long holds) and feeds `onTranscriptUpdate` — that is what drives the live partials — and on
+  release decodes the whole clip once more for the final transcript (measured ~120–300 ms
+  release→final for 4–7 s of speech on an M3 Pro). Recording itself is unchanged: the mic starts
+  on key press and the tap hands buffers to the session, which keeps them (lock-guarded, native
+  rate, downmixed) and resamples to 16 kHz at decode time. The fallback is
+  `AppleSpeechTranscriptionProvider` (Speech framework, on-device), so speech-recognition
+  permission is still requested. Recognition **language** and a **custom dictionary** are
+  user-configurable via `DictationSettingsStore` (Dictation tab): the language becomes
+  Parakeet's language hint (or Apple's locale on the fallback). When the dictionary is
+  non-empty, its words plus the built-in keyterms become FluidAudio **vocabulary boosting** on
+  the final transcript (CTC keyword spotting + rescoring; a second ~100 MB model,
+  `parakeet-ctc-110m`, loaded in the background the first time — a transcript never waits for
+  it, it goes out unboosted until the model is ready), with FluidAudio's conservative
+  short-vocabulary rescorer settings because the defaults rewrote ordinary words. On the Apple
+  fallback the same terms are passed as `SFSpeechAudioBufferRecognitionRequest.contextualStrings`.
+  Both are read on the main actor by `BuddyDictationManager` and threaded into
+  `startStreamingSession`.
 - **Text-to-Speech**: chosen once at launch by `BuddyTTSProviderFactory` from the Info.plist
-  `VoiceTTSProvider` key, which ships as `apple`: `AppleSpeechSynthesisClient`
-  (`AVSpeechSynthesizer`, the built-in macOS voices — on-device, no server, no resident memory
-  in the app). Setting it to `chatterbox` opts into `LocalChatterboxTTSClient`, a
+  `VoiceTTSProvider` key, which ships as `fluid`: `KokoroSpeechSynthesisClient` — Kokoro 82M
+  (FluidAudio's ANE 7-stage chain), voice `af_heart`, on-device and in-process (no server). The
+  reply is split into sentences (`KokoroSpeechTextChunker`, ≤260 chars per piece since the model
+  takes ≤510 phonemes); the first is synthesised and played through an `AVAudioPlayerNode`
+  while the next is synthesised, so speech starts after one short synthesis (~70 ms for
+  "Done.", ~300 ms to first audio for a typical sentence; ~22× real time). `stopPlayback()` (push-to-talk,
+  a new reply, task cancellation) stops the node at once. It falls back to
+  `AppleSpeechSynthesisClient` while Kokoro is loading, if it failed, or for the rest of a
+  reply whose synthesis failed. `apple` selects that client outright (`AVSpeechSynthesizer`,
+  the built-in macOS voices — no model memory at all). Setting it to `chatterbox` opts into
+  `LocalChatterboxTTSClient`, a
   self-hosted Chatterbox server at `ChatterboxTTSServerURL` (default `http://localhost:8004`),
   which is also the only case where the keep-warm heartbeat and the Today page's health check
   ping it. There is no runtime TTS switch. Reply speech is now
@@ -742,9 +788,10 @@ every screen's edges in a saturated lavender (the AI-activity accent) while `voi
 badge.
 
 **Model residency is the binding constraint.** On 18GB, a resident local vision model
-(the 3B default, or a 7B) leaves little spare — which is also why the default TTS is the
-system synthesizer rather than the Chatterbox server, whose resident memory grew to several
-gigabytes with use. A second concurrently-resident LLM is not feasible at
+(the 3B default, or a 7B) leaves little spare — which is also why the default TTS is Kokoro
+(in-process on the Neural Engine, with a footprint that doesn't grow with use) rather than the Chatterbox server, whose
+resident memory grew to several gigabytes with use, and why the speech models are loaded once
+and shared. A second concurrently-resident LLM is not feasible at
 that size. `ModelAccessGate` serialises all model calls so background work never evicts
 the prefix cache an interactive turn is depending on, and the keep-warm heartbeat is
 suspended during agent loops for the same reason.
@@ -782,7 +829,7 @@ Grouped by what they do. Line counts are approximate.
 | `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
 | `AgentTab.swift` | ~395 | Settings → Agent: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), announcements, an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`) and the Chrome Tabs card. Permissions moved to Settings → General. |
 | `BuddyChatTypes.swift` | ~685 | Shared value types: `JSONValue`, `BuddyContentBlock`, `BuddyChatMessage`/`BuddyChatTurn`, `BuddyToolDefinition`, `ConversationTranscript`, and the `AgentTaskRecord`/`AgentStepRecord` history records. |
-| `AppBundleConfiguration.swift` | ~30 | Reads Info.plist string keys (`VoiceTTSProvider`, `AgentModeEnabled`, `OllamaModel`, …) from the built bundle. |
+| `AppBundleConfiguration.swift` | ~30 | Reads Info.plist string keys (`VoiceTranscriptionProvider`, `VoiceTTSProvider`, `AgentModeEnabled`, `OllamaModel`, …) from the built bundle. |
 | `DictatedTextInserter.swift` | ~135 | Dictate mode's text insertion into the focused field: Accessibility selected-text for native fields, clipboard + synthesised ⌘V for web content and apps where AX does nothing. |
 | `ScreenshotReuseCache.swift` | ~125 | Resends the previous screenshot's exact bytes when the screen hasn't perceptibly changed, so Ollama's image cache hits instead of re-encoding. |
 | `CompanionScreenCaptureUtility.swift` | ~150 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. Starts OCR (`ScreenTextRecognizer`) on each captured frame. |
@@ -804,10 +851,13 @@ Grouped by what they do. Line counts are approximate.
 | `ProviderKeychainStore.swift` | ~90 | Per-provider API keys in the login Keychain — never in UserDefaults, Info.plist, or logs. |
 | `BuddyVisionChatClient.swift` | ~47 | Legacy chat-client protocol + factory. Superseded by `ModelProvider` on the main path; still used by `BrowserAgent` for its own local vision. |
 | `LocalChatterboxTTSClient.swift` | ~231 | Opt-in TTS (`VoiceTTSProvider = chatterbox`) against a self-hosted Chatterbox server: synthesises sentence N+1 while N is playing. |
-| `BuddyTTSProvider.swift` | ~53 | TTS protocol and factory, keyed off `VoiceTTSProvider`: Chatterbox only when it says `chatterbox`, otherwise the Apple synthesizer (the shipped default). |
-| `AppleSpeechSynthesisClient.swift` | ~205 | The default TTS: `AVSpeechSynthesizer` with the built-in macOS voices — on-device, no server, no resident memory in the app. |
-| `AppleSpeechTranscriptionProvider.swift` | ~147 | On-device STT via the Speech framework. The only provider. |
-| `BuddyTranscriptionProvider.swift` | ~45 | STT protocol (`BuddyTranscriptionProvider` / `BuddyStreamingTranscriptionSession`) and the factory, which always returns the Apple provider. |
+| `BuddyTTSProvider.swift` | ~90 | TTS protocol and factory, keyed off `VoiceTTSProvider`: Kokoro for `fluid` (the shipped default; `kokoro`/`fluidaudio` accepted), Chatterbox for `chatterbox`, otherwise the Apple synthesizer. `isKokoroConfigured`. |
+| `FluidAudioSpeechModels.swift` | ~475 | The one owner of the FluidAudio models: background download (first use) + load + warm-up of Parakeet then Kokoro, published load states for the readout, `ParakeetTranscriptionEngine` (actor; serial decodes, 16 kHz resampling, language hint, background-prepared CTC vocabulary boosting with conservative rescorer settings), `KokoroSynthesisEngine` (actor; voice `af_heart`), and `ProcessMemoryFootprint`. All FluidAudio API use is here (keep the test stub in step). |
+| `ParakeetTranscriptionProvider.swift` | ~305 | Default STT provider: per session, Parakeet if loaded and the language is one of v3's 25, else the Apple provider (logged). The Parakeet session buffers mic audio lock-guarded from the tap thread, re-decodes it periodically for live partials, and decodes once more on release (release→final latency logged). |
+| `KokoroSpeechSynthesisClient.swift` | ~330 | Default TTS client: Kokoro sentence-by-sentence through `AVAudioPlayerNode` (next sentence synthesised while the current plays), immediate `stopPlayback`, Apple-voice fallback while loading / on failure. Also `KokoroSpeechTextChunker`. |
+| `AppleSpeechSynthesisClient.swift` | ~205 | TTS with `AVSpeechSynthesizer` and the built-in macOS voices — on-device, no server, no model memory. Kokoro's fallback, and the client when `VoiceTTSProvider = apple`. |
+| `AppleSpeechTranscriptionProvider.swift` | ~147 | On-device STT via the Speech framework. Parakeet's fallback, and the provider when `VoiceTranscriptionProvider = apple`. |
+| `BuddyTranscriptionProvider.swift` | ~60 | STT protocol (`BuddyTranscriptionProvider` / `BuddyStreamingTranscriptionSession`) and the factory: Parakeet (with Apple fallback) unless `VoiceTranscriptionProvider = apple`. `isParakeetConfigured`. |
 | `SpokenSentenceStreamer.swift` | ~120 | Token stream → speakable sentences (tags held back). Left over from the retired whole-reply streaming: `CompanionManager` still holds an optional instance but never creates one. |
 | `ModelAccessGate.swift` | ~104 | Actor serialising all model calls, with interactive priority, so background work never evicts the prefix cache a live turn depends on. |
 
@@ -954,7 +1004,7 @@ Grouped by what they do. Line counts are approximate.
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
 | `MarketplaceTab.swift` | ~700 | Connections → Marketplace: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
 | `ShortcutsTab.swift` | ~250 | Settings → Shortcuts: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
-| `ActiveStackReadout.swift` | ~100 | "What's running": configured model/STT/TTS names from Info.plist plus Ollama residency, for the Wisp window's status pill and Settings → General's What's running card. Also labels perf timings and "Asking …" steps. |
+| `ActiveStackReadout.swift` | ~130 | "What's running": configured model/STT/TTS names from Info.plist (Parakeet/Kokoro rows show the download/load state and the Apple engine standing in until ready) plus Ollama residency, for the Wisp window's status pill and Settings → General's What's running card. Also labels perf timings and "Asking …" steps. |
 | `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
@@ -1057,8 +1107,11 @@ running):
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a
 dependency on another source file, add that file to the list or the suite stops compiling.
 `AgentRuntimeIntegration` compiles every `.swift` file under `leanring-buddy/` (recursively,
-minus the `@main` entry point) with PostHog stubbed, because the agent runtime reaches
-`CompanionManager` and through it most of the app; a new third-party import needs a stub there.
+minus the `@main` entry point) with PostHog and FluidAudio stubbed, because the agent runtime
+reaches `CompanionManager` and through it most of the app; a new third-party import needs a stub
+there. The FluidAudio stub (`Tests/AgentRuntimeIntegration/FluidAudioStub.swift`, also used by
+`HostileProviderAttack`) declares only the API `FluidAudioSpeechModels.swift` uses — calling
+more of FluidAudio means adding it there with the real signature.
 
 ## Local services
 
