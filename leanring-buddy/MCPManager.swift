@@ -243,17 +243,37 @@ final class MCPManager: ObservableObject {
         let namespacedName = "\(sanitizedServerName)__\(tool.name)"
         let isCuaDriverServer = CuaDriverToolNames.isCuaDriverServerNamespace(sanitizedServerName)
 
+        let serverDescription = tool.description.isEmpty
+            ? "Tool \(tool.name) from \(serverName)."
+            : tool.description
+
+        // A misaddressed cua-driver call ends here, before the card, with a
+        // reason the model can act on; any other server's input runs as given.
+        let cuaDriverInputPreparer: AgentToolRegistry.ToolInputPreparer? = isCuaDriverServer
+            ? { input in
+                if let refusal = CuaDriverToolNames.refusalForMisaddressedCall(toolInput: input) {
+                    return .finished(refusal)
+                }
+                return .ready(input)
+            }
+            : nil
+
         AgentToolRegistry.shared.register(
             BuddyToolDefinition(
                 name: namespacedName,
-                description: tool.description.isEmpty
-                    ? "Tool \(tool.name) from \(serverName)."
-                    : tool.description,
+                description: isCuaDriverServer
+                    ? CuaDriverToolNames.modelFacingDescription(originalDescription: serverDescription, inputSchema: tool.inputSchema)
+                    : serverDescription,
                 inputSchema: tool.inputSchema,
                 // MCP servers do not describe whether a tool changes anything,
-                // so every one is treated as if it might.
-                requiresConfirmation: true
-            )
+                // so every one is treated as if it might — except cua-driver's
+                // looking-only tools, which Wisp knows (CuaDriverToolNames):
+                // they read this Mac's screen, like `read_screen_text`.
+                metadata: isCuaDriverServer && !CuaDriverToolNames.requiresConfirmation(bareToolName: tool.name)
+                    ? .reading(.localMachine)
+                    : ToolMetadata(readOnly: false, externalSideEffect: true, dataSource: .localMachine)
+            ),
+            preparingInputWith: cuaDriverInputPreparer
         ) { input in
             let toolCallContent = try await connection.callToolReturningContent(name: tool.name, arguments: input)
             // cua-driver's action calls name their target only by an element

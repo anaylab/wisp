@@ -78,6 +78,61 @@ enum CuaDriverToolNames {
         guard isCuaDriverTool(toolName) else { return false }
         return !readOnlyBareToolNames.contains(ToolCallInspection.bareToolName(toolName))
     }
+
+    /// cua-driver tools that run without a confirmation card at all.
+    ///
+    /// Every MCP tool asks by default because a server doesn't say what its
+    /// tools do. For cua-driver Wisp knows: these only look, like Wisp's own
+    /// `list_windows` and `read_screen_text`, which don't ask either. Asking for
+    /// them meant two or three cards before a single click, and one missed card
+    /// stopped the task. `scroll` moves a view and `clipboard_read` reads what
+    /// the user copied, so both still ask.
+    static let runsWithoutConfirmationBareToolNames: Set<String> =
+        readOnlyBareToolNames.subtracting(["scroll", "clipboard_read"])
+
+    static func requiresConfirmation(bareToolName: String) -> Bool {
+        !runsWithoutConfirmationBareToolNames.contains(bareToolName)
+    }
+
+    /// The tool description the model sees: the driver's own, plus how to
+    /// address an element.
+    ///
+    /// Measured live: with Wisp's screen-context block on the same turn, the
+    /// model called `click {"pid": 0, "element_token": "a13"}` — one of Wisp's
+    /// own Accessibility ids, and no process at all. The driver can't resolve
+    /// either, so the call would fail after the user had approved it.
+    static func modelFacingDescription(originalDescription: String, inputSchema: JSONValue) -> String {
+        guard case .object(let schemaFields) = inputSchema,
+              case .object(let properties)? = schemaFields["properties"] else {
+            return originalDescription
+        }
+        var guidance: [String] = []
+        if properties["element_token"] != nil {
+            guidance.append("element_token values come only from this server's get_window_state result; Wisp's on-screen ids like a12 or t3 are not tokens.")
+        }
+        if properties["pid"] != nil {
+            guidance.append("pid and window_id must be real values from this server's list_windows or list_apps, never 0.")
+        }
+        guard !guidance.isEmpty else { return originalDescription }
+        return originalDescription + "\n\n" + guidance.joined(separator: " ")
+    }
+
+    /// Why a call can't be what the model meant, or nil when it may go ahead.
+    ///
+    /// Checked before the confirmation card, so the user is never asked to
+    /// approve a call that can only fail; the reason goes back to the model as
+    /// the tool result, which tells it how to recover.
+    static func refusalForMisaddressedCall(toolInput: JSONValue) -> String? {
+        guard case .object(let arguments) = toolInput else { return nil }
+        if case .string(let elementToken)? = arguments["element_token"],
+           elementToken.range(of: #"^[aAtT]\d+$"#, options: .regularExpression) != nil {
+            return "\"\(elementToken)\" is one of Wisp's own on-screen ids, not a cua-driver element token. Call get_window_state for the window first and use an element_token from its result."
+        }
+        if case .number(let processIdentifier)? = arguments["pid"], processIdentifier <= 0 {
+            return "pid \(Int(processIdentifier)) is not a running app. Call list_windows or list_apps first and use the pid it reports."
+        }
+        return nil
+    }
 }
 
 /// Decides when a request is about operating a native Mac app, so cua-driver's

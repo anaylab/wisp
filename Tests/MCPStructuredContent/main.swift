@@ -327,6 +327,41 @@ check(!isNativeAppRequest("click the button in Mail"), "an app that isn't runnin
 check(!isNativeAppRequest("click the code button"), "part of an app's name is not the app")
 check(!isNativeAppRequest(""), "an empty request")
 
+// MARK: - Which cua tools ask, and how calls must be addressed
+
+section("cua-driver's looking-only tools run without a card; actions and scroll still ask")
+for bareToolName in ["list_apps", "list_windows", "get_window_state", "verify_state"] {
+    check(!CuaDriverToolNames.requiresConfirmation(bareToolName: bareToolName), "\(bareToolName) runs without a card")
+}
+for bareToolName in ["click", "type_text", "press_key", "hotkey", "set_value", "invoke_menu", "scroll", "clipboard_read", "kill_app", "some_future_tool"] {
+    check(CuaDriverToolNames.requiresConfirmation(bareToolName: bareToolName), "\(bareToolName) asks")
+}
+
+section("the model is told where element tokens and pids come from")
+let clickSchema = object(["type": .string("object"), "properties": object([
+    "pid": object(["type": .string("integer")]),
+    "element_token": object(["type": .string("string")]),
+])])
+let clickDescription = CuaDriverToolNames.modelFacingDescription(originalDescription: "Click against a target pid.", inputSchema: clickSchema)
+check(clickDescription.hasPrefix("Click against a target pid."), "the driver's own description comes first")
+check(clickDescription.contains("get_window_state") && clickDescription.contains("a12"), "element tokens come from get_window_state, not Wisp's ids")
+check(clickDescription.contains("never 0"), "pid must be real")
+let listAppsSchema = object(["type": .string("object"), "properties": object(["session": object(["type": .string("string")])])])
+check(CuaDriverToolNames.modelFacingDescription(originalDescription: "List apps.", inputSchema: listAppsSchema) == "List apps.",
+      "a tool without tokens or pids keeps its description unchanged")
+
+section("a call addressed with Wisp's ids or pid 0 is refused before any card")
+check(CuaDriverToolNames.refusalForMisaddressedCall(toolInput: object(["pid": .number(0), "element_token": .string("a13")])) != nil,
+      "Wisp's a13 is refused")
+check(CuaDriverToolNames.refusalForMisaddressedCall(toolInput: object(["pid": .number(85279), "element_token": .string("t7")])) != nil,
+      "Wisp's t7 is refused")
+check(CuaDriverToolNames.refusalForMisaddressedCall(toolInput: object(["pid": .number(0), "element_token": .string("s1a2b3c4d:17")]))?.contains("pid") == true,
+      "pid 0 is refused")
+check(CuaDriverToolNames.refusalForMisaddressedCall(toolInput: object(["pid": .number(85279), "element_token": .string("s1a2b3c4d:17")])) == nil,
+      "a real pid and token go ahead")
+check(CuaDriverToolNames.refusalForMisaddressedCall(toolInput: object(["pid": .number(85279), "keys": .array([.string("cmd"), .string("n")])])) == nil,
+      "a call without a token goes ahead")
+
 // MARK: - MCPClient
 
 await runScriptedTransportChecks(structuredToolResult: fixtureResult)
