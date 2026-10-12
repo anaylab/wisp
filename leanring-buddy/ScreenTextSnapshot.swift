@@ -217,7 +217,7 @@ nonisolated struct ScreenTextSnapshot: Sendable, Equatable {
             lines.append(Self.promptLine(for: entry))
         }
         lines.append(
-            "to point at a line of this text, use its id, e.g. [POINT:t3:label]; [BOX:t3:label] and [ARROW:t3:label] work the same way."
+            "to point at a line of this text, use its id, e.g. [POINT:t3:label]; [BOX:t3:label] and [ARROW:t3:label] work the same way. these ids only work inside those tags; no tool accepts them."
         )
         return lines.joined(separator: "\n")
     }

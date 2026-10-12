@@ -85,7 +85,8 @@ nonisolated struct AccessibilityElementSnapshot: Sendable, Equatable {
         lines.append(
             "to point at one of these, use its id instead of pixel coordinates, e.g. [POINT:a2:save button]. "
                 + "[BOX:a2:label], [HIGHLIGHT:a2:label] and [ARROW:a2:label] take an id the same way. "
-                + "only use pixel coordinates for something that is not in this list."
+                + "only use pixel coordinates for something that is not in this list. "
+                + "these ids only work inside those tags; no tool accepts them."
         )
         return lines.joined(separator: "\n")
     }

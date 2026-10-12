@@ -44,6 +44,15 @@ final class AgentTurnRunner {
     /// asking for tools; a normal exchange finishes on the first or second.
     private static let maximumIterations = 4
 
+    /// The ceiling for a cloud model. Four was set for the local model, whose
+    /// every pass costs seconds of prompt evaluation and drifts as the
+    /// conversation grows. Acting in an app takes more: find the window, read
+    /// it, act, and maybe try once more another way. Measured live, a Notes
+    /// task spent its four calls on a refused call and a slow read, then
+    /// ended with "I'll use the File menu instead" and never did.
+    private static let maximumIterationsForCloudModels = 10
+    static var maximumIterationsForCloudModelsForTesting: Int { maximumIterationsForCloudModels }
+
     /// A tool that hasn't answered in this long is treated as failed, so one
     /// wedged tool can't hold the whole conversation open.
     /// How long one tool gets, including any permission prompt.
@@ -199,10 +208,13 @@ final class AgentTurnRunner {
         }
         messages.append(BuddyChatMessage(role: .user, blocks: firstUserBlocks))
 
-        for iteration in 0..<Self.maximumIterations {
+        let iterationLimit = modelProvider.deployment.sendsDataOffThisMachine
+            ? Self.maximumIterationsForCloudModels
+            : Self.maximumIterations
+        for iteration in 0..<iterationLimit {
             try Task.checkCancellation()
 
-            let isFinalIteration = iteration == Self.maximumIterations - 1
+            let isFinalIteration = iteration == iterationLimit - 1
 
             // Between steps, background work steps aside for anyone talking.
             // No-op when nothing is waiting.
