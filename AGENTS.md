@@ -940,7 +940,7 @@ Grouped by what they do. Line counts are approximate.
 ### Agent, tools and MCP
 | File | Lines | Purpose |
 |------|-------|---------|
-| `AgentTurnRunner.swift` | ~415 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
+| `AgentTurnRunner.swift` | ~425 | The agent loop: max 4 iterations for the local model, 10 for a cloud model (`maximumIterationsForCloudModels` — acting in an app takes find/read/act/check), screenshot on iteration 0 only, per-tool timeouts. |
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
 | `ChromeExtensionBridge.swift` | ~330 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts, `connectionState` for the Agent tab. |
 | `ChromeTabOrganizer.swift` | ~600 | Tab organizing: `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per-window plans, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered prompt + strict reply parsing), `ChromeTabCommand`, and `ChromeTabOrganizer` (runs a plan through the bridge). |
