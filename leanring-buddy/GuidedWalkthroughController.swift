@@ -153,6 +153,11 @@ extension CompanionManager {
     /// The user did the current step (a click on its target, or Next after
     /// doing it another way).
     func completeGuidedWalkthroughStep() {
+        // Not while Wisp is still looking for the step's target: a press then
+        // would credit a step the user hasn't seen marked, and repeated presses
+        // would race through the list. Once the box is up, or Wisp has said it
+        // can't find it, the user's word that they did it is taken.
+        guard guidedWalkthrough.currentTargetStatus != .searching else { return }
         advanceGuidedWalkthrough(creditingStep: true)
     }
 
@@ -501,7 +506,11 @@ struct GuidedWalkthroughChecklistView: View {
                     .font(.system(size: 12, weight: .semibold))
             }
             .buttonStyle(WispIslandButtonStyle(prominence: guidedWalkthrough.currentTargetStatus == .located ? .subtle : .prominent))
-            .help("Done with this step — move on")
+            .disabled(guidedWalkthrough.currentTargetStatus == .searching)
+            .opacity(guidedWalkthrough.currentTargetStatus == .searching ? 0.4 : 1)
+            .help(guidedWalkthrough.currentTargetStatus == .searching
+                  ? "Wisp is still looking for this step"
+                  : "Done with this step — move on")
 
             Button(action: onStop) {
                 Text("Stop")
