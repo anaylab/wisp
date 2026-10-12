@@ -198,6 +198,17 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     }
 
     private var pendingContinuation: CheckedContinuation<ToolApprovalOutcome, Never>?
+
+    /// An answer that came while the question was still being spoken.
+    ///
+    /// The card appears the moment a request is made, but the wait for an
+    /// answer only begins once the question has been said aloud. A click (or an
+    /// accessibility press) in between used to clear the card and resume
+    /// nothing, so the request sat until its timeout and was reported as "no
+    /// answer" — measured live, with the island already flashing the approval.
+    /// The slower on-device voice made that gap seconds long. The answer is now
+    /// kept here and returned as soon as speaking ends.
+    private var answerReceivedWhileAsking: ToolApprovalOutcome?
     private var timeoutTask: Task<Void, Never>?
 
     var isAwaitingConfirmation: Bool { pendingConfirmation != nil }
@@ -358,6 +369,7 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
 
         let question = spokenQuestionOverride ?? Self.spokenQuestion(forToolNamed: toolName)
         let requestedAt = Date()
+        answerReceivedWhileAsking = nil
         editedTextsByArgumentKey = [:]
         pendingConfirmationExpiryDate = requestedAt.addingTimeInterval(Self.confirmationTimeoutSeconds)
         pendingConfirmation = PendingConfirmation(
@@ -372,6 +384,11 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         )
 
         await speak(question)
+
+        if let answerReceivedWhileAsking {
+            self.answerReceivedWhileAsking = nil
+            return answerReceivedWhileAsking
+        }
 
         // As before, the full window counts from when the question has been
         // asked aloud, not from when the card appeared.
@@ -450,6 +467,9 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     }
 
     private func resolve(with decision: Decision) {
+        // Whether a request is out. Its card can be answered before the wait
+        // below has begun (see `answerReceivedWhileAsking`).
+        let isRequestOutstanding = pendingConfirmation != nil || pendingContinuation != nil
         timeoutTask?.cancel()
         timeoutTask = nil
         // Edits only travel with an approval; a decline runs nothing.
@@ -458,12 +478,16 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
         pendingConfirmationExpiryDate = nil
         editedTextsByArgumentKey = [:]
 
-        guard let continuation = pendingContinuation else { return }
-        pendingContinuation = nil
-        continuation.resume(returning: ToolApprovalOutcome(
+        let outcome = ToolApprovalOutcome(
             decision: decision,
             editedTextsByArgumentKey: approvedEditedTexts
-        ))
+        )
+        guard let continuation = pendingContinuation else {
+            if isRequestOutstanding { answerReceivedWhileAsking = outcome }
+            return
+        }
+        pendingContinuation = nil
+        continuation.resume(returning: outcome)
     }
 
     /// (Re)starts the countdown to `pendingConfirmationExpiryDate` — restarted
