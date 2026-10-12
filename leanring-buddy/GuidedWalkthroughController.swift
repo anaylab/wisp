@@ -97,11 +97,15 @@ final class GuidedWalkthroughSession: ObservableObject {
 
 extension CompanionManager {
     /// How long Wisp keeps looking for a step's target before it stops trying
-    /// (the user can still tap Next). Menus and panes take a moment to open, so
-    /// the search is patient but not endless — each try is a capture plus OCR.
-    private static let guidedStepSearchDurationSeconds: TimeInterval = 40
+    /// (the user can still tap Next). Menus and panes take a moment to open, and
+    /// the target may be below the fold until the user scrolls, so the search
+    /// outlasts the first few quick tries — slowly, since each try is a capture
+    /// plus OCR.
+    private static let guidedStepSearchDurationSeconds: TimeInterval = 300
     private static let guidedStepFirstSearchDelaySeconds: TimeInterval = 0.7
     private static let guidedStepSearchIntervalSeconds: TimeInterval = 0.9
+    /// The pace once the checklist has admitted it can't see the target.
+    private static let guidedStepSlowSearchIntervalSeconds: TimeInterval = 2.0
     /// Tries before the checklist admits it can't see the target.
     private static let guidedStepAttemptsBeforeAdmittingNotFound = 5
     private static let guidedWalkthroughFinishedLingerSeconds: TimeInterval = 2.5
@@ -220,9 +224,14 @@ extension CompanionManager {
             var attemptCount = 0
 
             while !Task.isCancelled, Date() < searchDeadline {
-                let delaySeconds = attemptCount == 0
-                    ? Self.guidedStepFirstSearchDelaySeconds
-                    : Self.guidedStepSearchIntervalSeconds
+                let delaySeconds: TimeInterval
+                if attemptCount == 0 {
+                    delaySeconds = Self.guidedStepFirstSearchDelaySeconds
+                } else if attemptCount >= Self.guidedStepAttemptsBeforeAdmittingNotFound {
+                    delaySeconds = Self.guidedStepSlowSearchIntervalSeconds
+                } else {
+                    delaySeconds = Self.guidedStepSearchIntervalSeconds
+                }
                 try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
                 guard !Task.isCancelled, let self else { return }
                 // The user moved on (Next, or a click) while this was waiting.
@@ -486,7 +495,7 @@ struct GuidedWalkthroughChecklistView: View {
         switch guidedWalkthrough.currentTargetStatus {
         case .searching: return "Looking for it…"
         case .located: return "Click the highlighted spot."
-        case .notFound: return "Can\u{2019}t see it \u{2014} do it yourself, then tap Next."
+        case .notFound: return "Can\u{2019}t see it \u{2014} it may be off-screen. Scroll and I\u{2019}ll keep looking, or tap Next."
         }
     }
 
