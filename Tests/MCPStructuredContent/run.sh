@@ -26,6 +26,7 @@ SHARED_SOURCES=(
   Tests/EditableConfirmation/AppStubs.swift
   leanring-buddy/MCPToolResultRendering.swift
   leanring-buddy/CuaDriverSupport.swift
+  leanring-buddy/WindowManagement/WindowLayoutCommand.swift
   leanring-buddy/EditableConfirmationFields.swift
   leanring-buddy/ToolConfirmationCardBuilder.swift
   leanring-buddy/ToolCallInspection.swift

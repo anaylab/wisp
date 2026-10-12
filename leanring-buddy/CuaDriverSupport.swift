@@ -80,6 +80,71 @@ enum CuaDriverToolNames {
     }
 }
 
+/// Decides when a request is about operating a native Mac app, so cua-driver's
+/// tools are offered to the model.
+///
+/// Without this they almost never were. The per-turn router ranks tools by the
+/// request's words, and "click" is one of the browser scope's words, so "click
+/// the New Note button in Notes" was answered with the browser tools — which
+/// can't reach Notes — and no cua-driver tool at all. Measured against the real
+/// router with the driver's real tool list: none of "click the New Note button
+/// in Notes", "what buttons are in the Mail window" or "type hello into the
+/// search field in Finder" got a single cua-driver tool.
+///
+/// Deterministic and conservative, like the rest of the routing: it needs the
+/// request to name a running app that isn't a browser *and* use a word about
+/// on-screen controls, or to name cua outright. A browser named anywhere leaves
+/// the request to the browser tools, which drive the DOM far better.
+nonisolated enum CuaDriverToolRouting {
+
+    /// Words that say the request is about an app's on-screen controls.
+    static let userInterfaceWords: Set<String> = [
+        "click", "press", "tap", "type", "button", "buttons", "menu", "field",
+        "window", "checkbox", "toggle", "select", "choose", "sidebar", "toolbar",
+        "dialog", "fill", "uncheck", "check",
+    ]
+
+    /// A request naming one of these is about the web; the browser tools own it.
+    static let browserWords: Set<String> = [
+        "browser", "chrome", "safari", "arc", "firefox", "edge", "brave", "webpage",
+        "website", "tab",
+    ]
+
+    /// Saying "cua" is an explicit request for its tools.
+    static let explicitRequestWords: Set<String> = ["cua", "cuadriver"]
+
+    static func requestIsAboutOperatingNativeApplication(
+        _ transcript: String,
+        runningApplicationNames: [String]
+    ) -> Bool {
+        let requestWords = WindowLayoutApplicationNameMatcher.comparableWords(transcript)
+        guard !requestWords.isEmpty else { return false }
+
+        if requestWords.contains(where: { explicitRequestWords.contains($0) }) { return true }
+        if requestWords.contains(where: { browserWords.contains($0) }) { return false }
+        guard requestWords.contains(where: { userInterfaceWords.contains($0) }) else { return false }
+
+        return runningApplicationNames.contains { applicationName in
+            let applicationWords = WindowLayoutApplicationNameMatcher.comparableWords(applicationName)
+            guard !applicationWords.isEmpty,
+                  !applicationWords.contains(where: { browserWords.contains($0) }) else { return false }
+            return requestWords.containsContiguousRun(of: applicationWords)
+        }
+    }
+}
+
+private extension Array where Element == String {
+    /// Whether `run` appears in order with nothing between, e.g. ["visual",
+    /// "studio", "code"] inside "click run in visual studio code".
+    func containsContiguousRun(of run: [String]) -> Bool {
+        guard !run.isEmpty, run.count <= count else { return false }
+        for startIndex in 0...(count - run.count) where Array(self[startIndex..<(startIndex + run.count)]) == run {
+            return true
+        }
+        return false
+    }
+}
+
 /// What a cua-driver element token referred to when Wisp last saw it.
 struct CuaDriverElementDescription: Equatable {
     /// The AX role with its `AX` prefix dropped ("Button", "TextField").

@@ -306,6 +306,27 @@ check(cuaCard("get_window_state", object(["pid": .number(4242)])) == nil, "a cua
 check(EditableConfirmationFields.editableFields(forToolNamed: "cua-driver__type_text", toolInput: object(["text": .string("hi")])).isEmpty,
       "typed text is not an editable field")
 
+// MARK: - Routing
+
+let runningApplicationNames = ["Notes", "Finder", "Visual Studio Code", "Google Chrome", "Safari", "Wisp"]
+func isNativeAppRequest(_ transcript: String) -> Bool {
+    CuaDriverToolRouting.requestIsAboutOperatingNativeApplication(transcript, runningApplicationNames: runningApplicationNames)
+}
+
+section("a request about a running app's controls is routed to cua-driver")
+check(isNativeAppRequest("click the New Note button in Notes"), "click a button in Notes")
+check(isNativeAppRequest("type hello into the search field in Finder"), "type into a field in Finder")
+check(isNativeAppRequest("open the Run menu in Visual Studio Code"), "a multi-word app name")
+check(isNativeAppRequest("use cua to list my windows"), "naming cua is explicit")
+
+section("anything else is left to the usual routing")
+check(!isNativeAppRequest("click the sign in button on github.com in chrome"), "a browser named → browser tools")
+check(!isNativeAppRequest("click the Notes link on this website"), "a web request that mentions an app")
+check(!isNativeAppRequest("what's in my notes about atlas"), "an app name without a UI word")
+check(!isNativeAppRequest("click the button in Mail"), "an app that isn't running")
+check(!isNativeAppRequest("click the code button"), "part of an app's name is not the app")
+check(!isNativeAppRequest(""), "an empty request")
+
 // MARK: - MCPClient
 
 await runScriptedTransportChecks(structuredToolResult: fixtureResult)

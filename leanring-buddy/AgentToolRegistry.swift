@@ -94,9 +94,13 @@ final class AgentToolRegistry: ObservableObject {
     /// - Parameter isToolPermitted: Tools a caller may not use are dropped
     ///   *before* ranking, so a limited buddy still gets a full set of relevant
     ///   tools instead of losing slots to ones it can't call.
+    /// - Parameter maximumToolCount: How many tools may reach the model; the
+    ///   local model's small default unless the caller's model is a cloud one
+    ///   (`AgentToolScope.maximumExposedToolsForCloudModels`).
     func definitions(
         forRequest transcript: String,
-        isToolPermitted: (String) -> Bool = { _ in true }
+        isToolPermitted: (String) -> Bool = { _ in true },
+        maximumToolCount: Int = AgentToolScope.maximumExposedTools
     ) -> [BuddyToolDefinition] {
         // Apple Shortcuts are matched by name against the cached list — never
         // a fresh process spawn on the turn's critical path; a stale cache is
@@ -122,6 +126,23 @@ final class AgentToolRegistry: ObservableObject {
         if MediaPlaybackPhraseParser.requestIsAboutMusic(transcript) {
             boostedToolNames.insert("control_music")
         }
+        // "click the New Note button in Notes" shares the word "click" with the
+        // browser scope, so without this the browser tools took the slots and
+        // cua-driver's tools — the only ones that can reach Notes — never did.
+        // The browser scope's bonus is dropped too, since its tools can't reach a
+        // native app and would otherwise tie with cua's for the few slots.
+        var scopeOverride: AgentToolScope?
+        let registeredCuaDriverToolNames = definitions.map(\.name).filter(CuaDriverToolNames.isCuaDriverTool)
+        if !registeredCuaDriverToolNames.isEmpty,
+           CuaDriverToolRouting.requestIsAboutOperatingNativeApplication(
+               transcript,
+               runningApplicationNames: WindowLayoutExecutor.runningApplicationNamesForMatching()
+           ) {
+            boostedToolNames.formUnion(registeredCuaDriverToolNames)
+            if AgentToolScope.forRequest(transcript) == .browser {
+                scopeOverride = .general
+            }
+        }
         let routableDefinitions = (isBrainEnabled
             ? definitions
             : definitions.filter { !BrainToolNames.all.contains($0.name) })
@@ -129,8 +150,9 @@ final class AgentToolRegistry: ObservableObject {
         let selectedDefinitions = AgentToolRouter.select(
             from: routableDefinitions,
             for: transcript,
-            limit: AgentToolScope.maximumExposedTools,
-            boostedToolNames: boostedToolNames
+            limit: maximumToolCount,
+            boostedToolNames: boostedToolNames,
+            scopeOverride: scopeOverride
         )
         return ShortcutsToolRouting.applyingMatchingShortcutNames(
             shortcutsRoutingHints.matchingShortcutNames,

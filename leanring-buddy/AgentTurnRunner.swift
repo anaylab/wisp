@@ -163,9 +163,17 @@ final class AgentTurnRunner {
         // against 262 and 0.36s for the handful that are relevant — and a 7B
         // model's tool choice degrades as the list grows, so the irrelevant
         // ones are worse than merely expensive.
+        // That cost and that degradation are the local model's; a cloud model
+        // is shown more, so a connected app's tools aren't crowded out.
         let runToolkit = toolkit
-        let tools = toolRegistry.definitions(forRequest: userText, isToolPermitted: { runToolkit.permits($0) })
-            + toolkit.additionalTools.map(\.definition)
+        let maximumToolCount = modelProvider.deployment.sendsDataOffThisMachine
+            ? AgentToolScope.maximumExposedToolsForCloudModels
+            : AgentToolScope.maximumExposedTools
+        let tools = toolRegistry.definitions(
+            forRequest: userText,
+            isToolPermitted: { runToolkit.permits($0) },
+            maximumToolCount: maximumToolCount
+        ) + toolkit.additionalTools.map(\.definition)
 
         var steps: [AgentStepRecord] = []
 
