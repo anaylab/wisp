@@ -92,6 +92,15 @@ enum ToolConfirmationCardBuilder {
         if ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage {
             return sendIMessageCard(toolInput: toolInput)
         }
+        // cua-driver's action tools name their target by an opaque element
+        // token, which no word matching below could make sense of.
+        if CuaDriverToolNames.mustAlwaysAsk(toolName: toolName) {
+            return cuaDriverActionCard(
+                bareToolName: ToolCallInspection.bareToolName(toolName),
+                toolInput: toolInput,
+                elementCache: CuaDriverElementCache.shared
+            )
+        }
 
         let inspectedActions = ToolCallInspection.inspectedActions(toolName: toolName, toolInput: toolInput)
 
@@ -441,6 +450,175 @@ enum ToolConfirmationCardBuilder {
             blocks.append(bodyPreviewBlock)
         }
         return GlanceCard(blocks: blocks)
+    }
+
+    // MARK: - cua-driver actions
+
+    /// "Click “Send” button · Mail": what a cua-driver action will do to which
+    /// element, in which app, plus whatever it types, presses or picks.
+    ///
+    /// The target comes from `elementCache` — the elements of the last
+    /// `get_window_state` results the model was shown — never from the model's
+    /// own description of it. A token the cache has never seen gets a plain
+    /// "Click" card with the raw arguments and a line saying the element is
+    /// unknown; the call still asks either way.
+    static func cuaDriverActionCard(
+        bareToolName: String,
+        toolInput: JSONValue,
+        elementCache: CuaDriverElementCache
+    ) -> GlanceCard {
+        let elementToken = ToolCallInspection.stringValue(forAnyOf: ["element_token"], in: toolInput)
+        let resolvedElement = elementToken.flatMap { elementCache.elementDescription(forToken: $0) }
+        let describedTarget = resolvedElement.map(describedCuaDriverElement)
+        let menuPathItems = cuaDriverMenuPathItems(in: toolInput)
+
+        let titleText: String
+        var iconName = "cursorarrow.click"
+        var keyValuePairs: [GlanceKeyValuePair] = []
+        var previewBlock: GlanceBlock?
+        // The words whose meaning decides whether this commits something:
+        // the label of what is pressed, or the menu item picked.
+        var committingLabel: String? = resolvedElement?.label
+        var killsApp = false
+
+        switch bareToolName {
+        case "click", "double_click", "right_click":
+            let clickVerb: String
+            if bareToolName == "double_click" {
+                clickVerb = "Double-click"
+            } else if bareToolName == "right_click"
+                        || ToolCallInspection.stringValue(forAnyOf: ["button"], in: toolInput) == "right" {
+                clickVerb = "Right-click"
+            } else {
+                clickVerb = "Click"
+            }
+            titleText = describedTarget.map { "\(clickVerb) \($0)" } ?? clickVerb
+        case "type_text":
+            iconName = "keyboard"
+            titleText = describedTarget.map { "Type into \($0)" } ?? "Type text"
+            previewBlock = bodyPreviewBlock(forAnyOf: ["text"], in: toolInput)
+        case "set_value":
+            iconName = "keyboard"
+            titleText = describedTarget.map { "Set \($0)" } ?? "Set a value"
+            if let newValueText = ToolCallInspection.stringValue(forAnyOf: ["value"], in: toolInput) {
+                keyValuePairs.append(GlanceKeyValuePair(key: "To", value: truncatedFieldValue(newValueText), tone: .neutral))
+            }
+        case "press_key", "hotkey":
+            iconName = "keyboard"
+            let pressedKeysText = cuaDriverPressedKeysText(in: toolInput)
+            titleText = pressedKeysText.map { "Press \($0)" } ?? "Press a key"
+            if let describedTarget {
+                keyValuePairs.append(GlanceKeyValuePair(key: "In", value: truncatedFieldValue(describedTarget), tone: .neutral))
+            }
+        case "invoke_menu":
+            iconName = "filemenu.and.selection"
+            titleText = menuPathItems.isEmpty ? "Choose a menu item" : "Choose " + menuPathItems.joined(separator: " › ")
+            committingLabel = menuPathItems.last
+        case "drag":
+            iconName = "hand.draw"
+            titleText = "Drag"
+            if let fromX = ToolCallInspection.stringValue(forAnyOf: ["from_x"], in: toolInput),
+               let fromY = ToolCallInspection.stringValue(forAnyOf: ["from_y"], in: toolInput),
+               let toX = ToolCallInspection.stringValue(forAnyOf: ["to_x"], in: toolInput),
+               let toY = ToolCallInspection.stringValue(forAnyOf: ["to_y"], in: toolInput) {
+                keyValuePairs.append(GlanceKeyValuePair(key: "From", value: "\(fromX), \(fromY)", tone: .neutral))
+                keyValuePairs.append(GlanceKeyValuePair(key: "To", value: "\(toX), \(toY)", tone: .neutral))
+            }
+        case "kill_app":
+            iconName = "xmark.octagon"
+            titleText = "Force quit an app"
+            killsApp = true
+        case "clipboard_write":
+            iconName = "doc.on.clipboard"
+            titleText = "Replace the clipboard"
+            previewBlock = bodyPreviewBlock(forAnyOf: ["text"], in: toolInput)
+        case "replay_trajectory":
+            iconName = "arrow.triangle.2.circlepath"
+            titleText = "Replay a recorded session"
+        default:
+            titleText = readableActionTitle(for: InspectedToolAction(
+                bareActionName: bareToolName,
+                serviceName: nil,
+                actionNameWords: ToolCallInspection.words(inIdentifier: bareToolName),
+                arguments: toolInput
+            ))
+        }
+
+        // Clicks and typing at a pixel position have no element to name.
+        if resolvedElement == nil,
+           let pointX = ToolCallInspection.stringValue(forAnyOf: ["x"], in: toolInput),
+           let pointY = ToolCallInspection.stringValue(forAnyOf: ["y"], in: toolInput) {
+            keyValuePairs.append(GlanceKeyValuePair(key: "At", value: "\(pointX), \(pointY)", tone: .neutral))
+        }
+
+        var warningRows: [GlanceListRow] = []
+        if let elementToken, resolvedElement == nil {
+            // Unknown target: show what was sent, so the user at least sees the
+            // raw call, and say plainly that Wisp can't name the element.
+            keyValuePairs.append(contentsOf: scalarArgumentPairs(in: toolInput, maximumPairs: 4)
+                .filter { $0.key != "Element token" })
+            keyValuePairs.insert(GlanceKeyValuePair(key: "Element", value: truncatedFieldValue(elementToken), tone: .neutral), at: 0)
+            warningRows.append(GlanceListRow(
+                text: "Wisp hasn't seen this element on screen, so it can't say what it is",
+                iconName: "questionmark.circle",
+                tone: .bad
+            ))
+        } else if elementToken == nil && keyValuePairs.isEmpty && previewBlock == nil {
+            keyValuePairs.append(contentsOf: scalarArgumentPairs(in: toolInput, maximumPairs: 4))
+        }
+
+        let committingLabelWords = committingLabel.map { Set(ToolCallInspection.words(inIdentifier: $0)) } ?? []
+        let isIrreversible = killsApp || ToolCallSafety.namesIrreversibleAction(actionNameWords: committingLabelWords)
+        if isIrreversible { iconName = "exclamationmark.triangle" }
+
+        var blocks: [GlanceBlock] = [
+            .header(title: titleText, iconName: iconName, trailingText: resolvedElement?.appName)
+        ]
+        if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
+        if let previewBlock { blocks.append(previewBlock) }
+        if !warningRows.isEmpty { blocks.append(.list(rows: warningRows)) }
+        if isIrreversible { blocks.append(cannotBeUndoneWarningBlock) }
+        return GlanceCard(blocks: blocks)
+    }
+
+    /// `“Send” button`, `“Subject” text field`, or `unlabelled button`.
+    static func describedCuaDriverElement(_ elementDescription: CuaDriverElementDescription) -> String {
+        let roleWords = elementDescription.roleName
+            .map { ToolCallInspection.words(inIdentifier: $0).joined(separator: " ") } ?? ""
+        let roleText = roleWords.isEmpty ? "element" : roleWords
+        guard let label = elementDescription.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty else {
+            return "unlabelled \(roleText)"
+        }
+        return "“\(truncatedFieldValue(label))” \(roleText)"
+    }
+
+    /// `invoke_menu`'s `path` array (`["File", "Save As..."]`), as strings.
+    private static func cuaDriverMenuPathItems(in toolInput: JSONValue) -> [String] {
+        guard case .array(let pathValues)? = ToolCallInspection.fieldValue(forAnyOf: ["path"], in: toolInput) else { return [] }
+        return pathValues.compactMap { pathValue in
+            guard case .string(let pathItem) = pathValue else { return nil }
+            return pathItem
+        }
+    }
+
+    /// `cmd+shift+s` from a hotkey's `keys` array, or `cmd+return` from
+    /// press_key's `modifiers` + `key`.
+    private static func cuaDriverPressedKeysText(in toolInput: JSONValue) -> String? {
+        func stringItems(forKey argumentKey: String) -> [String] {
+            guard case .array(let itemValues)? = ToolCallInspection.fieldValue(forAnyOf: [argumentKey], in: toolInput) else { return [] }
+            return itemValues.compactMap { itemValue in
+                guard case .string(let itemText) = itemValue else { return nil }
+                return itemText
+            }
+        }
+        var pressedKeys = stringItems(forKey: "keys")
+        if pressedKeys.isEmpty {
+            pressedKeys = stringItems(forKey: "modifiers")
+            if let mainKey = ToolCallInspection.stringValue(forAnyOf: ["key"], in: toolInput) {
+                pressedKeys.append(mainKey)
+            }
+        }
+        return pressedKeys.isEmpty ? nil : truncatedFieldValue(pressedKeys.joined(separator: "+"))
     }
 
     // MARK: - Deletion

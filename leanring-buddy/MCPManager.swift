@@ -239,7 +239,9 @@ final class MCPManager: ObservableObject {
         from serverName: String,
         connection: MCPServerConnection
     ) {
-        let namespacedName = "\(sanitize(serverName))__\(tool.name)"
+        let sanitizedServerName = sanitize(serverName)
+        let namespacedName = "\(sanitizedServerName)__\(tool.name)"
+        let isCuaDriverServer = CuaDriverToolNames.isCuaDriverServerNamespace(sanitizedServerName)
 
         AgentToolRegistry.shared.register(
             BuddyToolDefinition(
@@ -253,7 +255,17 @@ final class MCPManager: ObservableObject {
                 requiresConfirmation: true
             )
         ) { input in
-            try await connection.callTool(name: tool.name, arguments: input)
+            let toolCallContent = try await connection.callToolReturningContent(name: tool.name, arguments: input)
+            // cua-driver's action calls name their target only by an element
+            // token; remembering what each token was lets the confirmation
+            // card for the next click say what it will press.
+            if isCuaDriverServer, let structuredContent = toolCallContent.structuredContent {
+                CuaDriverElementCache.shared.recordElements(fromStructuredContent: structuredContent)
+            }
+            return MCPToolResultRendering.modelText(
+                flattenedContentText: toolCallContent.flattenedContentText,
+                structuredContent: toolCallContent.structuredContent
+            )
         }
 
         registeredToolNames.insert(namespacedName)

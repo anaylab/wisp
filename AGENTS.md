@@ -468,7 +468,10 @@ cloud dependency to the local path, without asking.
   share/invite/publish/merge/deploy, arbitrary command execution, calendar events with guests
   (they email invitations), file writes whose path lands outside the agent working folder, and
   Composio `COMPOSIO_MULTI_EXECUTE_TOOL` calls whose unwrapped tool slugs are any of those (or
-  can't be read; remote bash/workbench always) — still go to the confirmation card with
+  can't be read; remote bash/workbench always), and every **cua-driver** tool that isn't a known
+  read (`CuaDriverToolNames.mustAlwaysAsk`: click/type_text/press_key/hotkey/set_value/invoke_menu/
+  drag/kill_app/… — none of those verbs is in the word floor; scoped to the `cua-driver__` namespace,
+  so another server's `click` is judged as before) — still go to the confirmation card with
   auto-approve on. Reads and benign writes stay auto-approved. Deterministic word matching on the
   tool name + argument shapes, no model; errs toward asking. The registry now asks via
   `ToolPermissionBroker.requestApproval(toolName:toolInput:)` (structured args; a default
@@ -479,8 +482,13 @@ cloud dependency to the local path, without asking.
   Cancel/Allow in `ToolConfirmationView` — "New Email" (To/Cc/Subject + truncated body), "New
   Message"/"New Post", "New Event" (title/start/end/where/guests), file writes/moves (file,
   folder, content preview, flagged "Outside agent folder"), deletions and other irreversible
-  actions (identifying args + "can't be taken back"), and Composio batches (one row per unwrapped
-  tool). Reading tools and unrecognised shapes get no card, so the panel falls back to the plain
+  actions (identifying args + "can't be taken back"), Composio batches (one row per unwrapped
+  tool), and cua-driver actions ("Click “Send” button · Mail", "Type into “Subject:” text field" +
+  the text, "Press cmd+s", "Choose File › Save As…"): the `element_token` is resolved against
+  `CuaDriverElementCache` (token → role/label/app from the last 4 cua-driver element lists Wisp
+  passed to the model, session-only), a resolved label or menu item with an irreversible word (the
+  `ToolCallSafety` vocabulary) gets "can't be taken back", and an unknown token shows the raw
+  arguments plus "Wisp hasn't seen this element". Reading tools and unrecognised shapes get no card, so the panel falls back to the plain
   summary (zero regression). The spoken yes/no and deny-by-default flow are unchanged. Argument/name
   parsing shared by both lives in `ToolCallInspection` (lenient key lookup, Composio unwrapping,
   path containment, and `matchingFieldKey` — the exact key a lenient lookup lands on).
@@ -650,6 +658,29 @@ cloud dependency to the local path, without asking.
   (`https://connect.composio.dev/mcp`, auth `x-consumer-api-key`): connecting installs one
   remote server whose meta-tools (`COMPOSIO_SEARCH_TOOLS`/`MULTI_EXECUTE_TOOL`/
   `MANAGE_CONNECTIONS`, …) reach 500+ apps and count against the same tool budget.
+  **Structured results**: an MCP result's `structuredContent` (2025-06-18 spec) is no longer
+  dropped. `MCPServerConnection.callToolReturningContent` returns it beside the flattened text
+  blocks, and `MCPToolResultRendering.modelText` (used by `MCPManager` for every MCP tool) renders
+  it first: a list of UI elements (objects with a token/id + role) as one line each
+  (`s1a2b3c4d:3 Button "Send" = "value" (disabled)`, under a header of the result's short scalar
+  fields), anything else as sorted compact JSON — capped at 4000 chars, with the text blocks after
+  it within 5000 total (500 beside an element list, whose text is usually the same tree as
+  markdown; a text block that is just the structured content's JSON is dropped). A result with no
+  `structuredContent` is returned exactly as before, and plain `callTool` (Composio's connection
+  list parses its text) still returns only the text. Image blocks are still named "(image
+  content)": tool results are `String` from handler to provider, so passing images through would
+  mean a new content type in every provider.
+  **cua-driver** (github.com/trycua/cua, `docs/cua-spike.md` on `spike/cua`) is supported: install
+  it pinned (`uv tool install cua-driver==0.34.1`) and add a `cua-driver` entry (`command`:
+  `~/.local/bin/cua-driver`, `args` `["mcp", "--direct"]` — direct mode runs under Wisp's own
+  Accessibility/Screen Recording grants — and `env` `DO_NOT_TRACK=1`,
+  `CUA_DRIVER_RS_TELEMETRY_ENABLED=false`, `CUA_DRIVER_RS_UPDATE_CHECK=false`, since its telemetry
+  is on by default). Start with the reads in `allowedTools` (`list_apps`, `list_windows`,
+  `get_window_state`, `verify_state`); to let Wisp act in native apps, add `click`, `type_text`,
+  `press_key`, `hotkey`, `scroll`, `set_value` and `invoke_menu`. Every action asks (see the
+  destructive-action floor) with a card naming the element. Keep `kill_app`, `clipboard_*`,
+  `browser_*`, `install_*` and `replay_trajectory` off. Ask `get_window_state` for `max_elements`
+  — one window can be 300+ elements.
 - **Apple Shortcuts as agent tools** (local, no server): `list_shortcuts` (read-only) and
   `run_shortcut` (name + optional text input) drive the system `/usr/bin/shortcuts` CLI via
   `ShortcutsBridge` — `Process` with an **argument array** (name last, after `--`, so spaces,
@@ -909,7 +940,9 @@ Grouped by what they do. Line counts are approximate.
 | `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/messaging/general) + `alwaysAvailableToolNames` + the per-turn budget (`maximumExposedTools` = 6). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership (or a caller's `boostedToolNames`, e.g. `run_shortcut` when the request names a shortcut) adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
-| `MCPClient.swift` | ~420 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. `MCPStartupTimeoutPolicy` gives a package runner's `initialize` a long first-run budget. |
+| `MCPClient.swift` | ~445 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. `MCPStartupTimeoutPolicy` gives a package runner's `initialize` a long first-run budget. `callToolReturningContent` keeps a result's text blocks and `structuredContent` apart; `callTool` returns the text only. |
+| `MCPToolResultRendering.swift` | ~290 | Pure: an MCP result → the model's text. Element lists (token + role) as one line each under a scalar-field header, other structured content as sorted compact JSON, 4000/5000-char caps, duplicate-JSON text dropped; no `structuredContent` → unchanged. Tested by `Tests/MCPStructuredContent`. |
+| `CuaDriverSupport.swift` | ~155 | cua-driver specifics: `CuaDriverToolNames` (server-namespace match, read-only allow-list, `mustAlwaysAsk`) and `CuaDriverElementCache` (token → role/label/app from the last 4 element lists, fed by `MCPManager`, read by the confirmation card). |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
 | `MCPStdioTransport.swift` | ~300 | Stdio transport: child process over stdin/stdout as NDJSON (pipes read via `readabilityHandler`, framed by the pure `NewlineDelimitedLineBuffer`), login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
 | `MCPStreamableHTTPTransport.swift` | ~230 | Remote transport: JSON-RPC over MCP Streamable HTTP (one POST per message; parses JSON + SSE replies; `Mcp-Session-Id`, auth headers). |
@@ -939,8 +972,8 @@ Grouped by what they do. Line counts are approximate.
 | `EditableConfirmationFieldView.swift` | ~125 | One editable card field: reads as card text until hovered (fill, pencil, I-beam), single-line `TextField` or multi-line `TextEditor`, focus counts as editing activity, "edited" mark (`EditedConfirmationFieldMark`). |
 | `ToolCallInspection.swift` | ~325 | Deterministic reading of a tool call: `server__` namespace stripping, identifier → words (camelCase/underscores), Composio execute-meta-tool unwrapping into `InspectedToolAction`s (tolerates JSON-string arguments), lenient case/underscore-insensitive argument lookup, display text for arrays/objects, path-argument extraction and `..`-safe path containment. |
 | `ToolMetadata.swift` | ~100 | What a tool does (read-only, destructive, external side effect, data source) as data; whether it needs confirmation is computed from it. |
-| `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules, and `alwaysAskBareToolNames` (`run_shortcut`). |
-| `ToolConfirmationCardBuilder.swift` | ~610 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). Exposes the shape it chose (`ConfirmationCardShape`) and its key vocabularies for the editable fields. |
+| `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules, `alwaysAskBareToolNames` (`run_shortcut`), and every non-read cua-driver tool (`CuaDriverToolNames.mustAlwaysAsk`). |
+| `ToolConfirmationCardBuilder.swift` | ~790 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / cua-driver action (element resolved via `CuaDriverElementCache`) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). Exposes the shape it chose (`ConfirmationCardShape`) and its key vocabularies for the editable fields. |
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
 | `AgentTaskRegistry.swift` | ~165 | Task and step records backing History → Timeline. Loads saved history on launch and saves it (debounced) on every change. |
 | `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
@@ -1103,6 +1136,8 @@ running):
 ./Tests/WindowManagement/run.sh          # window layout command parsing, app matching, frame math
 ./Tests/ScreenWatcher/run.sh             # screen-watch request parsing, text matching, evaluator
 ./Tests/EditableConfirmation/run.sh      # editable confirmation fields: which, edit application, refusals
+./Tests/MCPStructuredContent/run.sh      # MCP structuredContent rendering + caps, cua-driver floor and cards
+WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a
