@@ -34,12 +34,16 @@ struct GuidedWalkthroughTargetLocation {
     let displayFrameInAppKitCoordinates: CGRect
     let screenshotSize: CGSize
     let regionInScreenshotPixels: CGRect
+    /// The text of the marked control, for judging whether Wisp may click it.
+    let label: String?
 }
 
 @MainActor
 final class GuidedWalkthroughSession: ObservableObject {
     @Published private(set) var plan: GuidedWalkthroughPlan?
     @Published private(set) var currentTargetStatus: GuidedWalkthroughTargetStatus = .searching
+    /// Why "Do it for me" didn't click, shown under the current step.
+    @Published private(set) var autoClickNote: String?
     /// Set for a moment after the last step so the checklist can say it's done.
     @Published private(set) var didFinishAllSteps = false
 
@@ -58,6 +62,11 @@ final class GuidedWalkthroughSession: ObservableObject {
 
     func updatePlan(_ updatedPlan: GuidedWalkthroughPlan) {
         plan = updatedPlan
+        autoClickNote = nil
+    }
+
+    func showAutoClickNote(_ note: String) {
+        autoClickNote = note
     }
 
     func updateTargetStatus(_ newStatus: GuidedWalkthroughTargetStatus) {
@@ -80,6 +89,7 @@ final class GuidedWalkthroughSession: ObservableObject {
         globalClickMonitor = nil
         currentTargetLocation = nil
         didFinishAllSteps = false
+        autoClickNote = nil
         plan = nil
         currentTargetStatus = .searching
     }
@@ -131,6 +141,7 @@ extension CompanionManager {
     /// Ends the walkthrough and takes its marks off the screen.
     func endGuidedWalkthrough() {
         guard guidedWalkthrough.isActive else { return }
+        print("🧭 Guided walkthrough ended")
         guidedWalkthrough.reset()
         activeAnnotationsByDisplayFrame.removeAll()
         annotationScreenshotSizeByDisplayFrame.removeAll()
@@ -152,6 +163,7 @@ extension CompanionManager {
 
     private func advanceGuidedWalkthrough(creditingStep: Bool) {
         guard var updatedPlan = guidedWalkthrough.plan, !updatedPlan.isFinished else { return }
+        print("🧭 Step \(creditingStep ? "done" : "skipped"): \"\(updatedPlan.currentStep?.instruction ?? "")\"")
 
         if creditingStep {
             updatedPlan.completeCurrentStep()
@@ -287,8 +299,60 @@ extension CompanionManager {
         return GuidedWalkthroughTargetLocation(
             displayFrameInAppKitCoordinates: displayFrame,
             screenshotSize: screenshotSize,
-            regionInScreenshotPixels: annotation.regionInScreenshotPixels
+            regionInScreenshotPixels: annotation.regionInScreenshotPixels,
+            label: annotation.label
         )
+    }
+
+    // MARK: - Doing a step for the user
+
+    /// "Do it for me": Wisp clicks the marked control itself, then moves on.
+    /// Pressing the button is the user's consent, but a control whose name
+    /// reads as irreversible (Send, Delete, Pay…) is never clicked this way —
+    /// the same vocabulary the confirmation floor uses — and Wisp says so.
+    func performCurrentGuidedStepForUser() {
+        guard guidedWalkthrough.currentTargetStatus == .located,
+              let targetLocation = guidedWalkthrough.currentTargetLocation,
+              let currentStep = guidedWalkthrough.plan?.currentStep else { return }
+
+        let wordsNamingTheAction = Set(
+            PointingTargetMatcher.words(in: currentStep.instruction)
+                + PointingTargetMatcher.words(in: targetLocation.label ?? "")
+        )
+        if ToolCallSafety.namesIrreversibleAction(actionNameWords: wordsNamingTheAction) {
+            guidedWalkthrough.showAutoClickNote("That one can\u{2019}t be undone \u{2014} click it yourself.")
+            return
+        }
+        guard AXIsProcessTrusted() else {
+            guidedWalkthrough.showAutoClickNote("Wisp needs Accessibility access to click for you.")
+            return
+        }
+        guard let primaryDisplayHeight = NSScreen.screens.first?.frame.height,
+              let clickPoint = GuidedWalkthroughAutoClickPoint.quartzGlobalPoint(
+                  displayFrameInAppKitCoordinates: targetLocation.displayFrameInAppKitCoordinates,
+                  screenshotSize: targetLocation.screenshotSize,
+                  regionInScreenshotPixels: targetLocation.regionInScreenshotPixels,
+                  primaryDisplayHeight: primaryDisplayHeight
+              ) else { return }
+
+        print("🧭 Doing step for the user: \"\(currentStep.instruction)\" at (\(Int(clickPoint.x)), \(Int(clickPoint.y)))")
+        // Move on first: it puts the status back to searching, so the click
+        // monitor ignores the click Wisp is about to make instead of counting
+        // it as a second completion.
+        completeGuidedWalkthroughStep()
+
+        // The overlay ignores mouse events, so the click lands on the app below.
+        Task {
+            for eventType in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                CGEvent(
+                    mouseEventSource: nil,
+                    mouseType: eventType,
+                    mouseCursorPosition: clickPoint,
+                    mouseButton: .left
+                )?.post(tap: .cghidEventTap)
+                try? await Task.sleep(nanoseconds: 60_000_000)
+            }
+        }
     }
 
     // MARK: - Clicks
@@ -328,6 +392,7 @@ extension CompanionManager {
 /// the rest dim. Next and Stop sit underneath.
 struct GuidedWalkthroughChecklistView: View {
     @ObservedObject var guidedWalkthrough: GuidedWalkthroughSession
+    let onDoItForMe: () -> Void
     let onNextStep: () -> Void
     let onStop: () -> Void
 
@@ -370,7 +435,7 @@ struct GuidedWalkthroughChecklistView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if step.status == .current && !guidedWalkthrough.didFinishAllSteps {
-                    Text(currentStepHint)
+                    Text(guidedWalkthrough.autoClickNote ?? currentStepHint)
                         .font(.system(size: 11))
                         .foregroundColor(WispColor.Island.textSecondary)
                 }
@@ -422,11 +487,20 @@ struct GuidedWalkthroughChecklistView: View {
 
     private var controlRow: some View {
         HStack(spacing: 8) {
+            if guidedWalkthrough.currentTargetStatus == .located {
+                Button(action: onDoItForMe) {
+                    Text("Do it for me")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(WispIslandButtonStyle(prominence: .prominent))
+                .help("Wisp clicks the highlighted spot for you")
+            }
+
             Button(action: onNextStep) {
                 Text("Next")
                     .font(.system(size: 12, weight: .semibold))
             }
-            .buttonStyle(WispIslandButtonStyle(prominence: .prominent))
+            .buttonStyle(WispIslandButtonStyle(prominence: guidedWalkthrough.currentTargetStatus == .located ? .subtle : .prominent))
             .help("Done with this step — move on")
 
             Button(action: onStop) {
