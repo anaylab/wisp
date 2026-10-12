@@ -227,6 +227,9 @@ struct ToolConfirmationView: View {
             // declining only costs a repeated request.
             Button("Cancel", action: onDeny)
                 .wispGlassButtonStyle(prominence: .subtle)
+            // Named explicitly: the custom button style left these as a bare
+            // "button" to VoiceOver (and to any automation reading the card).
+                .accessibilityLabel("Cancel")
 
             Button(action: onApprove) {
                 HStack(spacing: WispSpacing.xs) {
@@ -237,6 +240,7 @@ struct ToolConfirmationView: View {
                 .frame(maxWidth: .infinity)
             }
             .wispGlassButtonStyle(prominence: .prominent)
+            .accessibilityLabel("Allow")
             // Cmd-Return approves from inside a field. Plain Return never
             // does: there is deliberately no default button on this card.
             .keyboardShortcut(.return, modifiers: .command)

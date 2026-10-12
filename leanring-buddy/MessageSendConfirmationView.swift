@@ -266,6 +266,9 @@ struct MessageSendConfirmationView: View {
         HStack(spacing: WispSpacing.sm) {
             Button("Cancel", action: onCancel)
                 .wispGlassButtonStyle(prominence: .subtle)
+            // Named explicitly: the custom button style left these as a bare
+            // "button" to VoiceOver (and to any automation reading the card).
+                .accessibilityLabel("Cancel")
 
             Button(action: onSend) {
                 HStack(spacing: WispSpacing.xs) {
@@ -276,6 +279,7 @@ struct MessageSendConfirmationView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(MessageSendButtonStyle(fill: messageBubbleFill))
+            .accessibilityLabel("Send")
             // Cmd-Return sends from inside the bubble; plain Return never does.
             .keyboardShortcut(.return, modifiers: .command)
         }

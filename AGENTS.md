@@ -680,7 +680,14 @@ cloud dependency to the local path, without asking.
   is on by default). Start with the reads in `allowedTools` (`list_apps`, `list_windows`,
   `get_window_state`, `verify_state`); to let Wisp act in native apps, add `click`, `type_text`,
   `press_key`, `hotkey`, `scroll`, `set_value` and `invoke_menu`. Every action asks (see the
-  destructive-action floor) with a card naming the element. **Routing:** "click" is a browser-scope
+  destructive-action floor) with a card naming the element; the looking-only tools
+  (`CuaDriverToolNames.runsWithoutConfirmationBareToolNames`: list_apps/list_windows/
+  get_window_state/verify_state…, not scroll or clipboard_read) run without a card, like Wisp's own
+  `read_screen_text`, so a click costs one card instead of three. `MCPManager` appends to each cua
+  tool's description where element tokens and pids come from (`modelFacingDescription`), and a
+  call addressed with one of Wisp's own `a`/`t` ids or pid ≤ 0 is refused before the card by an
+  input preparer (`refusalForMisaddressedCall`) — measured live, the model sent
+  `click {"pid": 0, "element_token": "a13"}`. **Routing:** "click" is a browser-scope
   word, so before `CuaDriverToolRouting` a request like "click the New Note button in Notes" got the
   browser tools and no cua tool. Now a request that names cua, or names a running non-browser app
   together with a UI word (click/type/button/menu/field/window…), boosts every registered cua-driver
@@ -949,7 +956,7 @@ Grouped by what they do. Line counts are approximate.
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~445 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. `MCPStartupTimeoutPolicy` gives a package runner's `initialize` a long first-run budget. `callToolReturningContent` keeps a result's text blocks and `structuredContent` apart; `callTool` returns the text only. |
 | `MCPToolResultRendering.swift` | ~290 | Pure: an MCP result → the model's text. Element lists (token + role) as one line each under a scalar-field header, other structured content as sorted compact JSON, 4000/5000-char caps, duplicate-JSON text dropped; no `structuredContent` → unchanged. Tested by `Tests/MCPStructuredContent`. |
-| `CuaDriverSupport.swift` | ~215 | cua-driver specifics: `CuaDriverToolNames` (server-namespace match, read-only allow-list, `mustAlwaysAsk`), `CuaDriverToolRouting` (when a request is about operating a native app, so its tools are offered) and `CuaDriverElementCache` (token → role/label/app from the last 4 element lists, fed by `MCPManager`, read by the confirmation card). |
+| `CuaDriverSupport.swift` | ~215 | cua-driver specifics: `CuaDriverToolNames` (server-namespace match, read-only allow-list, `mustAlwaysAsk`, which tools skip the card, model-facing descriptions, misaddressed-call refusal), `CuaDriverToolRouting` (when a request is about operating a native app, so its tools are offered) and `CuaDriverElementCache` (token → role/label/app from the last 4 element lists, fed by `MCPManager`, read by the confirmation card). |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
 | `MCPStdioTransport.swift` | ~300 | Stdio transport: child process over stdin/stdout as NDJSON (pipes read via `readabilityHandler`, framed by the pure `NewlineDelimitedLineBuffer`), login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
 | `MCPStreamableHTTPTransport.swift` | ~230 | Remote transport: JSON-RPC over MCP Streamable HTTP (one POST per message; parses JSON + SSE replies; `Mcp-Session-Id`, auth headers). |
