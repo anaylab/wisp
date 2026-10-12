@@ -114,6 +114,7 @@ extension CompanionManager {
         }
 
         guidedWalkthrough.begin(with: newPlan)
+        keepOverlayVisibleForGuidedWalkthrough()
         if firstStepAnnotation.isUnplacedWalkthroughStep {
             // A [STEP:] tag has only words, so even the first step is found on
             // the live screen like the rest.
@@ -266,6 +267,7 @@ extension CompanionManager {
             screenNumber: candidate.screenNumber,
             stepNumber: stepNumber
         )
+        keepOverlayVisibleForGuidedWalkthrough()
         applyAnnotations([stepAnnotation], from: screenCaptures)
         guidedWalkthrough.currentTargetLocation = locationOfActiveAnnotation()
         guidedWalkthrough.updateTargetStatus(.located)

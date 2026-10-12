@@ -2166,6 +2166,19 @@ final class CompanionManager: ObservableObject {
     /// annotations a moment to be seen, then fades out the overlay after a
     /// 1-second pause. Cancelled automatically if the user starts another
     /// push-to-talk interaction.
+    /// Puts the overlay up (it carries a walkthrough's marks) and cancels any
+    /// fade already counting down from earlier in the turn — the overlay is
+    /// transient, so without this a hide scheduled when the reply began would
+    /// still fire a second after the speech ended and take a step's box with it.
+    func keepOverlayVisibleForGuidedWalkthrough() {
+        transientHideTask?.cancel()
+        transientHideTask = nil
+        guard !isOverlayVisible else { return }
+        overlayWindowManager.hasShownOverlayBefore = true
+        overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+        isOverlayVisible = true
+    }
+
     func scheduleTransientHideIfNeeded() {
         guard !isCursorAlwaysVisible && isOverlayVisible else { return }
         // The overlay carries a walkthrough's marks; it fades when that ends.
@@ -2189,7 +2202,7 @@ final class CompanionManager: ObservableObject {
 
             // Pause 1s after everything finishes, then fade out
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !guidedWalkthrough.isActive else { return }
             overlayWindowManager.fadeOutAndHideOverlay()
             isOverlayVisible = false
         }
