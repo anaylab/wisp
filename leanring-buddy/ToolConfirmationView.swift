@@ -5,32 +5,30 @@
 //  The visible half of asking permission to run a tool — now rendered as Wisp's
 //  Dynamic-Island confirmation panel. When the companion needs an explicit ok
 //  before an external or sensitive action, the island expands into this compact
-//  pane of glass: the request itself is visually dominant, the exact call is
-//  legible beneath it, and two clear (but not enormous) choices sit at the
-//  bottom, with "or just say yes" as the voice affordance.
+//  island-surface card below the notch (solid black, or Liquid Glass when the
+//  user chose it for the island): a plain-words headline, what will happen,
+//  the exact call folded into one line, and two clear choices, with "or just
+//  say yes" as the voice affordance.
 //
 //  The spoken question still comes first — this is a voice assistant — but the
 //  card exists for every case speech alone fails: a failed synth, a noisy room,
 //  disconnected headphones, or simply wanting to read the exact request before
-//  allowing it. The presentation/interactivity plumbing is unchanged; only the
-//  look is the new liquid-glass identity.
+//  allowing it.
 //
 //  When the coordinator attached a confirmation card (built deterministically
 //  from the call by `ToolConfirmationCardBuilder` — "New Email" with To and
 //  Subject, a file write with its path), it is drawn with the generic glance-
-//  card renderer between the request and the buttons, and the raw call chip
-//  shrinks to a single line beneath it. Without a card the panel is exactly the
-//  plain summary it always was.
+//  card renderer between the headline and the buttons. Without a card the
+//  headline names the tool in plain words.
 //
 //  The call's human-text fields (subject, body, message, event title, …, as
 //  decided by `EditableConfirmationFields`) are drawn as editable text boxes in
 //  place of their card rows, so the user can fix the wording before Allow. The
 //  typed text goes straight to the coordinator — which is what makes a spoken
-//  "yes" approve the edited version — and the raw call chip shows the call as
+//  "yes" approve the edited version — and the call details show the call as
 //  it will run with those edits. Recipients, paths and the like stay read-only.
 //
 
-import Combine
 import SwiftUI
 
 struct ToolConfirmationView: View {
@@ -41,11 +39,14 @@ struct ToolConfirmationView: View {
     let onApprove: () -> Void
     let onDeny: () -> Void
 
-    /// Counts down alongside the coordinator's own timeout, so the card
-    /// doesn't sit there looking live after the request has expired.
-    @State private var secondsRemaining: Int = Int(ToolConfirmationCoordinator.confirmationTimeoutSeconds)
+    /// The island's surface choice (black by default, Liquid Glass when the
+    /// user opted in), so the card reads as the island expanding.
+    @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
 
-    private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    /// Whether the raw call (tool name + arguments) is unfolded. Folded by
+    /// default: the headline and card already say what will happen, and the
+    /// JSON underneath is for the user who wants to check it.
+    @State private var isShowingCallDetails = false
 
     /// The call as it will run: the asked-about input with the current edits
     /// applied, through the same rule the executor uses.
@@ -92,64 +93,91 @@ struct ToolConfirmationView: View {
         confirmationCoordinator.editedTextsByArgumentKey[editableField.argumentKey] ?? editableField.originalText
     }
 
+    private var cardShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: WispRadius.panel, style: .continuous)
+    }
+
     private var toolCallPanel: some View {
-        WispGlassPanel(
-            cornerRadius: WispRadius.panel,
-            padding: WispSpacing.lg,
-            shadow: .island,
-            // A decision is pending, so the whole rim glows in the warning tone.
-            rimLight: .glowing(WispColor.warning)
-        ) {
-            VStack(alignment: .leading, spacing: WispSpacing.md) {
-                header
-                requestBlock
-                actions
-                Text("or just say yes")
-                    .font(WispFont.caption)
-                    .foregroundColor(WispColor.OnGlass.textTertiary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
+        VStack(alignment: .leading, spacing: WispSpacing.md) {
+            header
+            requestBlock
+            actions
+            Text("or just say yes")
+                .font(WispFont.caption)
+                .foregroundColor(WispColor.Island.textTertiary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
-        .background(
-            WispStateWash(color: WispColor.warning, strength: 0.3)
-                .clipShape(RoundedRectangle(cornerRadius: WispRadius.panel, style: .continuous))
+        .padding(WispSpacing.lg)
+        .frame(width: 340)
+        // A solid island surface, not translucent glass: the card used to show
+        // the user's window through one half and the wallpaper through the
+        // other, which made the text muddy. Black by default, like the notch.
+        .wispNotchIslandSurface(in: cardShape, style: islandStylePreference.surfaceStyle)
+        // A decision is pending, so the rim glows in the warning tone.
+        .wispLiquidRim(
+            in: cardShape,
+            light: .glowing(WispColor.warning),
+            showsSpecularHighlight: islandStylePreference.surfaceStyle == .liquidGlass
         )
-        .frame(width: 312)
+        .wispShadow(.island)
         // Only this card takes clicks. The overlay behind it must stay
         // transparent to the mouse or the whole desktop becomes unclickable.
         .allowsHitTesting(true)
-        .onReceive(countdownTimer) { _ in
-            refreshSecondsRemaining()
-        }
-        // Editing moves the expiry; follow it at once rather than on the next tick.
-        .onChange(of: confirmationCoordinator.pendingConfirmationExpiryDate) { _, _ in
-            refreshSecondsRemaining()
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Wisp needs your OK")
+        .accessibilityAddTraits(.isModal)
     }
 
-    private func refreshSecondsRemaining() {
+    /// What the card asks, in plain words. The spoken question is lowercase
+    /// and names the raw tool ("i'd need to run hotkey to do that…"), which
+    /// suits speech but not a headline.
+    private var headlineText: String {
+        if confirmation.confirmationCard != nil || confirmation.offersEditableFields {
+            return "Allow Wisp to do this?"
+        }
+        return "Allow Wisp to run \u{201C}\(readableToolName)\u{201D}?"
+    }
+
+    /// `cua-driver__get_window_state` → `get window state (cua-driver)`.
+    private var readableToolName: String {
+        let actionWords = ToolCallInspection.words(inIdentifier: ToolCallInspection.bareToolName(confirmation.toolName))
+            .joined(separator: " ")
+        guard let serverNamespace = ToolCallInspection.serverNamespace(of: confirmation.toolName) else {
+            return actionWords
+        }
+        return "\(actionWords) (\(serverNamespace))"
+    }
+
+    private func secondsRemaining(at date: Date) -> Int {
         let expiryDate = confirmationCoordinator.pendingConfirmationExpiryDate
             ?? confirmation.requestedAt.addingTimeInterval(ToolConfirmationCoordinator.confirmationTimeoutSeconds)
-        secondsRemaining = max(0, Int(expiryDate.timeIntervalSinceNow.rounded(.up)))
+        return max(0, Int(expiryDate.timeIntervalSince(date).rounded(.up)))
     }
 
     // MARK: - Header — the wisp mark asking
 
     private var header: some View {
         HStack(spacing: WispSpacing.sm) {
-            WispMark(state: .thinking, size: 18)
-            Text("Wisp")
-                .font(WispFont.headline)
-                .foregroundColor(WispColor.OnGlass.textPrimary)
-            Text("needs your ok")
+            WispMark(state: .thinking, size: 16)
+                .accessibilityHidden(true)
+            Text("Wisp needs your OK")
                 .font(WispFont.caption)
-                .foregroundColor(WispColor.OnGlass.textTertiary)
+                .foregroundColor(WispColor.Island.textSecondary)
 
             Spacer(minLength: WispSpacing.sm)
 
-            Text("\(secondsRemaining)s")
-                .font(WispFont.mono)
-                .foregroundColor(secondsRemaining <= 10 ? WispColor.destructiveText : WispColor.OnGlass.textTertiary)
+            // Derived from the expiry on every tick rather than counted in
+            // view state. The old Timer + @State lived in the view struct, so
+            // each overlay re-render (the live transcript updates it ~11 times
+            // a second) rebuilt it, and the card could flash "45s" or skip.
+            TimelineView(.periodic(from: .now, by: 1)) { timelineContext in
+                let remainingSeconds = secondsRemaining(at: timelineContext.date)
+                Text("\(remainingSeconds)s")
+                    .font(WispFont.mono)
+                    .monospacedDigit()
+                    .foregroundColor(remainingSeconds <= 10 ? WispColor.destructiveText : WispColor.Island.textTertiary)
+                    .accessibilityLabel("\(remainingSeconds) seconds to answer")
+            }
         }
     }
 
@@ -157,11 +185,11 @@ struct ToolConfirmationView: View {
 
     private var requestBlock: some View {
         VStack(alignment: .leading, spacing: WispSpacing.sm) {
-            // The spoken request, given the most weight on the card.
-            Text(confirmation.spokenQuestion)
+            Text(headlineText)
                 .font(WispFont.title)
-                .foregroundColor(WispColor.OnGlass.textPrimary)
+                .foregroundColor(WispColor.Island.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
 
             // What the call will do, laid out as a card, when its shape is
             // one Wisp recognises.
@@ -189,61 +217,83 @@ struct ToolConfirmationView: View {
                 }
             }
 
-            // The exact call + arguments, so a decision is made on what will
-            // actually run rather than on a spoken paraphrase. With a card
-            // above, the raw arguments shrink to one (still selectable) line —
-            // the card already shows them legibly. Edits are reflected here.
-            VStack(alignment: .leading, spacing: WispSpacing.xs) {
-                Text(confirmation.toolName)
-                    .font(WispFont.mono)
-                    .foregroundColor(WispColor.Brand.sage)
-                if hasArguments {
-                    Text(argumentSummaryWithEdits)
-                        .font(WispFont.mono)
-                        .foregroundColor(WispColor.OnGlass.textTertiary)
-                        .lineLimit(confirmation.confirmationCard == nil && !confirmation.offersEditableFields ? 3 : 1)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(WispSpacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: WispRadius.medium, style: .continuous)
-                    .fill(WispColor.OnGlass.chipFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: WispRadius.medium, style: .continuous)
-                    .strokeBorder(WispColor.OnGlass.borderSubtle, lineWidth: 0.75)
-            )
+            callDetails
         }
+    }
+
+    /// The exact call, so a decision can be made on what will actually run
+    /// rather than on a paraphrase — folded to one quiet line until asked for.
+    /// Edits are reflected in it.
+    private var callDetails: some View {
+        VStack(alignment: .leading, spacing: WispSpacing.xs) {
+            Button {
+                isShowingCallDetails.toggle()
+            } label: {
+                HStack(spacing: WispSpacing.xs) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(isShowingCallDetails ? 90 : 0))
+                    Text(confirmation.toolName)
+                        .font(WispFont.mono)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .foregroundColor(WispColor.Island.textTertiary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering in
+                if isHovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+            .accessibilityLabel(isShowingCallDetails ? "Hide call details" : "Show call details")
+
+            if isShowingCallDetails && hasArguments {
+                Text(argumentSummaryWithEdits)
+                    .font(WispFont.mono)
+                    .foregroundColor(WispColor.Island.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(WispSpacing.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: WispRadius.medium, style: .continuous)
+                            .fill(WispColor.Island.controlFill)
+                    )
+            }
+        }
+        .animation(WispMotion.prefersReducedMotion ? nil : WispMotion.quick, value: isShowingCallDetails)
     }
 
     // MARK: - Actions
 
     private var actions: some View {
         HStack(spacing: WispSpacing.sm) {
-            // Cancel leads and is the wider target — approving runs something,
-            // declining only costs a repeated request.
-            Button("Cancel", action: onDeny)
-                .wispGlassButtonStyle(prominence: .subtle)
+            Button(action: onDeny) {
+                Text("Cancel")
+                    .font(WispFont.bodyMedium)
+                    .frame(maxWidth: .infinity)
+            }
+            .wispIslandButtonStyle(prominence: .subtle)
             // Named explicitly: the custom button style left these as a bare
             // "button" to VoiceOver (and to any automation reading the card).
-                .accessibilityLabel("Cancel")
+            .accessibilityLabel("Cancel")
 
             Button(action: onApprove) {
                 HStack(spacing: WispSpacing.xs) {
                     Text("Allow")
+                        .font(WispFont.bodyMedium)
                     Image(systemName: "arrow.right")
                         .font(.system(size: 11, weight: .semibold))
                 }
                 .frame(maxWidth: .infinity)
             }
-            .wispGlassButtonStyle(prominence: .prominent)
+            .wispIslandButtonStyle(prominence: .prominent)
             .accessibilityLabel("Allow")
             // Cmd-Return approves from inside a field. Plain Return never
             // does: there is deliberately no default button on this card.
             .keyboardShortcut(.return, modifiers: .command)
         }
     }
+
 }

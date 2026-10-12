@@ -286,6 +286,24 @@ check(headerTitle(killCard) == "Force quit an app", "kill_app title")
 check(cardTexts(killCard).contains("4242"), "kill_app shows the pid")
 check(cardTexts(killCard).contains(cannotBeUndoneText), "force quitting is marked irreversible")
 
+section("the app is named in place of its pid, and an unnamed app keeps its pid")
+let namedAppHotkeyCard = ToolConfirmationCardBuilder.cuaDriverActionCard(
+    bareToolName: "hotkey",
+    toolInput: object(["keys": .array([.string("cmd"), .string("n")]), "pid": .number(85279), "window_id": .number(17444)]),
+    elementCache: CuaDriverElementCache(),
+    applicationNameForProcessIdentifier: { processIdentifier in processIdentifier == 85279 ? "Notes" : nil }
+)
+check(headerTrailingText(namedAppHotkeyCard) == "Notes", "the header names the app, got \(headerTrailingText(namedAppHotkeyCard) ?? "nil")")
+check(!cardTexts(namedAppHotkeyCard).contains("85279") && !cardTexts(namedAppHotkeyCard).contains("17444"),
+      "pid and window id rows are dropped once the app is named")
+let unnamedAppKillCard = ToolConfirmationCardBuilder.cuaDriverActionCard(
+    bareToolName: "kill_app",
+    toolInput: object(["pid": .number(4242)]),
+    elementCache: CuaDriverElementCache(),
+    applicationNameForProcessIdentifier: { _ in nil }
+)
+check(cardTexts(unnamedAppKillCard).contains("4242"), "a force quit whose app can't be named still shows the pid")
+
 section("an unknown token falls back to the raw arguments, and still asks")
 let unknownTokenInput = object(["element_token": .string("s99999999:3"), "pid": .number(4242)])
 let unknownTokenCard = cuaCard("click", unknownTokenInput)

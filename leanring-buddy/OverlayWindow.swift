@@ -106,6 +106,41 @@ struct OverlayContentView: View {
     /// the resident overlay does no work while idle.
     @State private var isCursorOnThisScreen: Bool = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// How far below the top of the screen the confirmation card starts: under
+    /// the notch (its height is the screen's top safe-area inset) or, on a Mac
+    /// without one, under the menu bar — plus a small gap, so the card hangs
+    /// from the island instead of overlapping it.
+    private var confirmationCardTopInset: CGFloat {
+        let notchHeight = NSScreen.screens.first { $0.frame == screenFrame }?.safeAreaInsets.top ?? 0
+        let topObstructionHeight = notchHeight > 0 ? notchHeight : NSStatusBar.system.thickness
+        return topObstructionHeight + WispSpacing.md
+    }
+
+    /// VoiceOver says nothing when a window appears under a background app, so
+    /// the card would wait silently for an answer the user can't know is
+    /// wanted. Announced once, from the screen showing the card.
+    private func announceConfirmationForVoiceOver() {
+        guard let confirmation = companionManager.pendingToolConfirmation,
+              screenFrame.contains(NSEvent.mouseLocation) else { return }
+        let firstCardTitle = confirmation.confirmationCard?.blocks.lazy.compactMap { block -> String? in
+            if case .header(let title, _, _) = block { return title }
+            return nil
+        }.first
+        let announcementText = ["Wisp needs your OK.", firstCardTitle, "Allow or Cancel, or say yes."]
+            .compactMap { $0 }
+            .joined(separator: " ")
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: announcementText,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ]
+        )
+    }
+
     var body: some View {
         ZStack {
             // Nearly transparent background (helps with compositing)
@@ -124,26 +159,31 @@ struct OverlayContentView: View {
             // and a copy on every monitor would suggest otherwise.
             if isCursorOnThisScreen,
                let confirmation = companionManager.pendingToolConfirmation {
-                ToolConfirmationView(
-                    confirmation: confirmation,
-                    confirmationCoordinator: ToolConfirmationCoordinator.shared,
-                    onApprove: {
-                        companionManager.flashIsland(.success)
-                        ToolConfirmationCoordinator.shared.approveFromUserInterface()
-                    },
-                    onDeny: {
-                        companionManager.flashIsland(.error)
-                        ToolConfirmationCoordinator.shared.declineFromUserInterface()
-                    }
-                )
-                // Sits just under the notch, so the request reads as the Dynamic
-                // Island expanding into a confirmation rather than a card in the
-                // corner of the screen.
-                .position(
-                    x: screenFrame.width / 2,
-                    y: 150
-                )
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                // Anchored by its top edge just below the notch. It used to be
+                // placed by its centre at a fixed height, so a taller card (a
+                // glance card, editable fields) grew upward behind the notch and
+                // hid its own header.
+                VStack(spacing: 0) {
+                    ToolConfirmationView(
+                        confirmation: confirmation,
+                        confirmationCoordinator: ToolConfirmationCoordinator.shared,
+                        onApprove: {
+                            companionManager.flashIsland(.success)
+                            ToolConfirmationCoordinator.shared.approveFromUserInterface()
+                        },
+                        onDeny: {
+                            companionManager.flashIsland(.error)
+                            ToolConfirmationCoordinator.shared.declineFromUserInterface()
+                        }
+                    )
+                    // A new request is a new card, so one prompt replacing another
+                    // animates instead of rewriting the old card in place.
+                    .id(confirmation.id)
+                    .padding(.top, confirmationCardTopInset)
+                    Spacer(minLength: 0)
+                }
+                .frame(width: screenFrame.width, height: screenFrame.height, alignment: .top)
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
 
             // The command-mode badge — naming which push-to-talk gesture just
@@ -200,6 +240,12 @@ struct OverlayContentView: View {
                 isCursorOnThisScreen = screenFrame.contains(NSEvent.mouseLocation)
             }
         }
+        // Without this the card's transition had nothing to animate it, so it
+        // popped in and out.
+        .animation(reduceMotion ? nil : WispMotion.island, value: companionManager.pendingToolConfirmation?.id)
+        .onChange(of: companionManager.pendingToolConfirmation?.id) { _ in
+            announceConfirmationForVoiceOver()
+        }
         .animation(.easeOut(duration: 0.18), value: companionManager.activeCommandMode)
         .animation(.easeOut(duration: 0.18), value: companionManager.browserActivityText.isEmpty)
         .animation(WispMotion.smooth, value: companionManager.voiceState == .listening)
@@ -227,6 +273,9 @@ class OverlayWindowManager {
         currentlyAcceptsMouseEvents = acceptsMouseEvents
         for window in overlayWindows {
             window.ignoresMouseEvents = !acceptsMouseEvents
+            // Only while a card is up is there anything here to name; VoiceOver
+            // otherwise read the window as just "window".
+            window.setAccessibilityTitle(acceptsMouseEvents ? "Wisp needs your OK" : nil)
         }
     }
 
