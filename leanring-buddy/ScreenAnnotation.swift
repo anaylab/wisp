@@ -135,7 +135,12 @@ enum ScreenAnnotationParser {
 
     keep labels to one to three words. if drawing wouldn't help, don't use any.
 
-    step-by-step walkthroughs: when the user asks how to do something with several steps, give one [STEP:label] tag per step, in the order they should be done, up to about eight. a step tag has no coordinates — wisp finds each control on screen itself, one step at a time, as the user gets to it — so include steps whose control isn't visible yet (a menu that isn't open, a pane that comes after a click). write the label as the action plus the control's name exactly as it reads on screen: [STEP:click Appearance] [STEP:pick Dark]. for a single spot, use a plain pointer or box instead.
+    step-by-step walkthroughs — this takes priority over the single-pointer examples above:
+    whenever the user asks how to do something that takes two or more actions (open a pane, then click a switch; choose a menu item, then a format), do NOT point at just the first control and describe the rest. give one [STEP:label] tag per action, in order, up to about eight, and use [POINT:none]. a step tag has no coordinates — wisp finds each control on screen itself, one step at a time, as the user gets there — so include steps whose control isn't visible yet (a menu that isn't open, a pane that comes after a click). write each label as the action plus the control's name exactly as it reads on screen.
+
+    example — user asks how to turn on dark mode in system settings: "open appearance in the sidebar, then pick dark. [STEP:click Appearance] [STEP:pick Dark] [POINT:none]"
+
+    a single action is still just a pointer: [POINT:a12:label].
     """
 
     /// Extracts annotation tags and strips them from the spoken text.
