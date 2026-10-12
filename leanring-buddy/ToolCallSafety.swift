@@ -100,6 +100,11 @@ enum ToolCallSafety {
 
         if alwaysAskBareToolNames.contains(bareName) { return true }
 
+        // cua-driver clicks, types and presses keys in the user's real apps.
+        // None of those verbs is in the vocabulary below, so its action tools
+        // are matched by server and name instead (see `CuaDriverToolNames`).
+        if CuaDriverToolNames.mustAlwaysAsk(toolName: toolName) { return true }
+
         if ToolCallInspection.isComposioMetaTool(bareToolName: bareName) {
             if ToolCallInspection.isComposioExecuteMetaTool(bareToolName: bareName) {
                 // A wrapper whose contents cannot be read cannot be shown to be
