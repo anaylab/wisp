@@ -114,8 +114,14 @@ extension CompanionManager {
         }
 
         guidedWalkthrough.begin(with: newPlan)
-        applyAnnotations([firstStepAnnotation], from: screenCaptures)
-        guidedWalkthrough.currentTargetLocation = locationOfActiveAnnotation()
+        if firstStepAnnotation.isUnplacedWalkthroughStep {
+            // A [STEP:] tag has only words, so even the first step is found on
+            // the live screen like the rest.
+            findCurrentGuidedStepTarget()
+        } else {
+            applyAnnotations([firstStepAnnotation], from: screenCaptures)
+            guidedWalkthrough.currentTargetLocation = locationOfActiveAnnotation()
+        }
         startWatchingForGuidedWalkthroughClicks()
         print("🧭 Guided walkthrough: \(newPlan.steps.map(\.instruction).joined(separator: " → "))")
         return true

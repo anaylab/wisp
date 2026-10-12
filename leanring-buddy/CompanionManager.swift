@@ -1649,7 +1649,11 @@ final class CompanionManager: ObservableObject {
                         screenCaptures: screenCaptures
                     )
                     if !didStartGuidedWalkthrough {
-                        applyAnnotations(annotationsToDraw, from: screenCaptures)
+                        // A lone [STEP:] has no position and nothing to draw.
+                        let placedAnnotations = annotationsToDraw.filter { !$0.isUnplacedWalkthroughStep }
+                        if !placedAnnotations.isEmpty {
+                            applyAnnotations(placedAnnotations, from: screenCaptures)
+                        }
                     }
                 }
 

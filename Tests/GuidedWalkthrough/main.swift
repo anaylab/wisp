@@ -53,6 +53,20 @@ check(plan.isFinished && plan.currentStep == nil, "finished after the last step"
 plan.completeCurrentStep()
 check(plan.isFinished && plan.completedStepCount == 2, "stepping past the end changes nothing")
 
+// MARK: [STEP:] tags
+
+let stepReply = ScreenAnnotationParser.parse("Open Appearance, then pick Dark. [STEP:click Appearance] [STEP:then pick Dark]")
+check(stepReply.spokenText == "Open Appearance, then pick Dark.", "step tags are stripped from speech")
+check(stepReply.annotations.map(\.label) == ["click Appearance", "then pick Dark"], "step labels in order")
+check(stepReply.annotations.allSatisfy(\.isUnplacedWalkthroughStep), "steps carry no position")
+check(stepReply.annotations.map(\.stepNumber) == [1, 2], "two steps are numbered")
+check(GuidedWalkthroughPlan(annotations: stepReply.annotations) != nil, "step tags make a plan")
+let loneStep = ScreenAnnotationParser.parse("Click it. [STEP:click Appearance]")
+check(loneStep.annotations.count == 1 && loneStep.annotations[0].stepNumber == nil, "a lone step isn't numbered")
+check(GuidedWalkthroughPlan(annotations: loneStep.annotations) == nil, "a lone step is no walkthrough")
+let boxReply = ScreenAnnotationParser.parse("[BOX:10,10,50,40:save]")
+check(!boxReply.annotations[0].isUnplacedWalkthroughStep, "a real box is placed")
+
 // MARK: Target text
 
 func target(_ instruction: String) -> (String, String?) {
