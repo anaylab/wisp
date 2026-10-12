@@ -4,9 +4,11 @@
 //
 //  User-facing dictation settings: the recognition language and a personal
 //  dictionary of words the recogniser should spell right (names, jargon,
-//  product names). Both feed straight into the Apple Speech session — the
-//  language chooses the recogniser's locale, and the dictionary is passed as
-//  contextual strings that bias recognition toward those exact spellings.
+//  product names). The language picks Parakeet's language hint (or, for a
+//  language Parakeet doesn't cover, the Apple Speech fallback's locale). The
+//  dictionary drives Parakeet's vocabulary boosting on the final transcript,
+//  and on the Apple fallback is passed as contextual strings that bias
+//  recognition toward those exact spellings.
 //
 
 import Combine

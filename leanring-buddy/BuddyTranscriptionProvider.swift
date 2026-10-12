@@ -38,7 +38,21 @@ enum BuddyTranscriptionProviderFactory {
         return provider
     }
 
+    /// Whether Info.plist's `VoiceTranscriptionProvider` selects Parakeet.
+    /// `apple` keeps Apple Speech only; anything else (the shipped
+    /// `fluidaudio`, or the key missing) means Parakeet with Apple Speech as
+    /// its automatic fallback.
+    static var isParakeetConfigured: Bool {
+        let configuredProviderName = AppBundleConfiguration
+            .stringValue(forKey: "VoiceTranscriptionProvider")?
+            .lowercased()
+        return configuredProviderName != "apple"
+    }
+
     private static func resolveProvider() -> any BuddyTranscriptionProvider {
-        AppleSpeechTranscriptionProvider()
+        if isParakeetConfigured {
+            return ParakeetTranscriptionProvider()
+        }
+        return AppleSpeechTranscriptionProvider()
     }
 }

@@ -88,6 +88,13 @@ swiftc -emit-module -module-name PostHog "${SWIFTFLAGS[@]:0:4}" \
   "$BUILD_DIR/stub/PostHog.swift" -emit-module-path "$BUILD_DIR/stub/PostHog.swiftmodule"
 swiftc -c -parse-as-library -module-name PostHog "${SWIFTFLAGS[@]:0:4}" \
   "$BUILD_DIR/stub/PostHog.swift" -o "$BUILD_DIR/stub/PostHog.o"
+# FluidAudio (Parakeet + Kokoro), stubbed with the same file the
+# AgentRuntimeIntegration suite uses.
+swiftc -emit-module -module-name FluidAudio "${SWIFTFLAGS[@]:0:4}" \
+  Tests/AgentRuntimeIntegration/FluidAudioStub.swift \
+  -emit-module-path "$BUILD_DIR/stub/FluidAudio.swiftmodule"
+swiftc -c -parse-as-library -module-name FluidAudio "${SWIFTFLAGS[@]:0:4}" \
+  Tests/AgentRuntimeIntegration/FluidAudioStub.swift -o "$BUILD_DIR/stub/FluidAudio.o"
 
 APP_SOURCES=()
 # Every Swift file under leanring-buddy/, subfolders included, as in
@@ -102,6 +109,7 @@ swiftc "${SWIFTFLAGS[@]}" \
   -o "$BUILD_DIR/attack" \
   Tests/HostileProviderAttack/main.swift \
   "${APP_SOURCES[@]}" \
-  "$BUILD_DIR/stub/PostHog.o" || { echo "COMPILE FAILED"; exit 1; }
+  "$BUILD_DIR/stub/PostHog.o" \
+  "$BUILD_DIR/stub/FluidAudio.o" || { echo "COMPILE FAILED"; exit 1; }
 
 "$BUILD_DIR/attack"
