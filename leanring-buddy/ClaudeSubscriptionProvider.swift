@@ -156,6 +156,7 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
             exitStatus: process.terminationStatus,
             duration: Date().timeIntervalSince(startDate),
             knownToolNames: Set(request.tools.map(\.name)),
+            exampleToolName: request.tools.first?.name,
             providerName: userFacingName
         )
     }
@@ -393,6 +394,7 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
         exitStatus: Int32,
         duration: TimeInterval,
         knownToolNames: Set<String>,
+        exampleToolName: String? = nil,
         providerName: String
     ) throws -> BuddyChatTurn {
         let replyText = outcome.finalResultText ?? outcome.accumulatedText
@@ -408,7 +410,7 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
         let parsed = StructuredTextToolProtocol.parse(replyText, knownToolNames: knownToolNames)
         let echoedCallIDs = Set(
             parsed.toolCalls
-                .filter(StructuredTextToolProtocol.isEchoOfPromptExample)
+                .filter { StructuredTextToolProtocol.isEchoOfPromptExample($0, exampleToolName: exampleToolName) }
                 .map(\.id)
         )
         let content = parsed.contentBlocks.filter { block in

@@ -136,7 +136,11 @@ final class OllamaProvider: ModelProvider, @unchecked Sendable {
             )
         }
 
-        return Self.turn(from: result, knownToolNames: Set(request.tools.map(\.name)))
+        return Self.turn(
+            from: result,
+            knownToolNames: Set(request.tools.map(\.name)),
+            exampleToolName: request.tools.first?.name
+        )
     }
 
     /// URL failures that mean "nothing is listening", as opposed to a request
@@ -259,7 +263,8 @@ final class OllamaProvider: ModelProvider, @unchecked Sendable {
     /// meaning.
     private static func turn(
         from result: LocalOllamaAPI.StreamedChatResult,
-        knownToolNames: Set<String>
+        knownToolNames: Set<String>,
+        exampleToolName: String?
     ) -> BuddyChatTurn {
         let parsed = StructuredTextToolProtocol.parse(result.text, knownToolNames: knownToolNames)
 
@@ -268,7 +273,7 @@ final class OllamaProvider: ModelProvider, @unchecked Sendable {
         // answer a request the user never made.
         let echoedCallIDs = Set(
             parsed.toolCalls
-                .filter(StructuredTextToolProtocol.isEchoOfPromptExample)
+                .filter { StructuredTextToolProtocol.isEchoOfPromptExample($0, exampleToolName: exampleToolName) }
                 .map(\.id)
         )
 

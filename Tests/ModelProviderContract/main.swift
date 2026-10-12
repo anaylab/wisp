@@ -211,6 +211,16 @@ func runSuite() async {
     results.check("echoed prompt example rejected", echoed?.toolUses.isEmpty == true)
     results.check("echo leaves .endTurn", echoed?.stopReason == .endTurn)
 
+    // Only the example's own tool can be an echo. cua-driver's
+    // `list_windows {"on_screen_only": true}` is all-true like the example,
+    // and dropping it ended a real turn with nothing done.
+    server.setScript(.init(chunks: ["finding the window. [TOOL:read_page:{\"on_screen_only\":true}]"]))
+    let allTrueOtherTool = try? await provider.streamTurn(request("x", tools: knownTools),
+                                                          onTextDelta: { _ in })
+    results.equal("an all-true call to a tool other than the example's is kept",
+                  allTrueOtherTool?.toolUses.count, 1)
+    results.check("that call ends the turn as a tool call", allTrueOtherTool?.stopReason == .toolUse)
+
     // ========================================================================
     results.section("7. exact JSON preservation")
     // ========================================================================
