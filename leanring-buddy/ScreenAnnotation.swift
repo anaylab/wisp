@@ -68,6 +68,12 @@ struct ScreenAnnotation: Identifiable, Equatable {
         self.stepNumber = stepNumber
     }
 
+    /// A walkthrough step the model named without a position (`[STEP:…]`).
+    /// It has nothing to draw until the guided walkthrough finds it on screen.
+    var isUnplacedWalkthroughStep: Bool {
+        style == .box && regionInScreenshotPixels == .zero
+    }
+
     /// Converts to the overlay's coordinate space.
     ///
     /// Both spaces put the origin at the top left, so this is a pure scale.
@@ -129,7 +135,12 @@ enum ScreenAnnotationParser {
 
     keep labels to one to three words. if drawing wouldn't help, don't use any.
 
-    step-by-step walkthroughs: when the user asks how to do something with several steps, mark each step in order — one tag per step, listed in the order they should do them. they are numbered automatically on screen, so keep each label to the action ("click export", "then choose pdf"). use one tag per step for a single flow, up to about eight; for a simple pointer, one tag is fine.
+    step-by-step walkthroughs — this takes priority over the single-pointer examples above:
+    whenever the user asks how to do something that takes two or more actions (open a pane, then click a switch; choose a menu item, then a format), do NOT point at just the first control and describe the rest. give one [STEP:label] tag per action, in order, up to about eight, and use [POINT:none]. a step tag has no coordinates — wisp finds each control on screen itself, one step at a time, as the user gets there — so include steps whose control isn't visible yet (a menu that isn't open, a pane that comes after a click). write each label as the action plus the control's name exactly as it reads on screen.
+
+    example — user asks how to turn on dark mode in system settings: "open appearance in the sidebar, then pick dark. [STEP:click Appearance] [STEP:pick Dark] [POINT:none]"
+
+    a single action is still just a pointer: [POINT:a12:label].
     """
 
     /// Extracts annotation tags and strips them from the spoken text.
@@ -283,6 +294,33 @@ enum ScreenAnnotationParser {
                         // model named: the Accessibility frame already says
                         // where the element is.
                         screenNumber: resolvedRegion.screenNumber
+                    )
+                ))
+            }
+        }
+
+        // Coordinate-free walkthrough steps: [STEP:click Appearance]. The model
+        // can't give a position for a control that isn't on screen yet, so a
+        // step carries only its words (an empty region) and the guided
+        // walkthrough finds it on the live screen when its turn comes.
+        let walkthroughStepPattern = #"\[STEP:\s*([^\]]+?)\s*\]"#
+        if let walkthroughStepRegex = try? NSRegularExpression(pattern: walkthroughStepPattern) {
+            let range = NSRange(responseText.startIndex..., in: responseText)
+            for match in walkthroughStepRegex.matches(in: responseText, range: range) {
+                guard let tagRange = Range(match.range, in: responseText),
+                      let labelRange = Range(match.range(at: 1), in: responseText) else { continue }
+                rangesToRemove.append(tagRange)
+
+                let label = String(responseText[labelRange]).trimmingCharacters(in: .whitespaces)
+                guard !label.isEmpty else { continue }
+                let tagStartOffset = responseText.distance(from: responseText.startIndex, to: tagRange.lowerBound)
+                annotationsWithOffset.append((
+                    offset: tagStartOffset,
+                    annotation: ScreenAnnotation(
+                        style: .box,
+                        regionInScreenshotPixels: .zero,
+                        label: label,
+                        screenNumber: nil
                     )
                 ))
             }

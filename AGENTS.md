@@ -420,6 +420,17 @@ cloud dependency to the local path, without asking.
   ids to the OCR line box (already in screenshot pixels) and `a` ids to the AX path. The read-only
   `read_screen_text` agent tool (`.reading(.localMachine)`, general scope) returns the plain OCR text
   of the current screen (150 lines / 4000 chars).
+- **Guided walkthrough** (`GuidedWalkthrough.swift` pure, `GuidedWalkthroughController.swift`): a reply whose annotation tags
+  are ≥2 numbered, labelled steps (the existing step-by-step tags) is walked through one step at a time instead of drawn all at
+  once (`CompanionManager.beginGuidedWalkthrough`, called where the reply's annotations are applied). Only step 1 uses the model's
+  coordinates — the screen changes after it — so each later step is **found again on the live screen** from its words
+  (`GuidedWalkthroughTargetText.pointingRequest`: filler verbs and "in the sidebar" clauses dropped) with fast pointing's
+  deterministic AX + OCR matcher, retried every ~0.9s for up to 40s (a capture + OCR per try; "can't see it" shown after 5) and
+  drawn as a numbered box. A step completes on a global `leftMouseDown` landing on the marked target
+  (`GuidedWalkthroughClickMatcher`, AppKit-points → screenshot-pixels, no extra permission), or on the checklist's Next; Stop
+  ends it. No model call per step. The notch shows `GuidedWalkthroughChecklistView` in place of the reply text
+  (`answerSurfaceWithReplyActions`); the overlay isn't faded and the lingering-answer expiry is held while one runs, and a new
+  question (`clearScreenAnnotations`) ends it. Tested by `Tests/GuidedWalkthrough`.
 - **Fast pointing** ("where is X" / "point at X" / "where do I click to X"): recognised by
   `PointingRequestParser` in `sendTranscriptToClaudeWithScreenshot` after the browser router, and
   answered by `CompanionManager.runFastPointingTurn` **without the vision model**. The target is
@@ -1153,6 +1164,7 @@ running):
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
 ./Tests/HostileProviderAttack/run.sh     # adversarial provider vs the real agent loop; lists known defects
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
+./Tests/GuidedWalkthrough/run.sh         # guided walkthrough plan stepping, instruction → label, click-on-target matching
 ./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
 ./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec
 ./Tests/BrainDigest/run.sh               # conversation digest + notes import policy
