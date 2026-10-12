@@ -837,20 +837,23 @@ async -> (outcome: AgentTurnRunner.Outcome?, error: Error?,
         }
         let looping = HostileProvider.Turn(text: "still going", deltas: ["still ", "going"],
                                            toolCalls: [call("loop", "again")], stopReason: .toolUse)
-        let provider = HostileProvider(script: Array(repeating: looping, count: 8))
+        // This provider is remote, so it gets the cloud ceiling (the local
+        // model's is lower); the script outlasts it either way.
+        let iterationCap = AgentTurnRunner.maximumIterationsForCloudModelsForTesting
+        let provider = HostileProvider(script: Array(repeating: looping, count: iterationCap * 2))
         let result = await drive(provider, registry: registry)
-        check("the loop is capped", provider.callCount == 4, "\(provider.callCount)")
+        check("the loop is capped", provider.callCount == iterationCap, "\(provider.callCount)")
         check("the cap is reported", result.outcome?.hitIterationCap == true)
-        check("one fewer tool round than model calls", invocations.value == 3, "\(invocations.value)")
+        check("one fewer tool round than model calls", invocations.value == iterationCap - 1, "\(invocations.value)")
         check("text from a capped turn is never spoken", result.speakable.isEmpty,
               result.speakable.description)
         // History must accumulate, not be rebuilt from scratch each pass.
         let growth = provider.receivedRequests.map(\.messages.count)
         check("history grows monotonically across iterations",
-              growth == [1, 3, 5, 7], growth.description)
+              growth == (0..<iterationCap).map { 1 + 2 * $0 }, growth.description)
         let lastResults = provider.receivedRequests.last?.toolResultBlocks.map(\.content) ?? []
         check("every prior round's result is still present on the last pass",
-              lastResults == ["round 1", "round 2", "round 3"], lastResults.description)
+              lastResults == (1..<iterationCap).map { "round \($0)" }, lastResults.description)
     }
 
     // ── Mutation testing ──────────────────────────────────────────────────

@@ -693,7 +693,14 @@ cloud dependency to the local path, without asking.
   tool's description where element tokens and pids come from (`modelFacingDescription`), and a
   call addressed with one of Wisp's own `a`/`t` ids or pid ≤ 0 is refused before the card by an
   input preparer (`refusalForMisaddressedCall`) — measured live, the model sent
-  `click {"pid": 0, "element_token": "a13"}`. **Routing:** "click" is a browser-scope
+  `click {"pid": 0, "element_token": "a13"}`. **Checked after acting:** after any cua action that reports success
+  (not reads, `clipboard_write` or `replay_trajectory`), `MCPManager.cuaDriverResultCheckedAfterAction`
+  waits 0.5s, re-reads the app — `list_windows` for its pid (catches a window opened or closed) and
+  `get_window_state` for the acted-on window (≤60 elements, no screenshot; skipped after `kill_app`) —
+  and appends both to the action's result with an instruction to compare before claiming success
+  (`CuaDriverPostActionCheck`). Done inside the same tool call so it costs no extra agent-loop
+  iteration and can't be skipped; measured live, the driver answers menu picks with
+  `"effect": "unverifiable"` and the model otherwise said "I can't confirm it from here". **Routing:** "click" is a browser-scope
   word, so before `CuaDriverToolRouting` a request like "click the New Note button in Notes" got the
   browser tools and no cua tool. Now a request that names cua, or names a running non-browser app
   together with a UI word (click/type/button/menu/field/window…), boosts every registered cua-driver
@@ -933,7 +940,7 @@ Grouped by what they do. Line counts are approximate.
 ### Agent, tools and MCP
 | File | Lines | Purpose |
 |------|-------|---------|
-| `AgentTurnRunner.swift` | ~415 | The agent loop: max 4 iterations, screenshot on iteration 0 only, per-tool timeouts. |
+| `AgentTurnRunner.swift` | ~425 | The agent loop: max 4 iterations for the local model, 10 for a cloud model (`maximumIterationsForCloudModels` — acting in an app takes find/read/act/check), screenshot on iteration 0 only, per-tool timeouts. |
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
 | `ChromeExtensionBridge.swift` | ~330 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts, `connectionState` for the Agent tab. |
 | `ChromeTabOrganizer.swift` | ~600 | Tab organizing: `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per-window plans, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered prompt + strict reply parsing), `ChromeTabCommand`, and `ChromeTabOrganizer` (runs a plan through the bridge). |
