@@ -283,14 +283,36 @@ actor MCPServerConnection {
         }
     }
 
-    /// Calls a tool and flattens the response into text for the model.
+    /// Both halves of a successful tool result: the `content` blocks
+    /// flattened to text as before, and the `structuredContent` object when
+    /// the server sent one.
+    struct ToolCallContent: Sendable {
+        let flattenedContentText: String
+        let structuredContent: JSONValue?
+    }
+
+    /// Calls a tool and flattens the response into text.
+    ///
+    /// Callers that parse a server's text themselves (the Composio connection
+    /// list) use this; it ignores `structuredContent`, so their parsing sees
+    /// exactly what it always has. The model's path goes through
+    /// `callToolReturningContent` + `MCPToolResultRendering` instead.
     func callTool(name: String, arguments: JSONValue) async throws -> String {
+        let toolCallContent = try await callToolReturningContent(name: name, arguments: arguments)
+        let text = toolCallContent.flattenedContentText
+        return text.isEmpty ? "(the tool returned nothing)" : text
+    }
+
+    /// Calls a tool and returns its text and structured halves separately.
+    func callToolReturningContent(name: String, arguments: JSONValue) async throws -> ToolCallContent {
         let result = try await sendRequest(
             method: "tools/call",
             parameters: .object(["name": .string(name), "arguments": arguments])
         )
 
-        guard case .object(let resultObject) = result else { return "(no result)" }
+        guard case .object(let resultObject) = result else {
+            return ToolCallContent(flattenedContentText: "(no result)", structuredContent: nil)
+        }
 
         // A tool may report failure in-band; surface it as text so the model
         // can respond to it rather than the turn erroring out.
@@ -299,8 +321,10 @@ actor MCPServerConnection {
             throw MCPClientError.serverError(message.isEmpty ? "the tool reported an error." : message)
         }
 
-        let text = Self.flattenContent(resultObject["content"])
-        return text.isEmpty ? "(the tool returned nothing)" : text
+        return ToolCallContent(
+            flattenedContentText: Self.flattenContent(resultObject["content"]),
+            structuredContent: resultObject["structuredContent"]
+        )
     }
 
     /// MCP returns content as typed blocks; only text is usable in a spoken
