@@ -149,7 +149,15 @@ enum StructuredTextToolProtocol {
     /// need no tool at all. Those calls are indistinguishable from real ones
     /// by shape, but their values give them away, and running one would act on
     /// a request the user never made.
-    static func isEchoOfPromptExample(_ call: ParsedToolCall) -> Bool {
+    ///
+    /// - Parameter exampleToolName: The tool the prompt's example shows (the
+    ///   first one offered). Only a call to *that* tool can be an echo. Without
+    ///   it, every call whose arguments happened to be all true/zero/empty was
+    ///   dropped — so cua-driver's `list_windows {"on_screen_only": true}`, a
+    ///   real and natural call, vanished and the turn ended with nothing done.
+    ///   `nil` keeps the old any-tool reading for callers that don't know.
+    static func isEchoOfPromptExample(_ call: ParsedToolCall, exampleToolName: String? = nil) -> Bool {
+        if let exampleToolName, call.name != exampleToolName { return false }
         guard case .object(let arguments) = call.input, !arguments.isEmpty else { return false }
 
         return arguments.values.allSatisfy { value in
