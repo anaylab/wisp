@@ -2273,7 +2273,7 @@ final class CompanionManager: ObservableObject {
         AgentToolRegistry.shared.register(
             BuddyToolDefinition(
                 name: "do_in_background",
-                description: "Hand a slow request off to run in the background and notify the user when it's done, instead of making them wait. Use for anything that needs several steps.",
+                description: "Hand a slow request off to run in the background and notify the user when it's done, instead of making them wait. Use only for long, multi-step work. Never use it for a quick single action another tool can do directly, such as playing or pausing music, opening something or setting a reminder.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([

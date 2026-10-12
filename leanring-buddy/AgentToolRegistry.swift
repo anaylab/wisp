@@ -119,6 +119,9 @@ final class AgentToolRegistry: ObservableObject {
            ) {
             boostedToolNames.formUnion(BrainToolNames.reading)
         }
+        if MediaPlaybackPhraseParser.requestIsAboutMusic(transcript) {
+            boostedToolNames.insert("control_music")
+        }
         let routableDefinitions = (isBrainEnabled
             ? definitions
             : definitions.filter { !BrainToolNames.all.contains($0.name) })

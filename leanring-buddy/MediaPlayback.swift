@@ -188,6 +188,19 @@ enum MediaPlaybackPhraseParser {
             return nil
         }
     }
+
+    /// Whether a request is about playing or controlling music, so the
+    /// per-turn tool router offers `control_music` even when its description
+    /// shares few words with the request ("play some frank ocean").
+    static func requestIsAboutMusic(_ transcript: String) -> Bool {
+        let lowercasedWords = Set(
+            transcript.lowercased().split { !$0.isLetter }.map(String.init)
+        )
+        let musicWords: Set<String> = ["music", "song", "songs", "track", "tracks", "album",
+                                       "playlist", "spotify", "pause", "resume", "skip"]
+        if !lowercasedWords.isDisjoint(with: musicWords) { return true }
+        return transcript.lowercased().hasPrefix("play ")
+    }
 }
 
 // MARK: - Agent tool
@@ -214,7 +227,7 @@ extension AgentToolRegistry {
                     ]),
                     "required": .array([.string("action")])
                 ]),
-                metadata: .writing(.localMachine)
+                metadata: .trivialAndReversible
             )
         ) { input in
             guard case .object(let arguments) = input,
