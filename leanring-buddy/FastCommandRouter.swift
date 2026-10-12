@@ -52,6 +52,7 @@ enum FastCommandRouter {
         guard !normalized.isEmpty else { return nil }
 
         if let outcome = handleAudioCommand(normalized) { return outcome }
+        if let outcome = handleMediaCommand(normalized) { return outcome }
         if let outcome = handleTimerCommand(normalized) { return outcome }
         if let outcome = handleAppLaunch(normalized) { return outcome }
         return nil
@@ -75,6 +76,15 @@ enum FastCommandRouter {
             spokenConfirmation = "timer set for \(spokenDuration)."
         }
         return Outcome(spokenConfirmation: spokenConfirmation, glanceCardRequest: .timer(timerRequest))
+    }
+
+    // MARK: - Music
+
+    /// "Pause", "next song", "play some music": rigid phrases with no song to
+    /// look up. "Play <artist>" goes to the model and its `control_music` tool.
+    private static func handleMediaCommand(_ text: String) -> Outcome? {
+        guard let action = MediaPlaybackPhraseParser.action(fromNormalizedText: text) else { return nil }
+        return Outcome(spokenConfirmation: MediaPlayback.perform(action))
     }
 
     // MARK: - Audio

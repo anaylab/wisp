@@ -50,21 +50,30 @@ struct ToolMetadata: Sendable, Equatable {
 
     let dataSource: ToolDataSource
 
+    /// Changes only passing state on this Mac that one command undoes and that
+    /// nothing else depends on, such as pausing music. The user's own request
+    /// is consent enough, so it does not ask. Never overrides `destructive` or
+    /// `externalSideEffect`.
+    let isTrivialAndReversible: Bool
+
     /// Whether the user must approve before this runs.
     ///
     /// Deliberately derived rather than stored. One rule, one place, applied to
     /// every tool from every source — so a tool cannot be registered as
     /// destructive and silently also as not needing approval.
     var requiresConfirmation: Bool {
-        !readOnly || destructive || externalSideEffect
+        if destructive || externalSideEffect { return true }
+        return !readOnly && !isTrivialAndReversible
     }
 
     init(
         readOnly: Bool,
         destructive: Bool = false,
         externalSideEffect: Bool = false,
-        dataSource: ToolDataSource = .localMachine
+        dataSource: ToolDataSource = .localMachine,
+        isTrivialAndReversible: Bool = false
     ) {
+        self.isTrivialAndReversible = isTrivialAndReversible
         self.readOnly = readOnly
         self.destructive = destructive
         self.externalSideEffect = externalSideEffect
@@ -82,6 +91,11 @@ struct ToolMetadata: Sendable, Equatable {
     static func writing(_ dataSource: ToolDataSource = .localMachine) -> ToolMetadata {
         ToolMetadata(readOnly: false, dataSource: dataSource)
     }
+
+    /// Changes passing local state that one command undoes (play/pause).
+    static let trivialAndReversible = ToolMetadata(
+        readOnly: false, dataSource: .localMachine, isTrivialAndReversible: true
+    )
 
     /// Acts on the world beyond this Mac.
     static func external(_ dataSource: ToolDataSource = .network) -> ToolMetadata {
