@@ -1128,6 +1128,17 @@ struct NotchHUDView: View {
         companionManager.resolvedGlanceCard == nil ? 206 : 296
     }
 
+    /// Renders **bold**, `code` and links in a reply while keeping its line
+    /// breaks. Inline-only on purpose: list dashes stay as typed, and a reply
+    /// that fails to parse falls back to plain text.
+    private static func markdownRenderedReply(_ replyText: String) -> AttributedString {
+        let parsingOptions = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        return (try? AttributedString(markdown: replyText, options: parsingOptions))
+            ?? AttributedString(replyText)
+    }
+
     private var answerSurface: some View {
         let hasReply = !companionManager.currentReplyText
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1135,7 +1146,7 @@ struct NotchHUDView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if hasReply {
-                    Text(companionManager.currentReplyText)
+                    Text(Self.markdownRenderedReply(companionManager.currentReplyText))
                         .font(.system(size: 12.5))
                         .foregroundColor(WispColor.Island.textPrimary)
                         .lineSpacing(2)
