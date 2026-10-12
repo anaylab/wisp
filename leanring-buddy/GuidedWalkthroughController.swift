@@ -232,8 +232,12 @@ extension CompanionManager {
                     screenTextSnapshot: screenTextSnapshot,
                     screenCaptures: screenCaptures
                 )
+                // Near-equal places come back best first (an Accessibility
+                // element ahead of OCR text); a step needs just one, so take
+                // the top. Capping the matcher at one place instead would make
+                // it reject any label that shows up twice as "ambiguous".
                 if let bestMatch = PointingTargetMatcher
-                    .bestPlaces(for: pointingRequest, among: pointingCandidates, maximumPlaceCount: 1)
+                    .bestPlaces(for: pointingRequest, among: pointingCandidates)
                     .first {
                     self.markGuidedStepTarget(
                         bestMatch.candidate,
