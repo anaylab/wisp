@@ -36,6 +36,13 @@ struct GuidedWalkthroughTargetLocation {
     let regionInScreenshotPixels: CGRect
     /// The text of the marked control, for judging whether Wisp may click it.
     let label: String?
+    /// False when the match was loose — an OCR line that only partly says what
+    /// the step names, which may be text in some other window. Wisp won't click
+    /// those for the user; the box still guides them.
+    var isConfidentEnoughToClick = true
+    /// The app that was in front when the step was marked. A click must land in
+    /// a window of this app, or Wisp could end up pressing something in another.
+    var expectedApplicationBundleIdentifier: String?
 }
 
 @MainActor
@@ -272,6 +279,7 @@ extension CompanionManager {
                     .first {
                     self.markGuidedStepTarget(
                         bestMatch.candidate,
+                        targetText: pointingRequest.targetText,
                         stepNumber: currentStepIndex + 1,
                         instruction: currentStep.instruction,
                         screenCaptures: screenCaptures
@@ -289,6 +297,7 @@ extension CompanionManager {
 
     private func markGuidedStepTarget(
         _ candidate: PointingCandidate,
+        targetText: String,
         stepNumber: Int,
         instruction: String,
         screenCaptures: [CompanionScreenCapture]
@@ -305,6 +314,13 @@ extension CompanionManager {
         keepOverlayVisibleForGuidedWalkthrough()
         applyAnnotations([stepAnnotation], from: screenCaptures)
         guidedWalkthrough.currentTargetLocation = locationOfActiveAnnotation()
+        // A real control (Accessibility) or text that says exactly what the step
+        // names is safe to click; an OCR line with extra words is not — it may be
+        // a sentence in another window that happens to contain the label.
+        let candidateSaysExactlyTheTarget = PointingTargetMatcher.words(in: candidate.text)
+            == PointingTargetMatcher.words(in: targetText)
+        guidedWalkthrough.currentTargetLocation?.isConfidentEnoughToClick =
+            candidate.isAccessibilityElement || candidateSaysExactlyTheTarget
         guidedWalkthrough.updateTargetStatus(.located)
         print("🧭 Step \(stepNumber) found: \"\(instruction)\" → \"\(candidate.text)\"")
     }
@@ -319,7 +335,8 @@ extension CompanionManager {
             displayFrameInAppKitCoordinates: displayFrame,
             screenshotSize: screenshotSize,
             regionInScreenshotPixels: annotation.regionInScreenshotPixels,
-            label: annotation.label
+            label: annotation.label,
+            expectedApplicationBundleIdentifier: Self.frontmostExternalApplicationBundleIdentifier()
         )
     }
 
@@ -368,6 +385,10 @@ extension CompanionManager {
             guidedWalkthrough.showAutoClickNote("That one can\u{2019}t be undone \u{2014} click it yourself.")
             return
         }
+        guard targetLocation.isConfidentEnoughToClick else {
+            guidedWalkthrough.showAutoClickNote("I\u{2019}m not sure that\u{2019}s the right spot \u{2014} click it yourself.")
+            return
+        }
         guard AXIsProcessTrusted() else {
             guidedWalkthrough.showAutoClickNote("Wisp needs Accessibility access to click for you.")
             return
@@ -379,6 +400,16 @@ extension CompanionManager {
                   regionInScreenshotPixels: targetLocation.regionInScreenshotPixels,
                   primaryDisplayHeight: primaryDisplayHeight
               ) else { return }
+
+        // The window under the click must belong to the app the step was marked
+        // in. A box can sit over text that is really in another window.
+        if let expectedBundleIdentifier = targetLocation.expectedApplicationBundleIdentifier,
+           let windowOwnerBundleIdentifier = Self.bundleIdentifierOfTopmostWindow(atQuartzPoint: clickPoint),
+           windowOwnerBundleIdentifier != expectedBundleIdentifier {
+            print("🧭 Not clicking: the window there belongs to \(windowOwnerBundleIdentifier), not \(expectedBundleIdentifier)")
+            guidedWalkthrough.showAutoClickNote("That spot is in a different app \u{2014} click it yourself.")
+            return
+        }
 
         print("🧭 Doing step for the user: \"\(currentStep.instruction)\" at (\(Int(clickPoint.x)), \(Int(clickPoint.y)))")
         // Move on first: it puts the status back to searching, so the click
@@ -398,6 +429,39 @@ extension CompanionManager {
                 try? await Task.sleep(nanoseconds: 60_000_000)
             }
         }
+    }
+
+    /// The bundle id of the app the user is working in: the frontmost app, or
+    /// the last one before Wisp if Wisp itself is in front.
+    private static func frontmostExternalApplicationBundleIdentifier() -> String? {
+        if let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           frontmostBundleIdentifier != Bundle.main.bundleIdentifier {
+            return frontmostBundleIdentifier
+        }
+        return FrontmostAppTracker.shared.lastExternalApplication?.bundleIdentifier
+    }
+
+    /// The app owning the frontmost ordinary window at a point (Quartz global
+    /// coordinates), or nil if there is none — e.g. the menu bar, which has no
+    /// ordinary window under it. Menus, the Dock and Wisp's overlays sit on other
+    /// layers and are skipped, so only app windows are compared.
+    private static func bundleIdentifierOfTopmostWindow(atQuartzPoint point: CGPoint) -> String? {
+        guard let windowInfoList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return nil }
+
+        // The list is ordered front to back.
+        for windowInfo in windowInfoList {
+            guard let layer = windowInfo[kCGWindowLayer as String] as? Int, layer == 0,
+                  let boundsDictionary = windowInfo[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
+                  bounds.contains(point),
+                  let ownerProcessID = windowInfo[kCGWindowOwnerPID as String] as? pid_t,
+                  ownerProcessID != ProcessInfo.processInfo.processIdentifier else { continue }
+            return NSRunningApplication(processIdentifier: ownerProcessID)?.bundleIdentifier
+        }
+        return nil
     }
 
     // MARK: - Clicks
