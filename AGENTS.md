@@ -331,6 +331,15 @@ cloud dependency to the local path, without asking.
   Run now/Stop, Pin, Mark read/unread, **Notify when finished** (per buddy; the notification names the buddy,
   and runs another buddy asked for never notify), Duplicate (setup only — no thread or notes), Clear
   conversation (thread restarts, notes and History stay), Delete. The job is editable in place.
+  **Run reliability** (`Buddies/BuddyRunReliability.swift`, pure; applied by `BuddyStore.runDueBuddies`): every run
+  logs why it started (`BuddyRunReason`: scheduled / catch-up / retry / manual / message / delegated, `WispBuddy.runLog`,
+  shown beside "Recent runs"). A missed slot runs once or is skipped per `BuddyCatchUpPolicy` (Automation tab, "If
+  missed"; a slot more than 5 min late counts as missed). A failed *automatic* run is retried after 5 then 15 min
+  (`BuddyAutomationState`), a slot that still fails counts toward pausing, and 3 failed slots in a row pause the buddy
+  (`isAutomationPausedAfterFailures`: schedule keeps moving, nothing runs until Resume; counted in the Buddies badge).
+  Failed manual/message/delegated runs are never retried or counted; stopped/interrupted runs aren't failures. The rail's
+  pause button (`BuddyStore.areAllAutomationsPaused`, UserDefaults) holds every schedule and moves due slots past instead
+  of saving them up. Tested by `Tests/AgentRuntimeIntegration/BuddyReliabilityTests.swift`.
   A buddy has no loop of its own: each run is an ordinary background task
   via `CompanionManager.startBuddyRun` → `BackgroundTaskLauncher.start(title: "Buddy · <name>")`,
   so it queues behind the model like any background work and its record lives in
@@ -1121,6 +1130,7 @@ names forward here.
 | `AgentRunToolkit.swift` | ~35 | Per-run tool changes for `AgentTurnRunner`: names to hide/refuse and run-only tools. |
 | `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyStore.swift` | ~580 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
+| `Buddies/BuddyRunReliability.swift` | ~190 | Pure run-reliability rules: `BuddyRunReason`/`BuddyRunLogEntry` (why a run started), `BuddyCatchUpPolicy`, `BuddyAutomationState` and `BuddyRunReliabilityPolicy` (due decision, retry schedule, auto-pause). |
 | `Buddies/BuddyListPolicy.swift` | ~105 | Pure buddy-list rules (Rakazo-style): unread (a succeeded/failed run finishing after the last read, or marked by hand), ordering (pinned → latest activity → newest), copy names, which task ids make up the visible thread (stored exchanges, not just runs History still holds), starter jobs, and `BuddyAnswerFormatting` (inline markdown for answers). Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyCharacter.swift` | ~290 | The cloud character (Canvas, clock-driven): breathing, blink, pointer-following eyes, squish, moods, working ring, ground shadow; `Liveliness` cost dial. |
 | `Buddies/BuddyMood.swift` | ~55 | `BuddyMood` + pure `BuddyMoodPolicy` (run state/time → mood). |

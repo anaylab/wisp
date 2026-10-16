@@ -52,6 +52,24 @@ struct BuddyRailView: View {
                 .animation(WispMotion.island, value: buddies.map(\.id))
             }
 
+            if buddies.contains(where: { $0.schedule.isRepeating }) {
+                Button { buddyStore.setAllAutomationsPaused(!buddyStore.areAllAutomationsPaused) } label: {
+                    Image(systemName: buddyStore.areAllAutomationsPaused ? "play.fill" : "pause.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(buddyStore.areAllAutomationsPaused ? DS.Colors.warningText : WispColor.textTertiary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(WispColor.surface3.opacity(buddyStore.areAllAutomationsPaused ? 1 : 0.5)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .accessibilityLabel(buddyStore.areAllAutomationsPaused ? "Resume all buddy automation" : "Pause all buddy automation")
+                .nativeTooltip(buddyStore.areAllAutomationsPaused
+                               ? "Buddy automation is paused — click to resume"
+                               : "Pause all scheduled buddy runs")
+                .padding(.top, 10)
+            }
+
             Button(action: onNewBuddy) {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .semibold))

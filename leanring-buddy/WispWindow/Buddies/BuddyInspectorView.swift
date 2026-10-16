@@ -142,6 +142,27 @@ struct BuddyInspectorView: View {
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
         let runRecords = Array(buddyStore.runRecords(of: buddy, in: taskRegistry).suffix(6).reversed())
         return VStack(alignment: .leading, spacing: 18) {
+            if let pausedReason = buddy.automationState?.pausedReason {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(pausedReason).font(.system(size: 12.5, weight: .medium))
+                    if let lastFailureMessage = buddy.automationState?.lastFailureMessage {
+                        Text(lastFailureMessage)
+                            .font(.system(size: 11.5)).foregroundStyle(WispColor.textSecondary).lineLimit(3)
+                    }
+                    Button { buddyStore.resumeAutomation(ofBuddyWithID: buddy.id) } label: {
+                        Label("Resume", systemImage: "play.fill")
+                    }
+                    .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex)).pointerCursor()
+                }
+            } else if buddy.automationState?.nextRetryAt != nil {
+                Text("Last run failed — trying again shortly.")
+                    .font(.system(size: 12.5)).foregroundStyle(WispColor.textSecondary)
+            }
+            if buddyStore.areAllAutomationsPaused && buddy.schedule.isRepeating {
+                Text("All buddy automation is paused.")
+                    .font(.system(size: 12.5)).foregroundStyle(DS.Colors.warningText)
+            }
+
             VStack(alignment: .leading, spacing: 10) {
                 row("Next run", value: buddy.schedule.isRepeating ? BuddyFormatting.nextRunPhrase(for: buddy).capitalizedFirst : "On request")
                 BuddyScheduleEditor(schedule: Binding(
@@ -156,6 +177,18 @@ struct BuddyInspectorView: View {
                 }
                 .toggleStyle(.switch).controlSize(.small).tint(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex))
                 .pointerCursor()
+                if buddy.schedule.isRepeating {
+                    HStack(spacing: 8) {
+                        Text("If missed").font(.system(size: 13)).foregroundStyle(WispColor.textSecondary).fixedSize()
+                        Picker("If missed", selection: Binding(
+                            get: { buddy.effectiveCatchUpPolicy },
+                            set: { buddyStore.updateCatchUpPolicy(ofBuddyWithID: buddy.id, to: $0) }
+                        )) {
+                            ForEach(BuddyCatchUpPolicy.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
+                    }
+                }
             }
 
             if isRunning {
@@ -173,6 +206,9 @@ struct BuddyInspectorView: View {
                         HStack(spacing: 8) {
                             Circle().fill(runColor(record.status)).frame(width: 6, height: 6)
                             Text(runLabel(record.status)).font(.system(size: 12.5))
+                            if let runReason = buddy.runLog?.first(where: { $0.taskID == record.id })?.reason {
+                                Text(runReason.title).font(.system(size: 11.5)).foregroundStyle(WispColor.textTertiary)
+                            }
                             Spacer()
                             Text(BuddyFormatting.timeText(record.startedAt))
                                 .font(.system(size: 11.5).monospacedDigit()).foregroundStyle(WispColor.textTertiary)

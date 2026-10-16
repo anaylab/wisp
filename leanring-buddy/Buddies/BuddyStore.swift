@@ -14,7 +14,10 @@
 //
 //  Runs repeat on a schedule (`BuddySchedule`) checked once a minute while Wisp
 //  is running. A run that was due while the Mac was asleep or Wisp was closed
-//  runs once when Wisp next checks — not once per missed day.
+//  runs once when Wisp next checks — not once per missed day — or is skipped,
+//  per the buddy's `BuddyCatchUpPolicy`. A failed automatic run is retried
+//  twice, and a buddy that keeps failing is paused (`BuddyRunReliability.swift`);
+//  every run records why it started.
 //
 //  Stored at `~/Library/Application Support/Wisp/buddies.json`.
 //
@@ -146,12 +149,23 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// Whether a finished run posts a notification; nil means yes.
     var notifiesWhenFinished: Bool?
 
+    // Run reliability (`BuddyRunReliability.swift`). Optional so older files still load.
+    /// What to do about a schedule slot missed while Wisp was closed; nil means run once.
+    var catchUpPolicy: BuddyCatchUpPolicy?
+    /// How its automatic runs are going: retries, failure streak, whether it is paused.
+    var automationState: BuddyAutomationState?
+    /// Why each of its recent runs started, oldest first, capped like `runTaskIDs`.
+    var runLog: [BuddyRunLogEntry]?
+
     /// The most runs a buddy remembers (older ones stay in History).
     static let maximumRememberedRuns = 20
 
     /// Nil (older files, or never pinned) reads as not pinned.
     var isPinnedInList: Bool { isPinned ?? false }
     var postsNotificationWhenFinished: Bool { notifiesWhenFinished ?? true }
+    var effectiveCatchUpPolicy: BuddyCatchUpPolicy { catchUpPolicy ?? .runOnce }
+    /// Paused after repeated failures; its schedule keeps moving but nothing runs until resumed.
+    var isAutomationPausedAfterFailures: Bool { automationState?.pausedReason != nil }
 }
 
 /// Names a buddy from its job: a subject from the instruction plus a role —
@@ -246,7 +260,16 @@ final class BuddyStore: ObservableObject {
     /// Newest first.
     @Published private(set) var buddies: [WispBuddy] = []
 
+    private static let allAutomationsPausedDefaultsKey = "BuddyAllAutomationsPaused"
+
+    /// The user's "pause all buddy automation" switch. While on, nothing runs by
+    /// itself (manual runs and messages still work), and slots that come due are
+    /// moved past rather than saved up, so resuming doesn't start a burst of
+    /// stale runs. Not tied to a buddy, and survives relaunch.
+    @Published private(set) var areAllAutomationsPaused: Bool
+
     private let buddiesFileURL: URL
+    private let userDefaults: UserDefaults
     private var scheduleCheckTimer: Timer?
 
     /// Starts one run for a buddy — its job, or a message the user sent it —
@@ -258,8 +281,10 @@ final class BuddyStore: ObservableObject {
 
     /// The app uses `shared`, backed by the real file. Tests make their own
     /// store on a temporary file.
-    init(buddiesFileURL: URL = BuddyStore.defaultBuddiesFileURL) {
+    init(buddiesFileURL: URL = BuddyStore.defaultBuddiesFileURL, userDefaults: UserDefaults = .standard) {
         self.buddiesFileURL = buddiesFileURL
+        self.userDefaults = userDefaults
+        areAllAutomationsPaused = userDefaults.bool(forKey: Self.allAutomationsPausedDefaultsKey)
         buddies = loadBuddies()
     }
 
@@ -281,18 +306,44 @@ final class BuddyStore: ObservableObject {
         runDueBuddies(now: Date())
     }
 
-    /// Runs every repeating buddy whose time has come. A buddy already running
-    /// is skipped for this slot; one that can't start (the background limit)
-    /// keeps its due date and is tried again next minute.
-    func runDueBuddies(now: Date) {
+    /// One scheduler pass: count the runs that finished since the last pass
+    /// (retrying or pausing a buddy that failed), then run what is due.
+    /// A buddy already running is skipped for this slot; one that can't start
+    /// (the background limit) keeps its due date and is tried again next minute.
+    func runDueBuddies(now: Date, in taskRegistry: AgentTaskRegistry = .shared) {
+        accountForFinishedRuns(now: now, in: taskRegistry)
+
         for buddy in buddies {
-            guard let nextScheduledRunAt = buddy.nextScheduledRunAt, nextScheduledRunAt <= now else { continue }
-            if isRunning(buddy) {
+            let isHeld = areAllAutomationsPaused || buddy.isAutomationPausedAfterFailures
+
+            // A retry for an earlier failed run.
+            if !isHeld,
+               let nextRetryAt = buddy.automationState?.nextRetryAt, nextRetryAt <= now,
+               !isRunning(buddy, in: taskRegistry) {
+                runNow(
+                    buddyWithID: buddy.id,
+                    reason: .retry,
+                    retryAttempt: buddy.automationState?.retryAttempt,
+                    in: taskRegistry
+                )
+            }
+
+            guard let dueAt = buddy.nextScheduledRunAt, dueAt <= now else { continue }
+            if isHeld || isRunning(buddy, in: taskRegistry) {
                 advanceSchedule(ofBuddyWithID: buddy.id, after: now)
                 continue
             }
-            if runNow(buddyWithID: buddy.id) {
+            switch BuddyRunReliabilityPolicy.dueDecision(dueAt: dueAt, now: now, catchUpPolicy: buddy.effectiveCatchUpPolicy) {
+            case .skip:
                 advanceSchedule(ofBuddyWithID: buddy.id, after: now)
+            case .run(let reason):
+                // A new slot supersedes a retry still waiting for the last one.
+                mutateBuddy(withID: buddy.id) { buddy in
+                    buddy.automationState = BuddyRunReliabilityPolicy.stateEnteringNewSlot(buddy.automationState ?? BuddyAutomationState())
+                }
+                if runNow(buddyWithID: buddy.id, reason: reason, dueAt: dueAt, in: taskRegistry) {
+                    advanceSchedule(ofBuddyWithID: buddy.id, after: now)
+                }
             }
         }
     }
@@ -301,6 +352,45 @@ final class BuddyStore: ObservableObject {
         mutateBuddy(withID: buddyID) { buddy in
             buddy.nextScheduledRunAt = buddy.schedule.nextRunDate(after: date, calendar: .current)
         }
+    }
+
+    /// Looks at each buddy's latest run once it has finished and updates its
+    /// retry / failure tally. Runs on the scheduler's minute tick, so a retry
+    /// is scheduled within a minute of the failure.
+    private func accountForFinishedRuns(now: Date, in taskRegistry: AgentTaskRegistry) {
+        for buddy in buddies {
+            guard let latestRunRecord = latestRunRecord(of: buddy, in: taskRegistry),
+                  latestRunRecord.status.isTerminal,
+                  latestRunRecord.id != buddy.automationState?.lastAccountedTaskID else { continue }
+
+            let runReason = buddy.runLog?.first { $0.taskID == latestRunRecord.id }?.reason ?? .manual
+            let outcome = BuddyRunReliabilityPolicy.stateAfterRun(
+                status: latestRunRecord.status,
+                reason: runReason,
+                taskID: latestRunRecord.id,
+                state: buddy.automationState ?? BuddyAutomationState(),
+                now: now
+            )
+            mutateBuddy(withID: buddy.id) { $0.automationState = outcome.state }
+        }
+    }
+
+    /// Pauses or resumes all buddy automation at once.
+    func setAllAutomationsPaused(_ isPaused: Bool) {
+        guard isPaused != areAllAutomationsPaused else { return }
+        areAllAutomationsPaused = isPaused
+        userDefaults.set(isPaused, forKey: Self.allAutomationsPausedDefaultsKey)
+    }
+
+    /// Clears a buddy's automatic pause and failure streak so its schedule runs again.
+    func resumeAutomation(ofBuddyWithID buddyID: UUID) {
+        mutateBuddy(withID: buddyID) { buddy in
+            buddy.automationState = BuddyRunReliabilityPolicy.stateAfterResume(buddy.automationState ?? BuddyAutomationState())
+        }
+    }
+
+    func updateCatchUpPolicy(ofBuddyWithID buddyID: UUID, to newPolicy: BuddyCatchUpPolicy) {
+        mutateBuddy(withID: buddyID) { $0.catchUpPolicy = newPolicy == .runOnce ? nil : newPolicy }
     }
 
     // MARK: - Queries
@@ -372,9 +462,12 @@ final class BuddyStore: ObservableObject {
         )
     }
 
-    /// Buddies that are working or have news — what the sidebar badge counts.
+    /// Buddies that are working, have news, or were paused after failing — what
+    /// the sidebar badge counts.
     func buddiesNeedingAttentionCount(in taskRegistry: AgentTaskRegistry = .shared) -> Int {
-        buddies.filter { isRunning($0, in: taskRegistry) || isUnread($0, in: taskRegistry) }.count
+        buddies.filter {
+            isRunning($0, in: taskRegistry) || isUnread($0, in: taskRegistry) || $0.isAutomationPausedAfterFailures
+        }.count
     }
 
     // MARK: - Changes
@@ -421,9 +514,22 @@ final class BuddyStore: ObservableObject {
 
     /// Starts a run of the buddy's job now. Returns false when it couldn't start.
     @discardableResult
-    func runNow(buddyWithID buddyID: UUID) -> Bool {
+    func runNow(
+        buddyWithID buddyID: UUID,
+        reason: BuddyRunReason = .manual,
+        dueAt: Date? = nil,
+        retryAttempt: Int? = nil,
+        in taskRegistry: AgentTaskRegistry = .shared
+    ) -> Bool {
         guard let buddy = buddy(withID: buddyID) else { return false }
-        return startRun(of: buddy, request: BuddyRunRequest(origin: .job, text: buddy.instruction))
+        return startRunReturningTaskID(
+            of: buddy,
+            request: BuddyRunRequest(origin: .job, text: buddy.instruction),
+            reason: reason,
+            dueAt: dueAt,
+            retryAttempt: retryAttempt,
+            in: taskRegistry
+        ) != nil
     }
 
     /// Sends the user's message to the buddy as the next turn of its thread.
@@ -432,7 +538,7 @@ final class BuddyStore: ObservableObject {
     func sendMessage(_ messageText: String, toBuddyWithID buddyID: UUID) -> Bool {
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessageText.isEmpty, let buddy = buddy(withID: buddyID) else { return false }
-        return startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText))
+        return startRunReturningTaskID(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText), reason: .message) != nil
     }
 
     /// Sends a message with files attached. The files are copied into the
@@ -484,7 +590,7 @@ final class BuddyStore: ObservableObject {
             attachmentNames: addedAttachments.map(\.fileName),
             images: images
         )
-        return startRun(of: buddy, request: request)
+        return startRunReturningTaskID(of: buddy, request: request, reason: .message) != nil
     }
 
     /// Starts a run of `buddyID` for another buddy's `ask_buddy` request and
@@ -493,24 +599,36 @@ final class BuddyStore: ObservableObject {
         guard let buddy = buddy(withID: buddyID) else { return nil }
         return startRunReturningTaskID(
             of: buddy,
-            request: BuddyRunRequest(origin: .delegated, text: message, requesterName: requesterName)
+            request: BuddyRunRequest(origin: .delegated, text: message, requesterName: requesterName),
+            reason: .delegated
         )
     }
 
-    private func startRun(of buddy: WispBuddy, request: BuddyRunRequest) -> Bool {
-        startRunReturningTaskID(of: buddy, request: request) != nil
-    }
-
-    private func startRunReturningTaskID(of buddy: WispBuddy, request: BuddyRunRequest) -> UUID? {
+    private func startRunReturningTaskID(
+        of buddy: WispBuddy,
+        request: BuddyRunRequest,
+        reason: BuddyRunReason,
+        dueAt: Date? = nil,
+        retryAttempt: Int? = nil,
+        in taskRegistry: AgentTaskRegistry = .shared
+    ) -> UUID? {
         let buddyID = buddy.id
-        guard !isRunning(buddy), let runStarter, let runTaskID = runStarter(buddy, request) else {
+        guard !isRunning(buddy, in: taskRegistry), let runStarter, let runTaskID = runStarter(buddy, request) else {
             return nil
         }
+        let logEntry = BuddyRunLogEntry(
+            taskID: runTaskID, reason: reason, startedAt: Date(), dueAt: dueAt, retryAttempt: retryAttempt
+        )
         mutateBuddy(withID: buddyID) { buddy in
             buddy.runTaskIDs.append(runTaskID)
             if buddy.runTaskIDs.count > WispBuddy.maximumRememberedRuns {
                 buddy.runTaskIDs.removeFirst(buddy.runTaskIDs.count - WispBuddy.maximumRememberedRuns)
             }
+            buddy.runLog = BuddyRunReliabilityPolicy.trimmedLog(
+                (buddy.runLog ?? []) + [logEntry], limit: WispBuddy.maximumRememberedRuns
+            )
+            // A retry that has started is no longer waiting.
+            if reason == .retry { buddy.automationState?.nextRetryAt = nil }
         }
         return runTaskID
     }
@@ -607,7 +725,8 @@ final class BuddyStore: ObservableObject {
             modelChoice: originalBuddy.modelChoice,
             toolAccess: originalBuddy.toolAccess,
             specialty: originalBuddy.specialty,
-            notifiesWhenFinished: originalBuddy.notifiesWhenFinished
+            notifiesWhenFinished: originalBuddy.notifiesWhenFinished,
+            catchUpPolicy: originalBuddy.catchUpPolicy
         )
         buddies.insert(duplicatedBuddy, at: 0)
         saveBuddies()
@@ -623,6 +742,7 @@ final class BuddyStore: ObservableObject {
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
         mutateBuddy(withID: buddyID) { buddy in
             buddy.runTaskIDs = []
+            buddy.runLog = nil
             buddy.isMarkedUnread = nil
             buddy.lastReadAt = Date()
         }

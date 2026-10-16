@@ -182,6 +182,7 @@ struct BuddyChatView: View {
         case .waiting: return "Waiting for your ok"
         case .oops: return "Its last run failed"
         default:
+            if buddy.isAutomationPausedAfterFailures { return "Paused after repeated failures" }
             let specialtyPrefix = buddy.specialty.flatMap { $0 == .general ? nil : $0.title + " · " } ?? ""
             return buddy.schedule.isRepeating
                 ? "\(specialtyPrefix)Next run \(BuddyFormatting.nextRunPhrase(for: buddy))"
