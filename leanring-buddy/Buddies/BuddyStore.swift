@@ -157,6 +157,13 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// Why each of its recent runs started, oldest first, capped like `runTaskIDs`.
     var runLog: [BuddyRunLogEntry]?
 
+    // Event triggers (`BuddyTrigger.swift`), alongside the schedule. Optional so older files still load.
+    var triggers: [BuddyTrigger]?
+    /// When its trigger-started runs began, for the cooldown and the daily limit.
+    var triggeredRunDates: [Date]?
+    /// Calendar events a trigger already fired for, so a restart doesn't repeat them.
+    var firedTriggerKeys: [String]?
+
     /// The most runs a buddy remembers (older ones stay in History).
     static let maximumRememberedRuns = 20
 
@@ -164,6 +171,7 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     var isPinnedInList: Bool { isPinned ?? false }
     var postsNotificationWhenFinished: Bool { notifiesWhenFinished ?? true }
     var effectiveCatchUpPolicy: BuddyCatchUpPolicy { catchUpPolicy ?? .runOnce }
+    var activeTriggers: [BuddyTrigger] { triggers ?? [] }
     /// Paused after repeated failures; its schedule keeps moving but nothing runs until resumed.
     var isAutomationPausedAfterFailures: Bool { automationState?.pausedReason != nil }
 }
@@ -393,6 +401,63 @@ final class BuddyStore: ObservableObject {
         mutateBuddy(withID: buddyID) { $0.catchUpPolicy = newPolicy == .runOnce ? nil : newPolicy }
     }
 
+    // MARK: - Event triggers
+
+    func addTrigger(_ trigger: BuddyTrigger, toBuddyWithID buddyID: UUID) {
+        mutateBuddy(withID: buddyID) { buddy in
+            guard !buddy.activeTriggers.contains(where: { $0.id == trigger.id }) else { return }
+            buddy.triggers = buddy.activeTriggers + [trigger]
+        }
+    }
+
+    func removeTrigger(withID triggerID: String, fromBuddyWithID buddyID: UUID) {
+        mutateBuddy(withID: buddyID) { buddy in
+            let remainingTriggers = buddy.activeTriggers.filter { $0.id != triggerID }
+            buddy.triggers = remainingTriggers.isEmpty ? nil : remainingTriggers
+        }
+    }
+
+    /// Starts a run because `trigger` fired, if the buddy may run right now:
+    /// not paused (all, or after failures), not already running, and inside the
+    /// trigger cooldown and daily limit. `detailNames` (file names, event
+    /// titles) ride in the prompt as data. `firedKeys` are remembered so the
+    /// same calendar event doesn't fire twice. Returns whether a run started.
+    @discardableResult
+    func fireTrigger(
+        _ trigger: BuddyTrigger,
+        forBuddyWithID buddyID: UUID,
+        detailNames: [String],
+        firedKeys: [String] = [],
+        now: Date = Date(),
+        in taskRegistry: AgentTaskRegistry = .shared
+    ) -> Bool {
+        guard let buddy = buddy(withID: buddyID),
+              buddy.activeTriggers.contains(where: { $0.id == trigger.id }),
+              !areAllAutomationsPaused,
+              !buddy.isAutomationPausedAfterFailures,
+              !isRunning(buddy, in: taskRegistry) else { return false }
+
+        let recentRunDates = buddy.triggeredRunDates ?? []
+        guard BuddyTriggerPolicy.fireDecision(now: now, recentTriggeredRunDates: recentRunDates) == .fire else { return false }
+
+        let request = BuddyRunRequest(
+            origin: .job,
+            text: BuddyTriggerPolicy.runText(instruction: buddy.instruction, trigger: trigger, detailNames: detailNames),
+            displayText: BuddyTriggerPolicy.displayText(instruction: buddy.instruction, trigger: trigger, detailNames: detailNames)
+        )
+        guard startRunReturningTaskID(
+            of: buddy, request: request, reason: .triggered, detail: trigger.summary, in: taskRegistry
+        ) != nil else { return false }
+
+        mutateBuddy(withID: buddyID) { buddy in
+            buddy.triggeredRunDates = BuddyTriggerPolicy.prunedTriggeredRunDates(recentRunDates, now: now) + [now]
+            if !firedKeys.isEmpty {
+                buddy.firedTriggerKeys = BuddyTriggerPolicy.trimmedFiredKeys((buddy.firedTriggerKeys ?? []) + firedKeys)
+            }
+        }
+        return true
+    }
+
     // MARK: - Queries
 
     func buddy(withID buddyID: UUID) -> WispBuddy? {
@@ -610,6 +675,7 @@ final class BuddyStore: ObservableObject {
         reason: BuddyRunReason,
         dueAt: Date? = nil,
         retryAttempt: Int? = nil,
+        detail: String? = nil,
         in taskRegistry: AgentTaskRegistry = .shared
     ) -> UUID? {
         let buddyID = buddy.id
@@ -617,7 +683,7 @@ final class BuddyStore: ObservableObject {
             return nil
         }
         let logEntry = BuddyRunLogEntry(
-            taskID: runTaskID, reason: reason, startedAt: Date(), dueAt: dueAt, retryAttempt: retryAttempt
+            taskID: runTaskID, reason: reason, startedAt: Date(), dueAt: dueAt, retryAttempt: retryAttempt, detail: detail
         )
         mutateBuddy(withID: buddyID) { buddy in
             buddy.runTaskIDs.append(runTaskID)
@@ -726,7 +792,8 @@ final class BuddyStore: ObservableObject {
             toolAccess: originalBuddy.toolAccess,
             specialty: originalBuddy.specialty,
             notifiesWhenFinished: originalBuddy.notifiesWhenFinished,
-            catchUpPolicy: originalBuddy.catchUpPolicy
+            catchUpPolicy: originalBuddy.catchUpPolicy,
+            triggers: originalBuddy.triggers
         )
         buddies.insert(duplicatedBuddy, at: 0)
         saveBuddies()

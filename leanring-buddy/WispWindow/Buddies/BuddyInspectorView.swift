@@ -191,6 +191,8 @@ struct BuddyInspectorView: View {
                 }
             }
 
+            triggersSection(for: buddy)
+
             if isRunning {
                 Button { buddyStore.stopRun(ofBuddyWithID: buddy.id) } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()
@@ -217,6 +219,79 @@ struct BuddyInspectorView: View {
                 }
             }
         }
+    }
+
+    /// Event triggers: runs that start when something happens on this Mac
+    /// instead of (or as well as) on the schedule.
+    private func triggersSection(for buddy: WispBuddy) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header("Triggers")
+            ForEach(buddy.activeTriggers) { trigger in
+                HStack(spacing: 8) {
+                    Image(systemName: trigger.symbolName)
+                        .font(.system(size: 11.5)).foregroundStyle(WispColor.textSecondary).frame(width: 16)
+                    Text(trigger.summary).font(.system(size: 12.5)).lineLimit(1)
+                    Spacer()
+                    Button { buddyStore.removeTrigger(withID: trigger.id, fromBuddyWithID: buddy.id) } label: {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(WispColor.textTertiary)
+                    }
+                    .buttonStyle(.plain).pointerCursor()
+                    .accessibilityLabel("Remove trigger \(trigger.summary)")
+                    .nativeTooltip("Remove")
+                }
+            }
+            Menu {
+                Button("New file in a folder…") { chooseFolderTrigger(for: buddy) }
+                Menu("When an app opens") {
+                    ForEach(Self.runningApplicationChoices(), id: \.bundleIdentifier) { applicationChoice in
+                        Button(applicationChoice.name) {
+                            buddyStore.addTrigger(
+                                .appLaunched(bundleIdentifier: applicationChoice.bundleIdentifier, appName: applicationChoice.name),
+                                toBuddyWithID: buddy.id
+                            )
+                        }
+                    }
+                }
+                Menu("Before a calendar event") {
+                    ForEach(BuddyTrigger.calendarLeadMinuteChoices, id: \.self) { minutes in
+                        Button("\(minutes) minutes before") {
+                            buddyStore.addTrigger(.calendarEventStarting(minutesBefore: minutes), toBuddyWithID: buddy.id)
+                        }
+                    }
+                }
+            } label: {
+                Label("Add trigger", systemImage: "plus")
+            }
+            .menuStyle(.borderlessButton).fixedSize().pointerCursor()
+            if !buddy.activeTriggers.isEmpty {
+                Text("Runs at most once every 5 minutes, and only while Wisp is open.")
+                    .font(.system(size: 11)).foregroundStyle(WispColor.textTertiary)
+            }
+        }
+    }
+
+    private func chooseFolderTrigger(for buddy: WispBuddy) {
+        let openPanel = NSOpenPanel()
+        openPanel.canChooseFiles = false
+        openPanel.canChooseDirectories = true
+        openPanel.allowsMultipleSelection = false
+        openPanel.prompt = "Watch"
+        guard openPanel.runModal() == .OK, let folderURL = openPanel.url else { return }
+        buddyStore.addTrigger(.newFileInFolder(folderPath: folderURL.path), toBuddyWithID: buddy.id)
+    }
+
+    /// Regular apps that are running now, by name, for the "when an app opens" menu.
+    private static func runningApplicationChoices() -> [(name: String, bundleIdentifier: String)] {
+        var seenBundleIdentifiers = Set<String>()
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { application -> (name: String, bundleIdentifier: String)? in
+                guard let name = application.localizedName, let bundleIdentifier = application.bundleIdentifier,
+                      bundleIdentifier != Bundle.main.bundleIdentifier,
+                      seenBundleIdentifiers.insert(bundleIdentifier).inserted else { return nil }
+                return (name, bundleIdentifier)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private func runColor(_ status: AgentTaskRecord.Status) -> Color {

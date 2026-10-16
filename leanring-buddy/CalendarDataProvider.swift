@@ -106,6 +106,29 @@ actor CalendarDataProvider: GlanceCardDataProvider {
         )
     }
 
+    /// Timed (not all-day) events starting between `rangeStartDate` and
+    /// `rangeEndDate`, soonest first, or nil without full Calendar access. For
+    /// buddy triggers; never prompts, for the same reason as above.
+    func timedEventsStartingIfAuthorized(from rangeStartDate: Date, to rangeEndDate: Date) -> [CalendarGlanceEvent]? {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
+
+        let predicate = eventStore.predicateForEvents(withStart: rangeStartDate, end: rangeEndDate, calendars: nil)
+        return eventStore.events(matching: predicate)
+            .filter { !$0.isAllDay && $0.startDate >= rangeStartDate }
+            .sorted { $0.startDate < $1.startDate }
+            .map { event in
+                CalendarGlanceEvent(
+                    id: event.eventIdentifier ?? UUID().uuidString,
+                    title: event.title ?? "(no title)",
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                    isAllDay: false,
+                    location: event.location?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil,
+                    calendarColorHex: event.calendar?.cgColor?.hexString
+                )
+            }
+    }
+
     /// How many timed (not all-day) events are still to start today, or nil
     /// without Calendar access. For the morning suggestions banner; like
     /// `imminentTimedEventIfAuthorized`, never prompts.

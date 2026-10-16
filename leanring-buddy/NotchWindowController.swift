@@ -171,6 +171,8 @@ final class NotchWindowController {
         BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
             companionManager?.startBuddyRun(buddy, request: runRequest)
         }
+        // Buddies' event triggers: new files, app launches, calendar events.
+        BuddyTriggerMonitor.shared.start()
     }
 
     func hide() {

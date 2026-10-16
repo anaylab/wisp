@@ -340,6 +340,15 @@ cloud dependency to the local path, without asking.
   Failed manual/message/delegated runs are never retried or counted; stopped/interrupted runs aren't failures. The rail's
   pause button (`BuddyStore.areAllAutomationsPaused`, UserDefaults) holds every schedule and moves due slots past instead
   of saving them up. Tested by `Tests/AgentRuntimeIntegration/BuddyReliabilityTests.swift`.
+  **Event triggers** (`Buddies/BuddyTrigger.swift` pure, `BuddyTriggerMonitor.swift` watching, `BuddyStore.fireTrigger`):
+  besides its schedule a buddy can run on a new file in a folder (30s poll of the folder's direct contents; the first
+  look only baselines, files still being written or named `.part`/`.crdownload` wait), an app opening (NSWorkspace) or
+  a calendar event N minutes from starting (EventKit, only if access was already granted; fired events remembered in
+  `firedTriggerKeys`). `fireTrigger` refuses while all automation is paused, the buddy is auto-paused or running, within
+  5 min of its last triggered run, or past 12 triggered runs a day; files are only marked seen once a run starts, so a
+  burst becomes one run after the cooldown. What fired it (file names, event titles) is outside text and reaches the
+  model fenced as data. Triggered runs log reason `.triggered`, are never retried (a retry would lose the event) and don't
+  count toward auto-pause. Edited under the Automation tab's Triggers. Wisp must be open: nothing fires while it's closed.
   A buddy has no loop of its own: each run is an ordinary background task
   via `CompanionManager.startBuddyRun` → `BackgroundTaskLauncher.start(title: "Buddy · <name>")`,
   so it queues behind the model like any background work and its record lives in
@@ -1131,6 +1140,8 @@ names forward here.
 | `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyStore.swift` | ~580 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
 | `Buddies/BuddyRunReliability.swift` | ~190 | Pure run-reliability rules: `BuddyRunReason`/`BuddyRunLogEntry` (why a run started), `BuddyCatchUpPolicy`, `BuddyAutomationState` and `BuddyRunReliabilityPolicy` (due decision, retry schedule, auto-pause). |
+| `Buddies/BuddyTrigger.swift` | ~210 | Pure event-trigger rules: `BuddyTrigger`, `BuddyTriggerPolicy` (cooldown/daily limit, new-file detection, due calendar events, the fenced run prompt). |
+| `Buddies/BuddyTriggerMonitor.swift` | ~170 | Watches folders, app launches and the calendar for buddies' triggers and calls `BuddyStore.fireTrigger`. |
 | `Buddies/BuddyListPolicy.swift` | ~105 | Pure buddy-list rules (Rakazo-style): unread (a succeeded/failed run finishing after the last read, or marked by hand), ordering (pinned → latest activity → newest), copy names, which task ids make up the visible thread (stored exchanges, not just runs History still holds), starter jobs, and `BuddyAnswerFormatting` (inline markdown for answers). Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyCharacter.swift` | ~290 | The cloud character (Canvas, clock-driven): breathing, blink, pointer-following eyes, squish, moods, working ring, ground shadow; `Liveliness` cost dial. |
 | `Buddies/BuddyMood.swift` | ~55 | `BuddyMood` + pure `BuddyMoodPolicy` (run state/time → mood). |

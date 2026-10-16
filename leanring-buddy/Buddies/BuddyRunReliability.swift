@@ -21,6 +21,9 @@ enum BuddyRunReason: String, Codable, Equatable {
     case catchUp
     /// An earlier scheduled run failed and this is the automatic retry.
     case retry
+    /// One of its event triggers fired (`BuddyTrigger`). Not retried: a retry would
+    /// run the job without the event that started it.
+    case triggered
     /// The user pressed Run now (or the buddy was just created).
     case manual
     /// The user sent the buddy a message.
@@ -34,7 +37,7 @@ enum BuddyRunReason: String, Codable, Equatable {
     var isAutomatic: Bool {
         switch self {
         case .scheduled, .catchUp, .retry: return true
-        case .manual, .message, .delegated: return false
+        case .triggered, .manual, .message, .delegated: return false
         }
     }
 
@@ -43,6 +46,7 @@ enum BuddyRunReason: String, Codable, Equatable {
         case .scheduled: return "On schedule"
         case .catchUp: return "Catching up"
         case .retry: return "Retry"
+        case .triggered: return "Trigger"
         case .manual: return "Run now"
         case .message: return "Your message"
         case .delegated: return "Asked by a buddy"
@@ -60,6 +64,8 @@ struct BuddyRunLogEntry: Codable, Equatable, Identifiable {
     var dueAt: Date?
     /// For a retry, which attempt this is (1 = the first retry).
     var retryAttempt: Int?
+    /// For a triggered run, what fired it ("New file in Downloads").
+    var detail: String?
 
     var id: UUID { taskID }
 }
