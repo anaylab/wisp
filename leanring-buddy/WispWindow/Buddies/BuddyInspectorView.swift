@@ -281,6 +281,12 @@ struct BuddyInspectorView: View {
 
     private func aboutTab(for buddy: WispBuddy) -> some View {
         VStack(alignment: .leading, spacing: 18) {
+            Button { WispShareImporter.exportBuddy(buddy) } label: {
+                Label("Share this buddy…", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()
+            .nativeTooltip("Saves its job, model and tool limits as a file — not its conversation, notes or files")
+
             VStack(alignment: .leading, spacing: 8) {
                 header("Name")
                 TextField("Name", text: $editedName)

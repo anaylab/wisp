@@ -1121,6 +1121,20 @@ final class CompanionManager: ObservableObject {
             return
         }
         guard let routine = RoutineStore.shared.routine(withID: routineID) else { return }
+
+        // A routine with blanks ("summarize this for {person}") asks for them
+        // first, before anything leaves the screen; cancelling sends nothing.
+        let routineParameters = RoutineParameters.parameters(in: routine.instruction)
+        var parameterValues: [String: String] = [:]
+        if !routineParameters.isEmpty {
+            guard let enteredValues = RoutineParameterPrompt.ask(
+                routineName: routine.name,
+                parameters: routineParameters,
+                initialValues: RoutineParameters.initialValues(for: routineParameters, lastValues: routine.lastParameterValues)
+            ) else { return }
+            parameterValues = enteredValues
+            RoutineStore.shared.rememberParameterValues(enteredValues, forRoutineID: routineID)
+        }
         RoutineStore.shared.markRoutineRun(withID: routineID)
 
         // Wisp's own surfaces leave the screen before the screenshot, as with skills.
@@ -1131,7 +1145,12 @@ final class CompanionManager: ObservableObject {
             isOverlayVisible = true
         }
 
-        var routinePrompt = routine.instruction
+        var routinePrompt = RoutineParameters.resolve(
+            instruction: routine.instruction,
+            values: parameterValues,
+            clipboardText: RoutineParameters.usesClipboard(routine.instruction)
+                ? NSPasteboard.general.string(forType: .string) : nil
+        )
         if let workingApplication = FrontmostAppTracker.shared.lastExternalApplication {
             routinePrompt = "(I'm in \(workingApplication.displayName).) " + routinePrompt
         }

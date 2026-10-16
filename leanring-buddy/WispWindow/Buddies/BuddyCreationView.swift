@@ -63,6 +63,12 @@ struct BuddyCreationView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(WispColor.textPrimary)
                 Spacer()
+                Button("Import from file…") {
+                    if let importedBuddyID = WispShareImporter.importFromFile()?.importedBuddyIDs.first {
+                        onCreated(importedBuddyID)
+                    }
+                }
+                .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
                 if !isFirstBuddy {
                     Button("Cancel", action: onCancel).buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
                 }

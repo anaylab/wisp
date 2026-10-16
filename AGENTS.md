@@ -743,6 +743,19 @@ cloud dependency to the local path, without asking.
   router's `boostedToolNames` and appends at most 3 matching names to its description for that
   turn (`ShortcutsToolRouting`); a request saying "shortcut(s)" (not "keyboard shortcut") boosts
   both tools and relies on `list_shortcuts`. The Agent tab shows availability + count + Refresh.
+- **Routine blanks & sharing**: a routine's instruction can hold `{person}` / `{topic|default}` blanks
+  (`RoutineParameters`, pure; max 6, names start with a letter, JSON/code braces are left alone). `CompanionManager.runRoutine`
+  asks for them first in a native alert (`RoutineParameterPrompt`, prefilled from `WispRoutine.lastParameterValues` or the
+  default; Cancel sends nothing) — an alert because routines also run from the notch, which can't host a sheet.
+  `{clipboard}` (fenced between `<<<`/`>>>` and labelled as data), `{date}` and `{time}` are filled by Wisp, never asked.
+  **Sharing** (`WispShareBundle.swift` pure, `WispShareImporter.swift` panels + adding): routines and buddies export as a
+  `.wisp` JSON file holding setup only (routine: name/instruction/icon/apps; buddy: job, colour, specialty, model, tool limits,
+  its schedule as words) — never threads, notes, files, shortcuts, ids or keys. A file from someone else is untrusted: 1 MB and
+  50-per-kind caps, text trimmed and capped, unknown icons replaced, and a review dialog (`WispShareReview`) says what each
+  item could do (cloud model, "every tool", clipboard use) before anything is added. Imports are inert: routines arrive with
+  no shortcut or pin, buddies with their schedule off (made with a placeholder repeating schedule then set to `.once`, since
+  `createBuddy` runs a one-off buddy immediately) and nothing runs. Entry points: Routines → Import / Share, buddy About →
+  Share this buddy, the new-buddy screen → Import from file.
 - **Skills**: markdown files with a `name`/`description` frontmatter header, dropped in
   `~/.wisp/skills/`. Only the name+description index (a few tokens each) is always in the
   prompt; the full body is loaded on demand via the read-only `load_skill` tool —
@@ -1002,6 +1015,10 @@ Grouped by what they do. Line counts are approximate.
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `RoutineStore.swift` | ~270 | Routines: user-fired saved instructions (`WispRoutine`: name, instruction, symbol, optional chord+digit shortcut, suggested app bundle ids, pinned-in-notch). Persists to `~/Library/Application Support/Wisp/routines.json`; seeds 4 starters when the file is absent. `notchSuggestions(forAppBundleIdentifier:)` powers the notch's app-aware section. Distinct from skills (model-loaded reference). |
 | `FrontmostAppTracker.swift` | ~55 | Last frontmost app that isn't Wisp (NSWorkspace activation notifications), so suggestions survive opening the Wisp window/composer. |
+| `RoutineParameters.swift` | ~140 | Pure routine blanks: `{name}`/`{name|default}` parsing, prefill values, filling in (clipboard fenced as data, date, time). Tested by `Tests/RoutineParameters`. |
+| `RoutineParameterPrompt.swift` | ~65 | The native dialog that asks for a routine's blanks before it runs. |
+| `WispShareBundle.swift` | ~190 | Pure share format: `SharedRoutine`/`SharedBuddy`/`WispShareBundle`, export of setup only, validating + cleaning an imported file, `WispShareReview` text. |
+| `WispShareImporter.swift` | ~170 | Save/open panels, the import review dialog, and adding imported items inert. |
 | `RoutinesTab.swift` | ~450 | Routines page: list + auto-saving editor (name, instruction, icon, shortcut digit with "used by" warnings, suggested apps from running apps or /Applications, pin toggle, Run now — closes the Wisp window first so the screenshot sees the user's work). |
 | `SkillIndex.swift` | ~35 | Terse per-line skill index appended to the system prompt alongside tool instructions. |
 | `ShortcutsBridge.swift` | ~455 | Apple Shortcuts via `/usr/bin/shortcuts`: `ShortcutsListParser` (`list --show-identifiers` → name + UUID), `ShortcutsCommandLine` (argument arrays; name after `--`), `ShortcutsProcessRunner` (off-main `Process`, both pipes drained, timeout + cancellation terminate), `ShortcutRunResultFormatter` (capped text for the model), and the `ShortcutsBridge` ObservableObject (5-min cached list, availability, `runShortcut(named:textInput:)` with exact-name resolution and temp-file I/O). |
@@ -1179,6 +1196,7 @@ running):
 ./Tests/WindowManagement/run.sh          # window layout command parsing, app matching, frame math
 ./Tests/ScreenWatcher/run.sh             # screen-watch request parsing, text matching, evaluator
 ./Tests/EditableConfirmation/run.sh      # editable confirmation fields: which, edit application, refusals
+./Tests/RoutineParameters/run.sh         # routine blanks: parsing, defaults, clipboard/date, filling in
 ./Tests/MCPStructuredContent/run.sh      # MCP structuredContent rendering + caps, cua-driver floor and cards
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
 ```

@@ -66,6 +66,7 @@ swiftc -target arm64-apple-macos26.0 \
   -o "$BUILD_DIR/integration" \
   Tests/AgentRuntimeIntegration/main.swift \
   Tests/AgentRuntimeIntegration/BuddyRedesignTests.swift \
+  Tests/AgentRuntimeIntegration/WispShareTests.swift \
   Tests/AgentRuntimeIntegration/AnthropicProviderTests.swift \
   Tests/AgentRuntimeIntegration/BuddyBotTests.swift \
   Tests/AgentRuntimeIntegration/ClaudeSubscriptionProviderTests.swift \

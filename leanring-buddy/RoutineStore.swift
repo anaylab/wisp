@@ -37,6 +37,9 @@ struct WispRoutine: Codable, Identifiable, Equatable {
     /// Shown in the notch whatever app is in front.
     var isPinnedInNotch: Bool
     var lastRunAt: Date?
+    /// What the user last typed for each blank in the instruction
+    /// (`RoutineParameters`), keyed by lowercased name, to prefill the next run.
+    var lastParameterValues: [String: String]?
 
     init(
         id: UUID = UUID(),
@@ -47,7 +50,8 @@ struct WispRoutine: Codable, Identifiable, Equatable {
         suggestedAppBundleIdentifiers: [String] = [],
         suggestedAppNames: [String] = [],
         isPinnedInNotch: Bool = false,
-        lastRunAt: Date? = nil
+        lastRunAt: Date? = nil,
+        lastParameterValues: [String: String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -58,6 +62,7 @@ struct WispRoutine: Codable, Identifiable, Equatable {
         self.suggestedAppNames = suggestedAppNames
         self.isPinnedInNotch = isPinnedInNotch
         self.lastRunAt = lastRunAt
+        self.lastParameterValues = lastParameterValues
     }
 }
 
@@ -174,6 +179,13 @@ final class RoutineStore: ObservableObject {
     func markRoutineRun(withID routineID: UUID) {
         guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
         routines[index].lastRunAt = Date()
+        saveRoutines()
+    }
+
+    /// Remembers what the user entered for the blanks, to prefill the next run.
+    func rememberParameterValues(_ values: [String: String], forRoutineID routineID: UUID) {
+        guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
+        routines[index].lastParameterValues = values.isEmpty ? nil : values
         saveRoutines()
     }
 

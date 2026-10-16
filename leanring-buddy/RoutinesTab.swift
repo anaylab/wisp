@@ -58,6 +58,19 @@ struct RoutinesTab: View {
             .buttonStyle(WispPillButtonStyle(isProminent: false))
             .pointerCursor()
 
+            Button {
+                if WispShareImporter.importFromFile() != nil {
+                    selectRoutine(routineStore.routines.last?.id ?? selectedRoutineID)
+                }
+            } label: {
+                Label("Import from file…", systemImage: "square.and.arrow.down")
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
+            .pointerCursor()
+            .nativeTooltip("Add routines (and buddies) someone shared as a .wisp file")
+
             ScrollView {
                 VStack(spacing: 2) {
                     ForEach(routineStore.routines) { routine in
@@ -221,6 +234,19 @@ struct RoutinesTab: View {
             .nativeTooltip("Close the dashboard and run this on what's behind it")
 
             Button {
+                WispShareImporter.exportRoutine(routine)
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .nativeTooltip("Share this routine as a file")
+
+            Button {
                 isConfirmingDelete = true
             } label: {
                 Image(systemName: "trash")
@@ -261,6 +287,18 @@ struct RoutinesTab: View {
         .nativeTooltip("Change icon")
     }
 
+    /// Under the instruction: what it is sent with, and which blanks it asks for.
+    private func instructionHint(for instruction: String) -> String {
+        let parameters = RoutineParameters.parameters(in: instruction)
+        var hint = "Sent with a screenshot, like a typed question."
+        if !parameters.isEmpty {
+            hint += " Asks for \(RoutineParameters.summary(of: parameters)) each time it runs."
+        } else {
+            hint += " Use {name} for a blank to fill in at run time, or {clipboard}."
+        }
+        return hint
+    }
+
     private var instructionCard: some View {
         DashboardCard(title: "What should Wisp do?") {
             VStack(alignment: .leading, spacing: 6) {
@@ -275,7 +313,7 @@ struct RoutinesTab: View {
                                 .fill(DS.Colors.surface2)
                         )
                 }
-                Text("Sent with a screenshot, like a typed question.")
+                Text(instructionHint(for: editedRoutineBinding(\.instruction)?.wrappedValue ?? ""))
                     .font(.system(size: 11))
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
