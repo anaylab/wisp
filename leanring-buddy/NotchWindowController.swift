@@ -173,6 +173,8 @@ final class NotchWindowController {
         }
         // Buddies' event triggers: new files, app launches, calendar events.
         BuddyTriggerMonitor.shared.start()
+        // Pipelines of buddies run on their own schedules.
+        BuddyPipelineStore.shared.start()
     }
 
     func hide() {

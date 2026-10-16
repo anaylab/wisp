@@ -24,6 +24,8 @@ enum BuddyRunReason: String, Codable, Equatable {
     /// One of its event triggers fired (`BuddyTrigger`). Not retried: a retry would
     /// run the job without the event that started it.
     case triggered
+    /// A step of a pipeline (`BuddyPipeline`). Not retried here: the pipeline owns failure.
+    case pipeline
     /// The user pressed Run now (or the buddy was just created).
     case manual
     /// The user sent the buddy a message.
@@ -37,7 +39,7 @@ enum BuddyRunReason: String, Codable, Equatable {
     var isAutomatic: Bool {
         switch self {
         case .scheduled, .catchUp, .retry: return true
-        case .triggered, .manual, .message, .delegated: return false
+        case .triggered, .pipeline, .manual, .message, .delegated: return false
         }
     }
 
@@ -47,6 +49,7 @@ enum BuddyRunReason: String, Codable, Equatable {
         case .catchUp: return "Catching up"
         case .retry: return "Retry"
         case .triggered: return "Trigger"
+        case .pipeline: return "Pipeline step"
         case .manual: return "Run now"
         case .message: return "Your message"
         case .delegated: return "Asked by a buddy"

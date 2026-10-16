@@ -349,6 +349,15 @@ cloud dependency to the local path, without asking.
   burst becomes one run after the cooldown. What fired it (file names, event titles) is outside text and reaches the
   model fenced as data. Triggered runs log reason `.triggered`, are never retried (a retry would lose the event) and don't
   count toward auto-pause. Edited under the Automation tab's Triggers. Wisp must be open: nothing fires while it's closed.
+  **Pipelines** (`Buddies/BuddyPipeline.swift` pure, `BuddyPipelineStore.swift` runner, `WispWindow/Buddies/BuddyPipelinesView.swift`,
+  `~/Library/Application Support/Wisp/buddy-pipelines.json`): 2–5 buddies in a fixed order, each buddy once; step N runs that
+  buddy's own job as an ordinary buddy run (`BuddyStore.startPipelineStepRun`, reason `.pipeline`, so it lands in its thread and
+  History) with step N-1's cleaned answer appended, fenced as data (4000 chars). Steps run one at a time and stop at the first
+  failure, stop, or empty answer; a busy buddy or full queue is waited on up to 2 min. Only the last step notifies
+  (`BuddyRunRequest.suppressesNotification`). A hand-off between different models is approved once, when the pipeline is created
+  (`boundarySignature`: steps + models; changing either needs re-approval, and a scheduled run never prompts, it is skipped).
+  Own schedule (minute tick), held by pause-all, paused after 3 failed runs; a user Stop isn't a failure. Reached from the
+  Buddies rail's branch button. Tested by `Tests/AgentRuntimeIntegration/BuddyPipelineTests.swift`.
   A buddy has no loop of its own: each run is an ordinary background task
   via `CompanionManager.startBuddyRun` → `BackgroundTaskLauncher.start(title: "Buddy · <name>")`,
   so it queues behind the model like any background work and its record lives in
@@ -1142,6 +1151,9 @@ names forward here.
 | `Buddies/BuddyRunReliability.swift` | ~190 | Pure run-reliability rules: `BuddyRunReason`/`BuddyRunLogEntry` (why a run started), `BuddyCatchUpPolicy`, `BuddyAutomationState` and `BuddyRunReliabilityPolicy` (due decision, retry schedule, auto-pause). |
 | `Buddies/BuddyTrigger.swift` | ~210 | Pure event-trigger rules: `BuddyTrigger`, `BuddyTriggerPolicy` (cooldown/daily limit, new-file detection, due calendar events, the fenced run prompt). |
 | `Buddies/BuddyTriggerMonitor.swift` | ~170 | Watches folders, app launches and the calendar for buddies' triggers and calls `BuddyStore.fireTrigger`. |
+| `Buddies/BuddyPipeline.swift` | ~250 | Pure pipeline rules: `BuddyPipeline`/`BuddyPipelineRun`, validation, model-boundary crossings + approval signature, fenced step prompts, failure tally. |
+| `Buddies/BuddyPipelineStore.swift` | ~390 | Persists pipelines, runs them step by step through `BuddyPipelineEnvironment` (injectable), schedules them. |
+| `WispWindow/Buddies/BuddyPipelinesView.swift` | ~290 | Pipelines page: cards with steps/status/recent runs and the create form with up-front model-hand-off approval. |
 | `Buddies/BuddyListPolicy.swift` | ~105 | Pure buddy-list rules (Rakazo-style): unread (a succeeded/failed run finishing after the last read, or marked by hand), ordering (pinned → latest activity → newest), copy names, which task ids make up the visible thread (stored exchanges, not just runs History still holds), starter jobs, and `BuddyAnswerFormatting` (inline markdown for answers). Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyCharacter.swift` | ~290 | The cloud character (Canvas, clock-driven): breathing, blink, pointer-following eyes, squish, moods, working ring, ground shadow; `Liveliness` cost dial. |
 | `Buddies/BuddyMood.swift` | ~55 | `BuddyMood` + pure `BuddyMoodPolicy` (run state/time → mood). |

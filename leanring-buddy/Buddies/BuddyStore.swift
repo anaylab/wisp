@@ -112,6 +112,9 @@ struct BuddyRunRequest {
     var attachmentNames: [String] = []
     /// Attached pictures (downscaled JPEG data and a label) for a vision model.
     var images: [(data: Data, label: String)] = []
+    /// A step in the middle of a pipeline isn't news of its own, so it posts no
+    /// "finished" notification; the last step's still does.
+    var suppressesNotification = false
 }
 
 struct WispBuddy: Codable, Identifiable, Equatable {
@@ -456,6 +459,29 @@ final class BuddyStore: ObservableObject {
             }
         }
         return true
+    }
+
+    // MARK: - Pipelines
+
+    /// Starts a pipeline step: the buddy's own job with the previous step's
+    /// answer folded into `text`. Returns the run's task id, or nil when the
+    /// buddy is busy or the queue is full (the pipeline waits and tries again).
+    func startPipelineStepRun(
+        buddyID: UUID,
+        text: String,
+        displayText: String,
+        suppressesNotification: Bool,
+        pipelineName: String,
+        in taskRegistry: AgentTaskRegistry = .shared
+    ) -> UUID? {
+        guard let buddy = buddy(withID: buddyID) else { return nil }
+        return startRunReturningTaskID(
+            of: buddy,
+            request: BuddyRunRequest(origin: .job, text: text, displayText: displayText, suppressesNotification: suppressesNotification),
+            reason: .pipeline,
+            detail: "Pipeline “\(pipelineName)”",
+            in: taskRegistry
+        )
     }
 
     // MARK: - Queries

@@ -2401,6 +2401,7 @@ final class CompanionManager: ObservableObject {
             },
             // A peer's request is a step in that peer's run, not news of its own.
             completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated
+                && !request.suppressesNotification
                 ? .buddy(name: buddy.name, job: buddy.instruction)
                 : nil,
             speakConfirmation: { [weak self] question in

@@ -16,6 +16,8 @@ struct BuddyRailView: View {
     let isCreating: Bool
     var onSelect: (UUID) -> Void
     var onNewBuddy: () -> Void
+    var isShowingPipelines = false
+    var onShowPipelines: () -> Void = {}
     var onDuplicated: (UUID) -> Void
     var onRequestClearConversation: (UUID) -> Void
     var onRequestDeletion: (UUID) -> Void
@@ -69,6 +71,20 @@ struct BuddyRailView: View {
                                : "Pause all scheduled buddy runs")
                 .padding(.top, 10)
             }
+
+            Button(action: onShowPipelines) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isShowingPipelines ? WispColor.textPrimary : WispColor.textTertiary)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(WispColor.surface3.opacity(isShowingPipelines ? 1 : 0.5)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .accessibilityLabel("Pipelines")
+            .nativeTooltip("Pipelines — chain buddies")
+            .padding(.top, 10)
 
             Button(action: onNewBuddy) {
                 Image(systemName: "plus")

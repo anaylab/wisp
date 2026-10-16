@@ -887,6 +887,7 @@ func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
     buddyToolAppAccessSuite()
     buddyRunReliabilitySuite()
     buddyTriggerSuite()
+    await buddyPipelineSuite()
 
     print("\n\(String(repeating: "─", count: 52))")
     print("  \(tally.passed) passed, \(tally.failed) failed, \(tally.passed + tally.failed) total")

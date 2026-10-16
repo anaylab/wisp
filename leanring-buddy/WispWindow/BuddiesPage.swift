@@ -20,6 +20,7 @@ struct BuddiesPage: View {
 
     @State private var selectedBuddyID: UUID?
     @State private var isCreatingBuddy = false
+    @State private var isShowingPipelines = false
     @AppStorage("BuddyInspectorOpen") private var isInspectorOpen = true
     /// The buddy a right-click asked to clear or delete, awaiting confirmation.
     @State private var buddyIDPendingClear: UUID?
@@ -51,10 +52,13 @@ struct BuddiesPage: View {
                 onSelect: { buddyID in
                     withAnimation(WispMotion.smooth) {
                         isCreatingBuddy = false
+                        isShowingPipelines = false
                         selectedBuddyID = buddyID
                     }
                 },
-                onNewBuddy: { withAnimation(WispMotion.smooth) { isCreatingBuddy = true } },
+                onNewBuddy: { withAnimation(WispMotion.smooth) { isShowingPipelines = false; isCreatingBuddy = true } },
+                isShowingPipelines: isShowingPipelines && !showsCreation,
+                onShowPipelines: { withAnimation(WispMotion.smooth) { isCreatingBuddy = false; isShowingPipelines.toggle() } },
                 onDuplicated: showBuddy,
                 onRequestClearConversation: { buddyIDPendingClear = $0 },
                 onRequestDeletion: { buddyIDPendingDeletion = $0 }
@@ -68,6 +72,9 @@ struct BuddiesPage: View {
                         onCancel: { withAnimation(WispMotion.smooth) { isCreatingBuddy = false } }
                     )
                     .transition(.opacity)
+                } else if isShowingPipelines {
+                    BuddyPipelinesView()
+                        .transition(.opacity)
                 } else if let selectedBuddyID {
                     HStack(spacing: 0) {
                         BuddyChatView(
@@ -153,6 +160,7 @@ struct BuddiesPage: View {
     private func showBuddy(_ buddyID: UUID) {
         withAnimation(WispMotion.island) {
             isCreatingBuddy = false
+            isShowingPipelines = false
             selectedBuddyID = buddyID
         }
     }
