@@ -99,6 +99,10 @@ enum AskAboutPartKey: String, CaseIterable, Identifiable {
     }
 }
 
+/// "Save Worked Solution" is also a letter pressed with the Talk chord, chosen
+/// from the same letters (and key codes) as Ask About a Part.
+typealias SaveWorkedSolutionKey = AskAboutPartKey
+
 @MainActor
 final class ShortcutBindingStore: ObservableObject {
     static let shared = ShortcutBindingStore()
@@ -125,12 +129,18 @@ final class ShortcutBindingStore: ObservableObject {
         didSet { persistAndApplyToMonitor() }
     }
 
+    /// The letter that, with the Talk chord held, saves the worked solution on screen.
+    @Published var saveWorkedSolutionKey: SaveWorkedSolutionKey {
+        didSet { persistAndApplyToMonitor() }
+    }
+
     // MARK: - Defaults
 
     static let defaultPrimaryHoldChord: BuddyPushToTalkShortcut.ShortcutOption = .controlOption
     static let defaultHandsFreeDictationEnabled = true
     static let defaultHandsFreeDictationModifier: BareModifier = .control
     static let defaultAskAboutPartKey: AskAboutPartKey = .a
+    static let defaultSaveWorkedSolutionKey: SaveWorkedSolutionKey = .s
 
     // MARK: - Persistence keys
 
@@ -138,6 +148,7 @@ final class ShortcutBindingStore: ObservableObject {
     private static let handsFreeEnabledKey = "wisp.shortcut.handsFreeDictationEnabled"
     private static let handsFreeModifierKey = "wisp.shortcut.handsFreeDictationModifier"
     private static let askAboutPartKeyKey = "wisp.shortcut.askAboutPartKey"
+    private static let saveWorkedSolutionKeyKey = "wisp.shortcut.saveWorkedSolutionKey"
 
     private init() {
         let userDefaults = UserDefaults.standard
@@ -169,6 +180,13 @@ final class ShortcutBindingStore: ObservableObject {
             askAboutPartKey = Self.defaultAskAboutPartKey
         }
 
+        if let rawKey = userDefaults.string(forKey: Self.saveWorkedSolutionKeyKey),
+           let storedKey = SaveWorkedSolutionKey(rawValue: rawKey) {
+            saveWorkedSolutionKey = storedKey
+        } else {
+            saveWorkedSolutionKey = Self.defaultSaveWorkedSolutionKey
+        }
+
         applyToMonitor()
     }
 
@@ -178,6 +196,7 @@ final class ShortcutBindingStore: ObservableObject {
         handsFreeDictationEnabled = Self.defaultHandsFreeDictationEnabled
         handsFreeDictationModifier = Self.defaultHandsFreeDictationModifier
         askAboutPartKey = Self.defaultAskAboutPartKey
+        saveWorkedSolutionKey = Self.defaultSaveWorkedSolutionKey
     }
 
     // MARK: - Applying
@@ -188,6 +207,7 @@ final class ShortcutBindingStore: ObservableObject {
         userDefaults.set(handsFreeDictationEnabled, forKey: Self.handsFreeEnabledKey)
         userDefaults.set(handsFreeDictationModifier.rawValue, forKey: Self.handsFreeModifierKey)
         userDefaults.set(askAboutPartKey.rawValue, forKey: Self.askAboutPartKeyKey)
+        userDefaults.set(saveWorkedSolutionKey.rawValue, forKey: Self.saveWorkedSolutionKeyKey)
         applyToMonitor()
     }
 
@@ -197,5 +217,6 @@ final class ShortcutBindingStore: ObservableObject {
         BuddyPushToTalkShortcut.handsFreeDoubleTapModifier =
             handsFreeDictationEnabled ? handsFreeDictationModifier.eventModifierFlag : nil
         GlobalPushToTalkShortcutMonitor.askAboutPartKeyCode = askAboutPartKey.keyCode
+        GlobalPushToTalkShortcutMonitor.saveWorkedSolutionKeyCode = saveWorkedSolutionKey.keyCode
     }
 }

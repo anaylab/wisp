@@ -83,17 +83,41 @@ struct ShortcutsTab: View {
                     keys: bindingStore.primaryHoldChord.keyCapsuleLabels + [bindingStore.askAboutPartKey.capsuleLabel],
                     trailing: AnyView(askAboutPartKeyPicker)
                 )
+
+                Divider().overlay(DS.Colors.borderSubtle)
+
+                bindingRow(
+                    name: "Save worked solution",
+                    description: "While holding the Talk chord, press this key to save the explanation on screen as a picture with its notes.",
+                    keys: bindingStore.primaryHoldChord.keyCapsuleLabels + [bindingStore.saveWorkedSolutionKey.capsuleLabel],
+                    trailing: AnyView(saveWorkedSolutionKeyPicker)
+                )
             }
         }
     }
 
     private var askAboutPartKeyPicker: some View {
+        letterKeyPicker(selectedLetter: bindingStore.askAboutPartKey) { letter in
+            bindingStore.askAboutPartKey = letter
+        }
+    }
+
+    private var saveWorkedSolutionKeyPicker: some View {
+        letterKeyPicker(selectedLetter: bindingStore.saveWorkedSolutionKey) { letter in
+            bindingStore.saveWorkedSolutionKey = letter
+        }
+    }
+
+    private func letterKeyPicker(
+        selectedLetter: AskAboutPartKey,
+        onSelect: @escaping (AskAboutPartKey) -> Void
+    ) -> some View {
         Menu {
             ForEach(AskAboutPartKey.allCases) { letter in
                 Button {
-                    bindingStore.askAboutPartKey = letter
+                    onSelect(letter)
                 } label: {
-                    if letter == bindingStore.askAboutPartKey {
+                    if letter == selectedLetter {
                         Label(letter.capsuleLabel, systemImage: "checkmark")
                     } else {
                         Text(letter.capsuleLabel)

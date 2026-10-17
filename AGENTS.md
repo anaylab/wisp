@@ -35,7 +35,7 @@ cloud dependency to the local path, without asking.
   activation policy to `.regular` while open, and drops back to `.accessory` on close.
 - **Surfaces (notch-first layout)**: the **notch** is where Wisp is *used* (answers, cards, quick
   panel, quick chat); the **Wisp window** is where it's *managed*; the **menu bar item** is a plain
-  native `NSMenu` (`MenuBarMenuController`: status, Ask Wisp…, Open Wisp, Chat, Buddies, Pause
+  native `NSMenu` (`MenuBarMenuController`: status, Ask Wisp…, Ask About a Part…, Save Worked Solution… (enabled only while the drawings hold a note or circle), Open Wisp, Chat, Buddies, Pause
   Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit — rebuilt in `menuNeedsUpdate`).
   **Pause listening** (`CompanionManager.isListeningPaused` / `setListeningPaused`) drops every talk
   gesture and routine digit at the shortcut sinks (cancelling a hold in progress); typed questions
@@ -446,6 +446,18 @@ cloud dependency to the local path, without asking.
   (`AnnotationNoteLayout`, pure; later notes move down, never off-screen).
   card follow the *selected* provider (`ActiveStackReadout.chatModelName`/`isChatModelLocal`; the "runs entirely on this Mac" line is false while
   a cloud provider is selected). Tested by `Tests/ScreenRegionFocus`.
+- **Save a worked solution** (menu bar → **Save Worked Solution…**, or Talk chord + **S**, `saveWorkedSolutionShortcutPublisher`;
+  the letter is rebindable in Settings → Shortcuts like Ask About a Part's, `ShortcutBindingStore.saveWorkedSolutionKey`, and yields to
+  Ask About a Part if both are bound to one letter): saves the explanation Wisp drew (needs ≥1 note or circle,
+  `WorkedSolutionExport.hasSomethingToSave`) on the display with the most notes. `CompanionManager.saveWorkedSolution`
+  (`CompanionManager+WorkedSolutionExport.swift`) snapshots the drawings, takes a **fresh native-resolution capture of that one display with
+  Wisp's own windows excluded** (`CompanionScreenCaptureUtility.captureDisplayAtNativeResolution` — the 896px model copy is never used),
+  composites `ScreenAnnotationLayer(isForExport: true)` over it with SwiftUI `ImageRenderer` (every note regardless of `visibleNoteLimit`,
+  no Next pill, no pulse — one drawing path, no duplicate), then an `NSSavePanel` (default `~/Pictures/Wisp Solutions/`, created on demand;
+  "Worked solution <date time>.png") and writes the PNG plus a same-named `.md` (date, the last question from the transcript, the notes as a
+  numbered list). Local only; the clipboard is untouched; confirmation is the notch reply + `flashIsland(.success)`. Pure rules (worth saving,
+  which display, file names, Markdown) are in `WorkedSolutionExport.swift`, tested by `Tests/WorkedSolutionExport`; capture, render and the panel
+  are untestable headless glue.
 - **Guided walkthrough** (`GuidedWalkthrough.swift` pure, `GuidedWalkthroughController.swift`): a reply whose annotation tags
   are ≥2 numbered, labelled steps (the existing step-by-step tags) is walked through one step at a time instead of drawn all at
   once (`CompanionManager.beginGuidedWalkthrough`, called where the reply's annotations are applied). Only step 1 uses the model's
@@ -948,7 +960,7 @@ Grouped by what they do. Line counts are approximate.
 | `CompanionManager.swift` | ~3150 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
 | `BuddyDictationManager.swift` | ~940 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
 | `GlobalPushToTalkShortcutMonitor.swift` | ~270 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
-| `ShortcutBindingStore.swift` | ~210 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier, and the letter for Ask About a Part (`AskAboutPartKey`). Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
+| `ShortcutBindingStore.swift` | ~210 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier, and the letters for Ask About a Part (`AskAboutPartKey`) and Save Worked Solution. Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
 | `TextComposerWindowController.swift` | ~230 | The tap-to-type text composer: a keyable floating panel (activates the app for typing, Return to send, Esc to dismiss) whose typed question runs through the normal screenshot turn. |
 | `DictationSettingsStore.swift` | ~110 | Source of truth for dictation language + custom dictionary. Persists to UserDefaults; read by `BuddyDictationManager` when starting a session. |
 | `DictationTab.swift` | ~200 | Settings → Dictation: language picker (Automatic + on-device locales) and a removable-chip custom dictionary editor. |
@@ -1005,6 +1017,8 @@ Grouped by what they do. Line counts are approximate.
 | `ScreenWatchAgentTools.swift` | ~95 | `watch_screen` (condition + text) and `stop_screen_watch`, read-only, registered via `registerScreenWatchTools()`. |
 | `FastPointing.swift` | ~540 | Pure side of fast pointing: `PointingRequestParser` (spoken "where is X" → target + role hint, conservative), `PointingTargetMatcher` (exact/tolerant word scoring, same-place merging, tie → every place, shortlist for the model, connector-word guard) and `PointingModelFallback` (text-only prompt + lenient reply → id). Tested by `Tests/FastPointing`. |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
+| `WorkedSolutionExport.swift` | ~140 | Pure: whether the drawings are worth saving (a note or circle), which display's to save, the default PNG name (date + time, no colons), the matching `.md` name and the Markdown text (date, question, numbered notes). Tested by `Tests/WorkedSolutionExport`. |
+| `CompanionManager+WorkedSolutionExport.swift` | ~150 | Glue for Save Worked Solution: native-resolution capture of one display, `ImageRenderer` composite of `ScreenAnnotationLayer(isForExport:)`, `NSSavePanel`, PNG + Markdown write, notch confirmation. No test suite (needs screen capture and UI). |
 | `ScreenRegionFocus.swift` | ~90 | Pure: `FocusedScreenRegion` (the part of the screen the user chose — clamped, ≥24pt a side, AppKit bottom-left → screenshot top-left pixels, ScreenCaptureKit source rect) and its per-turn prompt text. Tested by `Tests/ScreenRegionFocus`. |
 | `ScreenRegionPicker.swift` | ~155 | The drag-to-select overlay behind "Ask About a Part…": a dimmed key panel on the pointer's screen, Esc/stray click cancels. |
 | `AnnotationClickTarget.swift` | ~210 | Pure: which annotations are clickable, a note's measured size (cached), hit-testing, pointer → overlay coordinates, clicked rect → focused region, and `AnnotationNoteLayout` (nudges overlapping notes apart). |
@@ -1143,7 +1157,7 @@ Grouped by what they do. Line counts are approximate.
 | `MarketplaceTab.swift` | ~700 | Connections → Marketplace: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
 | `ShortcutsTab.swift` | ~250 | Settings → Shortcuts: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
 | `ActiveStackReadout.swift` | ~130 | "What's running": configured model/STT/TTS names from Info.plist (Parakeet/Kokoro rows show the download/load state and the Apple engine standing in until ready) plus Ollama residency, for the Wisp window's status pill and Settings → General's What's running card. Also labels perf timings and "Asking …" steps. |
-| `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
+| `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Ask About a Part…, Save Worked Solution… (enabled only with a note or circle on screen), Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchFileDrop.swift` | ~75 | Drop a file on the notch to add it to the brain: `NotchFileDropView` (a transparent `hitTest`-nil sibling above the hosting view; wrapping it, registering it, or SwiftUI `.onDrop` all failed to receive drags) and `NotchFileDragDetector` (drag-pasteboard change count + held button, so window drags never misfire). `NotchWindowController.updateFileDragState` opens the island under a file drag (brain on only) and `addDroppedFilesToBrain` enqueues supported files on `BrainIngestQueue`, showing the result via `viewModel.fileDropFeedback`. |
@@ -1231,6 +1245,7 @@ running):
 ./Tests/HostileProviderAttack/run.sh     # adversarial provider vs the real agent loop; lists known defects
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
 ./Tests/ScreenRegionFocus/run.sh         # ask-about-a-part: region clamping, AppKit→screenshot pixels, prompt text
+./Tests/WorkedSolutionExport/run.sh      # save-a-worked-solution: worth saving, display choice, file names, Markdown
 ./Tests/GuidedWalkthrough/run.sh         # guided walkthrough plan stepping, instruction → label, click-on-target matching
 ./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
 ./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec

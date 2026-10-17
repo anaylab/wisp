@@ -566,6 +566,10 @@ final class CompanionManager: ObservableObject {
     }
 
     private var askAboutPartShortcutCancellable: AnyCancellable?
+    private var saveWorkedSolutionShortcutCancellable: AnyCancellable?
+    /// The capture / save-panel round trip of "Save Worked Solution…", kept so
+    /// a second request while one is open is ignored.
+    var workedSolutionSaveTask: Task<Void, Never>?
     private var escapeKeyCancellable: AnyCancellable?
     private var noteStepShortcutCancellable: AnyCancellable?
     private var annotationClickRouterActivityCancellable: AnyCancellable?
@@ -613,6 +617,25 @@ final class CompanionManager: ObservableObject {
                 self.voiceState = .idle
                 self.setActiveCommandMode(nil)
                 self.beginAskAboutRegion()
+            }
+
+        saveWorkedSolutionShortcutCancellable = globalPushToTalkShortcutMonitor
+            .saveWorkedSolutionShortcutPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self, !self.isListeningPaused else { return }
+                // The hold that carried the shortcut would otherwise be heard
+                // as a talk gesture.
+                self.pendingKeyboardShortcutStartTask?.cancel()
+                self.pendingKeyboardShortcutStartTask = nil
+                self.buddyDictationManager.cancelCurrentDictation(preserveDraftText: false)
+                self.voiceState = .idle
+                self.setActiveCommandMode(nil)
+                // The chord's press scheduled a clear of the drawings; this
+                // press is about saving them, not a new question.
+                self.pendingAnnotationClearTask?.cancel()
+                self.pendingAnnotationClearTask = nil
+                self.saveWorkedSolution()
             }
 
         shortcutTransitionCancellable = globalPushToTalkShortcutMonitor
@@ -1005,6 +1028,12 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var focusedScreenRegion: FocusedScreenRegion?
 
     private var screenRegionPickerController: ScreenRegionPickerController?
+
+    /// What the user last asked, for the note saved beside a worked solution.
+    /// `conversationTranscript` is private to this file.
+    var lastQuestionAskedByUser: String? {
+        conversationTranscript.turns.last?.userText
+    }
 
     /// The menu bar's "Ask About a Part…": a drag-to-select overlay, then the
     /// text composer with the chosen part remembered.

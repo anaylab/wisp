@@ -32,6 +32,14 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// a Part". Like a routine digit, an extra gesture layered on the hold.
     let askAboutPartShortcutPublisher = PassthroughSubject<Void, Never>()
 
+    /// Fires when S is pressed while the Talk chord is held — ⌃⌥S is "Save
+    /// Worked Solution". Another gesture layered on the hold.
+    let saveWorkedSolutionShortcutPublisher = PassthroughSubject<Void, Never>()
+
+    /// The key pressed with the Talk chord for "Save Worked Solution" (ANSI key
+    /// code; S by default). Kept current by `ShortcutBindingStore`.
+    nonisolated(unsafe) static var saveWorkedSolutionKeyCode: UInt16 = 1
+
     /// The key pressed with the Talk chord for "Ask About a Part" (ANSI key code;
     /// A by default). A plain static like the other bindings the tap reads on the
     /// main thread; `ShortcutBindingStore` keeps it current.
@@ -211,6 +219,17 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
            eventKeyCode == Self.askAboutPartKeyCode {
             didFireRoutineShortcutDuringCurrentHold = true
             askAboutPartShortcutPublisher.send()
+        }
+
+        if isShortcutCurrentlyPressed,
+           activeInvocationMode == .assistant,
+           eventType == .keyDown,
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+           eventKeyCode == Self.saveWorkedSolutionKeyCode,
+           // If both were bound to one letter, Ask About a Part (above) keeps it.
+           Self.saveWorkedSolutionKeyCode != Self.askAboutPartKeyCode {
+            didFireRoutineShortcutDuringCurrentHold = true
+            saveWorkedSolutionShortcutPublisher.send()
         }
 
         let shortcutTransition = BuddyPushToTalkShortcut.shortcutTransition(

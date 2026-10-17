@@ -26,6 +26,10 @@ struct ScreenAnnotationLayer: View {
     /// How many handwritten notes to show, nil for all of them. Notes past the
     /// limit are held back, and a Next button shows how many remain.
     var visibleNoteLimit: Int? = nil
+    /// Drawing for a saved picture rather than the live overlay: every note is
+    /// shown whatever `visibleNoteLimit` says, there is no Next pill, and
+    /// nothing pulses or dims (a still image has no animation to catch).
+    var isForExport = false
 
     @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
 
@@ -34,7 +38,7 @@ struct ScreenAnnotationLayer: View {
     @State private var isPulsing = false
 
     var body: some View {
-        let reveal = AnnotationNoteReveal.visibleAnnotations(annotations, noteLimit: visibleNoteLimit)
+        let reveal = AnnotationNoteReveal.visibleAnnotations(annotations, noteLimit: isForExport ? nil : visibleNoteLimit)
         let shownAnnotations = reveal.visible
         let nextButtonRect = AnnotationNoteReveal.nextButtonRect(
             visibleAnnotations: shownAnnotations,
@@ -78,6 +82,9 @@ struct ScreenAnnotationLayer: View {
         }
         .allowsHitTesting(false)
         .onAppear {
+            // ImageRenderer draws one frame; starting a repeating animation
+            // there would only capture an arbitrary mid-pulse state.
+            guard !isForExport else { return }
             withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
                 isPulsing = true
             }
@@ -231,7 +238,7 @@ struct ScreenAnnotationLayer: View {
             )
             .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
             .position(x: rect.minX, y: rect.minY)
-            .opacity(isPulsing ? 1.0 : 0.8)
+            .opacity(isPulsing || isForExport ? 1.0 : 0.8)
     }
 
     /// Handwritten working on the screen. Written in a pen-like face over a
@@ -307,6 +314,6 @@ struct ScreenAnnotationLayer: View {
             )
             .fixedSize()
             .position(x: rect.midX, y: labelY)
-            .opacity(isPulsing ? 1.0 : 0.75)
+            .opacity(isPulsing || isForExport ? 1.0 : 0.75)
     }
 }

@@ -90,6 +90,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
         menu.addItem(actionItem(title: "Ask Wisp…", action: #selector(askWisp)))
         menu.addItem(actionItem(title: "Ask About a Part…", action: #selector(askAboutPart)))
+        let saveWorkedSolutionItem = actionItem(title: "Save Worked Solution…", action: #selector(saveWorkedSolution))
+        // Only a drawing with a handwritten note or a circle is a worked solution.
+        saveWorkedSolutionItem.isEnabled = companionManager.canSaveWorkedSolution
+        menu.addItem(saveWorkedSolutionItem)
         menu.addItem(actionItem(title: "Open Wisp", action: #selector(openToday), keyEquivalent: "o"))
         menu.addItem(actionItem(title: "Chat", action: #selector(openChat)))
         menu.addItem(actionItem(title: "Buddies", action: #selector(openBuddies)))
@@ -147,6 +151,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
     @objc private func askAboutPart() {
         companionManager.beginAskAboutRegion()
+    }
+
+    @objc private func saveWorkedSolution() {
+        companionManager.saveWorkedSolution()
     }
 
     @objc private func openSetup() {

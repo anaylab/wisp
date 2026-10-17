@@ -203,4 +203,35 @@ enum CompanionScreenCaptureUtility {
         return NSBitmapImageRep(cgImage: cgImage)
             .representation(using: .jpeg, properties: [.compressionFactor: 0.85])
     }
+
+    /// A fresh capture of ONE display at its native pixel resolution (not the
+    /// 896px model copy), with all of Wisp's own windows left out, so a saved
+    /// picture shows the user's content and Wisp can draw its explanation over
+    /// it afterwards. The display is matched by its AppKit frame, as the
+    /// drawings are keyed. Nil if the display can't be found or the capture fails.
+    static func captureDisplayAtNativeResolution(displayFrameInAppKitCoordinates: CGRect) async -> CGImage? {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
+            return nil
+        }
+
+        guard let matchingScreen = NSScreen.screens.first(where: { $0.frame == displayFrameInAppKitCoordinates }),
+              let matchingDisplayID = matchingScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+              let display = content.displays.first(where: { $0.displayID == matchingDisplayID }) else {
+            return nil
+        }
+
+        let ownBundleIdentifier = Bundle.main.bundleIdentifier
+        let ownAppWindows = content.windows.filter { $0.owningApplication?.bundleIdentifier == ownBundleIdentifier }
+        let filter = SCContentFilter(display: display, excludingWindows: ownAppWindows)
+
+        let configuration = SCStreamConfiguration()
+        let pixelsPerPoint = matchingScreen.backingScaleFactor
+        configuration.width = max(1, Int(displayFrameInAppKitCoordinates.width * pixelsPerPoint))
+        configuration.height = max(1, Int(displayFrameInAppKitCoordinates.height * pixelsPerPoint))
+
+        return try? await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: configuration
+        )
+    }
 }
