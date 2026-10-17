@@ -521,7 +521,7 @@ private struct UsageCard: View {
                 .font(.system(size: 11))
                 .foregroundStyle(DS.Colors.textSecondary)
             Spacer()
-            Text("\(totals.turnCount) turns · \(UsageAggregator.formattedTokenCount(totals.totalTokens)) tokens · ≈ \(UsageCostEstimator.formattedDollars(totals.estimatedCostUSD))")
+            Text("\(totals.turnCount) turns · \(UsageAggregator.formattedTokenCount(totals.totalTokens)) tokens · ≈ \(UsageCostEstimator.formattedDollars(totals.estimatedCostUSD)) API-equivalent")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(DS.Colors.textPrimary)
         }
