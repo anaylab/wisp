@@ -305,10 +305,15 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
         var stopReason: String?
         var promptTokens: Int?
         var outputTokens: Int?
+        var cacheReadTokens: Int?
+        var cacheWriteTokens: Int?
+        /// `total_cost_usd` from the result event: what the turn would cost at
+        /// API rates. Reported by the CLI itself, so used as-is.
+        var reportedCostUSD: Double?
         var sawRateLimitRejection = false
     }
 
-    private static func readEventStream(
+    static func readEventStream(
         from chunks: AsyncStream<Data>,
         onTextDelta: @escaping @MainActor @Sendable (String) -> Void
     ) async -> StreamOutcome {
@@ -349,7 +354,10 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
                     let cacheRead = usage["cache_read_input_tokens"] as? Int ?? 0
                     outcome.promptTokens = freshInput + cacheCreation + cacheRead
                     outcome.outputTokens = usage["output_tokens"] as? Int
+                    outcome.cacheReadTokens = cacheRead
+                    outcome.cacheWriteTokens = cacheCreation
                 }
+                outcome.reportedCostUSD = (event["total_cost_usd"] as? NSNumber)?.doubleValue
 
             default:
                 return
@@ -433,7 +441,10 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
             duration: duration,
             promptTokens: outcome.promptTokens,
             outputTokens: outcome.outputTokens,
-            malformedToolCallDescriptions: parsed.malformedTags
+            malformedToolCallDescriptions: parsed.malformedTags,
+            cacheReadTokens: outcome.cacheReadTokens,
+            cacheWriteTokens: outcome.cacheWriteTokens,
+            reportedCostUSD: outcome.reportedCostUSD
         )
     }
 

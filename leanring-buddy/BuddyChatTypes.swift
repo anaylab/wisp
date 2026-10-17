@@ -326,6 +326,15 @@ struct BuddyChatTurn: Sendable {
     /// is left missing.
     let promptTokens: Int?
     let outputTokens: Int?
+    /// The part of `promptTokens` served from the provider's prompt cache, when
+    /// it says so. Priced far below fresh input, so the usage log needs it.
+    let cacheReadTokens: Int?
+    /// The part of `promptTokens` written to the prompt cache this turn
+    /// (Anthropic bills this above fresh input).
+    let cacheWriteTokens: Int?
+    /// A dollar cost the provider itself reported (the `claude` CLI's
+    /// `total_cost_usd`), when it does. `nil` means "not reported".
+    let reportedCostUSD: Double?
     /// Text that looked like a tool call but could not be read.
     ///
     /// Surfaced rather than dropped for two reasons. The model can be told its
@@ -363,7 +372,10 @@ struct BuddyChatTurn: Sendable {
         duration: TimeInterval = 0,
         promptTokens: Int? = nil,
         outputTokens: Int? = nil,
-        malformedToolCallDescriptions: [String] = []
+        malformedToolCallDescriptions: [String] = [],
+        cacheReadTokens: Int? = nil,
+        cacheWriteTokens: Int? = nil,
+        reportedCostUSD: Double? = nil
     ) {
         self.content = content
         self.stopReason = stopReason
@@ -371,6 +383,9 @@ struct BuddyChatTurn: Sendable {
         self.promptTokens = promptTokens
         self.outputTokens = outputTokens
         self.malformedToolCallDescriptions = malformedToolCallDescriptions
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
+        self.reportedCostUSD = reportedCostUSD
     }
 
     /// Convenience for the common shape: some prose, then any tool calls.

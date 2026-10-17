@@ -60,6 +60,7 @@ if swiftc -typecheck "${SWIFTFLAGS[@]}" \
      leanring-buddy/ToolMetadata.swift \
      leanring-buddy/ModelAccessGate.swift \
      leanring-buddy/AgentRunToolkit.swift \
+     leanring-buddy/UsageTokenCounts.swift \
      "$BUILD_DIR/iso/Stubs.swift" 2> "$BUILD_DIR/iso.err"; then
   echo "  PASS  runner type-checks without OllamaProvider.swift or LocalOllamaAPI.swift"
 else

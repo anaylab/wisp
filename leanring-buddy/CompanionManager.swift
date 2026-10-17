@@ -1620,6 +1620,10 @@ final class CompanionManager: ObservableObject {
             || LocalOllamaAPI.promptLikelyRefersToScreen(transcript)
             || focusedScreenRegion != nil
         PerfMetricsRecorder.shared.recordScreenshotDecision(didAttach: shouldAttachScreenshot)
+        // For the usage log: when this turn began, and which provider ran it
+        // (captured now, since the user can switch providers mid-turn).
+        let usageLogTurnStartedAt = Date()
+        let usageLogProviderIdentifier = selectedModelProvider.identifier
 
         currentResponseTask = Task {
             // Stay in processing (spinner) state — no streaming text displayed
@@ -1745,6 +1749,8 @@ final class CompanionManager: ObservableObject {
                 PerfMetricsRecorder.shared.beginPhase(.firstToken)
 
                 let fullResponseText: String
+                // Token counts the provider(s) reported for this turn, numbers only.
+                var usageCountsFromThisTurn = UsageTokenCounts()
                 // What this turn adds to the transcript. Both paths fill it in
                 // — the agent loop reports the messages it actually built, and
                 // the single-call path has only the question and the answer.
@@ -1782,6 +1788,7 @@ final class CompanionManager: ObservableObject {
                         }
                     )
                     fullResponseText = outcome.terminalText
+                    usageCountsFromThisTurn = outcome.usage
                     messagesFromThisTurn = outcome.messages
                 } else {
                     AgentTaskRegistry.shared.appendStep(
@@ -1860,6 +1867,13 @@ final class CompanionManager: ObservableObject {
                         step.durationSeconds = singleCallTurn.duration
                     }
                     fullResponseText = singleCallTurn.text
+                    usageCountsFromThisTurn.add(
+                        inputTokens: singleCallTurn.promptTokens,
+                        outputTokens: singleCallTurn.outputTokens,
+                        cacheReadTokens: singleCallTurn.cacheReadTokens,
+                        cacheWriteTokens: singleCallTurn.cacheWriteTokens,
+                        reportedCostUSD: singleCallTurn.reportedCostUSD
+                    )
                     messagesFromThisTurn = [
                         BuddyChatMessage(role: .user, text: transcript),
                         BuddyChatMessage(role: .assistant, text: singleCallTurn.text),
@@ -2064,6 +2078,13 @@ final class CompanionManager: ObservableObject {
                 }
 
                 AgentTaskRegistry.shared.finishTask(taskID, status: .succeeded, finalText: spokenText)
+                UsageLogStore.shared.recordTurn(
+                    providerIdentifier: usageLogProviderIdentifier,
+                    counts: usageCountsFromThisTurn,
+                    durationSeconds: Date().timeIntervalSince(usageLogTurnStartedAt),
+                    screenshotWasAttached: shouldAttachScreenshot,
+                    isBackgroundRun: false
+                )
                 PerfMetricsRecorder.shared.completeTurn()
             } catch is CancellationError {
                 sentenceStreamer = nil

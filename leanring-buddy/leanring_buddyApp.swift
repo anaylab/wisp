@@ -72,6 +72,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         AgentTaskRegistry.shared.saveHistoryImmediately()
         // The queue batches its saves; flush so a job added just before quit resumes.
         BrainIngestQueue.shared.saveQueueNow()
+        UsageLogStore.shared.saveImmediately()
     }
 
     /// Opens the brain (`~/.wisp/brain/`) and starts the services that keep

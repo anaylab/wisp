@@ -77,6 +77,7 @@ enum BackgroundTaskLauncher {
 
         let work = Task { @MainActor in
             defer { runningOffMachineTaskIDs.remove(taskID) }
+            let runStartedAt = Date()
             let runner = AgentTurnRunner(
                 modelProvider: modelProvider,
                 priority: .background,
@@ -102,6 +103,13 @@ enum BackgroundTaskLauncher {
                     }
                 )
 
+                UsageLogStore.shared.recordTurn(
+                    providerIdentifier: modelProvider.identifier,
+                    counts: outcome.usage,
+                    durationSeconds: Date().timeIntervalSince(runStartedAt),
+                    screenshotWasAttached: !images.isEmpty,
+                    isBackgroundRun: true
+                )
                 AgentTaskRegistry.shared.finishTask(
                     taskID,
                     status: .succeeded,
