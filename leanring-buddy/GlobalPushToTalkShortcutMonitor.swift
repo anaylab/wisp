@@ -20,6 +20,13 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// because it is an extra gesture layered on the hold, not a hold state.
     let routineShortcutPublisher = PassthroughSubject<Int, Never>()
 
+    /// Fires when A is pressed while the Talk chord is held — ⌃⌥A is "Ask About
+    /// a Part". Like a routine digit, an extra gesture layered on the hold.
+    let askAboutPartShortcutPublisher = PassthroughSubject<Void, Never>()
+
+    /// ANSI key code for A.
+    private static let askAboutPartKeyCode: UInt16 = 0
+
     /// Set when a routine digit fires during the current hold. The hold's own
     /// release is then swallowed: the routine replaced whatever the hold would
     /// have become (a spoken turn or the tap-to-type composer).
@@ -167,6 +174,15 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
            let routineDigit = Self.digitByKeyCode[eventKeyCode] {
             didFireRoutineShortcutDuringCurrentHold = true
             routineShortcutPublisher.send(routineDigit)
+        }
+
+        if isShortcutCurrentlyPressed,
+           activeInvocationMode == .assistant,
+           eventType == .keyDown,
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+           eventKeyCode == Self.askAboutPartKeyCode {
+            didFireRoutineShortcutDuringCurrentHold = true
+            askAboutPartShortcutPublisher.send()
         }
 
         let shortcutTransition = BuddyPushToTalkShortcut.shortcutTransition(

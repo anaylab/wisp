@@ -15,6 +15,9 @@ swiftc -target arm64-apple-macos14.0 \
   -default-isolation MainActor \
   -o "$BUILD_DIR/screen-region-focus" \
   Tests/ScreenRegionFocus/main.swift \
-  leanring-buddy/ScreenRegionFocus.swift
+  leanring-buddy/ScreenRegionFocus.swift \
+  leanring-buddy/AnnotationClickTarget.swift \
+  leanring-buddy/ScreenAnnotation.swift \
+  leanring-buddy/AccessibilityElementSnapshot.swift
 
 "$BUILD_DIR/screen-region-focus"

@@ -304,6 +304,8 @@ final class CompanionManager: ObservableObject {
         startLocalModelKeepWarmLoopIfNeeded()
         observeScreenConfigurationChanges()
         observeToolConfirmations()
+        // Notes, circles and boxes Wisp draws can be clicked to ask about them.
+        annotationClickRouter.start()
         registerBackgroundWorkTool()
         // The browser step loop marks what it acts on; this is how it reaches
         // the overlay this object owns.
@@ -544,7 +546,24 @@ final class CompanionManager: ObservableObject {
             }
     }
 
+    private var askAboutPartShortcutCancellable: AnyCancellable?
+
     private func bindShortcutTransitions() {
+        askAboutPartShortcutCancellable = globalPushToTalkShortcutMonitor
+            .askAboutPartShortcutPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self, !self.isListeningPaused else { return }
+                // The hold that carried the shortcut would otherwise be heard
+                // as a talk gesture.
+                self.pendingKeyboardShortcutStartTask?.cancel()
+                self.pendingKeyboardShortcutStartTask = nil
+                self.buddyDictationManager.cancelCurrentDictation(preserveDraftText: false)
+                self.voiceState = .idle
+                self.setActiveCommandMode(nil)
+                self.beginAskAboutRegion()
+            }
+
         shortcutTransitionCancellable = globalPushToTalkShortcutMonitor
             .shortcutTransitionPublisher
             .receive(on: DispatchQueue.main)
@@ -949,7 +968,10 @@ final class CompanionManager: ObservableObject {
 
     /// Marks the chosen part on screen while the user types, with the same
     /// highlight the model's own `[HIGHLIGHT:]` tag draws.
-    private func showFocusedRegionHighlight(_ focusedRegion: FocusedScreenRegion) {
+    private func showFocusedRegionHighlight(
+        _ focusedRegion: FocusedScreenRegion,
+        keepingExistingAnnotations: Bool = false
+    ) {
         if !isCursorAlwaysVisible && !isOverlayVisible {
             overlayWindowManager.hasShownOverlayBefore = true
             overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
@@ -966,9 +988,52 @@ final class CompanionManager: ObservableObject {
             label: nil,
             screenNumber: nil
         )
+        if keepingExistingAnnotations, let existingSize = annotationScreenshotSizeByDisplayFrame[displayFrame] {
+            // Annotations on this display are in the existing screenshot's
+            // space, so the highlight is expressed in that same space.
+            let highlightInExistingSpace = ScreenAnnotation(
+                style: .highlight,
+                regionInScreenshotPixels: focusedRegion.regionInScreenshotPixels(screenshotSize: existingSize),
+                label: nil,
+                screenNumber: nil
+            )
+            activeAnnotationsByDisplayFrame[displayFrame, default: []].append(highlightInExistingSpace)
+            return
+        }
         annotationScreenshotSizeByDisplayFrame = [displayFrame: screenshotSize]
         activeAnnotationsByDisplayFrame = [displayFrame: [highlight]]
     }
+
+    /// A note, circle or box Wisp drew was clicked: ask about that part, keeping
+    /// the explanation on screen around it.
+    private func beginAskAboutClickedAnnotation(_ clickedRegion: FocusedScreenRegion) {
+        transientHideTask?.cancel()
+        focusedScreenRegion = clickedRegion
+        showFocusedRegionHighlight(clickedRegion, keepingExistingAnnotations: true)
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+        openTextComposer(keepingFocusedScreenRegion: true)
+    }
+
+    private lazy var annotationClickRouter = AnnotationClickRouter(
+        annotationsOnEachDisplay: { [weak self] in
+            guard let self else { return [] }
+            return self.activeAnnotationsByDisplayFrame.compactMap { displayFrame, annotations in
+                guard let screenshotSize = self.annotationScreenshotSizeByDisplayFrame[displayFrame] else { return nil }
+                return AnnotationClickRouter.DisplayAnnotations(
+                    displayFrame: displayFrame,
+                    screenshotSize: screenshotSize,
+                    annotations: annotations
+                )
+            }
+        },
+        isOverlayReservedForConfirmation: { [weak self] in self?.pendingToolConfirmation != nil },
+        setOverlayAcceptsMouseEvents: { [weak self] acceptsMouseEvents in
+            self?.overlayWindowManager.setAcceptsMouseEvents(acceptsMouseEvents)
+        },
+        onClickedRegion: { [weak self] clickedRegion, _, _ in
+            self?.beginAskAboutClickedAnnotation(clickedRegion)
+        }
+    )
 
     /// The notch reply's "Follow up" action. Opens the text composer; no extra
     /// plumbing is needed for context because `conversationTranscript` already
@@ -2302,7 +2367,12 @@ final class CompanionManager: ObservableObject {
             // there is no speech to hold the overlay open. A silent reply would
             // otherwise fade the pointer almost immediately.
             if !activeAnnotationsByDisplayFrame.isEmpty {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                // Handwritten working is something to study and click on to ask
+                // about, not a pointer to glance at, so it stays up much longer.
+                let hasHandwrittenNotes = activeAnnotationsByDisplayFrame.values.contains { annotations in
+                    annotations.contains { $0.style == .note }
+                }
+                try? await Task.sleep(nanoseconds: hasHandwrittenNotes ? 120_000_000_000 : 3_000_000_000)
                 guard !Task.isCancelled else { return }
             }
 

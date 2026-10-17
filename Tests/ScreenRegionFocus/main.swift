@@ -48,6 +48,46 @@ let secondDisplay = CGRect(x: 1440, y: 900, width: 1920, height: 1080)
 let onSecond = FocusedScreenRegion(rectInAppKitCoordinates: CGRect(x: 1540, y: 1780, width: 200, height: 100), displayFrameInAppKitCoordinates: secondDisplay)!
 check(onSecond.rectInDisplayPointsTopLeftOrigin == CGRect(x: 100, y: 100, width: 200, height: 100), "offset display: rect is relative to that display")
 
+// MARK: Clicking something Wisp drew
+
+let clickDisplaySize = CGSize(width: 1440, height: 900)
+let clickScreenshotSize = CGSize(width: 896, height: 560)
+func overlayAnnotation(_ style: ScreenAnnotation.Style, _ region: CGRect, _ label: String? = nil) -> ScreenAnnotation {
+    ScreenAnnotation(style: style, regionInScreenshotPixels: region, label: label, screenNumber: nil)
+}
+let clickNote = overlayAnnotation(.note, CGRect(x: 100, y: 300, width: 0, height: 0), "3x = 18")
+let clickCircle = overlayAnnotation(.circle, CGRect(x: 60, y: 100, width: 80, height: 30))
+let clickMarker = overlayAnnotation(.marker, CGRect(x: 500, y: 100, width: 0, height: 0))
+let clickHighlight = overlayAnnotation(.highlight, CGRect(x: 10, y: 10, width: 300, height: 300))
+let unplacedStep = overlayAnnotation(.box, .zero, "click Appearance")
+check(AnnotationClickTarget.isClickable(clickNote) && AnnotationClickTarget.isClickable(clickCircle), "notes and circles are clickable")
+check(!AnnotationClickTarget.isClickable(clickMarker) && !AnnotationClickTarget.isClickable(clickHighlight), "markers and highlights are not")
+check(!AnnotationClickTarget.isClickable(unplacedStep), "an unplaced walkthrough step is not")
+
+// The note starts at its anchor (100/896 of the width = 160.7pt) and is centred on its y (300/560 of the height = 482pt).
+let noteRect = AnnotationClickTarget.clickableRectInOverlayCoordinates(for: clickNote, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(abs(noteRect.minX - 160.7) < 0.5 && abs(noteRect.midY - 482.1) < 0.5, "a note's clickable rect starts at its anchor, centred on y")
+check(noteRect.width == 16 + 7 * 11 && noteRect.height == 32, "a note's size is estimated from its text length")
+
+let overNote = AnnotationClickTarget.annotation(atOverlayPoint: CGPoint(x: 200, y: 482), in: [clickCircle, clickNote], screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(overNote?.style == .note, "a point inside the note hits the note")
+let overNothing = AnnotationClickTarget.annotation(atOverlayPoint: CGPoint(x: 900, y: 800), in: [clickCircle, clickNote], screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(overNothing == nil, "a point on nothing hits nothing")
+let overHighlightOnly = AnnotationClickTarget.annotation(atOverlayPoint: CGPoint(x: 100, y: 100), in: [clickHighlight], screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(overHighlightOnly == nil, "a highlight is never a click target")
+
+// A note anchored to an element sits to the right of it.
+let elementNote = overlayAnnotation(.note, CGRect(x: 100, y: 200, width: 60, height: 20), "x = 6")
+let elementNoteRect = AnnotationClickTarget.clickableRectInOverlayCoordinates(for: elementNote, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(elementNoteRect.minX > 160.7 + 96 && abs(elementNoteRect.midY - 337.5) < 0.5, "an element note is written right of the element, centred on it")
+
+// Pointer position conversion and the resulting region.
+let overlayPoint = AnnotationClickTarget.overlayPoint(forAppKitPoint: CGPoint(x: 1540, y: 1780), displayFrame: secondDisplay)
+check(overlayPoint == CGPoint(x: 100, y: 200), "AppKit pointer position maps to overlay coordinates")
+let clickedRegion = AnnotationClickTarget.focusedRegion(forClickedRectInOverlayCoordinates: CGRect(x: 100, y: 100, width: 40, height: 10), displayFrame: display)
+check(clickedRegion != nil && clickedRegion!.rectInAppKitCoordinates.width == 68 && clickedRegion!.rectInAppKitCoordinates.height == 38, "a thin note is padded into a valid region")
+check(clickedRegion!.rectInDisplayPointsTopLeftOrigin == CGRect(x: 86, y: 86, width: 68, height: 38), "the padded region lines up with the clicked note")
+
 // Prompt text.
 let prompt = nearTop.promptText(screenshotSize: screenshotSize, screenNumber: nil, hasCloseUpImage: true)
 check(prompt.contains("90,56,269,112"), "prompt names the region's pixel corners")

@@ -427,7 +427,13 @@ cloud dependency to the local path, without asking.
   until a fresh composer opens (`openTextComposer(keepingFocusedScreenRegion:)` — only a new selection and the notch's Follow up keep it),
   so follow-ups ("why?", "next step") stay about that part. A turn with a region always attaches the screenshot, adds a native-resolution
   close-up (`CompanionScreenCaptureUtility.captureCloseUpAsJPEG`, ≤1400px) as the last image, and joins `FocusedScreenRegion.promptText`
-  to the per-turn context block (stripped from history like the `a`/`t` ids). Tested by `Tests/ScreenRegionFocus`.
+  to the per-turn context block (stripped from history like the `a`/`t` ids). **⌃⌥A** (Talk chord held, then A — layered on the hold like a
+  routine digit; `askAboutPartShortcutPublisher`) opens the same picker. **Click what Wisp drew**: `AnnotationClickRouter` watches pointer
+  movement (global mouse-moved monitor while the overlay is click-through, local once it isn't) and flips the overlay to accept the mouse
+  only while the pointer is over a clickable note, circle or box (`AnnotationClickTarget`, pure — a note's size is estimated from its text,
+  mirroring `ScreenAnnotationLayer.noteView`); the click is consumed by a local monitor, the clicked rect (padded 14pt) becomes the focused
+  region, the rest of the explanation stays on screen, and the composer opens. It stands aside while a confirmation card owns the overlay.
+  Handwritten notes dwell 120s (other annotations ~4s) so there is time to read and click them. Tested by `Tests/ScreenRegionFocus`.
 - **Guided walkthrough** (`GuidedWalkthrough.swift` pure, `GuidedWalkthroughController.swift`): a reply whose annotation tags
   are ≥2 numbered, labelled steps (the existing step-by-step tags) is walked through one step at a time instead of drawn all at
   once (`CompanionManager.beginGuidedWalkthrough`, called where the reply's annotations are applied). Only step 1 uses the model's
