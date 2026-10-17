@@ -3,7 +3,7 @@
 //  leanring-buddy
 //
 //  The Wisp window's shell. There is no sidebar: a slim bar along the top holds
-//  the eight sections as icons — the open one expands to show its name and
+//  the sections (four by default, nine with Advanced features on) as icons — the open one expands to show its name and
 //  slides to the next as you move — with Wisp's own state and model at the far
 //  end, and a section with several pages gets a quiet segmented strip beneath
 //  it. That gives every page the full width, which the Buddies messenger and
@@ -24,6 +24,8 @@ struct WispWindowView: View {
     @ObservedObject var router: WispWindowRouter
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var brainIngestQueue = BrainIngestQueue.shared
+    @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
+    @ObservedObject private var jobsEngine = JobsEngine.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var sectionTabNamespace
     @Namespace private var pageTabNamespace
@@ -38,7 +40,7 @@ struct WispWindowView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            if router.selectedSection.pages.count > 1 {
+            if visiblePagesInSelectedSection.count > 1 {
                 pageStrip
                     .transition(.opacity)
             }
@@ -58,13 +60,26 @@ struct WispWindowView: View {
         .background(sectionShortcutButtons)
         .tint(WispColor.accentText)
         .ignoresSafeArea(.container, edges: .top)
+        // Turning Advanced off while on a Buddies or Brain page moves the window
+        // to Settings instead of leaving a hidden page on screen.
+        .onChange(of: advancedFeatures.isEnabled) { _, _ in
+            router.reconcileWithAdvancedSetting()
+        }
     }
 
-    /// ⌥⌘1–⌥⌘8 open the sections in bar order. (Plain ⌘1–⌘9 belong to the buddy
+    private var visibleSections: [WispSection] {
+        WispSection.visibleSections(advancedEnabled: advancedFeatures.isEnabled)
+    }
+
+    private var visiblePagesInSelectedSection: [WispPage] {
+        router.selectedSection.pages(advancedEnabled: advancedFeatures.isEnabled)
+    }
+
+    /// ⌥⌘1 onward open the visible sections in bar order. (Plain ⌘1–⌘9 belong to the buddy
     /// rail.) Invisible buttons, because SwiftUI only registers shortcuts on views.
     private var sectionShortcutButtons: some View {
         ZStack {
-            ForEach(Array(WispSection.allCases.enumerated()), id: \.element) { index, section in
+            ForEach(Array(visibleSections.enumerated()), id: \.element) { index, section in
                 Button("") { router.select(section) }
                     .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
             }
@@ -85,7 +100,7 @@ struct WispWindowView: View {
             Spacer().frame(width: trafficLightsInset)
 
             HStack(spacing: 2) {
-                ForEach(WispSection.allCases) { section in
+                ForEach(visibleSections) { section in
                     sectionTab(section)
                 }
             }
@@ -98,7 +113,7 @@ struct WispWindowView: View {
         .frame(height: Self.topBarHeight)
         .background(WindowDragArea())
         .overlay(alignment: .bottom) {
-            if router.selectedSection.pages.count <= 1 {
+            if visiblePagesInSelectedSection.count <= 1 {
                 Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(height: 0.5)
             }
         }
@@ -144,12 +159,15 @@ struct WispWindowView: View {
         .buttonStyle(.plain)
         .pointerCursor()
         .accessibilityLabel(section.title)
-        .nativeTooltip(isSelected ? nil : "\(section.title)  ⌥⌘\((WispSection.allCases.firstIndex(of: section) ?? 0) + 1)")
+        .nativeTooltip(isSelected ? nil : "\(section.title)  ⌥⌘\((visibleSections.firstIndex(of: section) ?? 0) + 1)")
     }
 
     /// Running work shows where the user would go to see it.
     private func sidebarBadgeCount(for section: WispSection) -> Int {
         switch section {
+        case .jobs:
+            // Something to look at: a change from Canvas or study blocks to approve.
+            return (jobsEngine.latestDiff != nil || !jobsEngine.pendingStudyBlocks.isEmpty) ? 1 : 0
         case .history:
             return taskRegistry.runningRecords.count
         case .buddies:
@@ -159,7 +177,10 @@ struct WispWindowView: View {
             // Things still being read into the brain.
             return brainIngestQueue.pendingJobCount
         case .settings:
-            return companionManager.allPermissionsGranted ? 0 : 1
+            // History is a Settings page while Advanced is off, so its running
+            // work still has to show somewhere.
+            let runningTaskCount = advancedFeatures.isEnabled ? 0 : taskRegistry.runningRecords.count
+            return (companionManager.allPermissionsGranted ? 0 : 1) + runningTaskCount
         default:
             return 0
         }
@@ -168,33 +189,35 @@ struct WispWindowView: View {
     // MARK: - Page strip
 
     private var pageStrip: some View {
-        HStack(spacing: 2) {
-            ForEach(router.selectedSection.pages) { page in
-                let isSelected = router.selectedPage == page
-                Button {
-                    router.select(page)
-                } label: {
-                    Text(page.title)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                        .foregroundStyle(isSelected ? WispColor.textPrimary : WispColor.textSecondary)
-                        .padding(.horizontal, 11)
-                        .frame(height: 26)
-                        .background {
-                            if isSelected {
-                                Color.clear
-                                    .wispBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface3)
-                                    .matchedGeometryEffect(id: "pageTab", in: pageTabNamespace)
+        // Scrolls sideways because Settings holds ten pages while Advanced is off.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(visiblePagesInSelectedSection) { page in
+                    let isSelected = router.selectedPage == page
+                    Button {
+                        router.select(page)
+                    } label: {
+                        Text(page.title)
+                            .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                            .foregroundStyle(isSelected ? WispColor.textPrimary : WispColor.textSecondary)
+                            .padding(.horizontal, 11)
+                            .frame(height: 26)
+                            .background {
+                                if isSelected {
+                                    Color.clear
+                                        .wispBevel(RoundedRectangle(cornerRadius: 8, style: .continuous), fill: WispColor.surface3)
+                                        .matchedGeometryEffect(id: "pageTab", in: pageTabNamespace)
+                                }
                             }
-                        }
-                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
                 }
-                .buttonStyle(.plain)
-                .pointerCursor()
             }
-            Spacer()
+            .padding(.horizontal, 18)
+            .padding(.bottom, 8)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 8)
         .overlay(alignment: .bottom) {
             Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(height: 0.5)
         }
@@ -212,6 +235,8 @@ struct WispWindowView: View {
                 companionManager: companionManager,
                 onSelectPage: { router.select($0) }
             )
+        case .jobs:
+            JobsTab()
         case .chat:
             ChatPage(companionManager: companionManager, taskRegistry: taskRegistry)
         case .buddies:

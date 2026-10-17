@@ -34,6 +34,8 @@ struct HomeTab: View {
     @ObservedObject private var brainStore = BrainStore.shared
     @ObservedObject private var brainIngestQueue = BrainIngestQueue.shared
     @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var jobsEngine = JobsEngine.shared
+    @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
 
     /// Moves the Wisp window to another page (e.g. "All routines").
     let onSelectPage: (WispPage) -> Void
@@ -117,13 +119,19 @@ struct HomeTab: View {
             .fixedSize(horizontal: false, vertical: true)
             .wispEntrance(order: 1)
 
+            checklistTile.wispEntrance(order: 2)
             needsYouStrip.wispEntrance(order: 2)
             runningNowTile.wispEntrance(order: 2)
 
             HStack(alignment: .top, spacing: tileSpacing) {
-                buddiesTile.frame(minWidth: 200)
+                // Buddies and Brain tiles only exist with Advanced features on.
+                if advancedFeatures.isEnabled {
+                    buddiesTile.frame(minWidth: 200)
+                }
                 upNextTile.frame(minWidth: 180)
-                brainTile.frame(width: 150)
+                if advancedFeatures.isEnabled {
+                    brainTile.frame(width: 150)
+                }
             }
             .fixedSize(horizontal: false, vertical: true)
             .wispEntrance(order: 3)
@@ -142,15 +150,106 @@ struct HomeTab: View {
     private var narrowGrid: some View {
         VStack(alignment: .leading, spacing: tileSpacing) {
             heroTile.wispEntrance(order: 1)
+            checklistTile.wispEntrance(order: 2)
             needsYouStrip.wispEntrance(order: 2)
             runningNowTile.wispEntrance(order: 2)
             todayTile(fillsRowHeight: false).wispEntrance(order: 3)
-            buddiesTile.wispEntrance(order: 3)
+            if advancedFeatures.isEnabled {
+                buddiesTile.wispEntrance(order: 3)
+            }
             upNextTile.wispEntrance(order: 4)
             routinesTile.wispEntrance(order: 4)
-            brainTile.wispEntrance(order: 5)
+            if advancedFeatures.isEnabled {
+                brainTile.wispEntrance(order: 5)
+            }
             recentAnswersTile.wispEntrance(order: 5)
         }
+    }
+
+    // MARK: - Checklist
+
+    /// Today's checklist from the Jobs engine: Canvas due dates and calendar
+    /// events, tickable here and in the notch, with Reminders as the source of
+    /// truth. Without one, a single pill leads to Jobs setup.
+    private var checklistTile: some View {
+        let checklistItems = jobsEngine.todayChecklist
+        let completedCount = checklistItems.filter(\.isCompleted).count
+        let maximumVisibleRows = 6
+        return WispBentoTile(
+            title: "Today's checklist",
+            symbolName: "checklist",
+            accessory: AnyView(
+                Group {
+                    if checklistItems.isEmpty {
+                        WispBentoLink(title: "Jobs") { onSelectPage(.jobs) }
+                    } else {
+                        Text("\(completedCount) of \(checklistItems.count)")
+                            .font(WispFont.caption)
+                            .foregroundStyle(WispColor.textSecondary)
+                    }
+                }
+            )
+        ) {
+            VStack(alignment: .leading, spacing: 2) {
+                if checklistItems.isEmpty {
+                    HStack(spacing: 10) {
+                        Text(jobsEngine.hasCanvasFeed ? "Nothing planned yet" : "Nothing set up yet")
+                            .font(.callout)
+                            .foregroundStyle(WispColor.textSecondary)
+                        Spacer(minLength: 0)
+                        Button(jobsEngine.hasCanvasFeed ? "Plan my day" : "Set up Jobs") {
+                            if jobsEngine.hasCanvasFeed {
+                                Task { await jobsEngine.rebuildChecklistNow() }
+                            } else {
+                                onSelectPage(.jobs)
+                            }
+                        }
+                        .buttonStyle(WispPillButtonStyle())
+                        .controlSize(.small)
+                        .pointerCursor()
+                    }
+                } else {
+                    ForEach(checklistItems.prefix(maximumVisibleRows)) { checklistItem in
+                        checklistRow(checklistItem)
+                    }
+                    if checklistItems.count > maximumVisibleRows {
+                        WispBentoLink(title: "All \(checklistItems.count)") { onSelectPage(.jobs) }
+                    }
+                }
+            }
+        }
+        .task { await jobsEngine.refreshChecklistCompletion() }
+    }
+
+    private func checklistRow(_ checklistItem: ChecklistItem) -> some View {
+        Button {
+            Task { await jobsEngine.setChecklistItem(id: checklistItem.id, isCompleted: !checklistItem.isCompleted) }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: checklistItem.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(checklistItem.isCompleted ? WispColor.accentText : WispColor.textTertiary)
+                    .contentTransition(.symbolEffect(.replace))
+                Text(checklistItem.title)
+                    .font(.callout)
+                    .foregroundStyle(checklistItem.isCompleted ? WispColor.textTertiary : WispColor.textPrimary)
+                    .strikethrough(checklistItem.isCompleted)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let subtitle = checklistItem.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(WispColor.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .accessibilityLabel(checklistItem.title)
+        .accessibilityValue(checklistItem.isCompleted ? "Done" : "Not done")
     }
 
     // MARK: - Hero

@@ -96,9 +96,13 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         menu.addItem(saveWorkedSolutionItem)
         menu.addItem(actionItem(title: "Open Wisp", action: #selector(openToday), keyEquivalent: "o"))
         menu.addItem(actionItem(title: "Chat", action: #selector(openChat)))
-        menu.addItem(actionItem(title: "Buddies", action: #selector(openBuddies)))
-        menu.addItem(actionItem(title: "Brain", action: #selector(openBrain)))
-        menu.addItem(actionItem(title: "Add to Brain…", action: #selector(addToBrain)))
+        // Buddies and Brain have no page while Advanced features are off (the router
+        // would land the click on Settings), so the items are left out until then.
+        if WispAdvancedFeaturesPreference.isEnabledNow {
+            menu.addItem(actionItem(title: "Buddies", action: #selector(openBuddies)))
+            menu.addItem(actionItem(title: "Brain", action: #selector(openBrain)))
+            menu.addItem(actionItem(title: "Add to Brain…", action: #selector(addToBrain)))
+        }
         menu.addItem(.separator())
 
         let pauseListeningItem = actionItem(title: "Pause Listening", action: #selector(togglePauseListening))

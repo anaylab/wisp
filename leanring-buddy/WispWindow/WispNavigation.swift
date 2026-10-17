@@ -10,7 +10,11 @@
 //  the dashboard, the pop-out conversation window and the settings pages inside
 //  the notch — so every setting now has exactly one home.
 //
-//  The sidebar has eight sections (`WispSection`). A section with several pages
+//  The window has four sections by default (Today, Chat, Jobs, Settings) and
+//  nine with Advanced features on (`WispSection`). Buddies, Brain, Routines,
+//  History and Connections are never deleted: with Advanced off, Routines,
+//  History and the Connections pages are reached as Settings pages, and the
+//  Buddies and Brain pages are hidden. A section with several pages
 //  (`WispPage`) shows them as a segmented control in the toolbar. Anything that
 //  wants the window open at a particular page — the notch's gear, the menu bar
 //  menu, Today's "Review" button — calls `WispWindowNavigator.open(_:)`.
@@ -31,6 +35,7 @@ extension Notification.Name {
 enum WispSection: String, CaseIterable, Identifiable {
     case home
     case chat
+    case jobs
     case buddies
     case brain
     case routines
@@ -44,6 +49,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Today"
         case .chat: return "Chat"
+        case .jobs: return "Jobs"
         case .buddies: return "Buddies"
         case .brain: return "Brain"
         case .routines: return "Routines"
@@ -57,6 +63,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "sun.max"
         case .chat: return "bubble.left.and.bubble.right"
+        case .jobs: return "calendar.badge.checkmark"
         case .buddies: return "person.2"
         case .brain: return "brain"
         case .routines: return "bolt"
@@ -71,6 +78,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: return [.home]
         case .chat: return [.chat]
+        case .jobs: return [.jobs]
         case .buddies: return [.buddies]
         // What Wisp knows, how it got there, and how to steer it. The old
         // History → Memory page (memory.md facts + conversation history) folded
@@ -83,15 +91,33 @@ enum WispSection: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Sidebar groups: using Wisp, then managing it.
-    static let useSections: [WispSection] = [.home, .chat, .buddies, .brain, .routines, .history]
-    static let manageSections: [WispSection] = [.connections, .settings]
+    /// Pages that are their own sections when Advanced is on, and fold into
+    /// Settings when it is off, so the bar can stay at four sections without
+    /// anything becoming unreachable.
+    static let pagesFoldedIntoSettingsWhenAdvancedIsOff: [WispPage] = [
+        .routines, .timeline, .marketplace, .tools, .sources
+    ]
+
+    /// The bar's contents. Advanced off: Today, Chat, Jobs, Settings.
+    static func visibleSections(advancedEnabled: Bool) -> [WispSection] {
+        advancedEnabled ? allCases : [.home, .chat, .jobs, .settings]
+    }
+
+    /// The pages shown in the section's strip. Settings gains the folded pages
+    /// (after its own) while Advanced is off.
+    func pages(advancedEnabled: Bool) -> [WispPage] {
+        if self == .settings && !advancedEnabled {
+            return pages + Self.pagesFoldedIntoSettingsWhenAdvancedIsOff
+        }
+        return pages
+    }
 }
 
 /// One page of the Wisp window.
 enum WispPage: String, CaseIterable, Identifiable {
     case home
     case chat
+    case jobs
     case buddies
     case routines
     case brainPages
@@ -117,11 +143,32 @@ enum WispPage: String, CaseIterable, Identifiable {
         WispSection.allCases.first { $0.pages.contains(self) } ?? .home
     }
 
+    /// The section the bar highlights for this page. Differs from `section`
+    /// only while Advanced is off, when Routines, History and Connections pages
+    /// live under Settings.
+    func visibleSection(advancedEnabled: Bool) -> WispSection {
+        if !advancedEnabled && WispSection.pagesFoldedIntoSettingsWhenAdvancedIsOff.contains(self) {
+            return .settings
+        }
+        return section
+    }
+
+    /// Buddies and Brain have no home while Advanced is off.
+    var isHiddenWhenAdvancedIsOff: Bool {
+        switch self {
+        case .buddies, .brainPages, .brainGraph, .brainInbox, .brainHealth, .brainLog, .brainSettings:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// The page's name in the toolbar's segmented control.
     var title: String {
         switch self {
         case .home: return "Today"
         case .chat: return "Chat"
+        case .jobs: return "Jobs"
         case .buddies: return "Buddies"
         case .routines: return "Routines"
         case .brainPages: return "Pages"
@@ -130,7 +177,7 @@ enum WispPage: String, CaseIterable, Identifiable {
         case .brainHealth: return "Health"
         case .brainLog: return "Log"
         case .brainSettings: return "Settings"
-        case .timeline: return "Timeline"
+        case .timeline: return "History"
         case .marketplace: return "Marketplace"
         case .tools: return "Servers & Tools"
         case .sources: return "Sources"
@@ -160,15 +207,43 @@ final class WispWindowRouter: ObservableObject {
     /// Dictation again rather than resetting to the section's first page.
     private var lastPageBySection: [WispSection: WispPage] = [:]
 
-    var selectedSection: WispSection { selectedPage.section }
+    /// Whether Advanced features are on, read live so the window reacts the
+    /// moment the switch moves (views also observe the preference itself).
+    private var advancedEnabled: Bool { WispAdvancedFeaturesPreference.isEnabledNow }
+
+    var selectedSection: WispSection {
+        selectedPage.visibleSection(advancedEnabled: advancedEnabled)
+    }
+
+    /// The strip under the bar for the open section.
+    var pagesInSelectedSection: [WispPage] {
+        selectedSection.pages(advancedEnabled: advancedEnabled)
+    }
+
+    /// Where a request for `requested` actually lands: Buddies and Brain pages
+    /// fall back to Settings while Advanced is off. Everything else, including
+    /// the pages folded into Settings, is reachable and returned as asked.
+    func resolvedPage(_ requested: WispPage, advancedEnabled: Bool) -> WispPage {
+        if !advancedEnabled && requested.isHiddenWhenAdvancedIsOff {
+            return .general
+        }
+        return requested
+    }
 
     func select(_ page: WispPage) {
-        selectedPage = page
-        lastPageBySection[page.section] = page
+        let landingPage = resolvedPage(page, advancedEnabled: advancedEnabled)
+        selectedPage = landingPage
+        lastPageBySection[landingPage.visibleSection(advancedEnabled: advancedEnabled)] = landingPage
     }
 
     func select(_ section: WispSection) {
-        select(lastPageBySection[section] ?? section.pages[0])
+        select(lastPageBySection[section] ?? section.pages(advancedEnabled: advancedEnabled)[0])
+    }
+
+    /// Called when the Advanced switch moves, so a page that just became hidden
+    /// is not left on screen.
+    func reconcileWithAdvancedSetting() {
+        select(selectedPage)
     }
 }
 

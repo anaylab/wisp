@@ -21,6 +21,7 @@ struct BuddyChatView: View {
     var onOpenBuddy: (UUID) -> Void
 
     @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var threadStore = BuddyThreadStore.shared
 
@@ -182,7 +183,9 @@ struct BuddyChatView: View {
         case .waiting: return "Waiting for your ok"
         case .oops: return "Its last run failed"
         default:
-            let specialtyPrefix = buddy.specialty.flatMap { $0 == .general ? nil : $0.title + " · " } ?? ""
+            let specialtyPrefix = advancedFeatures.isEnabled
+                ? (buddy.specialty.flatMap { $0 == .general ? nil : $0.title + " · " } ?? "")
+                : ""
             return buddy.schedule.isRepeating
                 ? "\(specialtyPrefix)Next run \(BuddyFormatting.nextRunPhrase(for: buddy))"
                 : (specialtyPrefix.isEmpty ? "Runs when you ask" : String(specialtyPrefix.dropLast(3)))
@@ -373,7 +376,7 @@ struct BuddyChatView: View {
                 }
                 if !didStart { sendFailureMessage = "Its model is busy — try again in a moment." }
             }
-            if !peers.isEmpty {
+            if advancedFeatures.isEnabled && !peers.isEmpty {
                 Menu {
                     ForEach(peers) { peer in
                         Button(peer.modelChoice?.sendsDataOffThisMachine == true ? "\(peer.name) · cloud model" : peer.name) {

@@ -167,6 +167,11 @@ final class NotchWindowController {
         // Quiet mode first, so the briefing's first check already knows about a call.
         QuietModeMonitor.shared.start()
         MorningBriefingController.shared.start()
+        // Jobs: Canvas calendar sync and the daily checklist. Deterministic, no model call.
+        LiveJobsChangeAnnouncer.flashSuccessOnIsland = { [weak companionManager] in
+            companionManager?.flashIsland(.success)
+        }
+        JobsEngine.shared.start()
         // Buddies' scheduled runs; each run is a background task started here.
         BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
             companionManager?.startBuddyRun(buddy, request: runRequest)

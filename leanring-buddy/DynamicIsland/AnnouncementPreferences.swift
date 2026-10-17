@@ -19,7 +19,8 @@ final class AnnouncementPreferences: ObservableObject {
     private static let quietDuringCallsEnabledUserDefaultsKey = "wisp.announcements.quietDuringCallsEnabled"
 
     /// Whether the notch offers the day's suggestions the first time the user is
-    /// at the Mac each day.
+    /// at the Mac each day. When the Jobs checklist exists for today, the same
+    /// switch governs dropping that checklist instead of the generic suggestions.
     @Published var areMorningSuggestionsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(areMorningSuggestionsEnabled, forKey: Self.morningSuggestionsEnabledUserDefaultsKey)

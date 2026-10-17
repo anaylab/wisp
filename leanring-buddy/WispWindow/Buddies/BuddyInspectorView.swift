@@ -47,6 +47,7 @@ struct BuddyInspectorView: View {
     var onRequestDeletion: () -> Void
 
     @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var memoryStore = BuddyMemoryStore.shared
     @ObservedObject private var fileLibrary = BuddyFileLibrary.shared
@@ -281,11 +282,13 @@ struct BuddyInspectorView: View {
 
     private func aboutTab(for buddy: WispBuddy) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            Button { WispShareImporter.exportBuddy(buddy) } label: {
-                Label("Share this buddy…", systemImage: "square.and.arrow.up")
+            if advancedFeatures.isEnabled {
+                Button { WispShareImporter.exportBuddy(buddy) } label: {
+                    Label("Share this buddy…", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()
+                .nativeTooltip("Saves its job, model and tool limits as a file — not its conversation, notes or files")
             }
-            .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()
-            .nativeTooltip("Saves its job, model and tool limits as a file — not its conversation, notes or files")
 
             VStack(alignment: .leading, spacing: 8) {
                 header("Name")
@@ -294,41 +297,43 @@ struct BuddyInspectorView: View {
                     .onSubmit { buddyStore.rename(buddyWithID: buddy.id, to: editedName) }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                header("Colour")
-                HStack(spacing: 9) {
-                    ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { colorIndex in
-                        Button { buddyStore.updateColor(ofBuddyWithID: buddy.id, to: colorIndex) } label: {
-                            Circle()
-                                .fill(BuddyAppearance.lightColor(forColorIndex: colorIndex))
-                                .frame(width: 20, height: 20)
-                                .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(buddy.colorIndex == colorIndex ? 0.85 : 0), lineWidth: 1.5).padding(-3))
+            if advancedFeatures.isEnabled {
+                VStack(alignment: .leading, spacing: 8) {
+                    header("Colour")
+                    HStack(spacing: 9) {
+                        ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { colorIndex in
+                            Button { buddyStore.updateColor(ofBuddyWithID: buddy.id, to: colorIndex) } label: {
+                                Circle()
+                                    .fill(BuddyAppearance.lightColor(forColorIndex: colorIndex))
+                                    .frame(width: 20, height: 20)
+                                    .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(buddy.colorIndex == colorIndex ? 0.85 : 0), lineWidth: 1.5).padding(-3))
+                            }
+                            .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(colorIndex + 1)")
                         }
-                        .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(colorIndex + 1)")
                     }
+                    .animation(WispMotion.quick, value: buddy.colorIndex)
                 }
-                .animation(WispMotion.quick, value: buddy.colorIndex)
-            }
 
-            VStack(alignment: .leading, spacing: 8) {
-                header("Specialty")
-                Picker("Specialty", selection: Binding(
-                    get: { buddy.specialty ?? .general },
-                    set: { buddyStore.updateSpecialty(ofBuddyWithID: buddy.id, to: $0, appliesToolLimits: true) }
-                )) {
-                    ForEach(BuddySpecialty.allCases) { specialty in
-                        Label(specialty.title, systemImage: specialty.symbolName).tag(specialty)
+                VStack(alignment: .leading, spacing: 8) {
+                    header("Specialty")
+                    Picker("Specialty", selection: Binding(
+                        get: { buddy.specialty ?? .general },
+                        set: { buddyStore.updateSpecialty(ofBuddyWithID: buddy.id, to: $0, appliesToolLimits: true) }
+                    )) {
+                        ForEach(BuddySpecialty.allCases) { specialty in
+                            Label(specialty.title, systemImage: specialty.symbolName).tag(specialty)
+                        }
                     }
+                    .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
                 }
-                .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
-            }
 
-            VStack(alignment: .leading, spacing: 8) {
-                header("Model")
-                BuddyModelEditor(modelChoice: Binding(
-                    get: { buddy.modelChoice },
-                    set: { buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: $0) }
-                ))
+                VStack(alignment: .leading, spacing: 8) {
+                    header("Model")
+                    BuddyModelEditor(modelChoice: Binding(
+                        get: { buddy.modelChoice },
+                        set: { buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: $0) }
+                    ))
+                }
             }
 
             VStack(alignment: .leading, spacing: 8) {

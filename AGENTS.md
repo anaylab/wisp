@@ -29,6 +29,15 @@ screenshots and the transcript off this machine and is labelled as such. Local r
 default and the private path — do not make a cloud provider the default, and do not add a
 cloud dependency to the local path, without asking.
 
+**Jobs (Canvas calendar + daily checklist)** add one more opt-in network use: a user-pasted Canvas
+calendar feed (.ics) URL, fetched on launch and at most hourly by `CanvasFeedStore` (https GET, no
+cookies, 5 MB cap, no off-https redirects). It is off until a URL is saved, has its own switch
+(`JobsEngine.isCanvasJobEnabled`, not `GlanceCardDataPreference`), and the URL is a secret: Keychain only
+(`CanvasFeedKeychainStore`, service `com.wisp.canvas-feed`), never in UserDefaults, logs, errors or History.
+Sync is deterministic code with no model call. Writes go only to a calendar named "Wisp" and a Reminders list
+named "Wisp Today"; study blocks are written only after one approval card (`wisp_jobs_apply_study_blocks`, on
+`ToolCallSafety.alwaysAskBareToolNames`, so session auto-approve cannot skip it).
+
 ## Architecture
 
 - **App Type**: Menu bar-only (`LSUIElement=true`), no dock icon. The Wisp window raises the
@@ -43,8 +52,10 @@ cloud dependency to the local path, without asking.
   banner on Today and "Listening paused" in the notch chat's talk pill. The window
   (`WispWindow/`) replaced the old dashboard, the pop-out conversation window, the notch's own
   settings pages and the big menu bar panel, so every setting has exactly one home. It has no sidebar:
-  a slim top bar (`WispWindowView`) holds the eight `WispSection`s as icons (Today, Chat, Buddies, Brain, Routines,
-  History, Connections, Settings) — the open one expands to its name and the pill slides between tabs
+  a slim top bar (`WispWindowView`) holds the `WispSection`s as icons — **four by default** (Today, Chat, Jobs, Settings), nine with
+  Settings → General → **Advanced features** on (`WispAdvancedFeaturesPreference`, off by default, adds Buddies, Brain, Routines, History,
+  Connections; with it off Routines, History and Connections open as Settings pages). Hiding only gates visibility and launch-time work: no
+  code or stored buddy/brain data is removed, and the brain is never switched off (`MemoryStore` needs `me.md`) — the open one expands to its name and the pill slides between tabs
   (`matchedGeometryEffect`) — with a status pill (mark + state + model) at the end, and a section with several
   pages (`WispPage`) gets a segmented strip beneath. The `NSWindow` is full-size-content with a transparent title
   bar and hidden title; the bar sits in it, doubles as the drag handle (`WindowDragArea`), and
@@ -356,6 +367,24 @@ cloud dependency to the local path, without asking.
   → an "N new" flank badge and a **NEW** section in the full panel, marked seen when the panel
   closes. Both switches live in the Agent tab's Announcements card (`AnnouncementPreferences`),
   which also has a "Show now" preview.
+- **Jobs** (`Jobs/`, `docs/jobs-revamp-plan.md`; a job is Source -> Rule -> Output -> Cadence, quiet unless something changed):
+  **Job 1, Canvas calendar manager**: the user pastes their Canvas calendar feed (`.ics`) URL once in the Jobs tab. The URL is a
+  secret: it lives only in the Keychain (`CanvasFeedKeychainStore`, service `com.wisp.canvas-feed`), is validated on save (https only,
+  `webcal://` rewritten, no userinfo), is never put in UserDefaults, logs, History, errors or notifications, and the UI shows only a
+  masked host. `JobsEngine` (`@MainActor` singleton, `start()` beside `MorningBriefingController.shared.start()`) fetches it on launch
+  and hourly with a plain cookie-less GET (a new **opt-in network use**: off until a URL is saved, with its own switch, not
+  `GlanceCardDataPreference`), `CanvasFeedParser` -> `CanvasItem`s, `CanvasSyncPlanner.diff` against the 0600 snapshot
+  `~/Library/Application Support/Wisp/jobs-canvas-snapshot.json` (no feed URL in it), then `WispCalendarWriter` upserts events into a
+  dedicated **"Wisp"** EventKit calendar keyed by Canvas UID, so re-running changes nothing. Writes never touch another calendar.
+  `StudyBlockPlanner` proposes study blocks in free gaps (busy time from every other calendar); they are **never auto-written** — one
+  confirmation card for the batch (`ToolConfirmationCardBuilder`), and `JobsToolNames.applyStudyBlocks` is on
+  `ToolCallSafety.alwaysAskBareToolNames`, so session auto-approve can't skip it. **Job 2, daily checklist**: `DayChecklistBuilder`
+  (pure) builds the day from Canvas due dates + calendar events + approved study blocks, rolling unfinished items over;
+  `WispTodayReminders` mirrors it into the Reminders list **"Wisp Today"** and reads completion back. The notch shows
+  `DailyChecklistView` (tickable) in place of the generic morning-suggestions banner when `JobsEngine.shared.hasChecklist`
+  (`MorningBriefing` defers), and `CanvasDiffCardView` summarises a non-empty diff. Notifications fire only when the diff is non-empty;
+  quiet mode suppresses notifications only, sync still runs. **No model call anywhere on the sync path.** Tested by
+  `Tests/CanvasSync`, `Tests/DayChecklist`, `Tests/JobsEngine`.
 - **Glance cards**: a visual answer surface in the notch's expanded panel, parsed from one
   `[CARD:{...json...}]` tag at the end of the reply (same structured-text mechanism as
   `[POINT:]`/`[BOX:]`/`[TOOL:]` — the local model can't do native structured output; the tag is
@@ -1137,6 +1166,15 @@ Grouped by what they do. Line counts are approximate.
 | `WispWindow/Brain/BrainInboxPage.swift / BrainHealthPage.swift / BrainLogPage.swift / BrainSettingsPage.swift` | ~675/~370/~270/~610 | Inbox (drop zone, jobs, notes import), Health (overview + fixes), Log (undo), Settings (switches, activity privacy, vault, conversation history). |
 | `WispWindow/Brain/BrainSharedViews.swift / BrainMarkdownRendering.swift` | ~495/~330 | Shared navigation state, chips, markdown view; pure markdown block parser and `wisp-brain://` link rewriting. |
 
+### Jobs (Canvas calendar + daily checklist)
+| File | Lines | Purpose |
+|------|-------|---------|
+| `Jobs/JobsEngine.swift` | ~480 | `@MainActor JobsEngine` (published sync state, diff, pending study blocks, today's checklist, access states) plus `JobsToolNames` and the injectable protocols (`JobsFeedProviding`, `JobsCalendarWriting`, `JobsReminderWriting`, `JobsStudyBlockApproving`, `JobsChangeAnnouncing`). Launch sync, then a 60s clock: sync at most hourly (15-minute floor even for Sync now), checklist rebuilt once per morning (5am-5pm). Snapshot saved only after every write succeeded; empty diff is silent. State in `jobs-engine-state.json` (0600). Tested by `Tests/JobsEngine`. |
+| `Jobs/JobsEngineLiveDependencies.swift` | ~130 | The real adapters (feed store, Keychain, the two EventKit actors, `ToolConfirmationCoordinator` approval, notification + island flash, quiet-mode aware) and `JobsEngine.shared`. `NotchWindowController.show()` sets the flash hook and calls `JobsEngine.shared.start()`. |
+| `Jobs/Canvas*.swift`, `Jobs/StudyBlockPlanner.swift` | ~800 | Pure Canvas core: models, ICS parser, snapshot diff, study-block planner, URL validator, Keychain store and feed store. Tested by `Tests/CanvasSync`. |
+| `Jobs/ChecklistModels.swift`, `Jobs/DayChecklistBuilder.swift` | ~550 | Checklist model, the pure builder (rollover, cap, dedupe) and `JobsEventKitPlanning` (write plans). Tested by `Tests/DayChecklist`. |
+| `Jobs/WispCalendarWriter.swift`, `Jobs/WispTodayReminders.swift` | ~470 | Thin EventKit actors for the "Wisp" calendar and the "Wisp Today" list. |
+
 ### Voice modes, glance cards & sources
 | File | Lines | Purpose |
 |------|-------|---------|
@@ -1155,6 +1193,21 @@ Grouped by what they do. Line counts are approximate.
 | `WispTimerStore.swift` / `TimerCardView.swift` | ~235/~225 | `timer` kind: the main-actor store that owns countdowns (completion task, scheduled `UNUserNotification`, finish callback) independent of any card, plus `WispTimerDurationFormatter`; the card is a live countdown (`CountdownSecondTickSchedule`, paused when off-screen) with a Cancel button. |
 | `ConfiguredSourceStore.swift` / `RESTSourceDataProvider.swift` / `SourceCardView.swift` | ~90/~140/~90 | `source` kind: user endpoints in `~/.wisp/sources.json`, fetched over HTTPS and mapped to generic blocks. |
 | `SourcesTab.swift` | ~150 | Connections → Sources: the live-card-data master toggle + the configured-source list. |
+
+### Jobs
+| File | Lines | Purpose |
+|------|-------|---------|
+| `Jobs/CanvasModels.swift` | ~120 | Pure `CanvasItem`, `CanvasItemChange`, `CanvasDiff`, `CanvasSnapshot`, study-block types (`StudyBlockSettings`, `StudyBlockProposal`, `BusyInterval`). |
+| `Jobs/CanvasFeedParser.swift` | ~300 | Pure ICS -> `CanvasItem`s; never throws, a malformed VEVENT is skipped (and counted). |
+| `Jobs/CanvasSyncPlanner.swift` | ~95 | Pure snapshot diff (first sync = everything added). |
+| `Jobs/StudyBlockPlanner.swift` | ~145 | Pure study-block proposals from due items, busy intervals and settings. |
+| `Jobs/CanvasFeedStore.swift` / `CanvasFeedKeychainStore.swift` | ~190/~70 | Feed URL validation + fetch + 0600 snapshot JSON; the URL's Keychain item. |
+| `Jobs/ChecklistModels.swift` / `DayChecklistBuilder.swift` | ~85/~490 | `ChecklistItem` and the pure daily-checklist builder (rollover, caps, day keys). |
+| `Jobs/WispCalendarWriter.swift` / `WispTodayReminders.swift` | ~285/~205 | Actors writing only the "Wisp" calendar and the "Wisp Today" Reminders list (EventKit). |
+| `Jobs/JobsEngine.swift` / `JobsEngineLiveDependencies.swift` | ~690/~135 | The orchestrator (launch + hourly sync, diff, study-block approval, checklist rebuild, published state for the window and notch) and its live EventKit/network wiring. |
+| `WispWindow/JobsTab.swift` | ~515 | Jobs section: Canvas setup flow, sync status, change cards, study-block approval, settings. |
+| `WispWindow/WispAdvancedFeaturesPreference.swift` | ~35 | Persisted Advanced features switch (`isEnabledNow` for non-UI code). |
+| `DynamicIsland/DailyChecklistView.swift` / `CanvasDiffCardView.swift` | ~130/~100 | The notch's tickable checklist and Canvas change card. |
 
 ### Wisp window, notch and UI
 | File | Lines | Purpose |
@@ -1282,7 +1335,13 @@ running):
 ./Tests/ScreenWatcher/run.sh             # screen-watch request parsing, text matching, evaluator
 ./Tests/EditableConfirmation/run.sh      # editable confirmation fields: which, edit application, refusals
 ./Tests/RoutineParameters/run.sh         # routine blanks: parsing, defaults, clipboard/date, filling in
+./Tests/CanvasSync/run.sh                # Canvas ICS parser, diff, study blocks, feed URL validator
+./Tests/DayChecklist/run.sh              # daily checklist builder + EventKit write planning
+./Tests/JobsEngine/run.sh                # Jobs engine flow with fakes (sync, throttle, approval, checklist)
 ./Tests/MCPStructuredContent/run.sh      # MCP structuredContent rendering + caps, cua-driver floor and cards
+./Tests/CanvasSync/run.sh                # Canvas ICS parsing, diff, study-block planner
+./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
+./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
 ```
 

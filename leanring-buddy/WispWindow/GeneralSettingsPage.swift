@@ -21,6 +21,7 @@ struct GeneralSettingsPage: View {
     @ObservedObject private var soundPreference = WispSoundPreference.shared
     @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
     @ObservedObject private var windowAppearance = WispAppearancePreference.shared
+    @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
 
     var body: some View {
         ScrollView {
@@ -32,12 +33,29 @@ struct GeneralSettingsPage: View {
                 appearanceCard
                 islandCard
                 voiceCard
+                advancedCard
             }
             .padding(20)
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .background(WispColor.windowBackground)
+    }
+
+    /// Buddies and Brain stay out of the window until asked for; nothing is
+    /// removed when this is off, so turning it back on restores them as they were.
+    private var advancedCard: some View {
+        DashboardCard(title: "Advanced") {
+            SettingRow(
+                title: "Advanced features",
+                detail: "Shows Buddies and Brain in the window."
+            ) {
+                Toggle("Advanced features", isOn: $advancedFeatures.isEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .pointerCursor()
+            }
+        }
     }
 
     private var appearanceCard: some View {

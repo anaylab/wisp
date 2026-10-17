@@ -87,6 +87,9 @@ enum ToolConfirmationCardBuilder {
         if ToolCallInspection.bareToolName(toolName) == BuddyDelegationToolNames.askBuddy {
             return askBuddyCard(toolInput: toolInput)
         }
+        if ToolCallInspection.bareToolName(toolName) == JobsToolNames.applyStudyBlocks {
+            return studyBlocksCard(toolInput: toolInput)
+        }
         // Its prepared input names the resolved person and handle, which the
         // generic message shape would show only half of.
         if ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage {
@@ -424,6 +427,55 @@ enum ToolConfirmationCardBuilder {
                 GlanceListRow(text: boundaryNote, iconName: "exclamationmark.triangle", tone: .neutral)
             ]))
         }
+        return GlanceCard(blocks: blocks)
+    }
+
+    // MARK: - Jobs
+
+    /// "N study blocks": one row per proposed block ("Study: X" with its day and
+    /// time), and the sentence saying where they go. Built from the call, never the
+    /// model, like every confirmation card. Expects `{"blocks":[{title,start,end}]}`
+    /// with ISO 8601 times (see `LiveJobsStudyBlockApprover.toolInput`).
+    static func studyBlocksCard(toolInput: JSONValue) -> GlanceCard {
+        var blockObjects: [JSONValue] = []
+        if case .object(let topLevelObject) = toolInput, case .array(let blockValues)? = topLevelObject["blocks"] {
+            blockObjects = blockValues
+        }
+        let timestampParser = ISO8601DateFormatter()
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "EEE"
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm"
+        let endTimeFormatter = DateFormatter()
+        endTimeFormatter.dateFormat = "h:mm a"
+
+        let maximumRowsShown = 8
+        var blockRows: [GlanceKeyValuePair] = []
+        for blockObject in blockObjects.prefix(maximumRowsShown) {
+            let blockTitle = ToolCallInspection.stringValue(forAnyOf: ["title"], in: blockObject) ?? "Study block"
+            var timeText = ""
+            if let startText = ToolCallInspection.stringValue(forAnyOf: ["start"], in: blockObject),
+               let endText = ToolCallInspection.stringValue(forAnyOf: ["end"], in: blockObject),
+               let startDate = timestampParser.date(from: startText),
+               let endDate = timestampParser.date(from: endText) {
+                timeText = "\(dayFormatter.string(from: startDate)) \(timeFormatter.string(from: startDate))-\(endTimeFormatter.string(from: endDate))"
+            }
+            blockRows.append(GlanceKeyValuePair(key: truncatedFieldValue(blockTitle), value: timeText, tone: .neutral))
+        }
+
+        let blockCount = blockObjects.count
+        var blocks: [GlanceBlock] = [
+            .header(title: "\(blockCount) study block\(blockCount == 1 ? "" : "s")", iconName: "calendar", trailingText: "Wisp calendar")
+        ]
+        if !blockRows.isEmpty { blocks.append(.keyValue(pairs: blockRows)) }
+        if blockCount > maximumRowsShown {
+            blocks.append(.list(rows: [
+                GlanceListRow(text: "and \(blockCount - maximumRowsShown) more", iconName: nil, tone: .neutral)
+            ]))
+        }
+        blocks.append(.list(rows: [
+            GlanceListRow(text: "Added to your Wisp calendar only", iconName: "info.circle", tone: .neutral)
+        ]))
         return GlanceCard(blocks: blocks)
     }
 

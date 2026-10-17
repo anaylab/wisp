@@ -156,8 +156,16 @@ final class MorningBriefingController: ObservableObject {
     /// notch must open once when the briefing arrives, not every time it reopens.
     @Published private(set) var presentationSequenceNumber = 0
 
+    /// True from the day's first presentation of the Jobs checklist until the user
+    /// dismisses the compact card. The checklist itself lives in `JobsEngine`; this
+    /// only says whether the notch should drop it down once, like the old banner.
+    @Published private(set) var isChecklistBannerPending = false
+
+    private static let lastChecklistPresentedDayUserDefaultsKey = "wisp.morningBriefing.lastChecklistPresentedDay"
+
     private var checkTimer: Timer?
     private var isBuildingBriefing = false
+    private var latestDiffObserver: AnyCancellable?
 
     private init() {}
 
@@ -174,6 +182,17 @@ final class MorningBriefingController: ObservableObject {
         timer.tolerance = 10
         RunLoop.main.add(timer, forMode: .common)
         checkTimer = timer
+
+        // A Canvas sync that changed something drops its one-line card from the
+        // notch. An empty diff is never published as non-nil, so a quiet sync
+        // never gets here. Quiet mode holds the card back to the hover panel.
+        latestDiffObserver = JobsEngine.shared.$latestDiff
+            .removeDuplicates()
+            .sink { [weak self] latestDiff in
+                guard latestDiff != nil, !QuietModeMonitor.shared.isQuiet else { return }
+                self?.presentationSequenceNumber += 1
+            }
+
         presentIfDue()
     }
 
@@ -185,6 +204,10 @@ final class MorningBriefingController: ObservableObject {
 
     func dismiss() {
         pendingSuggestions = []
+    }
+
+    func dismissChecklistBanner() {
+        isChecklistBannerPending = false
     }
 
     /// Runs one suggestion and takes it off the list; when the last one goes,
@@ -206,8 +229,16 @@ final class MorningBriefingController: ObservableObject {
     }
 
     private func presentIfDue() {
+        guard !QuietModeMonitor.shared.isQuiet else { return }
+
+        // The Jobs checklist replaces the generic suggestions banner: when there is
+        // a checklist for today, drop that once instead and skip the suggestions.
+        if JobsEngine.shared.hasChecklist {
+            presentChecklistIfDue()
+            return
+        }
+
         guard AnnouncementPreferences.shared.areMorningSuggestionsEnabled,
-              !QuietModeMonitor.shared.isQuiet,
               !isBuildingBriefing else { return }
 
         let secondsSinceLastUserInput = CGEventSource.secondsSinceLastEventType(
@@ -225,8 +256,36 @@ final class MorningBriefingController: ObservableObject {
         Task { await buildAndPresentBriefing() }
     }
 
+    /// Same once-a-day, user-is-present rules as the suggestions banner, with its
+    /// own "last presented" day so the two never block each other.
+    private func presentChecklistIfDue() {
+        // The same switch governs the checklist drop: it is the morning notch.
+        guard AnnouncementPreferences.shared.areMorningSuggestionsEnabled else { return }
+        let secondsSinceLastUserInput = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState,
+            eventType: CGEventType(rawValue: ~0)!
+        )
+        let now = Date()
+        guard MorningBriefingSchedule.shouldPresent(
+            now: now,
+            calendar: .current,
+            lastPresentedDayKey: UserDefaults.standard.string(forKey: Self.lastChecklistPresentedDayUserDefaultsKey),
+            secondsSinceLastUserInput: secondsSinceLastUserInput
+        ) else { return }
+
+        UserDefaults.standard.set(
+            MorningBriefingSchedule.dayKey(for: now, calendar: .current),
+            forKey: Self.lastChecklistPresentedDayUserDefaultsKey
+        )
+        isChecklistBannerPending = true
+        presentationSequenceNumber += 1
+    }
+
     private func buildAndPresentBriefing() async {
-        guard AnnouncementPreferences.shared.areMorningSuggestionsEnabled, !isBuildingBriefing else { return }
+        // Presented on demand ("Show now") still defers to a real checklist.
+        guard AnnouncementPreferences.shared.areMorningSuggestionsEnabled,
+              !isBuildingBriefing,
+              !JobsEngine.shared.hasChecklist else { return }
         isBuildingBriefing = true
         defer { isBuildingBriefing = false }
 

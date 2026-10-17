@@ -445,6 +445,7 @@ struct BuddyDetailView: View {
         case deletion
     }
 
+    @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var threadStore = BuddyThreadStore.shared
@@ -1106,10 +1107,12 @@ struct BuddyDetailView: View {
                     get: { buddy.schedule },
                     set: { newSchedule in buddyStore.updateSchedule(ofBuddyWithID: buddy.id, to: newSchedule) }
                 ))
-                BuddyModelEditor(modelChoice: Binding(
-                    get: { buddy.modelChoice },
-                    set: { newModelChoice in buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: newModelChoice) }
-                ))
+                if advancedFeatures.isEnabled {
+                    BuddyModelEditor(modelChoice: Binding(
+                        get: { buddy.modelChoice },
+                        set: { newModelChoice in buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: newModelChoice) }
+                    ))
+                }
             }
 
             Spacer(minLength: 0)
@@ -1133,6 +1136,7 @@ struct NewBuddyForm: View {
     let onCreated: (UUID) -> Void
     let onCancel: () -> Void
 
+    @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var buddyStore = BuddyStore.shared
 
     @State private var instructionText = ""
@@ -1207,7 +1211,9 @@ struct NewBuddyForm: View {
                 }
             ))
 
-            BuddyModelEditor(modelChoice: $modelChoice)
+            if advancedFeatures.isEnabled {
+                BuddyModelEditor(modelChoice: $modelChoice)
+            }
             BuddyToolAccessEditor(
                 toolAccess: $toolAccess,
                 modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(modelChoice)

@@ -2877,7 +2877,10 @@ final class CompanionManager: ObservableObject {
                 modelSendsDataOffThisMachine: runsOffThisMachine,
                 toolAccess: buddy.toolAccess,
                 // A run a peer started can't ask another peer in turn.
-                delegation: request.requesterName == nil ? (caller: buddy, service: .live()) : nil
+                // ask_buddy is only offered while Advanced features are on.
+                delegation: request.requesterName == nil && WispAdvancedFeaturesPreference.isEnabledNow
+                    ? (caller: buddy, service: .live())
+                    : nil
             ),
             onSucceeded: { finishedTaskID, answerText in
                 buddyThreadStore.completeExchange(

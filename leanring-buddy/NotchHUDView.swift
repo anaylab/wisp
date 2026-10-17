@@ -33,6 +33,7 @@ struct NotchHUDView: View {
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var upcomingEventMonitor = UpcomingEventMonitor.shared
     @ObservedObject private var morningBriefing = MorningBriefingController.shared
+    @ObservedObject private var jobsEngine = JobsEngine.shared
     @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
     @ObservedObject private var screenWatcherStore = ScreenWatcherStore.shared
@@ -253,7 +254,9 @@ struct NotchHUDView: View {
     /// on an otherwise empty notch.
     @ViewBuilder
     private var compactDroppedContent: some View {
-        if !hasAnswer && morningBriefing.hasPendingBriefing {
+        if !hasAnswer && hasJobsContentToDrop {
+            jobsDroppedContent
+        } else if !hasAnswer && morningBriefing.hasPendingBriefing {
             morningBannerContent
         } else {
             answerSurfaceWithReplyActions
@@ -325,6 +328,7 @@ struct NotchHUDView: View {
             || upcomingEventMonitor.imminentEvent != nil
             || !finishedWorkInbox.unseenTaskIDs.isEmpty
             || morningBriefing.hasPendingBriefing
+            || hasJobsContentToDrop
             || !screenWatcherStore.activeWatchers.isEmpty
     }
 
@@ -593,6 +597,66 @@ struct NotchHUDView: View {
         .nativeTooltip(tooltip)
     }
 
+    // MARK: - Jobs: Canvas change card and the daily checklist
+
+    /// A Canvas change to report, or today's checklist waiting to be shown.
+    private var hasJobsContentToDrop: Bool {
+        jobsEngine.latestDiff != nil
+            || (morningBriefing.isChecklistBannerPending && jobsEngine.hasChecklist)
+    }
+
+    /// The compact card: a one-line Canvas change on top, then the checklist the
+    /// first time it is presented each morning. Replaces the suggestions banner.
+    private var jobsDroppedContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            canvasDiffCard
+            if morningBriefing.isChecklistBannerPending && jobsEngine.hasChecklist {
+                DailyChecklistView(maximumVisibleRows: 4)
+                Button("Hide") {
+                    morningBriefing.dismissChecklistBanner()
+                    // Nothing left to show, so the notch goes back to being the notch.
+                    if jobsEngine.latestDiff == nil {
+                        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+                    }
+                }
+                .font(.system(size: 10.5, weight: .medium))
+                .wispIslandButtonStyle(prominence: .subtle)
+                .pointerCursor()
+                .nativeTooltip("Keep today's checklist in the notch panel only")
+            }
+        }
+    }
+
+    /// The "2 new assignments, 1 moved" card, shown only while a non-empty diff
+    /// is undismissed.
+    @ViewBuilder
+    private var canvasDiffCard: some View {
+        if let latestDiff = jobsEngine.latestDiff {
+            CanvasDiffCardView(
+                diff: latestDiff,
+                proposedStudyBlockCount: jobsEngine.pendingStudyBlocks.count,
+                onDismiss: {
+                    jobsEngine.dismissLatestDiff()
+                    if !(morningBriefing.isChecklistBannerPending && jobsEngine.hasChecklist) {
+                        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+                    }
+                },
+                onReviewStudyBlocks: {
+                    Task { await jobsEngine.approvePendingStudyBlocks() }
+                }
+            )
+        }
+    }
+
+    /// The hover panel's checklist, replacing the generic TODAY suggestions while
+    /// there is one.
+    @ViewBuilder
+    private var jobsChecklistSection: some View {
+        if jobsEngine.hasChecklist {
+            DailyChecklistView(maximumVisibleRows: 8)
+        }
+    }
+
     // MARK: - Morning briefing, new results, quiet mode
 
     private var morningBannerTitle: String {
@@ -684,6 +748,25 @@ struct NotchHUDView: View {
         .nativeTooltip("Wisp has \(suggestionCount) suggestions for today — hover to see them")
     }
 
+    /// "✓ 3" in the right flank: checklist items still open today. Hidden at zero
+    /// so a finished day is just the notch.
+    @ViewBuilder
+    private func flankChecklistRemainingCount(_ remainingCount: Int) -> some View {
+        if remainingCount > 0 {
+            HStack(spacing: 3) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(WispColor.Brand.lavender)
+                Text("\(remainingCount)")
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundColor(WispColor.Island.textSecondary)
+            }
+            .nativeTooltip("\(remainingCount) left on today's checklist — hover to see them")
+        } else {
+            stateDot
+        }
+    }
+
     /// A moon in the panel header while quiet mode holds announcements back.
     private func quietModeIndicator(_ quietReason: QuietModeReason) -> some View {
         Image(systemName: "moon.fill")
@@ -743,7 +826,7 @@ struct NotchHUDView: View {
     /// dismiss the rest.
     @ViewBuilder
     private var todaySuggestionsSection: some View {
-        if morningBriefing.hasPendingBriefing {
+        if morningBriefing.hasPendingBriefing && !jobsEngine.hasChecklist {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     sectionLabel("TODAY")
@@ -880,6 +963,8 @@ struct NotchHUDView: View {
                     flankUnseenResultsBadge(count: finishedWorkInbox.unseenTaskIDs.count)
                 } else if !screenWatcherStore.activeWatchers.isEmpty {
                     flankScreenWatchIndicator(watcherCount: screenWatcherStore.activeWatchers.count)
+                } else if jobsEngine.hasChecklist {
+                    flankChecklistRemainingCount(jobsEngine.todayChecklist.filter { !$0.isCompleted }.count)
                 } else if morningBriefing.hasPendingBriefing {
                     flankMorningSuggestionsCount(morningBriefing.pendingSuggestions.count)
                 } else {
@@ -977,6 +1062,9 @@ struct NotchHUDView: View {
         }
         if let firstScreenWatcher = screenWatcherStore.activeWatchers.first {
             return "Watching until \(firstScreenWatcher.condition.summaryText)"
+        }
+        if let latestDiff = jobsEngine.latestDiff {
+            return CanvasDiffCardText.line(for: latestDiff)
         }
         if morningBriefing.hasPendingBriefing {
             return morningBannerTitle
@@ -1096,6 +1184,11 @@ struct NotchHUDView: View {
 
                 // Background results that finished since the user last looked.
                 finishedWorkSection
+
+                // A Canvas change, then today's checklist; when a checklist
+                // exists it stands in for the generic suggestions below.
+                canvasDiffCard
+                jobsChecklistSection
 
                 // The day's suggestions, until run or dismissed.
                 todaySuggestionsSection

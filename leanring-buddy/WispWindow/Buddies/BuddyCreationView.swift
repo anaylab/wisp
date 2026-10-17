@@ -17,6 +17,7 @@ struct BuddyCreationView: View {
     var onCancel: () -> Void
 
     @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
 
     private enum Step { case pickSpecialty, details }
 
@@ -52,6 +53,11 @@ struct BuddyCreationView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .onAppear {
+            // Without Advanced features there are no specialties to pick, so go
+            // straight to naming the buddy with the general template.
+            if !advancedFeatures.isEnabled && step == .pickSpecialty { choose(.general) }
+        }
     }
 
     // MARK: - Step 1
@@ -63,12 +69,14 @@ struct BuddyCreationView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(WispColor.textPrimary)
                 Spacer()
-                Button("Import from file…") {
-                    if let importedBuddyID = WispShareImporter.importFromFile()?.importedBuddyIDs.first {
-                        onCreated(importedBuddyID)
+                if advancedFeatures.isEnabled {
+                    Button("Import from file…") {
+                        if let importedBuddyID = WispShareImporter.importFromFile()?.importedBuddyIDs.first {
+                            onCreated(importedBuddyID)
+                        }
                     }
+                    .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
                 }
-                .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
                 if !isFirstBuddy {
                     Button("Cancel", action: onCancel).buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
                 }
@@ -150,12 +158,16 @@ struct BuddyCreationView: View {
 
     private var detailsStep: some View {
         VStack(alignment: .leading, spacing: 22) {
-            Button {
-                withAnimation(WispMotion.island) { step = .pickSpecialty }
-            } label: {
-                Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .medium))
+            if advancedFeatures.isEnabled {
+                Button {
+                    withAnimation(WispMotion.island) { step = .pickSpecialty }
+                } label: {
+                    Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
+            } else if !isFirstBuddy {
+                Button("Cancel", action: onCancel).buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
             }
-            .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
 
             HStack(alignment: .center, spacing: 18) {
                 BuddyCharacter(colorIndex: colorIndex, size: 84, mood: .idle, liveliness: .full, looksAtPointer: true)
@@ -168,15 +180,17 @@ struct BuddyCreationView: View {
                         .onChange(of: nameText) { _, _ in
                             if nameText != suggestedName() { hasEditedName = true }
                         }
-                    HStack(spacing: 9) {
-                        ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { index in
-                            Button { withAnimation(WispMotion.quick) { colorIndex = index } } label: {
-                                Circle()
-                                    .fill(BuddyAppearance.lightColor(forColorIndex: index))
-                                    .frame(width: 20, height: 20)
-                                    .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(colorIndex == index ? 0.85 : 0), lineWidth: 1.5).padding(-3))
+                    if advancedFeatures.isEnabled {
+                        HStack(spacing: 9) {
+                            ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { index in
+                                Button { withAnimation(WispMotion.quick) { colorIndex = index } } label: {
+                                    Circle()
+                                        .fill(BuddyAppearance.lightColor(forColorIndex: index))
+                                        .frame(width: 20, height: 20)
+                                        .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(colorIndex == index ? 0.85 : 0), lineWidth: 1.5).padding(-3))
+                                }
+                                .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(index + 1)")
                             }
-                            .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(index + 1)")
                         }
                     }
                 }
@@ -221,7 +235,9 @@ struct BuddyCreationView: View {
                     get: { schedule },
                     set: { hasChosenScheduleByHand = true; schedule = $0 }
                 ))
-                BuddyModelEditor(modelChoice: $modelChoice)
+                if advancedFeatures.isEnabled {
+                    BuddyModelEditor(modelChoice: $modelChoice)
+                }
                 DisclosureGroup(isExpanded: $isShowingTools) {
                     BuddyToolsView(
                         toolAccess: $toolAccess,
