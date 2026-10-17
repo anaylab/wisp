@@ -1453,11 +1453,14 @@ final class CompanionManager: ObservableObject {
     /// not to name a contact and is being handed on as an ordinary turn.
     /// `skipsFastPointing` is set when a "where is X" request couldn't be
     /// answered from the element list and is being handed on the same way.
+    /// `skipsPartSelection` is set when a spoken part ("the third answer") has
+    /// been dealt with — selected, or not found — and the turn goes on as is.
     private func sendTranscriptToClaudeWithScreenshot(
         transcript: String,
         historyTitle: String? = nil,
         skipsMessageCommandRouting: Bool = false,
-        skipsFastPointing: Bool = false
+        skipsFastPointing: Bool = false,
+        skipsPartSelection: Bool = false
     ) {
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
@@ -1598,6 +1601,18 @@ final class CompanionManager: ObservableObject {
         // settle comes back here as an ordinary turn.
         if !skipsFastPointing, let pointingRequest = PointingRequestParser.request(from: transcript) {
             runFastPointingTurn(pointingRequest, transcript: transcript, historyTitle: historyTitle)
+            return
+        }
+
+        // "Ask about the third answer" / "explain option C": the user names a
+        // part of the screen in words. Wisp finds it in the OCR lines and
+        // selects it as if they had dragged over it (Ask About a Part), then
+        // the turn carries on with the rest of the question. Titled turns
+        // (routines, skills) are never spoken selections, and dictation has
+        // already returned above. Unresolved phrases go on unchanged.
+        if !skipsPartSelection, historyTitle == nil,
+           let partSelectionRequest = PartSelectionRequestParser.request(from: transcript) {
+            runPartSelectionTurn(partSelectionRequest, transcript: transcript)
             return
         }
 
@@ -2086,6 +2101,74 @@ final class CompanionManager: ObservableObject {
                 voiceState = .idle
                 scheduleTransientHideIfNeeded()
             }
+        }
+    }
+
+    /// Resolves a spoken part against this turn's OCR lines. On exactly one
+    /// match it selects that region (`focusedScreenRegion` + highlight, the same
+    /// state a drag leaves) and sends the residual question as an ordinary model
+    /// turn, so the close-up and prompt text built for focused regions apply.
+    /// With no capture, no OCR text, or no single match it sends the user's
+    /// original words on untouched, with the captures handed back so nothing
+    /// is captured twice.
+    private func runPartSelectionTurn(_ partSelectionRequest: PartSelectionRequest, transcript: String) {
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            voiceState = .processing
+
+            let screenCaptures = (try? await claimScreenCaptures()) ?? []
+            let screenTextSnapshot = screenCaptures.isEmpty
+                ? nil
+                : await ScreenTextRecognizer.shared.snapshot(
+                    for: screenCaptures,
+                    waitingAtMost: FastPointingTiming.screenTextWaitBudgetSeconds,
+                    maximumLineCount: FastPointingTiming.maximumMatchedScreenTextLineCount,
+                    maximumCharacterCount: FastPointingTiming.maximumMatchedScreenTextCharacterCount
+                )
+            guard !Task.isCancelled else { return }
+
+            // The turn that follows reuses these captures (and their OCR cache).
+            if !screenCaptures.isEmpty {
+                speculativeScreenCaptureTask = Task { screenCaptures }
+            }
+
+            if let screenTextSnapshot,
+               case .resolved(let resolvedPart) = PartSelectionResolver.resolve(
+                   partSelectionRequest.target,
+                   in: screenTextSnapshot.entries
+               ),
+               screenCaptures.indices.contains(resolvedPart.screenNumber - 1) {
+                let capture = screenCaptures[resolvedPart.screenNumber - 1]
+                if let selectedRegion = FocusedScreenRegion(
+                    regionInScreenshotPixels: resolvedPart.regionInScreenshotPixels,
+                    screenshotSize: CGSize(
+                        width: CGFloat(capture.screenshotWidthInPixels),
+                        height: CGFloat(capture.screenshotHeightInPixels)
+                    ),
+                    displayFrameInAppKitCoordinates: capture.displayFrame,
+                    paddingInPoints: 6
+                ) {
+                    print("🎯 Part selection: \(partSelectionRequest.target) → screen \(resolvedPart.screenNumber) \(resolvedPart.regionInScreenshotPixels)")
+                    focusedScreenRegion = selectedRegion
+                    showFocusedRegionHighlight(selectedRegion)
+                    sendTranscriptToClaudeWithScreenshot(
+                        transcript: partSelectionRequest.residualQuestion,
+                        historyTitle: transcript,
+                        skipsMessageCommandRouting: true,
+                        skipsFastPointing: true,
+                        skipsPartSelection: true
+                    )
+                    return
+                }
+            }
+
+            print("🎯 Part selection: \(partSelectionRequest.target) not resolved to one place — handing on as a normal turn")
+            sendTranscriptToClaudeWithScreenshot(
+                transcript: transcript,
+                skipsMessageCommandRouting: true,
+                skipsFastPointing: true,
+                skipsPartSelection: true
+            )
         }
     }
 
