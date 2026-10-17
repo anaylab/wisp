@@ -35,6 +35,44 @@ nonisolated struct FocusedScreenRegion: Equatable {
         self.displayFrameInAppKitCoordinates = displayFrame
     }
 
+    /// The inverse of `regionInScreenshotPixels`: a rectangle found in the
+    /// screenshot's pixel space (an OCR line, a list item) as a selection on
+    /// the display that screenshot was taken of. This is how a spoken "the third
+    /// answer" becomes the same region a drag would have produced.
+    ///
+    /// `paddingInPoints` grows the rectangle on every side so the highlight and
+    /// close-up don't clip glyphs; a rectangle still smaller than the minimum
+    /// selection (one short line is ~20pt tall) is grown evenly about its
+    /// centre to reach it. Clamped to the display like a dragged selection.
+    init?(
+        regionInScreenshotPixels screenshotRegion: CGRect,
+        screenshotSize: CGSize,
+        displayFrameInAppKitCoordinates displayFrame: CGRect,
+        paddingInPoints: CGFloat = 0
+    ) {
+        guard screenshotSize.width > 0, screenshotSize.height > 0,
+              displayFrame.width > 0, displayFrame.height > 0 else { return nil }
+
+        let pointsPerPixelHorizontally = displayFrame.width / screenshotSize.width
+        let pointsPerPixelVertically = displayFrame.height / screenshotSize.height
+
+        var widthInPoints = screenshotRegion.width * pointsPerPixelHorizontally + paddingInPoints * 2
+        var heightInPoints = screenshotRegion.height * pointsPerPixelVertically + paddingInPoints * 2
+        let centerXInPoints = screenshotRegion.midX * pointsPerPixelHorizontally
+        let centerYFromTopInPoints = screenshotRegion.midY * pointsPerPixelVertically
+        widthInPoints = max(widthInPoints, Self.minimumSideLengthInPoints)
+        heightInPoints = max(heightInPoints, Self.minimumSideLengthInPoints)
+
+        // Screenshot y grows downward; AppKit's grows upward from the display's bottom.
+        let rectInAppKitCoordinates = CGRect(
+            x: displayFrame.minX + centerXInPoints - widthInPoints / 2,
+            y: displayFrame.maxY - centerYFromTopInPoints - heightInPoints / 2,
+            width: widthInPoints,
+            height: heightInPoints
+        )
+        self.init(rectInAppKitCoordinates: rectInAppKitCoordinates, displayFrameInAppKitCoordinates: displayFrame)
+    }
+
     /// The region in the screenshot's pixel space (top-left origin) — the same
     /// space every annotation tag and `[POINT:]` uses. AppKit's y axis points up
     /// and the screenshot's points down, so the vertical edge is flipped here.
