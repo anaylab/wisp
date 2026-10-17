@@ -7,6 +7,7 @@
 //  over. The mouse plumbing that uses this lives in `AnnotationClickRouter`.
 //
 
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -23,10 +24,25 @@ enum AnnotationClickTarget {
         }
     }
 
-    /// Handwritten text's rough size at the 22pt note font: the layer lays text
-    /// out itself, so the router estimates its box from the character count.
-    static func estimatedNoteSize(forText noteText: String) -> CGSize {
-        CGSize(width: 16 + CGFloat(noteText.count) * 11, height: 32)
+    /// The font `ScreenAnnotationLayer.noteView` writes notes in. Both read the
+    /// same size and padding from here so the clickable area is the drawn area.
+    static let noteFontSize: CGFloat = 22
+    static let noteHorizontalPadding: CGFloat = 8
+    static let noteVerticalPadding: CGFloat = 2
+
+    /// The note's size on screen, measured with the same font the layer uses
+    /// (Bradley Hand Bold, falling back to the system's bold like SwiftUI does
+    /// when a face is missing) rather than guessed from the character count —
+    /// handwriting is far from fixed-width, so a guess missed the right edge of
+    /// long notes and clipped short ones.
+    static func measuredNoteSize(forText noteText: String) -> CGSize {
+        let noteFont = NSFont(name: "BradleyHandITCTT-Bold", size: noteFontSize)
+            ?? NSFont.systemFont(ofSize: noteFontSize, weight: .bold)
+        let textSize = (noteText as NSString).size(withAttributes: [.font: noteFont])
+        return CGSize(
+            width: ceil(textSize.width) + noteHorizontalPadding * 2,
+            height: ceil(textSize.height) + noteVerticalPadding * 2
+        )
     }
 
     /// The annotation's clickable rectangle in overlay coordinates (top-left
@@ -46,7 +62,7 @@ enum AnnotationClickTarget {
             return annotation.style == .circle ? regionRect.insetBy(dx: -8, dy: -5) : regionRect
         }
 
-        let noteSize = estimatedNoteSize(forText: annotation.label ?? "")
+        let noteSize = measuredNoteSize(forText: annotation.label ?? "")
         let isAnchoredToElement = regionRect.width > 0 || regionRect.height > 0
         let leadingEdge = isAnchoredToElement ? regionRect.maxX + 12 : regionRect.minX
         let verticalCentre = isAnchoredToElement ? regionRect.midY : regionRect.minY

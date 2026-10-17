@@ -326,6 +326,7 @@ struct ActiveStackCard: View {
     }
 
     private var residencyColor: Color {
+        guard stackReadout.isChatModelLocal else { return WispColor.warning }
         switch stackReadout.residency {
         case .resident: return WispColor.success
         case .notLoaded: return WispColor.warning
@@ -334,6 +335,9 @@ struct ActiveStackCard: View {
     }
 
     private var residencyDescription: String {
+        guard stackReadout.isChatModelLocal else {
+            return "\(stackReadout.chatProviderName) · answers come from a cloud model"
+        }
         switch stackReadout.residency {
         case .resident(_, let sizeText):
             return "\(stackReadout.chatProviderName) · \(sizeText) loaded"

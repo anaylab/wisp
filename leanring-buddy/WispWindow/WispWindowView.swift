@@ -301,6 +301,8 @@ private struct WispWindowStatusPill: View {
     }
 
     private var residencyColor: Color {
+        // Ollama's residency says nothing about a cloud model.
+        guard stackReadout.isChatModelLocal else { return WispColor.success }
         switch stackReadout.residency {
         case .resident: return WispColor.success
         case .notLoaded: return WispColor.warning

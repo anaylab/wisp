@@ -1032,8 +1032,23 @@ final class CompanionManager: ObservableObject {
         },
         onClickedRegion: { [weak self] clickedRegion, _, _ in
             self?.beginAskAboutClickedAnnotation(clickedRegion)
+        },
+        onContentScrolled: { [weak self] in
+            self?.dropAnnotationsAfterContentScrolled()
         }
     )
+
+    /// Annotations and the selected part are pinned to screen positions, so
+    /// once the content under them scrolls they sit on the wrong text. Drop
+    /// them (and the selection, whose close-up would now show something else).
+    /// A guided walkthrough finds each step on the live screen itself, so its
+    /// marks are left alone.
+    private func dropAnnotationsAfterContentScrolled() {
+        guard !guidedWalkthrough.isActive,
+              !activeAnnotationsByDisplayFrame.isEmpty || focusedScreenRegion != nil else { return }
+        focusedScreenRegion = nil
+        clearScreenAnnotations()
+    }
 
     /// The notch reply's "Follow up" action. Opens the text composer; no extra
     /// plumbing is needed for context because `conversationTranscript` already

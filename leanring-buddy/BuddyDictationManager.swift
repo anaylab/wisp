@@ -107,9 +107,12 @@ enum BuddyPushToTalkShortcut {
     }
 
     /// A hold shorter than this is treated as a tap, not a held press. Short
-    /// enough that a real "hold to talk" is never mistaken for a tap (speech does
-    /// not start this fast), long enough to catch a deliberate quick tap.
-    static let tapMaxDuration: TimeInterval = 0.22
+    /// enough that a real "hold to talk" is never mistaken for a tap (nobody
+    /// says anything useful in 0.3s), long enough to catch a deliberate quick
+    /// tap. It was 0.22s, and a tap measured at 0.224s was heard as a hold with
+    /// nothing said — the composer silently didn't open; a busy main thread
+    /// right after launch is enough to stretch a tap past that.
+    static let tapMaxDuration: TimeInterval = 0.30
 
     enum ShortcutTransition: Equatable {
         case none

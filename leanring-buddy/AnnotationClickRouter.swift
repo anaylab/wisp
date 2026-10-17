@@ -12,6 +12,10 @@
 //  one of the two), and the click itself is consumed by a local monitor so it
 //  never also reaches the app underneath.
 //
+//  It also notices scrolling in other apps. Annotations are pinned to screen
+//  positions, so once the content under them scrolls they sit on the wrong
+//  text — better gone than misleading.
+//
 
 import AppKit
 
@@ -28,7 +32,9 @@ final class AnnotationClickRouter {
     private let isOverlayReservedForConfirmation: () -> Bool
     private let setOverlayAcceptsMouseEvents: (Bool) -> Void
     private let onClickedRegion: (FocusedScreenRegion, CGRect, CGRect) -> Void
+    private let onContentScrolled: () -> Void
 
+    private var globalScrollMonitor: Any?
     private var globalMouseMovedMonitor: Any?
     private var localMouseMonitor: Any?
     private var isHoveringClickableAnnotation = false
@@ -37,18 +43,27 @@ final class AnnotationClickRouter {
         annotationsOnEachDisplay: @escaping () -> [DisplayAnnotations],
         isOverlayReservedForConfirmation: @escaping () -> Bool,
         setOverlayAcceptsMouseEvents: @escaping (Bool) -> Void,
-        onClickedRegion: @escaping (FocusedScreenRegion, CGRect, CGRect) -> Void
+        onClickedRegion: @escaping (FocusedScreenRegion, CGRect, CGRect) -> Void,
+        onContentScrolled: @escaping () -> Void
     ) {
         self.annotationsOnEachDisplay = annotationsOnEachDisplay
         self.isOverlayReservedForConfirmation = isOverlayReservedForConfirmation
         self.setOverlayAcceptsMouseEvents = setOverlayAcceptsMouseEvents
         self.onClickedRegion = onClickedRegion
+        self.onContentScrolled = onContentScrolled
     }
 
     func start() {
         guard globalMouseMovedMonitor == nil else { return }
         globalMouseMovedMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateHoverState() }
+        }
+        // Global scroll events are those going to other apps, which is exactly
+        // the content the annotations sit over. A zero-delta event (a trackpad
+        // gesture's phase change) moves nothing.
+        globalScrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
+            guard event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 else { return }
+            MainActor.assumeIsolated { self?.onContentScrolled() }
         }
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown]) { [weak self] event in
             MainActor.assumeIsolated {
@@ -65,6 +80,8 @@ final class AnnotationClickRouter {
     func stop() {
         if let globalMouseMovedMonitor { NSEvent.removeMonitor(globalMouseMovedMonitor) }
         if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
+        if let globalScrollMonitor { NSEvent.removeMonitor(globalScrollMonitor) }
+        globalScrollMonitor = nil
         globalMouseMovedMonitor = nil
         localMouseMonitor = nil
         endHoverIfNeeded()
@@ -98,8 +115,11 @@ final class AnnotationClickRouter {
     }
 
     private func updateHoverState() {
+        // A confirmation card owns the overlay's mouse handling. If we were
+        // hovering when it appeared, give the cursor back (a bare reset would
+        // leave the pointing hand pushed with nothing to pop it).
         guard !isOverlayReservedForConfirmation() else {
-            isHoveringClickableAnnotation = false
+            endHoverIfNeeded()
             return
         }
         let isOverClickableAnnotation = annotationUnderPointer() != nil

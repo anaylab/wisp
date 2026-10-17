@@ -36,16 +36,50 @@ final class ActiveStackReadout: ObservableObject {
         // a download finishing (or failing) re-renders them.
         speechModelStateSubscription = FluidAudioSpeechModels.shared.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
+
+        // The provider (and the Claude model) are chosen at runtime in
+        // Settings → Model and live in UserDefaults, so the readout re-renders
+        // when they change rather than showing the model that was selected at
+        // launch.
+        providerSelectionSubscription = NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
     }
+
+    private var providerSelectionSubscription: AnyCancellable?
 
     // MARK: - Configured stack
 
-    /// The chat model actually in use.
+    /// The backend answering turns right now — the runtime selection, not the
+    /// shipped Info.plist default.
+    var selectedChatProviderKind: BuddyChatProviderKind { BuddyChatProviderSelection.current }
+
+    /// The chat model actually in use. This used to be the Info.plist Ollama
+    /// model whatever was selected, so the window's status pill, the History
+    /// "Asking …" step and the timing labels all named a local model while a
+    /// Claude turn ran.
     var chatModelName: String {
-        AppBundleConfiguration.stringValue(forKey: "OllamaModel") ?? "unknown"
+        switch selectedChatProviderKind {
+        case .localOllama:
+            return AppBundleConfiguration.stringValue(forKey: "OllamaModel") ?? "unknown"
+        case .anthropic, .claudeSubscription:
+            return AnthropicModelSettings.selectedModel.displayName
+        case .openAI:
+            return OpenAIProvider.defaultModelName
+        case .gemini:
+            return GeminiProvider.defaultModelName
+        }
     }
 
-    var chatProviderName: String { "Ollama · local" }
+    var chatProviderName: String {
+        selectedChatProviderKind == .localOllama ? "Ollama · local" : selectedChatProviderKind.displayName
+    }
+
+    /// Whether the chat model lives on this Mac. Ollama residency (loaded,
+    /// cold, unreachable) says nothing about a cloud model, so the readouts
+    /// show it only when this is true.
+    var isChatModelLocal: Bool { !selectedChatProviderKind.sendsScreenshotsOffThisMachine }
 
     var speechProviderName: String {
         guard BuddyTranscriptionProviderFactory.isParakeetConfigured else {
@@ -97,12 +131,10 @@ final class ActiveStackReadout: ObservableObject {
     /// Drives the panel's assurance line, which should reflect what is
     /// configured rather than assert something that a changed Info.plist could
     /// quietly make untrue.
-    /// Every stage runs on this machine. There is no longer a configuration
-    /// that makes this false — the cloud clients were removed — but the panel
-    /// keeps asking rather than hardcoding the claim, so that adding one back
-    /// cannot leave the assurance line quietly lying.
+    /// False while a cloud chat provider is selected — screenshots and the
+    /// transcript then leave the Mac, and the assurance line must say so.
     var isEntirelyLocal: Bool {
-        !speechProviderName.contains("cloud") && !voiceProviderName.contains("cloud")
+        isChatModelLocal && !speechProviderName.contains("cloud") && !voiceProviderName.contains("cloud")
     }
 
     // MARK: - Live residency

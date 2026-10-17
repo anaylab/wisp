@@ -67,7 +67,12 @@ check(!AnnotationClickTarget.isClickable(unplacedStep), "an unplaced walkthrough
 // The note starts at its anchor (100/896 of the width = 160.7pt) and is centred on its y (300/560 of the height = 482pt).
 let noteRect = AnnotationClickTarget.clickableRectInOverlayCoordinates(for: clickNote, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
 check(abs(noteRect.minX - 160.7) < 0.5 && abs(noteRect.midY - 482.1) < 0.5, "a note's clickable rect starts at its anchor, centred on y")
-check(noteRect.width == 16 + 7 * 11 && noteRect.height == 32, "a note's size is estimated from its text length")
+let shortNoteSize = AnnotationClickTarget.measuredNoteSize(forText: "x = 6")
+let longNoteSize = AnnotationClickTarget.measuredNoteSize(forText: "subtract 7 from both sides of the equation")
+check(noteRect.size == AnnotationClickTarget.measuredNoteSize(forText: "3x = 18"), "a note's clickable size is its measured text size")
+check(longNoteSize.width > shortNoteSize.width * 2, "a longer note is measurably wider")
+check(shortNoteSize.height >= 26 && shortNoteSize.height <= 44, "a one-line note is about one line tall")
+check(AnnotationClickTarget.measuredNoteSize(forText: "iiii").width < AnnotationClickTarget.measuredNoteSize(forText: "mmmm").width, "widths follow the letters, not the count")
 
 let overNote = AnnotationClickTarget.annotation(atOverlayPoint: CGPoint(x: 200, y: 482), in: [clickCircle, clickNote], screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
 check(overNote?.style == .note, "a point inside the note hits the note")

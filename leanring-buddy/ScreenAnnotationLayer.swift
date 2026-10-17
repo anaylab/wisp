@@ -224,10 +224,10 @@ struct ScreenAnnotationLayer: View {
         let verticalCentre = isAnchoredToElement ? rect.midY : rect.minY
 
         return Text(text)
-            .font(.custom("Bradley Hand", size: 22).weight(.bold))
+            .font(.custom("Bradley Hand", size: AnnotationClickTarget.noteFontSize).weight(.bold))
             .foregroundColor(cursorAppearance.color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
+            .padding(.horizontal, AnnotationClickTarget.noteHorizontalPadding)
+            .padding(.vertical, AnnotationClickTarget.noteVerticalPadding)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(cursorAppearance.color.opacity(0.16))

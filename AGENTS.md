@@ -433,7 +433,13 @@ cloud dependency to the local path, without asking.
   only while the pointer is over a clickable note, circle or box (`AnnotationClickTarget`, pure — a note's size is estimated from its text,
   mirroring `ScreenAnnotationLayer.noteView`); the click is consumed by a local monitor, the clicked rect (padded 14pt) becomes the focused
   region, the rest of the explanation stays on screen, and the composer opens. It stands aside while a confirmation card owns the overlay.
-  Handwritten notes dwell 120s (other annotations ~4s) so there is time to read and click them. Tested by `Tests/ScreenRegionFocus`.
+  Handwritten notes dwell 120s (other annotations ~4s) so there is time to read and click them. A note's clickable box is its *measured* text
+  size (`AnnotationClickTarget.measuredNoteSize`, same font/padding constants as the layer). Annotations are pinned to screen positions, so a
+  scroll in another app (global `scrollWheel` monitor) drops them and the selected part (not during a guided walkthrough). A tap of the Talk
+  chord is a press shorter than `BuddyPushToTalkShortcut.tapMaxDuration` (0.30s — at 0.22 a tap measured at 0.224s was heard as a hold with
+  nothing said, so the composer silently didn't open). The window's status pill, History's "Asking …" step and the Settings → General stack
+  card follow the *selected* provider (`ActiveStackReadout.chatModelName`/`isChatModelLocal`; the "runs entirely on this Mac" line is false while
+  a cloud provider is selected). Tested by `Tests/ScreenRegionFocus`.
 - **Guided walkthrough** (`GuidedWalkthrough.swift` pure, `GuidedWalkthroughController.swift`): a reply whose annotation tags
   are ≥2 numbered, labelled steps (the existing step-by-step tags) is walked through one step at a time instead of drawn all at
   once (`CompanionManager.beginGuidedWalkthrough`, called where the reply's annotations are applied). Only step 1 uses the model's
