@@ -67,6 +67,32 @@ check(GuidedWalkthroughPlan(annotations: loneStep.annotations) == nil, "a lone s
 let boxReply = ScreenAnnotationParser.parse("[BOX:10,10,50,40:save]")
 check(!boxReply.annotations[0].isUnplacedWalkthroughStep, "a real box is placed")
 
+// MARK: [CIRCLE:] and [NOTE:] tags
+
+let workedReply = ScreenAnnotationParser.parse(
+    "Let's balance it. [NOTE:300,200:235 + 1 = 236] [NOTE:t4:top right: 141 + 3 = 144] [CIRCLE:10,10,50,40] [CIRCLE:t5] [NOTE:t99:ghost]",
+    accessibilityElementRegionResolver: { elementID in
+        switch elementID {
+        case "t4": return AccessibilityElementResolvedRegion(regionInScreenshotPixels: CGRect(x: 100, y: 120, width: 60, height: 20), screenNumber: 1)
+        case "t5": return AccessibilityElementResolvedRegion(regionInScreenshotPixels: CGRect(x: 100, y: 160, width: 60, height: 20), screenNumber: 1)
+        default: return nil
+        }
+    }
+)
+check(workedReply.spokenText == "Let's balance it.", "note and circle tags are stripped from speech")
+check(workedReply.annotations.map(\.style) == [.note, .note, .circle, .circle], "notes and circles parse in order; unknown id note draws nothing")
+check(workedReply.annotations[0].label == "235 + 1 = 236" && workedReply.annotations[0].regionInScreenshotPixels == CGRect(x: 300, y: 200, width: 0, height: 0), "coordinate note keeps its text and anchor")
+check(workedReply.annotations[1].label == "top right: 141 + 3 = 144", "note text may contain colons")
+check(workedReply.annotations[1].regionInScreenshotPixels.width == 60, "element note keeps the element frame")
+check(workedReply.annotations.allSatisfy { $0.stepNumber == nil }, "notes and circles are never numbered steps")
+check(GuidedWalkthroughPlan(annotations: workedReply.annotations) == nil, "notes and circles make no walkthrough")
+
+let manyNotes = ScreenAnnotationParser.parse((1...15).map { "[NOTE:10,\($0 * 10):line \($0)]" }.joined())
+check(manyNotes.annotations.count == 12, "notes are capped at twelve")
+
+let boxesAndNote = ScreenAnnotationParser.parse("[BOX:10,10,50,40:a] [NOTE:60,20:hi] [BOX:10,60,50,90:b]")
+check(boxesAndNote.annotations.map(\.stepNumber) == [1, nil, 2], "a note between boxes doesn't take a step number")
+
 // MARK: Target text
 
 func target(_ instruction: String) -> (String, String?) {

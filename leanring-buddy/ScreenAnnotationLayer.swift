@@ -38,8 +38,14 @@ struct ScreenAnnotationLayer: View {
                 }
             }
 
+            ForEach(annotations.filter { $0.style == .note }) { annotation in
+                if let noteText = annotation.label {
+                    noteView(for: annotation, text: noteText)
+                }
+            }
+
             ForEach(annotations) { annotation in
-                if let label = annotation.label, !label.isEmpty {
+                if annotation.style != .note, let label = annotation.label, !label.isEmpty {
                     labelView(for: annotation, text: label)
                 }
             }
@@ -87,6 +93,18 @@ struct ScreenAnnotationLayer: View {
 
         case .marker:
             drawMarker(at: CGPoint(x: rect.minX, y: rect.minY), in: &context, color: accent)
+
+        case .circle:
+            // Slightly larger than the region so the stroke rings the thing
+            // rather than cutting through it; a little wider than tall, like a
+            // loop drawn by hand.
+            let ring = Path(ellipseIn: rect.insetBy(dx: -8, dy: -5))
+            context.stroke(ring, with: .color(accent.opacity(0.28)), lineWidth: 6)
+            context.stroke(ring, with: .color(accent), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+
+        case .note:
+            // Drawn as a text view in `noteView`, not on the canvas.
+            break
         }
     }
 
@@ -194,6 +212,30 @@ struct ScreenAnnotationLayer: View {
             .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
             .position(x: rect.minX, y: rect.minY)
             .opacity(isPulsing ? 1.0 : 0.8)
+    }
+
+    /// Handwritten working on the screen. Written in a pen-like face over a
+    /// faint highlighter band so it reads on any content. A point region is
+    /// where the text starts; an element's frame puts it just to the right.
+    private func noteView(for annotation: ScreenAnnotation, text: String) -> some View {
+        let rect = overlayRect(for: annotation)
+        let isAnchoredToElement = rect.width > 0 || rect.height > 0
+        let leadingEdge = isAnchoredToElement ? rect.maxX + 12 : rect.minX
+        let verticalCentre = isAnchoredToElement ? rect.midY : rect.minY
+
+        return Text(text)
+            .font(.custom("Bradley Hand", size: 22).weight(.bold))
+            .foregroundColor(cursorAppearance.color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(cursorAppearance.color.opacity(0.16))
+            )
+            .fixedSize()
+            .padding(.leading, max(0, leadingEdge))
+            .frame(width: displaySize.width, height: max(1, verticalCentre * 2), alignment: .leading)
+            .position(x: displaySize.width / 2, y: verticalCentre)
     }
 
     private func labelView(for annotation: ScreenAnnotation, text: String) -> some View {

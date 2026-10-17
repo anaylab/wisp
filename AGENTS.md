@@ -471,7 +471,15 @@ cloud dependency to the local path, without asking.
   in the right flank, and the full panel's live section lists each watch with Stop. No model call.
 - **Screen Annotation**: `[BOX:left,top,right,bottom:label]`, `[HIGHLIGHT:...]` and
   `[ARROW:x,y:label]` tags render through a `Canvas` layer in the overlay, as does the `.marker`
-  from a `[POINT:]`. Note the corner format — the model emits corners, not origin+size. When
+  from a `[POINT:]`.
+  **Teaching on the page**: `[CIRCLE:l,t,r,b]` (or `[CIRCLE:t7]`) rings a chart bar, equation term or answer
+  choice with a hand-drawn ellipse, and `[NOTE:x,y:text]` / `[NOTE:t7:text]` writes handwritten working
+  (Bradley Hand over a faint highlighter band, `ScreenAnnotationLayer.noteView`) at a point, or just right of an
+  element's frame for an id. Note text runs to the closing bracket, so it may hold colons and `=`. Notes and
+  circles are never numbered walkthrough steps (so they don't trigger `GuidedWalkthroughPlan`) and are capped
+  apart from shapes (12 notes, 8 shapes). The prompt tells the model to work a visual/math problem line by line
+  beside its subject, circle the answer and say the idea via `[SAY:]`; it needs a capable model, so it is aimed
+  at Claude (subscription or key), not the 3B local model. Tested in `Tests/GuidedWalkthrough`. Note the corner format — the model emits corners, not origin+size. When
   several tags appear in one reply they are kept in document order and **auto-numbered** into a
   step-by-step walkthrough (badges drawn per step, cap 8). All annotations draw in the
   user-chosen colour from `CursorAppearanceStore` (Settings → General → Notch → Marker colour: blue/red/yellow/green; the old Cursor page and its always-visible overlay are gone).

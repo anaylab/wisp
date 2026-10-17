@@ -38,6 +38,14 @@ struct ScreenAnnotation: Identifiable, Equatable {
         /// old flying cursor's [POINT:] gesture. The region carries the point as
         /// its origin with zero size, the same shape an arrow's region uses.
         case marker
+        /// Ellipse drawn around a region — a chart bar, one answer choice, a
+        /// term in an equation — the way a tutor circles something by hand.
+        case circle
+        /// Handwritten text written on the screen. The text is the label. A
+        /// zero-size region is the point the text starts at (left edge,
+        /// vertically centred); a real region is an element's frame, and the
+        /// note is written just to its right. Never numbered as a walkthrough step.
+        case note
     }
 
     let id: UUID
@@ -125,13 +133,17 @@ enum ScreenAnnotationParser {
 
 
     drawing on screen:
-    besides pointing, you can draw a box, an arrow, or a highlight over part of the screen. use these when showing someone *where* something is matters more than describing it, or when several things need marking at once.
+    besides pointing, you can draw a box, an arrow, a circle, a highlight or handwritten notes over part of the screen. use these when showing someone *where* something is matters more than describing it, or when several things need marking at once.
 
     put the tags at the very end of your reply, after the spoken text. coordinates are pixels in the screenshot's own coordinate space, origin (0,0) at the top-left.
 
     - [BOX:left,top,right,bottom:label] — outline a region, for example a button or a panel. give the two opposite corners.
     - [ARROW:x,y:label] — point at a spot without covering it.
     - [HIGHLIGHT:left,top,right,bottom:label] — wash over a whole area, same two corners.
+    - [CIRCLE:left,top,right,bottom] — hand-drawn ellipse around something small: a chart bar, one term of an equation, the right answer choice. label optional.
+    - [NOTE:x,y:text] — handwritten text starting at that point. [NOTE:t7:text] writes it just to the right of that element instead.
+
+    teaching math, charts and other visual problems: when the user asks you to explain, teach or work through something on screen, do it on the screen itself, like a tutor with a pen. one line of working per note, written beside the thing it is about (next to each answer choice, beside the table row), e.g. [NOTE:t12:141 + 3 = 144]. highlight or circle the parts the working uses, work in order from the first line to the last, finish by circling the answer, and say the idea out loud in [SAY:] rather than reading the notes. use at most about ten notes; notes are text, so keep each under about eight words and put numbers and symbols in plain text (235 + 1 = 236).
 
     keep labels to one to three words. if drawing wouldn't help, don't use any.
 
@@ -176,7 +188,7 @@ enum ScreenAnnotationParser {
         // `[:alpha:]`, and with the label's `[^\]:]` later in the pattern that
         // made the whole pattern fail to compile — `try?` then silently
         // dropped every box, highlight and arrow.
-        let regionPattern = #"\[(BOX|HIGHLIGHT):\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen(\d+))?\]"#
+        let regionPattern = #"\[(BOX|HIGHLIGHT|CIRCLE):\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen(\d+))?\]"#
         let arrowPattern = #"\[(ARROW):\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen(\d+))?\]"#
 
         for (pattern, isRegion) in [(regionPattern, true), (arrowPattern, false)] {
@@ -195,6 +207,7 @@ enum ScreenAnnotationParser {
                 switch String(responseText[styleRange]).uppercased() {
                 case "BOX": style = .box
                 case "HIGHLIGHT": style = .highlight
+                case "CIRCLE": style = .circle
                 default: style = .arrow
                 }
 
@@ -254,7 +267,7 @@ enum ScreenAnnotationParser {
         // numeric patterns above cannot match these, since an id starts with a
         // letter. A box or highlight takes the element's whole frame; an arrow
         // aims at its centre.
-        let accessibilityElementIDPattern = #"\[(BOX|HIGHLIGHT|ARROW):\s*([aAtT]\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen\d+)?\]"#
+        let accessibilityElementIDPattern = #"\[(BOX|HIGHLIGHT|ARROW|CIRCLE):\s*([aAtT]\d+)\s*(?:[\s:]\s*([^\]:]+?))?\s*(?::screen\d+)?\]"#
         if let accessibilityElementIDRegex = try? NSRegularExpression(pattern: accessibilityElementIDPattern) {
             let range = NSRange(responseText.startIndex..., in: responseText)
             for match in accessibilityElementIDRegex.matches(in: responseText, range: range) {
@@ -272,6 +285,7 @@ enum ScreenAnnotationParser {
                 switch String(responseText[styleRange]).uppercased() {
                 case "BOX": style = .box
                 case "HIGHLIGHT": style = .highlight
+                case "CIRCLE": style = .circle
                 default: style = .arrow
                 }
 
@@ -294,6 +308,57 @@ enum ScreenAnnotationParser {
                         // model named: the Accessibility frame already says
                         // where the element is.
                         screenNumber: resolvedRegion.screenNumber
+                    )
+                ))
+            }
+        }
+
+        // Handwritten notes: [NOTE:x,y:text] and [NOTE:t7:text]. Unlike a
+        // label, a note's text is working — "235 + 1 = 236" — so it may contain
+        // colons and symbols and runs to the closing bracket. An id note keeps
+        // the whole element frame; the layer writes it to the element's right.
+        // As with other id tags, one that doesn't resolve is stripped silently.
+        let coordinateNotePattern = #"\[NOTE:\s*(-?\d+)\s*,\s*(-?\d+)\s*[\s:]\s*([^\]]+?)\s*\]"#
+        let elementNotePattern = #"\[NOTE:\s*([aAtT]\d+)\s*[\s:]\s*([^\]]+?)\s*\]"#
+        for (pattern, isElementNote) in [(coordinateNotePattern, false), (elementNotePattern, true)] {
+            guard let noteRegex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(responseText.startIndex..., in: responseText)
+            for match in noteRegex.matches(in: responseText, range: range) {
+                guard let tagRange = Range(match.range, in: responseText) else { continue }
+                rangesToRemove.append(tagRange)
+
+                var noteRegion: CGRect
+                var noteScreenNumber: Int?
+                let textGroupIndex: Int
+                if isElementNote {
+                    guard let elementIDRange = Range(match.range(at: 1), in: responseText),
+                          let resolvedRegion = accessibilityElementRegionResolver?(
+                              String(responseText[elementIDRange]).lowercased()
+                          ) else { continue }
+                    noteRegion = resolvedRegion.regionInScreenshotPixels
+                    noteScreenNumber = resolvedRegion.screenNumber
+                    textGroupIndex = 2
+                } else {
+                    guard let xRange = Range(match.range(at: 1), in: responseText),
+                          let yRange = Range(match.range(at: 2), in: responseText),
+                          let noteX = Double(responseText[xRange]),
+                          let noteY = Double(responseText[yRange]) else { continue }
+                    noteRegion = CGRect(x: noteX, y: noteY, width: 0, height: 0)
+                    textGroupIndex = 3
+                }
+
+                guard let textRange = Range(match.range(at: textGroupIndex), in: responseText) else { continue }
+                let noteText = String(responseText[textRange]).trimmingCharacters(in: .whitespaces)
+                guard !noteText.isEmpty else { continue }
+
+                let tagStartOffset = responseText.distance(from: responseText.startIndex, to: tagRange.lowerBound)
+                annotationsWithOffset.append((
+                    offset: tagStartOffset,
+                    annotation: ScreenAnnotation(
+                        style: .note,
+                        regionInScreenshotPixels: noteRegion,
+                        label: String(noteText.prefix(80)),
+                        screenNumber: noteScreenNumber
                     )
                 ))
             }
@@ -338,15 +403,32 @@ enum ScreenAnnotationParser {
             .map(\.annotation)
 
         // Enough for a real walkthrough, but past this shapes stop clarifying
-        // and start obscuring.
-        let maximumAnnotations = 8
-        var cappedAnnotations = Array(orderedAnnotations.prefix(maximumAnnotations))
+        // and start obscuring. Notes are counted apart — a worked problem is
+        // mostly notes — and neither notes nor circles are walkthrough steps.
+        let maximumShapes = 8
+        let maximumNotes = 12
+        var shapeCount = 0
+        var noteCount = 0
+        var cappedAnnotations: [ScreenAnnotation] = []
+        for annotation in orderedAnnotations {
+            if annotation.style == .note {
+                guard noteCount < maximumNotes else { continue }
+                noteCount += 1
+            } else {
+                guard shapeCount < maximumShapes else { continue }
+                shapeCount += 1
+            }
+            cappedAnnotations.append(annotation)
+        }
 
         // Number the steps only when there are several — a lone pointer needs no
         // "1" badge.
-        if cappedAnnotations.count >= 2 {
-            for stepIndex in cappedAnnotations.indices {
-                cappedAnnotations[stepIndex].stepNumber = stepIndex + 1
+        let stepIndices = cappedAnnotations.indices.filter {
+            cappedAnnotations[$0].style != .note && cappedAnnotations[$0].style != .circle
+        }
+        if stepIndices.count >= 2 {
+            for (stepOffset, annotationIndex) in stepIndices.enumerated() {
+                cappedAnnotations[annotationIndex].stepNumber = stepOffset + 1
             }
         }
 
