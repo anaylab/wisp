@@ -41,11 +41,23 @@ final class ActiveStackReadout: ObservableObject {
         // Settings → Model and live in UserDefaults, so the readout re-renders
         // when they change rather than showing the model that was selected at
         // launch.
+        // UserDefaults posts this for every write in the process, so only a
+        // change to what the readout shows re-renders it.
         providerSelectionSubscription = NotificationCenter.default
             .publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let currentSelectionSummary = "\(self.selectedChatProviderKind.rawValue)|\(self.chatModelName)"
+                    guard currentSelectionSummary != self.lastShownSelectionSummary else { return }
+                    self.lastShownSelectionSummary = currentSelectionSummary
+                    self.objectWillChange.send()
+                }
+            }
     }
+
+    private var lastShownSelectionSummary = ""
 
     private var providerSelectionSubscription: AnyCancellable?
 

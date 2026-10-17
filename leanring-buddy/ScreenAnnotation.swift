@@ -129,31 +129,50 @@ enum ScreenAnnotationParser {
     /// Written to mirror the [POINT:...] tag the model already produces
     /// reliably, since consistency between the two is what makes a small model
     /// get either of them right.
-    static let promptInstructions = """
+    static let promptInstructions = promptInstructions(includingTeaching: true)
+
+    /// The annotation instructions for one turn. The teaching section (circles,
+    /// handwritten notes, working a problem on the page) is long and only a
+    /// capable model uses it well, so it is left out for the small local model,
+    /// where every prompt token costs latency and the prefix cache.
+    static func promptInstructions(includingTeaching: Bool) -> String {
+        var instructions = """
 
 
-    drawing on screen:
-    besides pointing, you can draw a box, an arrow, a circle, a highlight or handwritten notes over part of the screen. use these when showing someone *where* something is matters more than describing it, or when several things need marking at once.
+        drawing on screen:
+        besides pointing, you can draw a box, an arrow\(includingTeaching ? ", a circle" : ""), a highlight\(includingTeaching ? " or handwritten notes" : "") over part of the screen. use these when showing someone *where* something is matters more than describing it, or when several things need marking at once.
 
-    put the tags at the very end of your reply, after the spoken text. coordinates are pixels in the screenshot's own coordinate space, origin (0,0) at the top-left.
+        put the tags at the very end of your reply, after the spoken text. coordinates are pixels in the screenshot's own coordinate space, origin (0,0) at the top-left.
 
-    - [BOX:left,top,right,bottom:label] — outline a region, for example a button or a panel. give the two opposite corners.
-    - [ARROW:x,y:label] — point at a spot without covering it.
-    - [HIGHLIGHT:left,top,right,bottom:label] — wash over a whole area, same two corners.
-    - [CIRCLE:left,top,right,bottom] — hand-drawn ellipse around something small: a chart bar, one term of an equation, the right answer choice. label optional.
-    - [NOTE:x,y:text] — handwritten text starting at that point. [NOTE:t7:text] writes it just to the right of that element instead.
+        - [BOX:left,top,right,bottom:label] — outline a region, for example a button or a panel. give the two opposite corners.
+        - [ARROW:x,y:label] — point at a spot without covering it.
+        - [HIGHLIGHT:left,top,right,bottom:label] — wash over a whole area, same two corners.
 
-    teaching math, charts and other visual problems: when the user asks you to explain, teach or work through something on screen, do it on the screen itself, like a tutor with a pen. one line of working per note, e.g. [NOTE:t12:141 + 3 = 144]. use the coordinate form to put all the notes in one tidy left-aligned column in empty space directly below the problem (the top-centre of the screen is covered by the reply card, so avoid the upper right), one note per roughly 40 pixels, never over text; use the id form only when a note belongs to one specific row. highlight or circle the parts the working uses — with no label, since a label pill covers the text underneath — work in order from the first line to the last, finish by circling the answer, and say the idea out loud in [SAY:] rather than reading the notes. use at most about ten notes; notes are text, so keep each under about eight words and put numbers and symbols in plain text (235 + 1 = 236).
+        """
 
-    keep labels to one to three words. if drawing wouldn't help, don't use any.
+        if includingTeaching {
+            instructions += """
+            - [CIRCLE:left,top,right,bottom] — hand-drawn ellipse around something small: a chart bar, one term of an equation, the right answer choice. label optional.
+            - [NOTE:x,y:text] — handwritten text starting at that point. [NOTE:t7:text] writes it just to the right of that element instead.
 
-    step-by-step walkthroughs — this takes priority over the single-pointer examples above:
-    whenever the user asks how to do something that takes two or more actions (open a pane, then click a switch; choose a menu item, then a format), do NOT point at just the first control and describe the rest. give one [STEP:label] tag per action, in order, up to about eight, and use [POINT:none]. a step tag has no coordinates — wisp finds each control on screen itself, one step at a time, as the user gets there — so include steps whose control isn't visible yet (a menu that isn't open, a pane that comes after a click). write each label as the action plus the control's name exactly as it reads on screen.
+            teaching math, charts and other visual problems: when the user asks you to explain, teach or work through something on screen, do it on the screen itself, like a tutor with a pen. one line of working per note, e.g. [NOTE:t12:141 + 3 = 144]. use the coordinate form to put all the notes in one tidy left-aligned column in empty space directly below the problem (the top-centre of the screen is covered by the reply card, so avoid the upper right), one note per roughly 40 pixels, never over text; use the id form only when a note belongs to one specific row. highlight or circle the parts the working uses — with no label, since a label pill covers the text underneath — work in order from the first line to the last, finish by circling the answer, and say the idea out loud in [SAY:] rather than reading the notes. use at most about ten notes; notes are text, so keep each under about eight words and put numbers and symbols in plain text (235 + 1 = 236).
 
-    example — user asks how to turn on dark mode in system settings: "open appearance in the sidebar, then pick dark. [STEP:click Appearance] [STEP:pick Dark] [POINT:none]"
 
-    a single action is still just a pointer: [POINT:a12:label].
-    """
+            """
+        }
+
+        instructions += """
+        keep labels to one to three words. if drawing wouldn't help, don't use any.
+
+        step-by-step walkthroughs — this takes priority over the single-pointer examples above:
+        whenever the user asks how to do something that takes two or more actions (open a pane, then click a switch; choose a menu item, then a format), do NOT point at just the first control and describe the rest. give one [STEP:label] tag per action, in order, up to about eight, and use [POINT:none]. a step tag has no coordinates — wisp finds each control on screen itself, one step at a time, as the user gets there — so include steps whose control isn't visible yet (a menu that isn't open, a pane that comes after a click). write each label as the action plus the control's name exactly as it reads on screen.
+
+        example — user asks how to turn on dark mode in system settings: "open appearance in the sidebar, then pick dark. [STEP:click Appearance] [STEP:pick Dark] [POINT:none]"
+
+        a single action is still just a pointer: [POINT:a12:label].
+        """
+        return instructions
+    }
 
     /// Extracts annotation tags and strips them from the spoken text.
     ///

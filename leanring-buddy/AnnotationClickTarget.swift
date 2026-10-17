@@ -36,14 +36,24 @@ enum AnnotationClickTarget {
     /// handwriting is far from fixed-width, so a guess missed the right edge of
     /// long notes and clipped short ones.
     static func measuredNoteSize(forText noteText: String) -> CGSize {
-        let noteFont = NSFont(name: "BradleyHandITCTT-Bold", size: noteFontSize)
-            ?? NSFont.systemFont(ofSize: noteFontSize, weight: .bold)
+        if let cachedSize = measuredNoteSizeCache[noteText] { return cachedSize }
+
         let textSize = (noteText as NSString).size(withAttributes: [.font: noteFont])
-        return CGSize(
+        let measuredSize = CGSize(
             width: ceil(textSize.width) + noteHorizontalPadding * 2,
             height: ceil(textSize.height) + noteVerticalPadding * 2
         )
+        // The router hit-tests on every pointer move; measuring the same few
+        // strings each time would be wasted work on the main thread.
+        if measuredNoteSizeCache.count > 200 { measuredNoteSizeCache.removeAll() }
+        measuredNoteSizeCache[noteText] = measuredSize
+        return measuredSize
     }
+
+    private static let noteFont: NSFont = NSFont(name: "BradleyHandITCTT-Bold", size: noteFontSize)
+        ?? NSFont.systemFont(ofSize: noteFontSize, weight: .bold)
+
+    private static var measuredNoteSizeCache: [String: CGSize] = [:]
 
     /// The annotation's clickable rectangle in overlay coordinates (top-left
     /// origin, points). A note is written from its anchor, or to the right of an
@@ -140,22 +150,29 @@ enum AnnotationNoteLayout {
             )
         }
 
-        // Shapes the model drew are obstacles from the start; notes become
-        // obstacles as they are placed, in the order they were written.
-        var occupiedRects: [CGRect] = annotations
+        // Circles and boxes the model drew are obstacles. The one exception: a
+        // note lying wholly inside a *box* was put there on purpose (beside a
+        // row of a boxed table). A circle's inside is the thing being circled,
+        // so a note over it is never deliberate.
+        let shapes: [(rect: CGRect, isBox: Bool)] = annotations
             .filter { $0.style == .circle || $0.style == .box }
             .filter { !$0.isUnplacedWalkthroughStep }
-            .map(clickableRect)
+            .map { (rect: clickableRect($0), isBox: $0.style == .box) }
+        var placedNoteRects: [CGRect] = []
 
         var arrangedAnnotations = annotations
         for annotationIndex in arrangedAnnotations.indices where arrangedAnnotations[annotationIndex].style == .note {
             let note = arrangedAnnotations[annotationIndex]
             var noteRect = clickableRect(note)
             let originalRect = noteRect
+            let obstacleRectsForThisNote = shapes
+                .filter { !($0.isBox && $0.rect.contains(originalRect)) }
+                .map(\.rect)
 
             var nudgeCount = 0
             while nudgeCount < maximumNudgesPerNote,
-                  let obstacle = occupiedRects.first(where: { $0.insetBy(dx: -2, dy: -3).intersects(noteRect) }) {
+                  let obstacle = (obstacleRectsForThisNote + placedNoteRects)
+                      .first(where: { $0.insetBy(dx: -2, dy: -3).intersects(noteRect) }) {
                 noteRect.origin.y = obstacle.maxY + gapInPoints
                 nudgeCount += 1
             }
@@ -179,9 +196,9 @@ enum AnnotationNoteLayout {
                     screenNumber: note.screenNumber,
                     stepNumber: note.stepNumber
                 )
-                occupiedRects.append(noteRect)
+                placedNoteRects.append(noteRect)
             } else {
-                occupiedRects.append(originalRect)
+                placedNoteRects.append(originalRect)
             }
         }
         return arrangedAnnotations

@@ -121,6 +121,16 @@ let nearBottomNote = [noteAt(100, 555, "last"), noteAt(100, 556, "also last")]
 let keptOnScreen = AnnotationNoteLayout.separatingOverlappingNotes(in: nearBottomNote, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
 check(keptOnScreen.allSatisfy { overlayRect($0).maxY <= clickDisplaySize.height + 40 }, "a note that can't be moved down stays put rather than leaving the screen")
 
+// A note that starts inside a box was put there on purpose (beside a boxed table's row).
+let boxAroundTable = overlayAnnotation(.box, CGRect(x: 80, y: 280, width: 400, height: 120))
+let noteInsideBox = noteAt(100, 300, "row note")
+let noteInsideBoxArranged = AnnotationNoteLayout.separatingOverlappingNotes(in: [boxAroundTable, noteInsideBox], screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(noteInsideBoxArranged[1] == noteInsideBox, "a note written inside a box stays where it is")
+let noteBesideBoxEdge = noteAt(60, 300, "straddles the edge")
+let straddlingArranged = AnnotationNoteLayout.separatingOverlappingNotes(in: [boxAroundTable, noteBesideBoxEdge], screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(!overlayRect(straddlingArranged[1]).intersects(overlayRect(boxAroundTable)), "a note starting outside a box is moved clear of it")
+check(AnnotationClickTarget.measuredNoteSize(forText: "x = 6") == AnnotationClickTarget.measuredNoteSize(forText: "x = 6"), "repeated measurements agree (cached)")
+
 // Prompt text.
 let prompt = nearTop.promptText(screenshotSize: screenshotSize, screenNumber: nil, hasCloseUpImage: true)
 check(prompt.contains("90,56,269,112"), "prompt names the region's pixel corners")

@@ -93,6 +93,16 @@ check(manyNotes.annotations.count == 12, "notes are capped at twelve")
 let boxesAndNote = ScreenAnnotationParser.parse("[BOX:10,10,50,40:a] [NOTE:60,20:hi] [BOX:10,60,50,90:b]")
 check(boxesAndNote.annotations.map(\.stepNumber) == [1, nil, 2], "a note between boxes doesn't take a step number")
 
+// MARK: Prompt sections
+
+let teachingPrompt = ScreenAnnotationParser.promptInstructions(includingTeaching: true)
+let plainPrompt = ScreenAnnotationParser.promptInstructions(includingTeaching: false)
+check(teachingPrompt.contains("[NOTE:") && teachingPrompt.contains("[CIRCLE:"), "the teaching prompt names notes and circles")
+check(!plainPrompt.contains("[NOTE:") && !plainPrompt.contains("[CIRCLE:") && !plainPrompt.contains("teaching math"), "the plain prompt leaves the teaching section out")
+check(plainPrompt.contains("[BOX:") && plainPrompt.contains("[STEP:label]") && plainPrompt.contains("[POINT:a12:label]"), "the plain prompt keeps boxes, steps and pointing")
+check(plainPrompt.count < teachingPrompt.count - 800, "the teaching section is a real saving for the local model")
+check(ScreenAnnotationParser.promptInstructions == teachingPrompt, "the default prompt is the full one")
+
 // MARK: Target text
 
 func target(_ instruction: String) -> (String, String?) {

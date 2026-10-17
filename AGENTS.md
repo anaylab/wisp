@@ -941,7 +941,7 @@ Grouped by what they do. Line counts are approximate.
 | `CompanionManager.swift` | ~3150 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
 | `BuddyDictationManager.swift` | ~940 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
 | `GlobalPushToTalkShortcutMonitor.swift` | ~270 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
-| `ShortcutBindingStore.swift` | ~150 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier. Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
+| `ShortcutBindingStore.swift` | ~210 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier, and the letter for Ask About a Part (`AskAboutPartKey`). Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
 | `TextComposerWindowController.swift` | ~230 | The tap-to-type text composer: a keyable floating panel (activates the app for typing, Return to send, Esc to dismiss) whose typed question runs through the normal screenshot turn. |
 | `DictationSettingsStore.swift` | ~110 | Source of truth for dictation language + custom dictionary. Persists to UserDefaults; read by `BuddyDictationManager` when starting a session. |
 | `DictationTab.swift` | ~200 | Settings → Dictation: language picker (Automatic + on-device locales) and a removable-chip custom dictionary editor. |
@@ -998,6 +998,10 @@ Grouped by what they do. Line counts are approximate.
 | `ScreenWatchAgentTools.swift` | ~95 | `watch_screen` (condition + text) and `stop_screen_watch`, read-only, registered via `registerScreenWatchTools()`. |
 | `FastPointing.swift` | ~540 | Pure side of fast pointing: `PointingRequestParser` (spoken "where is X" → target + role hint, conservative), `PointingTargetMatcher` (exact/tolerant word scoring, same-place merging, tie → every place, shortlist for the model, connector-word guard) and `PointingModelFallback` (text-only prompt + lenient reply → id). Tested by `Tests/FastPointing`. |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
+| `ScreenRegionFocus.swift` | ~90 | Pure: `FocusedScreenRegion` (the part of the screen the user chose — clamped, ≥24pt a side, AppKit bottom-left → screenshot top-left pixels, ScreenCaptureKit source rect) and its per-turn prompt text. Tested by `Tests/ScreenRegionFocus`. |
+| `ScreenRegionPicker.swift` | ~155 | The drag-to-select overlay behind "Ask About a Part…": a dimmed key panel on the pointer's screen, Esc/stray click cancels. |
+| `AnnotationClickTarget.swift` | ~210 | Pure: which annotations are clickable, a note's measured size (cached), hit-testing, pointer → overlay coordinates, clicked rect → focused region, and `AnnotationNoteLayout` (nudges overlapping notes apart). |
+| `AnnotationClickRouter.swift` | ~140 | Mouse-moved/scroll monitors (running only while something is drawn or selected) that flip the overlay to take the mouse over a clickable note, consume the click, and drop annotations when other content scrolls. |
 
 ### Agent, tools and MCP
 | File | Lines | Purpose |

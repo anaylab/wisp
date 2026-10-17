@@ -304,8 +304,23 @@ final class CompanionManager: ObservableObject {
         startLocalModelKeepWarmLoopIfNeeded()
         observeScreenConfigurationChanges()
         observeToolConfirmations()
-        // Notes, circles and boxes Wisp draws can be clicked to ask about them.
-        annotationClickRouter.start()
+        // Notes, circles and boxes Wisp draws can be clicked to ask about them,
+        // and scrolling drops them. The pointer and scroll monitors run only
+        // while something is drawn or selected, so Wisp isn't woken for every
+        // mouse move system-wide the rest of the time.
+        annotationClickRouterActivityCancellable = Publishers
+            .CombineLatest($activeAnnotationsByDisplayFrame, $focusedScreenRegion)
+            .map { annotationsByDisplayFrame, focusedRegion in
+                !annotationsByDisplayFrame.isEmpty || focusedRegion != nil
+            }
+            .removeDuplicates()
+            .sink { [weak self] shouldWatchAnnotations in
+                if shouldWatchAnnotations {
+                    self?.annotationClickRouter.start()
+                } else {
+                    self?.annotationClickRouter.stop()
+                }
+            }
         registerBackgroundWorkTool()
         // The browser step loop marks what it acts on; this is how it reaches
         // the overlay this object owns.
@@ -548,12 +563,19 @@ final class CompanionManager: ObservableObject {
 
     private var askAboutPartShortcutCancellable: AnyCancellable?
     private var escapeKeyCancellable: AnyCancellable?
+    private var annotationClickRouterActivityCancellable: AnyCancellable?
 
     private func bindShortcutTransitions() {
+        // Deliberately not `.receive(on:)`: the tap already runs on the main
+        // thread, and a hop to the next run-loop turn lets the composer or the
+        // picker finish dismissing itself on this same Esc first — after which
+        // the guard in `dropDrawingsAfterEscape` would see neither and wipe the
+        // drawings on the Esc that only meant to close them.
         escapeKeyCancellable = globalPushToTalkShortcutMonitor
             .escapeKeyPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.dropDrawingsAfterEscape() }
+            .sink { [weak self] in
+                MainActor.assumeIsolated { self?.dropDrawingsAfterEscape() }
+            }
 
         askAboutPartShortcutCancellable = globalPushToTalkShortcutMonitor
             .askAboutPartShortcutPublisher
@@ -715,11 +737,7 @@ final class CompanionManager: ObservableObject {
             transientHideTask = nil
 
             // If the cursor is hidden, bring it back transiently for this interaction
-            if !isCursorAlwaysVisible && !isOverlayVisible {
-                overlayWindowManager.hasShownOverlayBefore = true
-                overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
-                isOverlayVisible = true
-            }
+            showOverlayIfHidden()
 
             // Dismiss the menu bar panel so it doesn't cover the screen
             NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
@@ -738,6 +756,11 @@ final class CompanionManager: ObservableObject {
             }
 
     
+
+            // A spoken question is about whatever is on screen now, not a part
+            // chosen for an earlier typed one.
+            focusedScreenRegion = nil
+            focusedRegionHighlightID = nil
 
             WispAnalytics.trackPushToTalkStarted()
             PerfMetricsRecorder.shared.beginPhase(.transcription)
@@ -879,11 +902,7 @@ final class CompanionManager: ObservableObject {
 
         transientHideTask?.cancel()
         transientHideTask = nil
-        if !isCursorAlwaysVisible && !isOverlayVisible {
-            overlayWindowManager.hasShownOverlayBefore = true
-            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
-            isOverlayVisible = true
-        }
+        showOverlayIfHidden()
         NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
         currentResponseTask?.cancel()
         ttsProvider.stopPlayback()
@@ -946,6 +965,18 @@ final class CompanionManager: ObservableObject {
 
     // MARK: - Ask about a part of the screen
 
+    /// Brings the overlay up when it is hidden, so a marker, highlight or card
+    /// has somewhere to draw. A no-op while the cursor is always visible or
+    /// the overlay is already showing.
+    private func showOverlayIfHidden() {
+        if !isCursorAlwaysVisible && !isOverlayVisible {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+    }
+
+
     /// The part of the screen the user dragged over to ask about, kept for
     /// follow-ups until they pick another part or start a fresh question.
     @Published private(set) var focusedScreenRegion: FocusedScreenRegion?
@@ -955,6 +986,9 @@ final class CompanionManager: ObservableObject {
     /// The menu bar's "Ask About a Part…": a drag-to-select overlay, then the
     /// text composer with the chosen part remembered.
     func beginAskAboutRegion() {
+        // A second launch while the picker is up would orphan the first one's
+        // full-screen panel (its controller deallocates, its callbacks die).
+        guard screenRegionPickerController == nil else { return }
         NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
         screenRegionPickerController = ScreenRegionPickerController { [weak self] selectedRegion in
             guard let self else { return }
@@ -998,11 +1032,7 @@ final class CompanionManager: ObservableObject {
         _ focusedRegion: FocusedScreenRegion,
         keepingExistingAnnotations: Bool = false
     ) {
-        if !isCursorAlwaysVisible && !isOverlayVisible {
-            overlayWindowManager.hasShownOverlayBefore = true
-            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
-            isOverlayVisible = true
-        }
+        showOverlayIfHidden()
 
         let displayFrame = focusedRegion.displayFrameInAppKitCoordinates
         // The overlay maps annotations by scale alone, so any consistent
@@ -1117,6 +1147,9 @@ final class CompanionManager: ObservableObject {
     /// text composer does. Today closes the window first so the screenshot
     /// shows the user's work rather than Wisp's own window.
     func askTypedQuestion(_ typedQuestion: String) {
+        // Today's ask bar and the Chat page are fresh questions about the whole
+        // screen, not follow-ups about a part chosen earlier.
+        clearFocusedScreenRegion()
         submitTextComposerQuery(typedQuestion)
     }
 
@@ -1131,11 +1164,7 @@ final class CompanionManager: ObservableObject {
         // The gesture is spent — the composer has taken over.
         setActiveCommandMode(nil)
 
-        if !isCursorAlwaysVisible && !isOverlayVisible {
-            overlayWindowManager.hasShownOverlayBefore = true
-            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
-            isOverlayVisible = true
-        }
+        showOverlayIfHidden()
 
         // Let the composer window finish closing before the screenshot is taken,
         // so it is not captured in the frame the model sees.
@@ -1254,11 +1283,7 @@ final class CompanionManager: ObservableObject {
 
         // Bring the cursor companion back for this interaction if it's docked, so
         // the skill can point at things on screen.
-        if !isCursorAlwaysVisible && !isOverlayVisible {
-            overlayWindowManager.hasShownOverlayBefore = true
-            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
-            isOverlayVisible = true
-        }
+        showOverlayIfHidden()
 
         let skillInstruction = "Follow these instructions for what's on my screen right now:\n\n\(skillBody)"
 
@@ -1301,6 +1326,7 @@ final class CompanionManager: ObservableObject {
             return
         }
         guard let routine = RoutineStore.shared.routine(withID: routineID) else { return }
+        clearFocusedScreenRegion()
 
         // A routine with blanks ("summarize this for {person}") asks for them
         // first, before anything leaves the screen; cancelling sends nothing.
@@ -1319,11 +1345,7 @@ final class CompanionManager: ObservableObject {
 
         // Wisp's own surfaces leave the screen before the screenshot, as with skills.
         NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
-        if !isCursorAlwaysVisible && !isOverlayVisible {
-            overlayWindowManager.hasShownOverlayBefore = true
-            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
-            isOverlayVisible = true
-        }
+        showOverlayIfHidden()
 
         var routinePrompt = RoutineParameters.resolve(
             instruction: routine.instruction,
@@ -1671,7 +1693,7 @@ final class CompanionManager: ObservableObject {
                         images: labeledImagesIncludingCloseUp,
                         screenContextText: perTurnContextText,
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
-                            + ScreenAnnotationParser.promptInstructions
+                            + ScreenAnnotationParser.promptInstructions(includingTeaching: !isSelectedModelProviderLocal)
                             + GlanceCardParser.promptInstructions
                             + SpokenLineParser.promptInstructions
                             + glanceCardSourcesPromptAddendum
@@ -1723,7 +1745,7 @@ final class CompanionManager: ObservableObject {
                     )
                     let singleCallRequest = ModelRequest(
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
-                            + ScreenAnnotationParser.promptInstructions
+                            + ScreenAnnotationParser.promptInstructions(includingTeaching: !isSelectedModelProviderLocal)
                             + GlanceCardParser.promptInstructions
                             + SpokenLineParser.promptInstructions
                             + glanceCardSourcesPromptAddendum
