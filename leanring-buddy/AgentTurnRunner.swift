@@ -109,6 +109,9 @@ final class AgentTurnRunner {
         /// that seems to arrive from thin air. Images are still here; dropping
         /// them is the caller's decision to make, not this loop's.
         let messages: [BuddyChatMessage]
+        /// Token counts and reported cost summed over every model call this
+        /// turn made. Numbers only; feeds the usage log.
+        var usage = UsageTokenCounts()
     }
 
     private let modelProvider: any ModelProvider
@@ -197,6 +200,7 @@ final class AgentTurnRunner {
         // Where this turn's own record begins, so `Outcome.messages` can hand
         // back what this run added without the history it was given.
         let indexOfFirstMessageInThisTurn = messages.count
+        var totalUsage = UsageTokenCounts()
 
         // The screenshot rides on the first user message and nowhere else.
         var firstUserBlocks: [BuddyContentBlock] = images.map {
@@ -288,6 +292,14 @@ final class AgentTurnRunner {
 
             try Task.checkCancellation()
 
+            totalUsage.add(
+                inputTokens: turn.promptTokens,
+                outputTokens: turn.outputTokens,
+                cacheReadTokens: turn.cacheReadTokens,
+                cacheWriteTokens: turn.cacheWriteTokens,
+                reportedCostUSD: turn.reportedCostUSD
+            )
+
             let modelStep = AgentStepRecord(
                 kind: .modelCall,
                 summary: iteration == 0 ? "Thinking" : "Thinking again (step \(iteration + 1))",
@@ -338,7 +350,8 @@ final class AgentTurnRunner {
                     terminalText: turn.text,
                     steps: steps,
                     hitIterationCap: isFinalIteration && !requestedCalls.isEmpty,
-                    messages: Array(messages[indexOfFirstMessageInThisTurn...])
+                    messages: Array(messages[indexOfFirstMessageInThisTurn...]),
+                    usage: totalUsage
                 )
             }
 
@@ -422,7 +435,8 @@ final class AgentTurnRunner {
             terminalText: "",
             steps: steps,
             hitIterationCap: true,
-            messages: Array(messages[indexOfFirstMessageInThisTurn...])
+            messages: Array(messages[indexOfFirstMessageInThisTurn...]),
+            usage: totalUsage
         )
     }
 

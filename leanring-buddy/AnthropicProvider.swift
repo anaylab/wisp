@@ -129,6 +129,8 @@ final class AnthropicProvider: ModelProvider, @unchecked Sendable {
         var collectedBlocks: [BuddyContentBlock] = []
         var promptTokens: Int?
         var outputTokens: Int?
+        var cacheReadTokens: Int?
+        var cacheWriteTokens: Int?
         var finalStopReasonRaw: String?
 
         // Usually one pass. A server-side web search can pause a long turn
@@ -152,6 +154,8 @@ final class AnthropicProvider: ModelProvider, @unchecked Sendable {
             collectedBlocks.append(contentsOf: pass.blocks)
             promptTokens = (promptTokens ?? 0) + (pass.promptTokens ?? 0)
             outputTokens = (outputTokens ?? 0) + (pass.outputTokens ?? 0)
+            cacheReadTokens = (cacheReadTokens ?? 0) + (pass.cacheReadTokens ?? 0)
+            cacheWriteTokens = (cacheWriteTokens ?? 0) + (pass.cacheWriteTokens ?? 0)
             finalStopReasonRaw = pass.stopReasonRaw
 
             if pass.stopReasonRaw != "pause_turn" { break }
@@ -170,7 +174,9 @@ final class AnthropicProvider: ModelProvider, @unchecked Sendable {
             stopReason: Self.stopReason(stopReasonRaw: finalStopReasonRaw, hasToolCalls: hasToolCalls),
             duration: Date().timeIntervalSince(startTime),
             promptTokens: promptTokens,
-            outputTokens: outputTokens
+            outputTokens: outputTokens,
+            cacheReadTokens: cacheReadTokens,
+            cacheWriteTokens: cacheWriteTokens
         )
     }
 
@@ -180,6 +186,8 @@ final class AnthropicProvider: ModelProvider, @unchecked Sendable {
         let stopReasonRaw: String?
         let promptTokens: Int?
         let outputTokens: Int?
+        let cacheReadTokens: Int?
+        let cacheWriteTokens: Int?
     }
 
     private func streamOnePass(
@@ -247,6 +255,8 @@ final class AnthropicProvider: ModelProvider, @unchecked Sendable {
         var orderedBlocks: [BuddyContentBlock] = []
         var promptTokens: Int?
         var outputTokens: Int?
+        var cacheReadTokens: Int?
+        var cacheWriteTokens: Int?
         var stopReasonRaw: String?
 
         // The block currently being streamed.
@@ -368,10 +378,12 @@ final class AnthropicProvider: ModelProvider, @unchecked Sendable {
                         // Cached tokens are reported separately from
                         // `input_tokens`; the prompt is all three together.
                         let uncachedInputTokens = usage["input_tokens"] as? Int ?? 0
-                        let cacheReadTokens = usage["cache_read_input_tokens"] as? Int ?? 0
-                        let cacheWriteTokens = usage["cache_creation_input_tokens"] as? Int ?? 0
-                        promptTokens = uncachedInputTokens + cacheReadTokens + cacheWriteTokens
-                        print("☁️ Claude prompt: \(promptTokens ?? 0) tokens (\(cacheReadTokens) from cache, \(cacheWriteTokens) newly cached)")
+                        let messageCacheReadTokens = usage["cache_read_input_tokens"] as? Int ?? 0
+                        let messageCacheWriteTokens = usage["cache_creation_input_tokens"] as? Int ?? 0
+                        promptTokens = uncachedInputTokens + messageCacheReadTokens + messageCacheWriteTokens
+                        cacheReadTokens = messageCacheReadTokens
+                        cacheWriteTokens = messageCacheWriteTokens
+                        print("☁️ Claude prompt: \(promptTokens ?? 0) tokens (\(messageCacheReadTokens) from cache, \(messageCacheWriteTokens) newly cached)")
                     }
 
                 case "content_block_start":
@@ -443,7 +455,9 @@ final class AnthropicProvider: ModelProvider, @unchecked Sendable {
             blocks: orderedBlocks,
             stopReasonRaw: stopReasonRaw,
             promptTokens: promptTokens,
-            outputTokens: outputTokens
+            outputTokens: outputTokens,
+            cacheReadTokens: cacheReadTokens,
+            cacheWriteTokens: cacheWriteTokens
         )
     }
 

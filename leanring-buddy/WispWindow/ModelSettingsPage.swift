@@ -29,6 +29,8 @@ struct PerformanceTab: View {
             VStack(alignment: .leading, spacing: 16) {
                 ModelProviderCard(companionManager: companionManager)
 
+                UsageCard()
+
                 systemSection
 
                 if metricsRecorder.recentTurns.isEmpty {
@@ -458,6 +460,70 @@ private struct ClaudeModelOptions: View {
         case .low: return "Quickest replies. Claude still thinks, but briefly."
         case .medium: return "More thought for multi-step tasks, a little slower."
         case .high: return "Deepest reasoning. Slowest and uses the most tokens."
+        }
+    }
+}
+
+// MARK: - Usage
+
+/// What recent turns used and roughly cost at API prices, from the local
+/// `UsageLogStore`. Totals for today, 7 days and 30 days, split by provider.
+private struct UsageCard: View {
+    @ObservedObject private var usageLogStore = UsageLogStore.shared
+
+    var body: some View {
+        let usageSummary = usageLogStore.summary
+        DashboardCard(title: "Usage") {
+            if usageSummary.lastThirtyDays.turnCount == 0 {
+                Text("Nothing logged yet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DS.Colors.textSecondary)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    usageRow(label: "Today", totals: usageSummary.today)
+                    usageRow(label: "Last 7 days", totals: usageSummary.lastSevenDays)
+                    usageRow(label: "Last 30 days", totals: usageSummary.lastThirtyDays)
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(usageSummary.providerBreakdown) { providerBreakdown in
+                        HStack {
+                            Text(providerBreakdown.providerKind.displayName)
+                                .font(.system(size: 11))
+                                .foregroundStyle(DS.Colors.textSecondary)
+                            Spacer()
+                            Text("\(providerBreakdown.totals.turnCount) turns · " + UsageCostEstimator.costLabel(
+                                providerKind: providerBreakdown.providerKind,
+                                estimatedCostUSD: providerBreakdown.totals.estimatedCostUSD))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(DS.Colors.textPrimary)
+                        }
+                    }
+                }
+            }
+            HStack {
+                Text("Stays on this Mac. Counts only, never your words. Cost is an estimate (prices as of \(ModelPricing.pricesSetOn)).")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                Spacer()
+                Button("Clear") { usageLogStore.clear() }
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
+                    .controlSize(.small)
+                    .pointerCursor()
+                    .disabled(usageSummary.lastThirtyDays.turnCount == 0)
+            }
+        }
+    }
+
+    private func usageRow(label: String, totals: UsageTotals) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(DS.Colors.textSecondary)
+            Spacer()
+            Text("\(totals.turnCount) turns · \(UsageAggregator.formattedTokenCount(totals.totalTokens)) tokens · ≈ \(UsageCostEstimator.formattedDollars(totals.estimatedCostUSD))")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(DS.Colors.textPrimary)
         }
     }
 }

@@ -871,6 +871,21 @@ cloud dependency to the local path, without asking.
   notes import), Health, Log (undo), Settings.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
+- **Usage log** (local, private; `UsageLogStore`): a record per finished model turn — timestamp, provider kind,
+  model API name, input/output/cached-input tokens, an estimated API-equivalent cost, duration, whether a screenshot was
+  attached, and whether it was a background/buddy run — in `~/Library/Application Support/Wisp/usage-log.json` (0600,
+  30-day retention, debounced save like the task history, flushed on quit). **Nothing leaves the Mac and no content is
+  stored**: `UsageLogRecord` has no field for prompt text, answers, screenshots or anything typed, and `Tests/UsageLog`
+  asserts the persisted keys. Providers surface usage through optional fields on `BuddyChatTurn` (`promptTokens`,
+  `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `reportedCostUSD` — nil = not reported, never zero): Anthropic
+  from `message_start`/`message_delta`, the Claude subscription CLI from the `result` event (`usage` + `total_cost_usd`),
+  OpenAI/Gemini from the final usage chunk, Ollama from `prompt_eval_count`/`eval_count`. `AgentTurnRunner.Outcome.usage`
+  sums them over the turn's model calls; `CompanionManager` (live turns) and `BackgroundTaskLauncher` (buddy/background
+  runs) call `UsageLogStore.recordTurn(providerIdentifier:…)` once on success, parsing kind + model out of
+  `ModelProvider.identifier`. `ModelPricing` is a hand-maintained **estimate** table (Claude Opus/Sonnet 5.5, Haiku 4.5,
+  gpt-4o, gemini-2.5-flash; local = $0; `pricesSetOn` dates it) — a provider-reported cost wins, an unpriced model stays
+  "cost unknown". Subscription turns read "included in subscription (≈ API cost $X)". Shown in Settings → Model → Usage
+  (today / 7 days / 30 days, per-provider, Clear). Turns that fail or are cancelled are not logged.
 
 ### Key Architecture Decisions
 
@@ -1167,6 +1182,10 @@ Grouped by what they do. Line counts are approximate.
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `DesignSystem.swift` | ~480 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |
+| `UsageTokenCounts.swift` | ~60 | Dependency-free token counts + provider-reported cost for a turn, summed over its model calls (`AgentTurnRunner.Outcome.usage`). |
+| `ModelPricing.swift` | ~120 | Pure price table (estimates, dated by `pricesSetOn`) and `UsageCostEstimator` (cache-aware cost, provider-reported cost wins, cost labels incl. the subscription wording). |
+| `UsageLogRecord.swift` | ~170 | Pure usage-log shape (numbers only), codec, 30-day retention, `UsageProviderIdentifier` parsing and `UsageAggregator` (today / 7 / 30 days, per-provider). |
+| `UsageLogStore.swift` | ~120 | `@MainActor` singleton behind the log: `~/Library/Application Support/Wisp/usage-log.json` (0600), debounced save, `recordTurn`, `clear`, flush on quit. |
 | `SystemReadouts.swift` | ~143 | Memory via `host_statistics64`; Ollama residency via `/api/ps`. |
 | `WindowPositionManager.swift` | ~262 | Window placement and permission helpers. |
 | `WispAnalytics.swift` | ~153 | Gated off. Sends nothing. Kept so the call sites still compile. |
@@ -1250,6 +1269,7 @@ running):
 ./Tests/ScreenRegionFocus/run.sh         # ask-about-a-part: region clamping, AppKit→screenshot pixels, prompt text
 ./Tests/WorkedSolutionExport/run.sh      # save-a-worked-solution: worth saving, display choice, file names, Markdown
 ./Tests/PartSelection/run.sh            # voice selection of a part: spoken-target parser, OCR list/ordinal resolver, pixels→region round trip
+./Tests/UsageLog/run.sh                  # usage log: cost estimator, aggregation windows, retention, codec, no content fields, store file
 ./Tests/GuidedWalkthrough/run.sh         # guided walkthrough plan stepping, instruction → label, click-on-target matching
 ./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
 ./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec

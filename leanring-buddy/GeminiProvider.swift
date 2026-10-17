@@ -164,6 +164,7 @@ final class GeminiProvider: ModelProvider, @unchecked Sendable {
         var orderedBlocks: [BuddyContentBlock] = []
         var promptTokens: Int?
         var outputTokens: Int?
+        var cachedPromptTokens: Int?
         var lastFinishReason: String?
 
         func appendText(_ newText: String) {
@@ -189,7 +190,12 @@ final class GeminiProvider: ModelProvider, @unchecked Sendable {
 
                 if let usage = chunk["usageMetadata"] as? [String: Any] {
                     promptTokens = usage["promptTokenCount"] as? Int ?? promptTokens
-                    outputTokens = usage["candidatesTokenCount"] as? Int ?? outputTokens
+                    // Reasoning ("thoughts") tokens are billed as output but
+                    // reported beside, not inside, the candidates count.
+                    if let candidatesTokenCount = usage["candidatesTokenCount"] as? Int {
+                        outputTokens = candidatesTokenCount + (usage["thoughtsTokenCount"] as? Int ?? 0)
+                    }
+                    cachedPromptTokens = usage["cachedContentTokenCount"] as? Int ?? cachedPromptTokens
                 }
 
                 guard let candidates = chunk["candidates"] as? [[String: Any]],
@@ -234,7 +240,8 @@ final class GeminiProvider: ModelProvider, @unchecked Sendable {
             stopReason: Self.stopReason(finishReason: lastFinishReason, hasToolCalls: hasToolCalls),
             duration: Date().timeIntervalSince(startTime),
             promptTokens: promptTokens,
-            outputTokens: outputTokens
+            outputTokens: outputTokens,
+            cacheReadTokens: cachedPromptTokens
         )
     }
 

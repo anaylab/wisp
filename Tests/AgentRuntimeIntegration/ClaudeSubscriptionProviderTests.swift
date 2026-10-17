@@ -61,6 +61,24 @@ import Foundation
         check("the latest message ends the text", finalText.hasSuffix("what is this?"))
     }
 
+    section("Claude subscription: usage and reported cost")
+    do {
+        let resultEvent = #"{"type":"result","result":"Hi.","is_error":false,"total_cost_usd":0.0421,"usage":{"input_tokens":10,"cache_creation_input_tokens":200,"cache_read_input_tokens":900,"output_tokens":33}}"#
+        let (chunkStream, chunkContinuation) = AsyncStream<Data>.makeStream()
+        chunkContinuation.yield(Data((resultEvent + "\n").utf8))
+        chunkContinuation.finish()
+        let streamOutcome = await ClaudeSubscriptionProvider.readEventStream(from: chunkStream, onTextDelta: { _ in })
+        check("result event: input is fresh + cache write + cache read", streamOutcome.promptTokens == 1110, "\(streamOutcome.promptTokens ?? -1)")
+        check("result event: cache read and write reported separately",
+              streamOutcome.cacheReadTokens == 900 && streamOutcome.cacheWriteTokens == 200)
+        check("result event: total_cost_usd carried", streamOutcome.reportedCostUSD == 0.0421)
+        let usageTurn = try? ClaudeSubscriptionProvider.turn(
+            from: streamOutcome, standardErrorText: "", exitStatus: 0, duration: 1,
+            knownToolNames: [], providerName: "Claude")
+        check("turn carries cache counts and reported cost",
+              usageTurn?.cacheReadTokens == 900 && usageTurn?.cacheWriteTokens == 200 && usageTurn?.reportedCostUSD == 0.0421)
+    }
+
     section("Claude subscription: reply → turn")
     do {
         var outcome = ClaudeSubscriptionProvider.StreamOutcome()

@@ -126,6 +126,7 @@ final class OpenAIProvider: ModelProvider, @unchecked Sendable {
         var orderedTextBlocks: [BuddyContentBlock] = []
         var promptTokens: Int?
         var outputTokens: Int?
+        var cachedPromptTokens: Int?
         var finishReason: String?
 
         // Tool calls accumulate by their streamed index, since their argument
@@ -160,6 +161,9 @@ final class OpenAIProvider: ModelProvider, @unchecked Sendable {
                 if let usage = chunk["usage"] as? [String: Any] {
                     promptTokens = usage["prompt_tokens"] as? Int ?? promptTokens
                     outputTokens = usage["completion_tokens"] as? Int ?? outputTokens
+                    if let promptDetails = usage["prompt_tokens_details"] as? [String: Any] {
+                        cachedPromptTokens = promptDetails["cached_tokens"] as? Int ?? cachedPromptTokens
+                    }
                 }
 
                 guard let choices = chunk["choices"] as? [[String: Any]],
@@ -221,7 +225,8 @@ final class OpenAIProvider: ModelProvider, @unchecked Sendable {
             stopReason: Self.stopReason(finishReason: finishReason, hasToolCalls: hasToolCalls),
             duration: Date().timeIntervalSince(startTime),
             promptTokens: promptTokens,
-            outputTokens: outputTokens
+            outputTokens: outputTokens,
+            cacheReadTokens: cachedPromptTokens
         )
     }
 

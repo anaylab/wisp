@@ -171,6 +171,28 @@ func sampleTool() -> BuddyToolDefinition {
                 && betaHeader.contains("server-side-fallback-2026-07-01"), betaHeader)
     }
 
+    section("Claude: usage reporting")
+    do {
+        StubbedAnthropicTransport.reset(responses: [
+            anthropicMessageStream(blocks: [textBlock("hello")], stopReason: "end_turn")
+        ])
+        let provider = AnthropicProvider(apiKey: "test-key", modelChoice: .opus, effortLevel: .low,
+                                         isWebAccessEnabled: false, session: stubbedAnthropicSession())
+        let usageTurn = try? await provider.streamTurn(
+            ModelRequest(systemPrompt: "s", messages: [BuddyChatMessage(role: .user, text: "hi")]),
+            onTextDelta: { _ in })
+        check("prompt tokens = fresh + cache read + cache write", usageTurn?.promptTokens == 910, "\(usageTurn?.promptTokens ?? -1)")
+        check("output tokens come from message_delta", usageTurn?.outputTokens == 42)
+        check("cache read tokens surfaced", usageTurn?.cacheReadTokens == 900)
+        check("cache write tokens surfaced", usageTurn?.cacheWriteTokens == 0)
+        check("Anthropic reports no dollar cost", usageTurn?.reportedCostUSD == nil)
+        let usageCost = UsageCostEstimator.estimatedCostUSD(
+            providerKind: .anthropic, modelName: "claude-opus-5-5",
+            counts: UsageTokenCounts(inputTokens: usageTurn?.promptTokens, outputTokens: usageTurn?.outputTokens,
+                                     cacheReadTokens: usageTurn?.cacheReadTokens, cacheWriteTokens: usageTurn?.cacheWriteTokens))
+        check("those counts price to a plausible cost", (usageCost ?? 0) > 0 && (usageCost ?? 1) < 0.01, "\(usageCost ?? -1)")
+    }
+
     section("Claude: request shape (no tools, and Haiku)")
     do {
         StubbedAnthropicTransport.reset(responses: [
