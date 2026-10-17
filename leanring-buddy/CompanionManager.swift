@@ -899,7 +899,12 @@ final class CompanionManager: ObservableObject {
 
     /// Opens the floating text composer. Created lazily so the window only exists
     /// once the user actually taps to type.
-    private func openTextComposer() {
+    private func openTextComposer(keepingFocusedScreenRegion: Bool = false) {
+        // A fresh question is about the whole screen; only a follow-up or a
+        // just-made selection keeps talking about the chosen part.
+        if !keepingFocusedScreenRegion {
+            clearFocusedScreenRegion()
+        }
         if textComposerWindowController == nil {
             textComposerWindowController = TextComposerWindowController(
                 onSubmit: { [weak self] typedQuery in
@@ -912,11 +917,64 @@ final class CompanionManager: ObservableObject {
         textComposerWindowController?.show()
     }
 
+    // MARK: - Ask about a part of the screen
+
+    /// The part of the screen the user dragged over to ask about, kept for
+    /// follow-ups until they pick another part or start a fresh question.
+    @Published private(set) var focusedScreenRegion: FocusedScreenRegion?
+
+    private var screenRegionPickerController: ScreenRegionPickerController?
+
+    /// The menu bar's "Ask About a Part…": a drag-to-select overlay, then the
+    /// text composer with the chosen part remembered.
+    func beginAskAboutRegion() {
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+        screenRegionPickerController = ScreenRegionPickerController { [weak self] selectedRegion in
+            guard let self else { return }
+            self.screenRegionPickerController = nil
+            guard let selectedRegion else { return }
+            self.focusedScreenRegion = selectedRegion
+            self.showFocusedRegionHighlight(selectedRegion)
+            self.openTextComposer(keepingFocusedScreenRegion: true)
+        }
+        screenRegionPickerController?.show()
+    }
+
+    /// Forgets the selected part, so the next question is about the whole screen.
+    func clearFocusedScreenRegion() {
+        guard focusedScreenRegion != nil else { return }
+        focusedScreenRegion = nil
+        clearScreenAnnotations()
+    }
+
+    /// Marks the chosen part on screen while the user types, with the same
+    /// highlight the model's own `[HIGHLIGHT:]` tag draws.
+    private func showFocusedRegionHighlight(_ focusedRegion: FocusedScreenRegion) {
+        if !isCursorAlwaysVisible && !isOverlayVisible {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+
+        let displayFrame = focusedRegion.displayFrameInAppKitCoordinates
+        // The overlay maps annotations by scale alone, so any consistent
+        // "screenshot" size works for a region drawn straight from the screen.
+        let screenshotSize = displayFrame.size
+        let highlight = ScreenAnnotation(
+            style: .highlight,
+            regionInScreenshotPixels: focusedRegion.regionInScreenshotPixels(screenshotSize: screenshotSize),
+            label: nil,
+            screenNumber: nil
+        )
+        annotationScreenshotSizeByDisplayFrame = [displayFrame: screenshotSize]
+        activeAnnotationsByDisplayFrame = [displayFrame: [highlight]]
+    }
+
     /// The notch reply's "Follow up" action. Opens the text composer; no extra
     /// plumbing is needed for context because `conversationTranscript` already
     /// carries the recent turns into the next request.
     func beginFollowUpQuestion() {
-        openTextComposer()
+        openTextComposer(keepingFocusedScreenRegion: true)
     }
 
     // MARK: - Conversation in the Wisp window
@@ -1341,6 +1399,7 @@ final class CompanionManager: ObservableObject {
         // only behaves when the screen is left out.
         let shouldAttachScreenshot = !isSelectedModelProviderLocal
             || LocalOllamaAPI.promptLikelyRefersToScreen(transcript)
+            || focusedScreenRegion != nil
         PerfMetricsRecorder.shared.recordScreenshotDecision(didAttach: shouldAttachScreenshot)
 
         currentResponseTask = Task {
@@ -1411,7 +1470,33 @@ final class CompanionManager: ObservableObject {
                     && BrainPreferences.shared.isPromptContextEnabled
                     ? BrainStore.shared.promptContext(forRequest: transcript)
                     : ""
-                let perTurnContextText = [accessibilityElementPromptText, brainPromptContextText]
+                // The part of the screen the user chose to ask about, with a
+                // native-resolution close-up of it so small text and symbols
+                // are readable.
+                var focusedRegionCloseUpImage: (data: Data, label: String)?
+                var focusedRegionPromptText = ""
+                if shouldAttachScreenshot, let focusedRegion = focusedScreenRegion,
+                   let focusedCaptureIndex = screenCaptures.firstIndex(where: {
+                       $0.displayFrame == focusedRegion.displayFrameInAppKitCoordinates
+                   }) {
+                    let focusedCapture = screenCaptures[focusedCaptureIndex]
+                    if let closeUpData = await CompanionScreenCaptureUtility.captureCloseUpAsJPEG(of: focusedRegion) {
+                        focusedRegionCloseUpImage = (
+                            data: closeUpData,
+                            label: "close-up of the part of screen \(focusedCaptureIndex + 1) the user is asking about"
+                        )
+                    }
+                    focusedRegionPromptText = focusedRegion.promptText(
+                        screenshotSize: CGSize(
+                            width: CGFloat(focusedCapture.screenshotWidthInPixels),
+                            height: CGFloat(focusedCapture.screenshotHeightInPixels)
+                        ),
+                        screenNumber: screenCaptures.count > 1 ? focusedCaptureIndex + 1 : nil,
+                        hasCloseUpImage: focusedRegionCloseUpImage != nil
+                    )
+                }
+
+                let perTurnContextText = [accessibilityElementPromptText, focusedRegionPromptText, brainPromptContextText]
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n\n")
 
@@ -1430,6 +1515,7 @@ final class CompanionManager: ObservableObject {
                     let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
                     return (data: capture.imageData, label: capture.label + dimensionInfo)
                 } : []
+                let labeledImagesIncludingCloseUp = labeledImages + (focusedRegionCloseUpImage.map { [$0] } ?? [])
 
                 // Prior exchanges, projected down to what this request should
                 // carry: the questions and the answers, without the tool
@@ -1460,7 +1546,7 @@ final class CompanionManager: ObservableObject {
                     )
                     let outcome = try await runner.run(
                         userText: transcript,
-                        images: labeledImages,
+                        images: labeledImagesIncludingCloseUp,
                         screenContextText: perTurnContextText,
                         systemPrompt: Self.companionVoiceResponseSystemPrompt
                             + ScreenAnnotationParser.promptInstructions
@@ -1511,7 +1597,7 @@ final class CompanionManager: ObservableObject {
                         role: .user,
                         blocks: [.text(transcript)]
                             + perTurnContextBlocks
-                            + labeledImages.map { .image(data: $0.data, label: $0.label) }
+                            + labeledImagesIncludingCloseUp.map { .image(data: $0.data, label: $0.label) }
                     )
                     let singleCallRequest = ModelRequest(
                         systemPrompt: Self.companionVoiceResponseSystemPrompt

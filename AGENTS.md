@@ -420,6 +420,14 @@ cloud dependency to the local path, without asking.
   ids to the OCR line box (already in screenshot pixels) and `a` ids to the AX path. The read-only
   `read_screen_text` agent tool (`.reading(.localMachine)`, general scope) returns the plain OCR text
   of the current screen (150 lines / 4000 chars).
+- **Ask about a part** (menu bar → **Ask About a Part…**): `ScreenRegionPickerController` (`ScreenRegionPicker.swift`) shows a dimmed
+  drag-to-select panel on the pointer's screen (Esc cancels; the one Wisp overlay that takes the mouse, and only while up). The chosen
+  `FocusedScreenRegion` (`ScreenRegionFocus.swift`, pure — clamped to the display, ≥24pt a side, AppKit bottom-left → screenshot
+  top-left pixels) is highlighted on screen, the text composer opens, and `CompanionManager.focusedScreenRegion` rides on every question
+  until a fresh composer opens (`openTextComposer(keepingFocusedScreenRegion:)` — only a new selection and the notch's Follow up keep it),
+  so follow-ups ("why?", "next step") stay about that part. A turn with a region always attaches the screenshot, adds a native-resolution
+  close-up (`CompanionScreenCaptureUtility.captureCloseUpAsJPEG`, ≤1400px) as the last image, and joins `FocusedScreenRegion.promptText`
+  to the per-turn context block (stripped from history like the `a`/`t` ids). Tested by `Tests/ScreenRegionFocus`.
 - **Guided walkthrough** (`GuidedWalkthrough.swift` pure, `GuidedWalkthroughController.swift`): a reply whose annotation tags
   are ≥2 numbered, labelled steps (the existing step-by-step tags) is walked through one step at a time instead of drawn all at
   once (`CompanionManager.beginGuidedWalkthrough`, called where the reply's annotations are applied). Only step 1 uses the model's
@@ -1193,6 +1201,7 @@ running):
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
 ./Tests/HostileProviderAttack/run.sh     # adversarial provider vs the real agent loop; lists known defects
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
+./Tests/ScreenRegionFocus/run.sh         # ask-about-a-part: region clamping, AppKit→screenshot pixels, prompt text
 ./Tests/GuidedWalkthrough/run.sh         # guided walkthrough plan stepping, instruction → label, click-on-target matching
 ./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
 ./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec

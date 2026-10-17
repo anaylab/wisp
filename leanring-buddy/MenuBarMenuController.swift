@@ -89,6 +89,7 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(actionItem(title: "Ask Wisp…", action: #selector(askWisp)))
+        menu.addItem(actionItem(title: "Ask About a Part…", action: #selector(askAboutPart)))
         menu.addItem(actionItem(title: "Open Wisp", action: #selector(openToday), keyEquivalent: "o"))
         menu.addItem(actionItem(title: "Chat", action: #selector(openChat)))
         menu.addItem(actionItem(title: "Buddies", action: #selector(openBuddies)))
@@ -142,6 +143,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
     @objc private func askWisp() {
         companionManager.openAskComposer()
+    }
+
+    @objc private func askAboutPart() {
+        companionManager.beginAskAboutRegion()
     }
 
     @objc private func openSetup() {

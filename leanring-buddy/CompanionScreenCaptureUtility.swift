@@ -163,4 +163,44 @@ enum CompanionScreenCaptureUtility {
 
         return capturedScreens
     }
+
+    /// A native-resolution close-up of one selected part of the screen, so the
+    /// model can read text and symbols the 896px full-screen capture blurs.
+    /// Capped at 1400px on its longest side to keep the image cheap. Nil if the
+    /// display can't be found or the capture fails — the turn then just goes
+    /// without a close-up.
+    static func captureCloseUpAsJPEG(of focusedRegion: FocusedScreenRegion) async -> Data? {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
+            return nil
+        }
+
+        // Match the display by its AppKit frame, as the full capture does.
+        guard let display = content.displays.first(where: { display in
+            NSScreen.screens.contains { screen in
+                (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == display.displayID
+                    && screen.frame == focusedRegion.displayFrameInAppKitCoordinates
+            }
+        }) else { return nil }
+
+        let ownBundleIdentifier = Bundle.main.bundleIdentifier
+        let ownAppWindows = content.windows.filter { $0.owningApplication?.bundleIdentifier == ownBundleIdentifier }
+        let filter = SCContentFilter(display: display, excludingWindows: ownAppWindows)
+
+        let regionInDisplayPoints = focusedRegion.rectInDisplayPointsTopLeftOrigin
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = regionInDisplayPoints
+
+        let longestSideInPixels: CGFloat = 1400
+        let scale = min(2.0, longestSideInPixels / max(regionInDisplayPoints.width, regionInDisplayPoints.height))
+        configuration.width = max(1, Int(regionInDisplayPoints.width * scale))
+        configuration.height = max(1, Int(regionInDisplayPoints.height * scale))
+
+        guard let cgImage = try? await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: configuration
+        ) else { return nil }
+
+        return NSBitmapImageRep(cgImage: cgImage)
+            .representation(using: .jpeg, properties: [.compressionFactor: 0.85])
+    }
 }
