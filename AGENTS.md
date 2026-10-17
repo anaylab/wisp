@@ -505,7 +505,14 @@ cloud dependency to the local path, without asking.
   circles are never numbered walkthrough steps (so they don't trigger `GuidedWalkthroughPlan`) and are capped
   apart from shapes (12 notes, 8 shapes). The prompt tells the model to work a visual/math problem line by line
   beside its subject, circle the answer and say the idea via `[SAY:]`; it needs a capable model, so it is aimed
-  at Claude (subscription or key), not the 3B local model. Tested in `Tests/GuidedWalkthrough`. Note the corner format — the model emits corners, not origin+size. When
+  at Claude (subscription or key), not the 3B local model.
+  **Stepping through working**: a reply with ≥3 notes (`AnnotationNoteReveal.minimumNotesToStepThrough`) shows only the first
+  (`CompanionManager.visibleNoteLimit`, nil = all) with a **Next › 1/6** pill beside the latest note (`ScreenAnnotationLayer.nextStepPill`;
+  shapes always show). Clicking the pill (a second target kind in `AnnotationClickRouter`) or **⌃⌥→ / ⌃⌥←** (`noteStepShortcutPublisher`,
+  layered on the Talk chord like ⌃⌥A; arrow auto-repeat allowed) reveals/removes one; the last reveal shows all and drops the pill. Because the
+  chord's press clears the previous drawings, that clear is deferred 450ms while there are notes to step through
+  (`clearScreenAnnotationsForNewUtterance`) and the step key cancels it. Not yet synced to the spoken line (no per-sentence timing exists).
+  Tested in `Tests/GuidedWalkthrough` (parser) and `Tests/ScreenRegionFocus` (reveal logic). Note the corner format — the model emits corners, not origin+size. When
   several tags appear in one reply they are kept in document order and **auto-numbered** into a
   step-by-step walkthrough (badges drawn per step, cap 8). All annotations draw in the
   user-chosen colour from `CursorAppearanceStore` (Settings → General → Notch → Marker colour: blue/red/yellow/green; the old Cursor page and its always-visible overlay are gone).

@@ -204,3 +204,80 @@ enum AnnotationNoteLayout {
         return arrangedAnnotations
     }
 }
+
+/// Revealing a worked solution one note at a time. A reply with several lines
+/// of working shows the first, and the user steps through the rest — the way a
+/// tutor writes a line, lets it land, then writes the next.
+enum AnnotationNoteReveal {
+    /// Fewer notes than this are just shown all at once.
+    static let minimumNotesToStepThrough = 3
+
+    static let nextButtonSize = CGSize(width: 104, height: 30)
+
+    /// How many notes to show first: one when there are enough to step through,
+    /// nil (everything) otherwise.
+    static func initialLimit(forNoteCount noteCount: Int) -> Int? {
+        noteCount >= minimumNotesToStepThrough ? 1 : nil
+    }
+
+    static func noteCount(in annotations: [ScreenAnnotation]) -> Int {
+        annotations.filter { $0.style == .note }.count
+    }
+
+    /// The annotations to draw for a limit, in their original order, and how
+    /// many notes are still hidden. Shapes are always shown; only notes past the
+    /// limit are held back.
+    static func visibleAnnotations(
+        _ annotations: [ScreenAnnotation],
+        noteLimit: Int?
+    ) -> (visible: [ScreenAnnotation], hiddenNoteCount: Int) {
+        guard let noteLimit else { return (annotations, 0) }
+        var shownNoteCount = 0
+        var hiddenNoteCount = 0
+        var visibleAnnotations: [ScreenAnnotation] = []
+        for annotation in annotations {
+            if annotation.style == .note {
+                if shownNoteCount < noteLimit {
+                    shownNoteCount += 1
+                    visibleAnnotations.append(annotation)
+                } else {
+                    hiddenNoteCount += 1
+                }
+            } else {
+                visibleAnnotations.append(annotation)
+            }
+        }
+        return (visibleAnnotations, hiddenNoteCount)
+    }
+
+    /// Where the Next button sits: just right of the most recently revealed note.
+    /// Nil when nothing is hidden or no note is showing.
+    static func nextButtonRect(
+        visibleAnnotations: [ScreenAnnotation],
+        hiddenNoteCount: Int,
+        screenshotSize: CGSize,
+        displaySize: CGSize
+    ) -> CGRect? {
+        guard hiddenNoteCount > 0,
+              let latestNote = visibleAnnotations.last(where: { $0.style == .note }) else { return nil }
+        let noteRect = AnnotationClickTarget.clickableRectInOverlayCoordinates(
+            for: latestNote, screenshotSize: screenshotSize, displaySize: displaySize
+        )
+        var buttonRect = CGRect(
+            x: noteRect.maxX + 10,
+            y: noteRect.midY - nextButtonSize.height / 2,
+            width: nextButtonSize.width,
+            height: nextButtonSize.height
+        )
+        // Keep it on screen when the note runs close to the right edge.
+        if buttonRect.maxX > displaySize.width - 8 {
+            buttonRect.origin.x = max(8, displaySize.width - 8 - nextButtonSize.width)
+        }
+        return buttonRect
+    }
+
+    /// A stepped limit, kept between one note and all of them.
+    static func limit(afterStepping step: Int, from currentLimit: Int, noteCount: Int) -> Int {
+        min(max(currentLimit + step, 1), noteCount)
+    }
+}

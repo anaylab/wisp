@@ -24,7 +24,16 @@ final class AnnotationClickRouter {
     struct DisplayAnnotations {
         let displayFrame: CGRect
         let screenshotSize: CGSize
+        /// Only what is drawn right now (notes still held back are absent).
         let annotations: [ScreenAnnotation]
+        /// The Next button's rectangle in overlay coordinates, when one is shown.
+        let nextButtonRect: CGRect?
+    }
+
+    /// What the pointer is over.
+    private enum PointerTarget {
+        case annotation(rectInOverlay: CGRect, displayFrame: CGRect)
+        case nextButton
     }
 
     private let annotationsOnEachDisplay: () -> [DisplayAnnotations]
@@ -33,6 +42,7 @@ final class AnnotationClickRouter {
     private let setOverlayAcceptsMouseEvents: (Bool) -> Void
     private let onClickedRegion: (FocusedScreenRegion, CGRect, CGRect) -> Void
     private let onContentScrolled: () -> Void
+    private let onNextStepClicked: () -> Void
 
     private var globalScrollMonitor: Any?
     private var globalMouseMovedMonitor: Any?
@@ -44,13 +54,15 @@ final class AnnotationClickRouter {
         isOverlayReservedForConfirmation: @escaping () -> Bool,
         setOverlayAcceptsMouseEvents: @escaping (Bool) -> Void,
         onClickedRegion: @escaping (FocusedScreenRegion, CGRect, CGRect) -> Void,
-        onContentScrolled: @escaping () -> Void
+        onContentScrolled: @escaping () -> Void,
+        onNextStepClicked: @escaping () -> Void
     ) {
         self.annotationsOnEachDisplay = annotationsOnEachDisplay
         self.isOverlayReservedForConfirmation = isOverlayReservedForConfirmation
         self.setOverlayAcceptsMouseEvents = setOverlayAcceptsMouseEvents
         self.onClickedRegion = onClickedRegion
         self.onContentScrolled = onContentScrolled
+        self.onNextStepClicked = onNextStepClicked
     }
 
     func start() {
@@ -87,28 +99,31 @@ final class AnnotationClickRouter {
         endHoverIfNeeded()
     }
 
-    /// The clickable annotation under the pointer, with its clickable rectangle
-    /// and its display's frame.
-    private func annotationUnderPointer() -> (rectInOverlay: CGRect, displayFrame: CGRect)? {
+    /// What the pointer is over: the Next button, or a clickable annotation
+    /// with its clickable rectangle and its display's frame.
+    private func targetUnderPointer() -> PointerTarget? {
         let pointerLocation = NSEvent.mouseLocation
         for displayAnnotations in annotationsOnEachDisplay() where displayAnnotations.displayFrame.contains(pointerLocation) {
             let overlayPoint = AnnotationClickTarget.overlayPoint(
                 forAppKitPoint: pointerLocation,
                 displayFrame: displayAnnotations.displayFrame
             )
+            if let nextButtonRect = displayAnnotations.nextButtonRect, nextButtonRect.contains(overlayPoint) {
+                return .nextButton
+            }
             guard let hitAnnotation = AnnotationClickTarget.annotation(
                 atOverlayPoint: overlayPoint,
                 in: displayAnnotations.annotations,
                 screenshotSize: displayAnnotations.screenshotSize,
                 displaySize: displayAnnotations.displayFrame.size
             ) else { return nil }
-            return (
-                AnnotationClickTarget.clickableRectInOverlayCoordinates(
+            return .annotation(
+                rectInOverlay: AnnotationClickTarget.clickableRectInOverlayCoordinates(
                     for: hitAnnotation,
                     screenshotSize: displayAnnotations.screenshotSize,
                     displaySize: displayAnnotations.displayFrame.size
                 ),
-                displayAnnotations.displayFrame
+                displayFrame: displayAnnotations.displayFrame
             )
         }
         return nil
@@ -122,7 +137,7 @@ final class AnnotationClickRouter {
             endHoverIfNeeded()
             return
         }
-        let isOverClickableAnnotation = annotationUnderPointer() != nil
+        let isOverClickableAnnotation = targetUnderPointer() != nil
         guard isOverClickableAnnotation != isHoveringClickableAnnotation else { return }
         isHoveringClickableAnnotation = isOverClickableAnnotation
         setOverlayAcceptsMouseEvents(isOverClickableAnnotation)
@@ -142,17 +157,25 @@ final class AnnotationClickRouter {
         NSCursor.pop()
     }
 
-    /// Returns true when the click was on an annotation and has been handled.
+    /// Returns true when the click was on the Next button or an annotation and
+    /// has been handled.
     private func handleClick() -> Bool {
-        guard isHoveringClickableAnnotation,
-              let (clickedRect, displayFrame) = annotationUnderPointer(),
-              let focusedRegion = AnnotationClickTarget.focusedRegion(
-                  forClickedRectInOverlayCoordinates: clickedRect,
-                  displayFrame: displayFrame
-              ) else { return false }
+        guard isHoveringClickableAnnotation, let target = targetUnderPointer() else { return false }
 
-        endHoverIfNeeded()
-        onClickedRegion(focusedRegion, clickedRect, displayFrame)
-        return true
+        switch target {
+        case .nextButton:
+            onNextStepClicked()
+            // The button may have just disappeared (last note shown); the next
+            // pointer move re-evaluates the hover.
+            return true
+        case .annotation(let clickedRect, let displayFrame):
+            guard let focusedRegion = AnnotationClickTarget.focusedRegion(
+                forClickedRectInOverlayCoordinates: clickedRect,
+                displayFrame: displayFrame
+            ) else { return false }
+            endHoverIfNeeded()
+            onClickedRegion(focusedRegion, clickedRect, displayFrame)
+            return true
+        }
     }
 }

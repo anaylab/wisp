@@ -24,6 +24,10 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// Wisp uses it to clear its drawings; the event is never consumed.
     let escapeKeyPublisher = PassthroughSubject<Void, Never>()
 
+    /// Steps through a worked solution: +1 for Right Arrow, -1 for Left Arrow
+    /// while the Talk chord is held (⌃⌥→ / ⌃⌥←). Another gesture layered on the hold.
+    let noteStepShortcutPublisher = PassthroughSubject<Int, Never>()
+
     /// Fires when A is pressed while the Talk chord is held — ⌃⌥A is "Ask About
     /// a Part". Like a routine digit, an extra gesture layered on the hold.
     let askAboutPartShortcutPublisher = PassthroughSubject<Void, Never>()
@@ -187,6 +191,17 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
            eventKeyCode == 53,
            event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
             escapeKeyPublisher.send()
+        }
+
+        // Right (124) and Left (123) arrow with the Talk chord held step through
+        // a worked solution. Auto-repeat is allowed so holding the key keeps
+        // revealing.
+        if isShortcutCurrentlyPressed,
+           activeInvocationMode == .assistant,
+           eventType == .keyDown,
+           eventKeyCode == 124 || eventKeyCode == 123 {
+            didFireRoutineShortcutDuringCurrentHold = true
+            noteStepShortcutPublisher.send(eventKeyCode == 124 ? 1 : -1)
         }
 
         if isShortcutCurrentlyPressed,

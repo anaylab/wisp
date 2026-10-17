@@ -104,6 +104,9 @@ final class CompanionManager: ObservableObject {
     /// Pixel size of the screenshot each display's annotations came from,
     /// needed to scale them onto that display.
     @Published var annotationScreenshotSizeByDisplayFrame: [CGRect: CGSize] = [:]
+    /// How many handwritten notes are showing, nil for all. A reply with several
+    /// lines of working starts at one and is stepped through (Next button, ⌃⌥→).
+    @Published var visibleNoteLimit: Int?
     /// The live guided walkthrough, when a multi-step answer is being walked
     /// through one step at a time (see GuidedWalkthroughController.swift).
     let guidedWalkthrough = GuidedWalkthroughSession()
@@ -365,6 +368,7 @@ final class CompanionManager: ObservableObject {
         guidedWalkthrough.reset()
         activeAnnotationsByDisplayFrame.removeAll()
         annotationScreenshotSizeByDisplayFrame.removeAll()
+        visibleNoteLimit = nil
     }
 
     func stop() {
@@ -563,9 +567,28 @@ final class CompanionManager: ObservableObject {
 
     private var askAboutPartShortcutCancellable: AnyCancellable?
     private var escapeKeyCancellable: AnyCancellable?
+    private var noteStepShortcutCancellable: AnyCancellable?
     private var annotationClickRouterActivityCancellable: AnyCancellable?
 
     private func bindShortcutTransitions() {
+        noteStepShortcutCancellable = globalPushToTalkShortcutMonitor
+            .noteStepShortcutPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] step in
+                guard let self, !self.isListeningPaused else { return }
+                // The chord's hold would otherwise start a recording.
+                self.pendingKeyboardShortcutStartTask?.cancel()
+                self.pendingKeyboardShortcutStartTask = nil
+                self.buddyDictationManager.cancelCurrentDictation(preserveDraftText: false)
+                self.voiceState = .idle
+                self.setActiveCommandMode(nil)
+                // The chord's press scheduled a clear of the drawings; this
+                // press was a step, not a new question.
+                self.pendingAnnotationClearTask?.cancel()
+                self.pendingAnnotationClearTask = nil
+                self.stepNoteReveal(by: step)
+            }
+
         // Deliberately not `.receive(on:)`: the tap already runs on the main
         // thread, and a hop to the next run-loop turn lets the composer or the
         // picker finish dismissing itself on this same Esc first — after which
@@ -752,7 +775,7 @@ final class CompanionManager: ObservableObject {
             } else {
                 currentResponseTask?.cancel()
                 ttsProvider.stopPlayback()
-                clearScreenAnnotations()
+                clearScreenAnnotationsForNewUtterance()
             }
 
     
@@ -1077,10 +1100,17 @@ final class CompanionManager: ObservableObject {
             guard let self else { return [] }
             return self.activeAnnotationsByDisplayFrame.compactMap { displayFrame, annotations in
                 guard let screenshotSize = self.annotationScreenshotSizeByDisplayFrame[displayFrame] else { return nil }
+                let reveal = AnnotationNoteReveal.visibleAnnotations(annotations, noteLimit: self.visibleNoteLimit)
                 return AnnotationClickRouter.DisplayAnnotations(
                     displayFrame: displayFrame,
                     screenshotSize: screenshotSize,
-                    annotations: annotations
+                    annotations: reveal.visible,
+                    nextButtonRect: AnnotationNoteReveal.nextButtonRect(
+                        visibleAnnotations: reveal.visible,
+                        hiddenNoteCount: reveal.hiddenNoteCount,
+                        screenshotSize: screenshotSize,
+                        displaySize: displayFrame.size
+                    )
                 )
             }
         },
@@ -1093,8 +1123,53 @@ final class CompanionManager: ObservableObject {
         },
         onContentScrolled: { [weak self] in
             self?.dropAnnotationsAfterContentScrolled()
+        },
+        onNextStepClicked: { [weak self] in
+            self?.stepNoteReveal(by: 1)
         }
     )
+
+    private var pendingAnnotationClearTask: Task<Void, Never>?
+
+    /// A new utterance replaces the drawings of the last one. But the Talk chord
+    /// is also how a worked solution is stepped (⌃⌥→ / ⌃⌥←): the arrow lands a
+    /// moment after the chord, so while there are notes to step through the
+    /// clear waits briefly, and the step key cancels it.
+    private func clearScreenAnnotationsForNewUtterance() {
+        pendingAnnotationClearTask?.cancel()
+        pendingAnnotationClearTask = nil
+
+        let hasNotesToStepThrough = activeAnnotationsByDisplayFrame.values.contains {
+            AnnotationNoteReveal.noteCount(in: $0) >= AnnotationNoteReveal.minimumNotesToStepThrough
+        }
+        guard hasNotesToStepThrough else {
+            clearScreenAnnotations()
+            return
+        }
+        pendingAnnotationClearTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            self?.clearScreenAnnotations()
+            self?.pendingAnnotationClearTask = nil
+        }
+    }
+
+    /// Shows the next (or previous) line of working. Stepping back from "all
+    /// showing" goes to one fewer note; a reply with too few notes to step
+    /// through is left alone.
+    private func stepNoteReveal(by step: Int) {
+        let totalNoteCount = activeAnnotationsByDisplayFrame.values
+            .map { AnnotationNoteReveal.noteCount(in: $0) }
+            .max() ?? 0
+        guard totalNoteCount >= AnnotationNoteReveal.minimumNotesToStepThrough else { return }
+
+        let currentLimit = visibleNoteLimit ?? totalNoteCount
+        let steppedLimit = AnnotationNoteReveal.limit(afterStepping: step, from: currentLimit, noteCount: totalNoteCount)
+        // Once the last note shows there is nothing left to step: show all.
+        visibleNoteLimit = steppedLimit >= totalNoteCount ? nil : steppedLimit
+        // Reading takes time: restart the overlay's dwell from this step.
+        scheduleTransientHideIfNeeded()
+    }
 
     /// Esc while Wisp's drawings are up clears them (and the selected part).
     /// Esc is never consumed — the app the user is in still gets it. Ignored
@@ -2983,6 +3058,12 @@ final class CompanionManager: ObservableObject {
                 displaySize: displayFrame.size
             )
         }
+
+        // Several lines of working are revealed one at a time.
+        let mostNotesOnOneDisplay = annotationsByDisplay.values
+            .map { AnnotationNoteReveal.noteCount(in: $0) }
+            .max() ?? 0
+        visibleNoteLimit = AnnotationNoteReveal.initialLimit(forNoteCount: mostNotesOnOneDisplay)
 
         annotationScreenshotSizeByDisplayFrame = screenshotSizes
         activeAnnotationsByDisplayFrame = annotationsByDisplay

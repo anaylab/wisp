@@ -131,6 +131,37 @@ let straddlingArranged = AnnotationNoteLayout.separatingOverlappingNotes(in: [bo
 check(!overlayRect(straddlingArranged[1]).intersects(overlayRect(boxAroundTable)), "a note starting outside a box is moved clear of it")
 check(AnnotationClickTarget.measuredNoteSize(forText: "x = 6") == AnnotationClickTarget.measuredNoteSize(forText: "x = 6"), "repeated measurements agree (cached)")
 
+// MARK: Revealing notes one at a time
+
+let revealNotes = [noteAt(100, 100, "one"), noteAt(100, 140, "two"), noteAt(100, 180, "three"), noteAt(100, 220, "four")]
+let revealShapes = [overlayAnnotation(.circle, CGRect(x: 300, y: 300, width: 40, height: 20))]
+let revealAll = revealShapes + revealNotes
+check(AnnotationNoteReveal.initialLimit(forNoteCount: 2) == nil, "two notes are shown all at once")
+check(AnnotationNoteReveal.initialLimit(forNoteCount: 3) == 1 && AnnotationNoteReveal.initialLimit(forNoteCount: 6) == 1, "three or more notes start at one")
+check(AnnotationNoteReveal.noteCount(in: revealAll) == 4, "notes are counted apart from shapes")
+
+let firstOnly = AnnotationNoteReveal.visibleAnnotations(revealAll, noteLimit: 1)
+check(firstOnly.visible.count == 2 && firstOnly.hiddenNoteCount == 3, "limit 1 shows the circle and one note, hides three")
+check(firstOnly.visible.contains { $0.style == .circle }, "shapes are always shown")
+check(firstOnly.visible.last?.label == "one", "notes appear in the order written")
+let upToTwo = AnnotationNoteReveal.visibleAnnotations(revealAll, noteLimit: 2)
+check(upToTwo.visible.filter { $0.style == .note }.map(\.label) == ["one", "two"] && upToTwo.hiddenNoteCount == 2, "limit 2 shows the first two notes")
+check(AnnotationNoteReveal.visibleAnnotations(revealAll, noteLimit: nil).visible == revealAll, "no limit shows everything")
+
+let nextRect = AnnotationNoteReveal.nextButtonRect(visibleAnnotations: firstOnly.visible, hiddenNoteCount: 3, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)!
+let firstNoteRect = overlayRect(revealNotes[0])
+check(nextRect.minX > firstNoteRect.maxX && abs(nextRect.midY - firstNoteRect.midY) < 0.5, "the Next button sits just right of the latest note")
+check(nextRect.size == AnnotationNoteReveal.nextButtonSize, "the Next button has its fixed size")
+check(AnnotationNoteReveal.nextButtonRect(visibleAnnotations: firstOnly.visible, hiddenNoteCount: 0, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize) == nil, "no Next button once nothing is hidden")
+let edgeNote = noteAt(880, 100, "a note near the right edge of the screen")
+let edgeRect = AnnotationNoteReveal.nextButtonRect(visibleAnnotations: [edgeNote], hiddenNoteCount: 1, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)!
+check(edgeRect.maxX <= clickDisplaySize.width - 8, "the Next button stays on screen")
+
+check(AnnotationNoteReveal.limit(afterStepping: 1, from: 1, noteCount: 4) == 2, "stepping forward adds a note")
+check(AnnotationNoteReveal.limit(afterStepping: 1, from: 4, noteCount: 4) == 4, "stepping forward stops at all notes")
+check(AnnotationNoteReveal.limit(afterStepping: -1, from: 1, noteCount: 4) == 1, "stepping back stops at the first note")
+check(AnnotationNoteReveal.limit(afterStepping: -1, from: 3, noteCount: 4) == 2, "stepping back removes the latest note")
+
 // Prompt text.
 let prompt = nearTop.promptText(screenshotSize: screenshotSize, screenNumber: nil, hasCloseUpImage: true)
 check(prompt.contains("90,56,269,112"), "prompt names the region's pixel corners")

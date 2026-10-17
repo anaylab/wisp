@@ -23,6 +23,9 @@ struct ScreenAnnotationLayer: View {
     let screenshotSize: CGSize
     /// Point dimensions of the screen being drawn on.
     let displaySize: CGSize
+    /// How many handwritten notes to show, nil for all of them. Notes past the
+    /// limit are held back, and a Next button shows how many remain.
+    var visibleNoteLimit: Int? = nil
 
     @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
 
@@ -31,29 +34,46 @@ struct ScreenAnnotationLayer: View {
     @State private var isPulsing = false
 
     var body: some View {
+        let reveal = AnnotationNoteReveal.visibleAnnotations(annotations, noteLimit: visibleNoteLimit)
+        let shownAnnotations = reveal.visible
+        let nextButtonRect = AnnotationNoteReveal.nextButtonRect(
+            visibleAnnotations: shownAnnotations,
+            hiddenNoteCount: reveal.hiddenNoteCount,
+            screenshotSize: screenshotSize,
+            displaySize: displaySize
+        )
+
         ZStack(alignment: .topLeading) {
             Canvas { context, _ in
-                for annotation in annotations {
+                for annotation in shownAnnotations {
                     draw(annotation, in: &context)
                 }
             }
 
-            ForEach(annotations.filter { $0.style == .note }) { annotation in
+            ForEach(shownAnnotations.filter { $0.style == .note }) { annotation in
                 if let noteText = annotation.label {
                     noteView(for: annotation, text: noteText)
                 }
             }
 
-            ForEach(annotations) { annotation in
+            ForEach(shownAnnotations) { annotation in
                 if annotation.style != .note, let label = annotation.label, !label.isEmpty {
                     labelView(for: annotation, text: label)
                 }
             }
 
-            ForEach(annotations) { annotation in
+            ForEach(shownAnnotations) { annotation in
                 if let stepNumber = annotation.stepNumber {
                     stepBadge(for: annotation, stepNumber: stepNumber)
                 }
+            }
+
+            if let nextButtonRect {
+                nextStepPill(
+                    in: nextButtonRect,
+                    shownNoteCount: AnnotationNoteReveal.noteCount(in: shownAnnotations),
+                    totalNoteCount: AnnotationNoteReveal.noteCount(in: annotations)
+                )
             }
         }
         .allowsHitTesting(false)
@@ -236,6 +256,29 @@ struct ScreenAnnotationLayer: View {
             .padding(.leading, max(0, leadingEdge))
             .frame(width: displaySize.width, height: max(1, verticalCentre * 2), alignment: .leading)
             .position(x: displaySize.width / 2, y: verticalCentre)
+    }
+
+    /// "Next ▸ 2/5": what clicking (or ⌃⌥→) reveals, and where the explanation
+    /// stands. Drawn here; the click itself is taken by `AnnotationClickRouter`.
+    private func nextStepPill(in rect: CGRect, shownNoteCount: Int, totalNoteCount: Int) -> some View {
+        HStack(spacing: 5) {
+            Text("Next")
+                .font(.system(size: 12, weight: .semibold))
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .bold))
+            Text("\(shownNoteCount)/\(totalNoteCount)")
+                .font(.system(size: 11, weight: .medium))
+                .opacity(0.8)
+        }
+        .foregroundColor(.white)
+        .frame(width: rect.width, height: rect.height)
+        .background(
+            Capsule(style: .continuous)
+                .fill(cursorAppearance.color)
+                .shadow(color: cursorAppearance.color.opacity(0.45), radius: 5)
+        )
+        .position(x: rect.midX, y: rect.midY)
+        .opacity(isPulsing ? 1.0 : 0.85)
     }
 
     private func labelView(for annotation: ScreenAnnotation, text: String) -> some View {

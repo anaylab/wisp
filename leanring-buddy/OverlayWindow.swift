@@ -217,7 +217,8 @@ struct OverlayContentView: View {
                 ScreenAnnotationLayer(
                     annotations: annotations,
                     screenshotSize: screenshotSize,
-                    displaySize: screenFrame.size
+                    displaySize: screenFrame.size,
+                    visibleNoteLimit: companionManager.visibleNoteLimit
                 )
                 .transition(.opacity)
             }
