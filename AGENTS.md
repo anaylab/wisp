@@ -437,7 +437,7 @@ cloud dependency to the local path, without asking.
   size (`AnnotationClickTarget.measuredNoteSize`, same font/padding constants as the layer). Annotations are pinned to screen positions, so a
   scroll in another app (global `scrollWheel` monitor) drops them and the selected part (not during a guided walkthrough). A tap of the Talk
   chord is a press shorter than `BuddyPushToTalkShortcut.tapMaxDuration` (0.30s — at 0.22 a tap measured at 0.224s was heard as a hold with
-  nothing said, so the composer silently didn't open). The window's status pill, History's "Asking …" step and the Settings → General stack
+  nothing said, so the composer silently didn't open). Because any fixed cutoff can still be missed by a slow first press, **a hold under 1s that recognises no speech is also read as a tap** (`BuddyDictationManager.onKeyboardShortcutHoldEndedWithoutSpeech` → `openComposerAfterEmptyShortHold`), so a tap is never silently lost. The window's status pill, History's "Asking …" step and the Settings → General stack
   The composer shows an **"About: selected part ✕"** chip while a selection is active (✕ drops just the selection and its highlight,
   `clearFocusedScreenRegionKeepingDrawings`). The **A in ⌃⌥A is rebindable** (`ShortcutBindingStore.askAboutPartKey`, Settings → Shortcuts → Ask
   about a part, any letter; pushed to `GlobalPushToTalkShortcutMonitor.askAboutPartKeyCode`). **Esc clears Wisp's drawings and the selection**

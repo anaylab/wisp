@@ -61,7 +61,7 @@ nonisolated enum PartSelectionResolver {
     /// heights below the item's last line.
     static let maximumContinuationGapInLineHeights: CGFloat = 0.8
     /// Words in a row of options (A. 4   B. 6) may be this far apart.
-    static let maximumHorizontalGapInLineHeights: CGFloat = 3
+    static let maximumHorizontalGapInLineHeights: CGFloat = 1.5
     /// Shortest on-screen text accepted as a target.
     static let minimumTextTargetCharacterCount = 2
     /// Shortest target allowed to match part of a longer line.

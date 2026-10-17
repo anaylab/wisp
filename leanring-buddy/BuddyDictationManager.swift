@@ -654,9 +654,15 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         }
     }
 
+    /// Called when a keyboard-shortcut hold finishes and nothing was recognised.
+    /// The shortcut owner decides what that means (a short one was most likely a
+    /// tap that ran past the tap cutoff).
+    var onKeyboardShortcutHoldEndedWithoutSpeech: (() -> Void)?
+
     private func finishCurrentDictationSessionIfNeeded(shouldSubmitFinalDraft: Bool) {
         guard !hasFinishedCurrentDictationSession else { return }
         hasFinishedCurrentDictationSession = true
+        let wasKeyboardShortcutHold = activeStartSource == .keyboardShortcut
 
         finalizeFallbackWorkItem?.cancel()
         finalizeFallbackWorkItem = nil
@@ -676,7 +682,12 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         resetSessionState()
 
         guard shouldSubmitFinalDraft else { return }
-        guard !finalTranscriptText.isEmpty else { return }
+        guard !finalTranscriptText.isEmpty else {
+            if wasKeyboardShortcutHold {
+                onKeyboardShortcutHoldEndedWithoutSpeech?()
+            }
+            return
+        }
 
         currentDraftCallbacks?.submitDraftText(finalDraftText)
     }

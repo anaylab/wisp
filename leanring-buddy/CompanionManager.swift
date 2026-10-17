@@ -574,7 +574,31 @@ final class CompanionManager: ObservableObject {
     private var noteStepShortcutCancellable: AnyCancellable?
     private var annotationClickRouterActivityCancellable: AnyCancellable?
 
+    private var talkChordPressedAt: Date?
+    private var lastTalkChordHoldDuration: TimeInterval?
+
+    /// A press longer than `tapMaxDuration` is a hold-to-talk, and a hold with
+    /// nothing said used to be dropped silently — so a slightly slow tap (the
+    /// first one after launch, or a busy main thread) did nothing at all. Up to
+    /// this long, an empty hold is read as the tap it almost certainly was and
+    /// opens the composer. Longer, the user really held the key and said nothing.
+    private static let emptyHoldAsTapMaximumSeconds: TimeInterval = 1.0
+
+    private func openComposerAfterEmptyShortHold() {
+        guard let holdDuration = lastTalkChordHoldDuration,
+              holdDuration < Self.emptyHoldAsTapMaximumSeconds,
+              !isListeningPaused,
+              !(textComposerWindowController?.isShowing ?? false) else { return }
+        voiceState = .idle
+        setActiveCommandMode(.type, autoDismissAfter: 2.5)
+        openTextComposer()
+    }
+
     private func bindShortcutTransitions() {
+        buddyDictationManager.onKeyboardShortcutHoldEndedWithoutSpeech = { [weak self] in
+            self?.openComposerAfterEmptyShortHold()
+        }
+
         noteStepShortcutCancellable = globalPushToTalkShortcutMonitor
             .noteStepShortcutPublisher
             .receive(on: DispatchQueue.main)
@@ -803,6 +827,8 @@ final class CompanionManager: ObservableObject {
 
     
 
+            talkChordPressedAt = Date()
+
             // A spoken question is about whatever is on screen now, not a part
             // chosen for an earlier typed one.
             focusedScreenRegion = nil
@@ -900,6 +926,7 @@ final class CompanionManager: ObservableObject {
             // Without this, a quick press-and-release drops the release event and
             // leaves the waveform overlay stuck on screen indefinitely.
             WispAnalytics.trackPushToTalkReleased()
+            lastTalkChordHoldDuration = talkChordPressedAt.map { Date().timeIntervalSince($0) }
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = nil
             buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
