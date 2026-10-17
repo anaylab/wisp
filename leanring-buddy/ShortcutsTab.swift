@@ -74,8 +74,51 @@ struct ShortcutsTab: View {
                             .foregroundStyle(DS.Colors.textTertiary)
                     )
                 )
+
+                Divider().overlay(DS.Colors.borderSubtle)
+
+                bindingRow(
+                    name: "Ask about a part",
+                    description: "While holding the Talk chord, press this key, then drag over the part of the screen to ask about.",
+                    keys: bindingStore.primaryHoldChord.keyCapsuleLabels + [bindingStore.askAboutPartKey.capsuleLabel],
+                    trailing: AnyView(askAboutPartKeyPicker)
+                )
             }
         }
+    }
+
+    private var askAboutPartKeyPicker: some View {
+        Menu {
+            ForEach(AskAboutPartKey.allCases) { letter in
+                Button {
+                    bindingStore.askAboutPartKey = letter
+                } label: {
+                    if letter == bindingStore.askAboutPartKey {
+                        Label(letter.capsuleLabel, systemImage: "checkmark")
+                    } else {
+                        Text(letter.capsuleLabel)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("Change")
+                    .font(.system(size: 11, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(DS.Colors.textSecondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .fill(DS.Colors.surface2)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .pointerCursor()
     }
 
     private var primaryChordPicker: some View {

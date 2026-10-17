@@ -57,6 +57,48 @@ enum BareModifier: String, CaseIterable, Identifiable {
     }
 }
 
+/// The letter pressed with the Talk chord to start "Ask About a Part". Letters
+/// only: digits are the routine shortcuts.
+enum AskAboutPartKey: String, CaseIterable, Identifiable {
+    case a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z
+
+    var id: String { rawValue }
+
+    var capsuleLabel: String { rawValue.uppercased() }
+
+    /// ANSI virtual key codes, which are not in alphabetical order.
+    var keyCode: UInt16 {
+        switch self {
+        case .a: return 0
+        case .s: return 1
+        case .d: return 2
+        case .f: return 3
+        case .h: return 4
+        case .g: return 5
+        case .z: return 6
+        case .x: return 7
+        case .c: return 8
+        case .v: return 9
+        case .b: return 11
+        case .q: return 12
+        case .w: return 13
+        case .e: return 14
+        case .r: return 15
+        case .y: return 16
+        case .t: return 17
+        case .o: return 31
+        case .u: return 32
+        case .i: return 34
+        case .p: return 35
+        case .l: return 37
+        case .j: return 38
+        case .k: return 40
+        case .n: return 45
+        case .m: return 46
+        }
+    }
+}
+
 @MainActor
 final class ShortcutBindingStore: ObservableObject {
     static let shared = ShortcutBindingStore()
@@ -78,17 +120,24 @@ final class ShortcutBindingStore: ObservableObject {
         didSet { persistAndApplyToMonitor() }
     }
 
+    /// The letter that, with the Talk chord held, starts "Ask About a Part".
+    @Published var askAboutPartKey: AskAboutPartKey {
+        didSet { persistAndApplyToMonitor() }
+    }
+
     // MARK: - Defaults
 
     static let defaultPrimaryHoldChord: BuddyPushToTalkShortcut.ShortcutOption = .controlOption
     static let defaultHandsFreeDictationEnabled = true
     static let defaultHandsFreeDictationModifier: BareModifier = .control
+    static let defaultAskAboutPartKey: AskAboutPartKey = .a
 
     // MARK: - Persistence keys
 
     private static let primaryHoldChordKey = "wisp.shortcut.primaryHoldChord"
     private static let handsFreeEnabledKey = "wisp.shortcut.handsFreeDictationEnabled"
     private static let handsFreeModifierKey = "wisp.shortcut.handsFreeDictationModifier"
+    private static let askAboutPartKeyKey = "wisp.shortcut.askAboutPartKey"
 
     private init() {
         let userDefaults = UserDefaults.standard
@@ -113,6 +162,13 @@ final class ShortcutBindingStore: ObservableObject {
             handsFreeDictationModifier = Self.defaultHandsFreeDictationModifier
         }
 
+        if let rawKey = userDefaults.string(forKey: Self.askAboutPartKeyKey),
+           let storedKey = AskAboutPartKey(rawValue: rawKey) {
+            askAboutPartKey = storedKey
+        } else {
+            askAboutPartKey = Self.defaultAskAboutPartKey
+        }
+
         applyToMonitor()
     }
 
@@ -121,6 +177,7 @@ final class ShortcutBindingStore: ObservableObject {
         primaryHoldChord = Self.defaultPrimaryHoldChord
         handsFreeDictationEnabled = Self.defaultHandsFreeDictationEnabled
         handsFreeDictationModifier = Self.defaultHandsFreeDictationModifier
+        askAboutPartKey = Self.defaultAskAboutPartKey
     }
 
     // MARK: - Applying
@@ -130,6 +187,7 @@ final class ShortcutBindingStore: ObservableObject {
         userDefaults.set(primaryHoldChord.rawValue, forKey: Self.primaryHoldChordKey)
         userDefaults.set(handsFreeDictationEnabled, forKey: Self.handsFreeEnabledKey)
         userDefaults.set(handsFreeDictationModifier.rawValue, forKey: Self.handsFreeModifierKey)
+        userDefaults.set(askAboutPartKey.rawValue, forKey: Self.askAboutPartKeyKey)
         applyToMonitor()
     }
 
@@ -138,5 +196,6 @@ final class ShortcutBindingStore: ObservableObject {
         BuddyPushToTalkShortcut.currentShortcutOption = primaryHoldChord
         BuddyPushToTalkShortcut.handsFreeDoubleTapModifier =
             handsFreeDictationEnabled ? handsFreeDictationModifier.eventModifierFlag : nil
+        GlobalPushToTalkShortcutMonitor.askAboutPartKeyCode = askAboutPartKey.keyCode
     }
 }

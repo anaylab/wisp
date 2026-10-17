@@ -19,12 +19,23 @@ import SwiftUI
 final class TextComposerWindowController {
     private var panel: TextComposerPanel?
     private let onSubmit: (String) -> Void
+    /// Whether a selected part of the screen is still the subject of the
+    /// conversation, asked each time the composer opens.
+    private let hasFocusedScreenRegion: () -> Bool
+    /// The chip's ✕: forget the selection (and its highlight).
+    private let onClearFocusedScreenRegion: () -> Void
     private var resignKeyObserver: NSObjectProtocol?
 
     private let composerSize = CGSize(width: 460, height: 104)
 
-    init(onSubmit: @escaping (String) -> Void) {
+    init(
+        onSubmit: @escaping (String) -> Void,
+        hasFocusedScreenRegion: @escaping () -> Bool = { false },
+        onClearFocusedScreenRegion: @escaping () -> Void = {}
+    ) {
         self.onSubmit = onSubmit
+        self.hasFocusedScreenRegion = hasFocusedScreenRegion
+        self.onClearFocusedScreenRegion = onClearFocusedScreenRegion
     }
 
     deinit {
@@ -32,6 +43,9 @@ final class TextComposerWindowController {
             NotificationCenter.default.removeObserver(resignKeyObserver)
         }
     }
+
+    /// Whether the composer is on screen right now.
+    var isShowing: Bool { panel != nil }
 
     func show() {
         if panel == nil {
@@ -59,6 +73,8 @@ final class TextComposerWindowController {
 
     private func createPanel() {
         let composerView = TextComposerView(
+            hasFocusedScreenRegion: hasFocusedScreenRegion(),
+            onClearFocusedScreenRegion: onClearFocusedScreenRegion,
             onSubmit: { [weak self] typedText in
                 self?.hide()
                 self?.onSubmit(typedText)
@@ -122,10 +138,26 @@ final class TextComposerPanel: NSPanel {
 }
 
 struct TextComposerView: View {
+    let hasFocusedScreenRegion: Bool
+    let onClearFocusedScreenRegion: () -> Void
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
     @State private var typedText = ""
+    @State private var isFocusedScreenRegionChipShown: Bool
+
+    init(
+        hasFocusedScreenRegion: Bool,
+        onClearFocusedScreenRegion: @escaping () -> Void,
+        onSubmit: @escaping (String) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.hasFocusedScreenRegion = hasFocusedScreenRegion
+        self.onClearFocusedScreenRegion = onClearFocusedScreenRegion
+        self.onSubmit = onSubmit
+        self.onCancel = onCancel
+        _isFocusedScreenRegionChipShown = State(initialValue: hasFocusedScreenRegion)
+    }
     @FocusState private var isFieldFocused: Bool
 
     var body: some View {
@@ -142,6 +174,9 @@ struct TextComposerView: View {
             }
 
             HStack(spacing: 12) {
+                if isFocusedScreenRegionChipShown {
+                    focusedRegionChip
+                }
                 keyHint("return", meaning: "send")
                 keyHint("esc", meaning: "dismiss")
                 Spacer()
@@ -164,6 +199,29 @@ struct TextComposerView: View {
                 isFieldFocused = true
             }
         }
+    }
+
+    /// Says the question is about the part of the screen the user chose, and
+    /// lets them drop it to ask about the whole screen again.
+    private var focusedRegionChip: some View {
+        Button {
+            isFocusedScreenRegionChipShown = false
+            onClearFocusedScreenRegion()
+        } label: {
+            HStack(spacing: 5) {
+                Text("About: selected part")
+                    .font(.system(size: 10, weight: .medium))
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .foregroundColor(DS.Colors.textSecondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule(style: .continuous).fill(DS.Colors.surface2))
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .accessibilityLabel("Asking about the selected part of the screen. Clear selection.")
     }
 
     private func submit() {

@@ -438,6 +438,12 @@ cloud dependency to the local path, without asking.
   scroll in another app (global `scrollWheel` monitor) drops them and the selected part (not during a guided walkthrough). A tap of the Talk
   chord is a press shorter than `BuddyPushToTalkShortcut.tapMaxDuration` (0.30s — at 0.22 a tap measured at 0.224s was heard as a hold with
   nothing said, so the composer silently didn't open). The window's status pill, History's "Asking …" step and the Settings → General stack
+  The composer shows an **"About: selected part ✕"** chip while a selection is active (✕ drops just the selection and its highlight,
+  `clearFocusedScreenRegionKeepingDrawings`). The **A in ⌃⌥A is rebindable** (`ShortcutBindingStore.askAboutPartKey`, Settings → Shortcuts → Ask
+  about a part, any letter; pushed to `GlobalPushToTalkShortcutMonitor.askAboutPartKeyCode`). **Esc clears Wisp's drawings and the selection**
+  (seen by the same CGEvent tap — `escapeKeyPublisher`, never consumed; ignored while the composer or region picker is up, where Esc dismisses
+  them; an `NSEvent` global key monitor never saw it). Notes the model stacked on each other or on a circle/box are nudged apart when applied
+  (`AnnotationNoteLayout`, pure; later notes move down, never off-screen).
   card follow the *selected* provider (`ActiveStackReadout.chatModelName`/`isChatModelLocal`; the "runs entirely on this Mac" line is false while
   a cloud provider is selected). Tested by `Tests/ScreenRegionFocus`.
 - **Guided walkthrough** (`GuidedWalkthrough.swift` pure, `GuidedWalkthroughController.swift`): a reply whose annotation tags

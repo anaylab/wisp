@@ -547,8 +547,14 @@ final class CompanionManager: ObservableObject {
     }
 
     private var askAboutPartShortcutCancellable: AnyCancellable?
+    private var escapeKeyCancellable: AnyCancellable?
 
     private func bindShortcutTransitions() {
+        escapeKeyCancellable = globalPushToTalkShortcutMonitor
+            .escapeKeyPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.dropDrawingsAfterEscape() }
+
         askAboutPartShortcutCancellable = globalPushToTalkShortcutMonitor
             .askAboutPartShortcutPublisher
             .receive(on: DispatchQueue.main)
@@ -928,7 +934,9 @@ final class CompanionManager: ObservableObject {
             textComposerWindowController = TextComposerWindowController(
                 onSubmit: { [weak self] typedQuery in
                     self?.submitTextComposerQuery(typedQuery)
-                }
+                },
+                hasFocusedScreenRegion: { [weak self] in self?.focusedScreenRegion != nil },
+                onClearFocusedScreenRegion: { [weak self] in self?.clearFocusedScreenRegionKeepingDrawings() }
             )
         }
         // Get the notch and menu bar panel out of the way while composing.
@@ -958,6 +966,24 @@ final class CompanionManager: ObservableObject {
         }
         screenRegionPickerController?.show()
     }
+
+    /// The chip's ✕ in the composer: forget the selected part and its highlight,
+    /// but leave the explanation Wisp drew on screen.
+    func clearFocusedScreenRegionKeepingDrawings() {
+        guard focusedScreenRegion != nil else { return }
+        focusedScreenRegion = nil
+        guard let highlightID = focusedRegionHighlightID else { return }
+        focusedRegionHighlightID = nil
+        for displayFrame in activeAnnotationsByDisplayFrame.keys {
+            activeAnnotationsByDisplayFrame[displayFrame]?.removeAll { $0.id == highlightID }
+            if activeAnnotationsByDisplayFrame[displayFrame]?.isEmpty == true {
+                activeAnnotationsByDisplayFrame[displayFrame] = nil
+            }
+        }
+    }
+
+    /// The highlight showing the selected part, so it can be removed alone.
+    private var focusedRegionHighlightID: UUID?
 
     /// Forgets the selected part, so the next question is about the whole screen.
     func clearFocusedScreenRegion() {
@@ -998,10 +1024,12 @@ final class CompanionManager: ObservableObject {
                 screenNumber: nil
             )
             activeAnnotationsByDisplayFrame[displayFrame, default: []].append(highlightInExistingSpace)
+            focusedRegionHighlightID = highlightInExistingSpace.id
             return
         }
         annotationScreenshotSizeByDisplayFrame = [displayFrame: screenshotSize]
         activeAnnotationsByDisplayFrame = [displayFrame: [highlight]]
+        focusedRegionHighlightID = highlight.id
     }
 
     /// A note, circle or box Wisp drew was clicked: ask about that part, keeping
@@ -1037,6 +1065,20 @@ final class CompanionManager: ObservableObject {
             self?.dropAnnotationsAfterContentScrolled()
         }
     )
+
+    /// Esc while Wisp's drawings are up clears them (and the selected part).
+    /// Esc is never consumed — the app the user is in still gets it. Ignored
+    /// while the composer or the region picker is up: there Esc belongs to
+    /// them (it dismisses them), and a second press clears the drawings.
+    private func dropDrawingsAfterEscape() {
+        guard !(textComposerWindowController?.isShowing ?? false),
+              screenRegionPickerController == nil,
+              !guidedWalkthrough.isActive,
+              !activeAnnotationsByDisplayFrame.isEmpty || focusedScreenRegion != nil else { return }
+        focusedScreenRegion = nil
+        focusedRegionHighlightID = nil
+        clearScreenAnnotations()
+    }
 
     /// Annotations and the selected part are pinned to screen positions, so
     /// once the content under them scrolls they sit on the wrong text. Drop
@@ -2906,6 +2948,17 @@ final class CompanionManager: ObservableObject {
             screenshotSizes[capture.displayFrame] = CGSize(
                 width: CGFloat(capture.screenshotWidthInPixels),
                 height: CGFloat(capture.screenshotHeightInPixels)
+            )
+        }
+
+        // Notes the model placed on top of each other (or on a circle or box)
+        // are moved apart; their coordinates were guesses.
+        for (displayFrame, displayAnnotations) in annotationsByDisplay {
+            guard let screenshotSize = screenshotSizes[displayFrame] else { continue }
+            annotationsByDisplay[displayFrame] = AnnotationNoteLayout.separatingOverlappingNotes(
+                in: displayAnnotations,
+                screenshotSize: screenshotSize,
+                displaySize: displayFrame.size
             )
         }
 

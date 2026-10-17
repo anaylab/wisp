@@ -20,12 +20,18 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// because it is an extra gesture layered on the hold, not a hold state.
     let routineShortcutPublisher = PassthroughSubject<Int, Never>()
 
+    /// Fires on every Escape key press (not auto-repeat), whichever app has it.
+    /// Wisp uses it to clear its drawings; the event is never consumed.
+    let escapeKeyPublisher = PassthroughSubject<Void, Never>()
+
     /// Fires when A is pressed while the Talk chord is held — ⌃⌥A is "Ask About
     /// a Part". Like a routine digit, an extra gesture layered on the hold.
     let askAboutPartShortcutPublisher = PassthroughSubject<Void, Never>()
 
-    /// ANSI key code for A.
-    private static let askAboutPartKeyCode: UInt16 = 0
+    /// The key pressed with the Talk chord for "Ask About a Part" (ANSI key code;
+    /// A by default). A plain static like the other bindings the tap reads on the
+    /// main thread; `ShortcutBindingStore` keeps it current.
+    nonisolated(unsafe) static var askAboutPartKeyCode: UInt16 = 0
 
     /// Set when a routine digit fires during the current hold. The hold's own
     /// release is then swallowed: the routine replaced whatever the hold would
@@ -174,6 +180,13 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
            let routineDigit = Self.digitByKeyCode[eventKeyCode] {
             didFireRoutineShortcutDuringCurrentHold = true
             routineShortcutPublisher.send(routineDigit)
+        }
+
+        // 53 is Escape.
+        if eventType == .keyDown,
+           eventKeyCode == 53,
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+            escapeKeyPublisher.send()
         }
 
         if isShortcutCurrentlyPressed,

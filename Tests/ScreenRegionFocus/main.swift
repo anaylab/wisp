@@ -93,6 +93,34 @@ let clickedRegion = AnnotationClickTarget.focusedRegion(forClickedRectInOverlayC
 check(clickedRegion != nil && clickedRegion!.rectInAppKitCoordinates.width == 68 && clickedRegion!.rectInAppKitCoordinates.height == 38, "a thin note is padded into a valid region")
 check(clickedRegion!.rectInDisplayPointsTopLeftOrigin == CGRect(x: 86, y: 86, width: 68, height: 38), "the padded region lines up with the clicked note")
 
+// MARK: Nudging overlapping notes apart
+
+func noteAt(_ x: Double, _ y: Double, _ text: String) -> ScreenAnnotation {
+    ScreenAnnotation(style: .note, regionInScreenshotPixels: CGRect(x: x, y: y, width: 0, height: 0), label: text, screenNumber: nil)
+}
+func overlayRect(_ annotation: ScreenAnnotation) -> CGRect {
+    AnnotationClickTarget.clickableRectInOverlayCoordinates(for: annotation, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+}
+let stackedNotes = [noteAt(100, 300, "subtract 7 from both sides"), noteAt(100, 302, "3x = 18"), noteAt(100, 304, "divide both sides by 3")]
+let arrangedNotes = AnnotationNoteLayout.separatingOverlappingNotes(in: stackedNotes, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+let arrangedRects = arrangedNotes.map(overlayRect)
+check(!arrangedRects[0].intersects(arrangedRects[1]) && !arrangedRects[1].intersects(arrangedRects[2]) && !arrangedRects[0].intersects(arrangedRects[2]), "stacked notes no longer overlap")
+check(arrangedNotes[0] == stackedNotes[0], "the first note stays where the model put it")
+check(arrangedNotes.map(\.label) == stackedNotes.map(\.label), "nudging keeps each note's text and order")
+check(arrangedRects[1].minY > arrangedRects[0].maxY && arrangedRects[2].minY > arrangedRects[1].maxY, "later notes move down, in order")
+
+let spacedNotes = [noteAt(100, 100, "one"), noteAt(100, 300, "two")]
+check(AnnotationNoteLayout.separatingOverlappingNotes(in: spacedNotes, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize) == spacedNotes, "notes that don't overlap are left alone")
+
+let circleUnderNote = [overlayAnnotation(.circle, CGRect(x: 90, y: 290, width: 120, height: 30)), noteAt(100, 300, "x = 6")]
+let avoidedCircle = AnnotationNoteLayout.separatingOverlappingNotes(in: circleUnderNote, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(!overlayRect(avoidedCircle[1]).intersects(overlayRect(avoidedCircle[0])), "a note is moved off a circle")
+check(avoidedCircle[0] == circleUnderNote[0], "circles never move")
+
+let nearBottomNote = [noteAt(100, 555, "last"), noteAt(100, 556, "also last")]
+let keptOnScreen = AnnotationNoteLayout.separatingOverlappingNotes(in: nearBottomNote, screenshotSize: clickScreenshotSize, displaySize: clickDisplaySize)
+check(keptOnScreen.allSatisfy { overlayRect($0).maxY <= clickDisplaySize.height + 40 }, "a note that can't be moved down stays put rather than leaving the screen")
+
 // Prompt text.
 let prompt = nearTop.promptText(screenshotSize: screenshotSize, screenNumber: nil, hasCloseUpImage: true)
 check(prompt.contains("90,56,269,112"), "prompt names the region's pixel corners")

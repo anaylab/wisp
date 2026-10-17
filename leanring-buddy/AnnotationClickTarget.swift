@@ -117,3 +117,73 @@ enum AnnotationClickTarget {
         )
     }
 }
+
+/// Moves handwritten notes that landed on each other, or on a circle or box,
+/// just far enough apart to read. The model's note coordinates are guesses, and
+/// it often stacks several lines of working at nearly the same spot.
+enum AnnotationNoteLayout {
+    /// Gap kept between a nudged note and what it was nudged away from.
+    private static let gapInPoints: CGFloat = 6
+    private static let maximumNudgesPerNote = 12
+
+    static func separatingOverlappingNotes(
+        in annotations: [ScreenAnnotation],
+        screenshotSize: CGSize,
+        displaySize: CGSize
+    ) -> [ScreenAnnotation] {
+        guard screenshotSize.width > 0, screenshotSize.height > 0,
+              annotations.contains(where: { $0.style == .note }) else { return annotations }
+
+        func clickableRect(_ annotation: ScreenAnnotation) -> CGRect {
+            AnnotationClickTarget.clickableRectInOverlayCoordinates(
+                for: annotation, screenshotSize: screenshotSize, displaySize: displaySize
+            )
+        }
+
+        // Shapes the model drew are obstacles from the start; notes become
+        // obstacles as they are placed, in the order they were written.
+        var occupiedRects: [CGRect] = annotations
+            .filter { $0.style == .circle || $0.style == .box }
+            .filter { !$0.isUnplacedWalkthroughStep }
+            .map(clickableRect)
+
+        var arrangedAnnotations = annotations
+        for annotationIndex in arrangedAnnotations.indices where arrangedAnnotations[annotationIndex].style == .note {
+            let note = arrangedAnnotations[annotationIndex]
+            var noteRect = clickableRect(note)
+            let originalRect = noteRect
+
+            var nudgeCount = 0
+            while nudgeCount < maximumNudgesPerNote,
+                  let obstacle = occupiedRects.first(where: { $0.insetBy(dx: -2, dy: -3).intersects(noteRect) }) {
+                noteRect.origin.y = obstacle.maxY + gapInPoints
+                nudgeCount += 1
+            }
+
+            // Pushed off the bottom of the screen is worse than overlapping.
+            let wasMoved = noteRect != originalRect
+            if wasMoved && noteRect.maxY <= displaySize.height {
+                let horizontalScale = screenshotSize.width / displaySize.width
+                let verticalScale = screenshotSize.height / displaySize.height
+                // A nudged note is anchored at a point, which is where its text starts.
+                arrangedAnnotations[annotationIndex] = ScreenAnnotation(
+                    id: note.id,
+                    style: .note,
+                    regionInScreenshotPixels: CGRect(
+                        x: noteRect.minX * horizontalScale,
+                        y: noteRect.midY * verticalScale,
+                        width: 0,
+                        height: 0
+                    ),
+                    label: note.label,
+                    screenNumber: note.screenNumber,
+                    stepNumber: note.stepNumber
+                )
+                occupiedRects.append(noteRect)
+            } else {
+                occupiedRects.append(originalRect)
+            }
+        }
+        return arrangedAnnotations
+    }
+}
