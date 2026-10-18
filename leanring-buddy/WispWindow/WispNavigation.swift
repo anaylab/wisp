@@ -199,11 +199,18 @@ enum WispPage: String, CaseIterable, Identifiable {
 final class WispWindowRouter: ObservableObject {
     static let shared = WispWindowRouter()
 
-    @Published private(set) var selectedPage: WispPage = .home
+    @Published private(set) var selectedPage: WispPage = .buddies
 
     /// A buddy another page asked the Buddies page to show (Today's Buddies
     /// tile). The Buddies page takes it and clears it.
     @Published var buddyIDToOpen: UUID?
+    /// The buddy whose chat the Buddies page is showing, so the sidebar can
+    /// mark it. The Buddies page keeps this current.
+    @Published var activeBuddyID: UUID?
+    /// A buddy the sidebar's context menu asked to clear or delete, awaiting the
+    /// sidebar's confirmation dialog.
+    @Published var buddyIDPendingClear: UUID?
+    @Published var buddyIDPendingDeletion: UUID?
     /// Today's "+" asked the Buddies page to open the new-buddy form.
     @Published var isNewBuddyFormRequested = false
 

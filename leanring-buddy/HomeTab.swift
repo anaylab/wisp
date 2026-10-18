@@ -113,12 +113,7 @@ struct HomeTab: View {
     /// the grid's edges line up.
     private var wideGrid: some View {
         VStack(alignment: .leading, spacing: tileSpacing) {
-            HStack(alignment: .top, spacing: tileSpacing) {
-                heroTile.frame(minWidth: 330)
-                todayTile(fillsRowHeight: true).frame(width: 230)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .wispEntrance(order: 1)
+            heroTile.wispEntrance(order: 1)
 
             checklistTile.wispEntrance(order: 2)
             needsYouStrip.wispEntrance(order: 2)
@@ -139,6 +134,7 @@ struct HomeTab: View {
             HStack(alignment: .top, spacing: tileSpacing) {
                 routinesTile.frame(minWidth: 270)
                 recentAnswersTile.frame(minWidth: 250)
+                todayTile(fillsRowHeight: true).frame(width: 230)
             }
             .fixedSize(horizontal: false, vertical: true)
             .wispEntrance(order: 4)
@@ -193,6 +189,9 @@ struct HomeTab: View {
                         Text("\(completedCount) of \(checklistItems.count)")
                             .font(WispFont.caption)
                             .foregroundStyle(WispColor.textSecondary)
+                            // Digits roll over when a task is ticked, rather than swapping.
+                            .contentTransition(.numericText())
+                            .animation(WispMotion.pop, value: completedCount)
                     }
                 }
             )
@@ -261,69 +260,64 @@ struct HomeTab: View {
 
     // MARK: - Hero
 
-    /// The one tile with Wisp's own colour: a wash of the signature gradient
-    /// that drifts while Wisp is working and holds still at rest.
+    /// HeyClicky-style: the day's buddy sits on top of one big talk pill, with the
+    /// greeting and how to start beneath it. Typing into the pill asks (or, after a
+    /// "/", runs a routine); holding the talk chord does the same by voice.
     private var heroTile: some View {
         let islandState = companionManager.islandState
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)).uppercased())
-                        .font(WispFont.overline)
-                        .tracking(0.8)
-                        .foregroundStyle(WispColor.textSecondary)
-                    Text(greeting)
-                        .font(WispFont.hero)
-                        .foregroundStyle(WispColor.textPrimary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 8)
+        return VStack(spacing: 0) {
+            VoiceLevelReactive(dictationManager: companionManager.buddyDictationManager) { voiceLevel in
+                // The buddy swells a little with your voice, as if leaning in to listen.
+                heroCharacter(islandState: islandState)
+                    .scaleEffect(1 + voiceLevel * 0.09, anchor: .bottom)
+                    .animation(WispMotion.hover, value: voiceLevel)
+            }
+            .frame(height: 104)
+                .zIndex(1)
+                .offset(y: 16)
+
+            talkPill
+
+            VStack(spacing: 8) {
+                Text(greeting)
+                    .font(WispFont.hero)
+                    .foregroundStyle(WispColor.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                heroLiveLine
                 voiceModeButton
             }
+            .padding(.top, 24)
 
-            HStack(alignment: .center, spacing: 12) {
-                WispMark(state: islandState.markState, size: 40)
-                    .frame(width: 52, height: 52)
-                    .background(
-                        Circle()
-                            .fill(.background.opacity(0.55))
-                            .shadow(color: islandState.accent.opacity(islandState.isActive ? 0.45 : 0), radius: 12)
-                    )
-                    .scaleEffect(islandState == .listening && !reduceMotion ? 1.06 : 1)
-                    .animation(WispMotion.island, value: islandState)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(companionManager.isListeningPaused ? "Listening paused" : islandState.label)
-                        .font(WispFont.headline)
-                        .foregroundStyle(WispColor.textPrimary)
-                        .contentTransition(.opacity)
-                    heroLiveLine
-                }
-                .animation(WispMotion.smooth, value: islandState.label)
-                Spacer(minLength: 0)
-            }
-
-            askBar
             if isAskBarInRoutineMode {
                 routineMatchesList
+                    .frame(maxWidth: 420)
+                    .padding(.top, 12)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .animation(WispMotion.smooth, value: isAskBarInRoutineMode)
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(heroBackground(isActive: islandState.isActive))
-        .clipShape(RoundedRectangle(cornerRadius: WispBentoMetrics.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: WispBentoMetrics.cornerRadius, style: .continuous)
-                .strokeBorder(WispColor.cardSeparator, lineWidth: 0.5)
-        )
-        .overlay {
-            if islandState.isActive {
-                WispLiveRim(cornerRadius: WispBentoMetrics.cornerRadius)
-            }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 28)
+        .padding(.bottom, 12)
+    }
+
+    /// The day's buddy, alive on the pill; Wisp's own mark when there are none.
+    @ViewBuilder
+    private func heroCharacter(islandState: WispIslandState) -> some View {
+        if let dayBuddy = buddyStore.dayBuddy(on: Date()) {
+            BuddyCharacter(
+                colorIndex: dayBuddy.colorIndex,
+                size: 92,
+                mood: buddyStore.mood(of: dayBuddy, in: taskRegistry),
+                liveliness: .full,
+                looksAtPointer: true
+            )
+        } else {
+            WispMark(state: islandState.markState, size: 72)
+                .shadow(color: islandState.accent.opacity(islandState.isActive ? 0.5 : 0), radius: 16)
         }
-        .shadow(color: .black.opacity(0.06), radius: 10, x: 0, y: 4)
     }
 
     /// Under the state label: what Wisp is hearing or doing, or how to start.
@@ -346,39 +340,11 @@ struct HomeTab: View {
                 ForEach(bindingStore.primaryHoldChord.keyCapsuleLabels, id: \.self) { keyLabel in
                     keyCap(keyLabel)
                 }
-                Text("to talk, or type below")
+                Text("and tell me what to take off your plate")
             }
             .font(WispFont.callout)
             .foregroundStyle(WispColor.textSecondary)
         }
-    }
-
-    @ViewBuilder
-    private func heroBackground(isActive: Bool) -> some View {
-        ZStack {
-            WispColor.groupedCardBackground
-            if isActive && !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { timeline in
-                    let driftPhase = timeline.date.timeIntervalSinceReferenceDate * 0.35
-                    LinearGradient(
-                        colors: WispGradient.signatureStops,
-                        startPoint: UnitPoint(x: 0.5 + 0.5 * cos(driftPhase), y: 0),
-                        endPoint: UnitPoint(x: 0.5 - 0.5 * cos(driftPhase), y: 1)
-                    )
-                    .opacity(0.32)
-                }
-            } else {
-                WispGradient.signature.opacity(isActive ? 0.32 : 0.2)
-            }
-            // Fades the wash out toward the bottom so the ask bar sits on a
-            // calm surface.
-            LinearGradient(
-                colors: [.clear, WispColor.groupedCardBackground.opacity(0.85)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-        .animation(WispMotion.gentle, value: isActive)
     }
 
     private var voiceModeButton: some View {
@@ -444,28 +410,35 @@ struct HomeTab: View {
         }
     }
 
-    // MARK: - Ask bar
+    // MARK: - Talk pill
 
-    private var askBar: some View {
+    /// One big glowing pill in the theme's accent: tap and type, or start with "/" to
+    /// run a routine. White text on the accent keeps it legible in every theme
+    /// (the theme tests hold that pair to 4.5:1).
+    private var talkPill: some View {
         HStack(spacing: 10) {
-            Image(systemName: isAskBarInRoutineMode ? "bolt.fill" : "sparkle")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isAskBarFocused ? WispColor.intelligence : WispColor.textTertiary)
+            Image(systemName: isAskBarInRoutineMode ? "bolt.fill" : "mic.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(WispColor.textOnAccent)
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 18)
-            TextField("Ask anything, or type / to run a routine", text: $askBarText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundStyle(WispColor.textPrimary)
-                .focused($isAskBarFocused)
-                .onSubmit(submitAskBar)
+            TextField(
+                "",
+                text: $askBarText,
+                prompt: Text(companionManager.voiceState == .listening ? "Listening…" : "Hi, how can I help ^_^?")
+                    .foregroundStyle(WispColor.textOnAccent.opacity(0.92))
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(WispColor.textOnAccent)
+            .focused($isAskBarFocused)
+            .onSubmit(submitAskBar)
             if !askBarText.isEmpty {
                 Button(action: submitAskBar) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(WispColor.textOnAccent)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(WispColor.accent))
+                        .foregroundStyle(WispColor.accentText)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(.white))
                 }
                 .buttonStyle(WispBentoPressStyle())
                 .pointerCursor()
@@ -473,23 +446,86 @@ struct HomeTab: View {
                 .nativeTooltip(isAskBarInRoutineMode ? "Run routine" : "Ask Wisp")
             }
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 8)
-        .frame(height: 44)
-        .background(
-            RoundedRectangle(cornerRadius: WispRadius.input, style: .continuous)
-                .fill(.background.opacity(0.85))
-        )
+        .padding(.leading, 18)
+        .padding(.trailing, 10)
+        .frame(width: 360, height: 52)
+        .background(talkPillBackground)
+        .background(talkPillAura)
         .overlay(
-            RoundedRectangle(cornerRadius: WispRadius.input, style: .continuous)
+            Capsule(style: .continuous)
                 .strokeBorder(
-                    isAskBarFocused ? WispColor.intelligence.opacity(0.8) : WispColor.borderSubtle,
-                    lineWidth: isAskBarFocused ? 1.5 : 1
+                    LinearGradient(
+                        colors: [.white.opacity(isAskBarFocused ? 0.85 : 0.55), .white.opacity(0.08)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
                 )
         )
-        .shadow(color: WispColor.intelligence.opacity(isAskBarFocused ? 0.25 : 0), radius: 10)
+        .shadow(color: WispColor.accent.opacity(isAskBarFocused ? 0.6 : 0.4), radius: isAskBarFocused ? 22 : 16, y: 5)
+        .scaleEffect(isAskBarFocused && !reduceMotion ? 1.02 : 1)
         .animation(WispMotion.smooth, value: isAskBarFocused)
         .animation(WispMotion.island, value: askBarText.isEmpty)
+    }
+
+    /// A soft glow behind the pill that breathes at rest and swells with your voice while
+    /// you talk, so "is it hearing me?" is answered by the pill itself.
+    private var talkPillAura: some View {
+        VoiceLevelReactive(dictationManager: companionManager.buddyDictationManager) { voiceLevel in
+            TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: !WispThemeStore.shared.allowsPlayfulMotion)) { timeline in
+                let restingBreath = WispThemeStore.shared.allowsPlayfulMotion
+                    ? 0.5 + 0.5 * sin(timeline.date.timeIntervalSinceReferenceDate * 2 * .pi / 4.5)
+                    : 0.5
+                Capsule(style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [WispColor.accent, WispColor.accentGradientEnd],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ))
+                    .blur(radius: 22)
+                    .opacity(0.22 + 0.12 * restingBreath + 0.55 * Double(voiceLevel))
+                    .scaleEffect(x: 1.02 + 0.10 * voiceLevel, y: 1.1 + 0.55 * voiceLevel)
+                    .animation(WispMotion.hover, value: voiceLevel)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// The pill's body: the accent sliding into the theme's second hue, a soft gloss
+    /// across the top, and (while Playful is on) a slow shine that sweeps across every
+    /// few seconds so the pill reads as alive without ever moving the text.
+    private var talkPillBackground: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: !WispThemeStore.shared.allowsPlayfulMotion)) { timeline in
+            let sweepProgress = WispThemeStore.shared.allowsPlayfulMotion
+                ? CGFloat(timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 7) / 7)
+                : 0.5
+            Capsule(style: .continuous)
+                .fill(LinearGradient(
+                    colors: [WispColor.accent, WispColor.accentGradientEnd],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .fill(LinearGradient(
+                            colors: [.white.opacity(0.28), .white.opacity(0)],
+                            startPoint: .top,
+                            endPoint: .center
+                        ))
+                )
+                .overlay(
+                    GeometryReader { proxy in
+                        LinearGradient(
+                            colors: [.white.opacity(0), .white.opacity(0.22), .white.opacity(0)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: proxy.size.width * 0.35)
+                        .offset(x: (sweepProgress * 1.6 - 0.45) * proxy.size.width)
+                    }
+                    .clipShape(Capsule(style: .continuous))
+                )
+        }
     }
 
     private var isAskBarInRoutineMode: Bool {
@@ -1506,5 +1542,23 @@ private struct WispPulsingDot: View {
                     isExpanded = true
                 }
             }
+    }
+}
+
+
+/// Hands its content the live loudness of your voice (0 when you are not talking), read
+/// from the dictation manager. Lives in its own view so only the parts that react to the
+/// voice re-render ~20 times a second, not the whole Today page.
+private struct VoiceLevelReactive<Content: View>: View {
+    @ObservedObject var dictationManager: BuddyDictationManager
+    @ViewBuilder var content: (CGFloat) -> Content
+
+    private var voiceLevel: CGFloat {
+        let isTalking = dictationManager.isRecordingFromKeyboardShortcut || dictationManager.isRecordingFromMicrophoneButton
+        return isTalking ? min(max(dictationManager.currentAudioPowerLevel, 0), 1) : 0
+    }
+
+    var body: some View {
+        content(voiceLevel)
     }
 }
