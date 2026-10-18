@@ -25,7 +25,6 @@ struct NotchHUDView: View {
     @ObservedObject var viewModel: NotchViewModel
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
-    @ObservedObject private var soundPreference = WispSoundPreference.shared
     @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
     /// Observed so background work starting or finishing re-renders the
     /// island's ambient state — `islandState` reads the registry, but a computed
@@ -653,7 +652,7 @@ struct NotchHUDView: View {
     @ViewBuilder
     private var jobsChecklistSection: some View {
         if jobsEngine.hasChecklist {
-            DailyChecklistView(maximumVisibleRows: 8)
+            DailyChecklistView(maximumVisibleRows: 5)
         }
     }
 
@@ -782,9 +781,14 @@ struct NotchHUDView: View {
     private var finishedWorkSection: some View {
         let unseenRecords = finishedWorkInbox.unseenRecords(in: taskRegistry)
         if !unseenRecords.isEmpty {
+            // Two rows is enough to notice something finished; the rest are in
+            // History, and the count says how many.
+            let visibleRecordLimit = 2
             VStack(alignment: .leading, spacing: 8) {
-                sectionLabel("NEW")
-                ForEach(unseenRecords) { finishedRecord in
+                sectionLabel(unseenRecords.count > visibleRecordLimit
+                    ? "NEW · \(unseenRecords.count - visibleRecordLimit) MORE IN HISTORY"
+                    : "NEW")
+                ForEach(unseenRecords.prefix(visibleRecordLimit)) { finishedRecord in
                     finishedWorkRow(finishedRecord)
                 }
             }
@@ -1178,25 +1182,26 @@ struct NotchHUDView: View {
     }
 
     private var quickPanelScrollingSections: some View {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 // What's in flight right now, with a way to stop it.
                 liveActivitySection
 
-                // Background results that finished since the user last looked.
-                finishedWorkSection
-
-                // A Canvas change, then today's checklist; when a checklist
-                // exists it stands in for the generic suggestions below.
-                canvasDiffCard
-                jobsChecklistSection
-
-                // The day's suggestions, until run or dismissed.
-                todaySuggestionsSection
-
-                // Only present when there is an answer, so an idle panel collapses
-                // down to just the header and footer.
                 if hasAnswer {
+                    // An answer wins the panel, as it does the compact card:
+                    // the day's lists wait until the answer is gone rather than
+                    // stacking under it.
                     answerSurfaceWithReplyActions
+                } else {
+                    // Background results that finished since the user last looked.
+                    finishedWorkSection
+
+                    // A Canvas change, then today's checklist; when a checklist
+                    // exists it stands in for the generic suggestions below.
+                    canvasDiffCard
+                    jobsChecklistSection
+
+                    // The day's suggestions, until run or dismissed.
+                    todaySuggestionsSection
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1486,46 +1491,15 @@ struct NotchHUDView: View {
                 if let activeQuietReason = quietModeMonitor.activeQuietReason {
                     quietModeIndicator(activeQuietReason)
                 }
-                soundCuesToggle
+                // Sound cues live in the menu bar menu and Settings is one click
+                // away via the footer's Open Wisp, so the header keeps only the
+                // toggle people reach for mid-conversation.
                 voiceOutputToggle
-                Button {
-                    WispWindowNavigator.open(.general)
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(WispColor.Island.textSecondary)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-                .nativeTooltip("Settings")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.trailing, 12)
         }
         .frame(height: viewModel.hasNotch ? notchContentTopInset : 36)
-    }
-
-    /// Sound-cue toggle in the header. Governs the short interaction sounds
-    /// (listening / thinking / reply / error) — separate from spoken replies,
-    /// which the voice/silent toggle governs.
-    private var soundCuesToggle: some View {
-        let areSoundsOn = soundPreference.areSoundCuesEnabled
-        return Button {
-            soundPreference.areSoundCuesEnabled.toggle()
-        } label: {
-            Image(systemName: areSoundsOn ? "bell.fill" : "bell.slash.fill")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(areSoundsOn ? WispColor.Island.textPrimary : WispColor.Island.textTertiary)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .pointerCursor()
-        .nativeTooltip(areSoundsOn
-            ? "Sound cues on — Wisp chimes as it listens, thinks and replies. Click to mute."
-            : "Sound cues muted. Click to enable.")
     }
 
     /// Voice / silent mode toggle in the header. When voice is off (silent
