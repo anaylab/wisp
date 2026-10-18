@@ -24,6 +24,10 @@
 import Foundation
 
 nonisolated enum WispThemeID: String, Codable, CaseIterable, Identifiable, Sendable {
+    /// A clean white messenger look: black accent, flat surfaces, vivid buddies.
+    case paper
+    /// HeyClicky-style: near-black window, periwinkle accent.
+    case midnight
     case aqua
     /// The original look. Its accent values are identical to `WispColor.Brand`.
     case sage
@@ -51,7 +55,7 @@ nonisolated struct WispThemeBuddyColor: Equatable, Sendable {
 
 nonisolated struct WispTheme: Identifiable, Equatable, Sendable {
     let id: WispThemeID
-    /// "Aqua", "Sage", "Candy", "Sunset", "Mint", "Berry Night", "Mono".
+    /// "Paper", "Midnight", "Aqua", "Sage", "Candy", "Sunset", "Mint", "Berry Night", "Mono".
     let name: String
     /// Fills: selected tab, prominent pill, switch. Carries `textOnAccentHex` at 4.5:1 or better.
     let accent: WispThemeColorPair
@@ -74,20 +78,33 @@ nonisolated struct WispTheme: Identifiable, Equatable, Sendable {
     /// 0...1. How strongly cards and bars take the backdrop's colour.
     let glassTintStrength: Double
 
+    /// A deeper second colour for the accent's gradient (the talk pill), so the pill can
+    /// slide from the accent to another hue. Nil means the accent's hover colour. It
+    /// carries `textOnAccentHex` at 4.5:1 or better, like the accent itself.
+    var accentGradientEnd: WispThemeColorPair? = nil
+    /// Overrides for the window's page and card colours. Nil keeps the system's own.
+    var windowBackground: WispThemeColorPair? = nil
+    var cardBackground: WispThemeColorPair? = nil
+    /// The window follows this theme's dark look even when the Mac is in light mode
+    /// (unless the user chose Light explicitly in Settings → Appearance).
+    var prefersDarkAppearance: Bool = false
+    /// The same, for a theme made for light (Paper).
+    var prefersLightAppearance: Bool = false
+
     static let buddyPaletteCount = 8
 
     static func theme(withID themeID: WispThemeID) -> WispTheme {
         all.first { $0.id == themeID } ?? defaultTheme
     }
 
-    /// Bright aqua is the out-of-the-box look; Sage stays one tap away in the picker.
-    static let defaultTheme: WispTheme = aqua
+    /// Paper is the out-of-the-box look; every other theme is one tap away in the picker.
+    static let defaultTheme: WispTheme = paper
 
-    /// The seven themes, in picker order.
-    static let all: [WispTheme] = [aqua, sage, candy, sunset, mint, berryNight, mono]
+    /// The nine themes, in picker order.
+    static let all: [WispTheme] = [paper, midnight, aqua, sage, candy, sunset, mint, berryNight, mono]
 }
 
-// MARK: - The seven themes
+// MARK: - The nine themes
 
 nonisolated extension WispTheme {
 
@@ -126,6 +143,67 @@ nonisolated extension WispTheme {
 
     /// Bright, clean aqua: a saturated cyan-teal accent over a cool, sunlit backdrop, with
     /// coral, sunshine and pink buddies so the colour stays playful rather than clinical.
+    /// A clean white messenger: flat white and pale-grey surfaces, a near-black accent (the
+    /// user's chat bubbles, the primary buttons) and buddies in bold, saturated colour, so
+    /// the characters are the only colour on the page. The backdrop is a barely-there
+    /// tint, and the window holds light even when the Mac is in dark mode.
+    static let paper = WispTheme(
+        id: .paper,
+        name: "Paper",
+        accent: WispThemeColorPair(lightHex: "#15151A", darkHex: "#3A3A44"),
+        accentHover: WispThemeColorPair(lightHex: "#2A2A32", darkHex: "#4A4A56"),
+        accentText: WispThemeColorPair(lightHex: "#15151A", darkHex: "#E8E8EE"),
+        textOnAccentHex: "#FFFFFF",
+        secondaryAccent: WispThemeColorPair(lightHex: "#2F6FED", darkHex: "#8DB2FF"),
+        aiActivityAccent: WispThemeColorPair(lightHex: "#7C3AED", darkHex: "#B79CFF"),
+        backdropStops: [
+            WispThemeColorPair(lightHex: "#FFFFFF", darkHex: "#16161A"),
+            WispThemeColorPair(lightHex: "#F4F5F8", darkHex: "#111114"),
+            WispThemeColorPair(lightHex: "#EEF0F5", darkHex: "#1A1A20"),
+        ],
+        buddyPalette: [
+            WispThemeBuddyColor(lightHex: "#8F5CF2", deepHex: "#6E3CD9"),
+            WispThemeBuddyColor(lightHex: "#2F86F0", deepHex: "#1F6AD0"),
+            WispThemeBuddyColor(lightHex: "#2FC25B", deepHex: "#177F37"),
+            WispThemeBuddyColor(lightHex: "#19B8A6", deepHex: "#0E8577"),
+            WispThemeBuddyColor(lightHex: "#F5479B", deepHex: "#C42A78"),
+            WispThemeBuddyColor(lightHex: "#F03A4A", deepHex: "#C0202F"),
+            WispThemeBuddyColor(lightHex: "#FF7A1A", deepHex: "#C25600"),
+            WispThemeBuddyColor(lightHex: "#9A5B3C", deepHex: "#774327"),
+        ],
+        islandTintHex: "#0A0A0A",
+        glassTintStrength: 0.04,
+        windowBackground: WispThemeColorPair(lightHex: "#FFFFFF", darkHex: "#101012"),
+        cardBackground: WispThemeColorPair(lightHex: "#F5F5F7", darkHex: "#1A1A1D"),
+        prefersLightAppearance: true
+    )
+
+    /// A near-black window with a periwinkle accent, like HeyClicky: flat dark panels, hairline
+    /// edges, and one bright pill. Dark text sits on the bright accent, so the accent fill is
+    /// light in both appearances; the backdrop is only a faint blue-violet glow on the black.
+    static let midnight = WispTheme(
+        id: .midnight,
+        name: "Midnight",
+        accent: WispThemeColorPair(lightHex: "#8EA2FF", darkHex: "#8FA3FF"),
+        accentHover: WispThemeColorPair(lightHex: "#A5B5FF", darkHex: "#A8B8FF"),
+        accentText: WispThemeColorPair(lightHex: "#3A48B8", darkHex: "#A9B7FF"),
+        textOnAccentHex: "#0B0B14",
+        secondaryAccent: WispThemeColorPair(lightHex: "#7A5CE6", darkHex: "#C0A8FF"),
+        aiActivityAccent: WispThemeColorPair(lightHex: "#6A52D9", darkHex: "#A99BFF"),
+        backdropStops: [
+            WispThemeColorPair(lightHex: "#CBD3FF", darkHex: "#171738"),
+            WispThemeColorPair(lightHex: "#E4D9FF", darkHex: "#0E0E10"),
+            WispThemeColorPair(lightHex: "#D0E4FF", darkHex: "#1D1236"),
+        ],
+        buddyPalette: WispTheme.sage.buddyPalette,
+        islandTintHex: "#0A0A12",
+        glassTintStrength: 0.08,
+        accentGradientEnd: WispThemeColorPair(lightHex: "#C6D0FF", darkHex: "#CAD4FF"),
+        windowBackground: WispThemeColorPair(lightHex: "#F2F3F8", darkHex: "#0C0C0E"),
+        cardBackground: WispThemeColorPair(lightHex: "#FFFFFF", darkHex: "#161618"),
+        prefersDarkAppearance: true
+    )
+
     static let aqua = WispTheme(
         id: .aqua,
         name: "Aqua",
@@ -135,10 +213,12 @@ nonisolated extension WispTheme {
         textOnAccentHex: "#FFFFFF",
         secondaryAccent: WispThemeColorPair(lightHex: "#2F6BD6", darkHex: "#7FB2FF"),
         aiActivityAccent: WispThemeColorPair(lightHex: "#4B5BD8", darkHex: "#93A6FF"),
+        // An aurora, not a single wash: aqua in one corner, lavender on the far side and a
+        // warm blush below, so the glass cards have real colour to refract.
         backdropStops: [
-            WispThemeColorPair(lightHex: "#7DF2F0", darkHex: "#04485C"),
-            WispThemeColorPair(lightHex: "#B4F7E4", darkHex: "#083B52"),
-            WispThemeColorPair(lightHex: "#9FD2FF", darkHex: "#102E6B"),
+            WispThemeColorPair(lightHex: "#6FE7E0", darkHex: "#06566B"),
+            WispThemeColorPair(lightHex: "#B9A8FF", darkHex: "#2B2478"),
+            WispThemeColorPair(lightHex: "#FFC4DA", darkHex: "#5A1F4E"),
         ],
         buddyPalette: [
             WispThemeBuddyColor(lightHex: "#5CE0E6", deepHex: "#0C7F8C"),
@@ -151,7 +231,8 @@ nonisolated extension WispTheme {
             WispThemeBuddyColor(lightHex: "#FFB866", deepHex: "#B35E00"),
         ],
         islandTintHex: "#04222B",
-        glassTintStrength: 0.45
+        glassTintStrength: 0.14,
+        accentGradientEnd: WispThemeColorPair(lightHex: "#2458C4", darkHex: "#2A5FD0")
     )
 
     static let candy = WispTheme(

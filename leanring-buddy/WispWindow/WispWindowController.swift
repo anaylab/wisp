@@ -85,9 +85,20 @@ final class WispWindowController: NSObject, NSWindowDelegate {
         positionTrafficLights()
 
         // Light, dark or system, for this window only.
-        appearanceObservation = WispAppearancePreference.shared.$mode.sink { [weak wispWindow] mode in
-            wispWindow?.appearance = mode.appKitAppearance
-        }
+        // A theme made for dark (Midnight) also holds the window dark, so the choice
+        // is re-applied whenever the theme changes as well as the mode.
+        appearanceObservation = WispAppearancePreference.shared.$mode
+            .combineLatest(
+                NotificationCenter.default.publisher(for: .wispThemeDidChange)
+                    .map { _ in () }
+                    .prepend(())
+            )
+            .sink { [weak wispWindow] mode, _ in
+                wispWindow?.appearance = WispAppearancePreference.effectiveAppearance(
+                    for: mode,
+                    theme: WispThemeStore.currentThemeNow
+                )
+            }
 
         WispWindowActivation.activateForWindow()
         wispWindow.makeKeyAndOrderFront(nil)

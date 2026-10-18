@@ -45,7 +45,7 @@ private nonisolated final class WispThemeSettingsCache: @unchecked Sendable {
             lock.lock(); defer { lock.unlock() }
             if let cachedThemeID { return cachedThemeID }
             let storedRawValue = UserDefaults.standard.string(forKey: Self.themeIDKey) ?? ""
-            let loadedThemeID = WispThemeID(rawValue: storedRawValue) ?? .sage
+            let loadedThemeID = WispThemeID(rawValue: storedRawValue) ?? WispTheme.defaultTheme.id
             cachedThemeID = loadedThemeID
             return loadedThemeID
         }

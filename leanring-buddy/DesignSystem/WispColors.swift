@@ -120,6 +120,8 @@ enum WispColor {
     /// Accent-coloured text/icons on surfaces (links, active nav, highlights).
     /// Checked at 4.5:1 on the window background in light and dark.
     static let accentText  = themedColor { $0.accentText }
+    /// Where the talk pill's gradient ends: a second fill that carries `textOnAccent` too.
+    static let accentGradientEnd = themedColor { $0.accentGradientEnd ?? $0.accentHover }
     /// A second hue for secondary highlights.
     static let secondaryAccent = themedColor { $0.secondaryAccent }
     /// Very subtle accent tint for selected rows and hovered brand chips. Built
@@ -174,9 +176,9 @@ enum WispColor {
     // Increase Contrast and the user's accent exactly like System Settings does.
 
     /// The page background behind grouped cards.
-    static let windowBackground = Color(nsColor: .windowBackgroundColor)
+    static let windowBackground = themedSurface(systemColor: .windowBackgroundColor) { $0.windowBackground }
     /// A grouped card sitting on `windowBackground`.
-    static let groupedCardBackground = Color(nsColor: .controlBackgroundColor)
+    static let groupedCardBackground = themedSurface(systemColor: .controlBackgroundColor) { $0.cardBackground }
     /// The hairline around a grouped card.
     static let cardSeparator = Color(nsColor: .separatorColor)
 
@@ -315,6 +317,19 @@ enum WispColor {
             lightValue: { NSColor(wispHex: pick($0).lightHex) },
             darkValue: { NSColor(wispHex: pick($0).darkHex) }
         )
+    }
+
+    /// A native surface colour a theme may override (Midnight's near-black); themes that
+    /// do not keep the system's own, so they track Increase Contrast and the like.
+    nonisolated static func themedSurface(
+        systemColor: NSColor,
+        override pick: @escaping @Sendable (WispTheme) -> WispThemeColorPair?
+    ) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            guard let overridePair = pick(WispThemeStore.currentThemeNow) else { return systemColor }
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(wispHex: isDark ? overridePair.darkHex : overridePair.lightHex)
+        })
     }
 
     /// A themed colour that is the same in light and dark.

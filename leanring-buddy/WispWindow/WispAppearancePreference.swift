@@ -41,6 +41,18 @@ final class WispAppearancePreference: ObservableObject {
         }
     }
 
+    /// What the window should wear: the user's explicit Light or Dark, otherwise the
+    /// system, except that a theme made for dark (Midnight) holds the window dark, and one made for light (Paper) holds it light.
+    static func effectiveAppearance(for mode: Mode, theme: WispTheme) -> NSAppearance? {
+        if mode == .system && theme.prefersDarkAppearance {
+            return NSAppearance(named: .darkAqua)
+        }
+        if mode == .system && theme.prefersLightAppearance {
+            return NSAppearance(named: .aqua)
+        }
+        return mode.appKitAppearance
+    }
+
     private static let userDefaultsKey = "WispWindowAppearance"
 
     @Published var mode: Mode {

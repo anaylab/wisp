@@ -103,6 +103,9 @@ nonisolated enum WispThemeContrast {
             problems.append("\(theme.name): glassTintStrength \(theme.glassTintStrength) is outside 0...1")
         }
         var everyHex: [String] = [theme.textOnAccentHex, theme.islandTintHex]
+        for optionalPair in [theme.accentGradientEnd, theme.windowBackground, theme.cardBackground] {
+            if let pair = optionalPair { everyHex += [pair.lightHex, pair.darkHex] }
+        }
         for pair in [theme.accent, theme.accentHover, theme.accentText, theme.secondaryAccent, theme.aiActivityAccent] + theme.backdropStops {
             everyHex += [pair.lightHex, pair.darkHex]
         }
@@ -140,6 +143,10 @@ nonisolated enum WispThemeContrast {
                   foregroundHex: theme.textOnAccentHex, backgroundHex: pick(theme.accent), minimum: minimumTextRatio)
             check("\(appearance.name) label on accent hover fill",
                   foregroundHex: theme.textOnAccentHex, backgroundHex: pick(theme.accentHover), minimum: minimumTextRatio)
+            if let gradientEnd = theme.accentGradientEnd {
+                check("\(appearance.name) label on accent gradient end",
+                      foregroundHex: theme.textOnAccentHex, backgroundHex: pick(gradientEnd), minimum: minimumTextRatio)
+            }
             check("\(appearance.name) AI-activity accent on window",
                   foregroundHex: pick(theme.aiActivityAccent), backgroundHex: appearance.background, minimum: minimumIndicatorRatio)
 
