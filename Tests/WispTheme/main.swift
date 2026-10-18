@@ -45,12 +45,12 @@ check(!WispThemeContrast.isValidHex("A1B2C3") && !WispThemeContrast.isValidHex("
 
 // MARK: - Every theme
 
-check(WispTheme.all.count == 6, "six themes")
+check(WispTheme.all.count == 7, "seven themes")
 check(Set(WispTheme.all.map { $0.id }).count == WispTheme.all.count, "theme ids are unique")
 check(WispTheme.all.map { $0.id } == WispThemeID.allCases, "picker order matches the id enum")
 check(Set(WispTheme.all.map { $0.name }).count == WispTheme.all.count, "theme names are unique")
-check(WispTheme.all.map { $0.name } == ["Sage", "Candy", "Sunset", "Mint", "Berry Night", "Mono"], "names, in picker order")
-check(WispTheme.defaultTheme.id == .sage, "Sage is the default")
+check(WispTheme.all.map { $0.name } == ["Aqua", "Sage", "Candy", "Sunset", "Mint", "Berry Night", "Mono"], "names, in picker order")
+check(WispTheme.defaultTheme.id == .aqua, "Aqua is the default")
 
 for theme in WispTheme.all {
     check(theme.backdropStops.count == 3, "\(theme.name): 3 backdrop stops")

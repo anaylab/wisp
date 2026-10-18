@@ -24,6 +24,7 @@
 import Foundation
 
 nonisolated enum WispThemeID: String, Codable, CaseIterable, Identifiable, Sendable {
+    case aqua
     /// The original look. Its accent values are identical to `WispColor.Brand`.
     case sage
     case candy
@@ -50,7 +51,7 @@ nonisolated struct WispThemeBuddyColor: Equatable, Sendable {
 
 nonisolated struct WispTheme: Identifiable, Equatable, Sendable {
     let id: WispThemeID
-    /// "Sage", "Candy", "Sunset", "Mint", "Berry Night", "Mono".
+    /// "Aqua", "Sage", "Candy", "Sunset", "Mint", "Berry Night", "Mono".
     let name: String
     /// Fills: selected tab, prominent pill, switch. Carries `textOnAccentHex` at 4.5:1 or better.
     let accent: WispThemeColorPair
@@ -79,13 +80,14 @@ nonisolated struct WispTheme: Identifiable, Equatable, Sendable {
         all.first { $0.id == themeID } ?? defaultTheme
     }
 
-    static let defaultTheme: WispTheme = sage
+    /// Bright aqua is the out-of-the-box look; Sage stays one tap away in the picker.
+    static let defaultTheme: WispTheme = aqua
 
-    /// The six themes, in picker order.
-    static let all: [WispTheme] = [sage, candy, sunset, mint, berryNight, mono]
+    /// The seven themes, in picker order.
+    static let all: [WispTheme] = [aqua, sage, candy, sunset, mint, berryNight, mono]
 }
 
-// MARK: - The six themes
+// MARK: - The seven themes
 
 nonisolated extension WispTheme {
 
@@ -120,6 +122,36 @@ nonisolated extension WispTheme {
         ],
         islandTintHex: "#10160F",
         glassTintStrength: 0.25
+    )
+
+    /// Bright, clean aqua: a saturated cyan-teal accent over a cool, sunlit backdrop, with
+    /// coral, sunshine and pink buddies so the colour stays playful rather than clinical.
+    static let aqua = WispTheme(
+        id: .aqua,
+        name: "Aqua",
+        accent: WispThemeColorPair(lightHex: "#007C8C", darkHex: "#087486"),
+        accentHover: WispThemeColorPair(lightHex: "#006B79", darkHex: "#0A8296"),
+        accentText: WispThemeColorPair(lightHex: "#006675", darkHex: "#5DE6F2"),
+        textOnAccentHex: "#FFFFFF",
+        secondaryAccent: WispThemeColorPair(lightHex: "#2F6BD6", darkHex: "#7FB2FF"),
+        aiActivityAccent: WispThemeColorPair(lightHex: "#4B5BD8", darkHex: "#93A6FF"),
+        backdropStops: [
+            WispThemeColorPair(lightHex: "#7DF2F0", darkHex: "#04485C"),
+            WispThemeColorPair(lightHex: "#B4F7E4", darkHex: "#083B52"),
+            WispThemeColorPair(lightHex: "#9FD2FF", darkHex: "#102E6B"),
+        ],
+        buddyPalette: [
+            WispThemeBuddyColor(lightHex: "#5CE0E6", deepHex: "#0C7F8C"),
+            WispThemeBuddyColor(lightHex: "#FF9E8A", deepHex: "#C2452F"),
+            WispThemeBuddyColor(lightHex: "#FFE066", deepHex: "#8F6D00"),
+            WispThemeBuddyColor(lightHex: "#FF9EC8", deepHex: "#C23C80"),
+            WispThemeBuddyColor(lightHex: "#8FC2FF", deepHex: "#2C6AC4"),
+            WispThemeBuddyColor(lightHex: "#A6F28F", deepHex: "#337A1A"),
+            WispThemeBuddyColor(lightHex: "#B8A6FF", deepHex: "#5E49C9"),
+            WispThemeBuddyColor(lightHex: "#FFB866", deepHex: "#B35E00"),
+        ],
+        islandTintHex: "#04222B",
+        glassTintStrength: 0.45
     )
 
     static let candy = WispTheme(
