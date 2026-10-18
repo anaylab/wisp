@@ -52,17 +52,45 @@ final class NotchIslandStylePreference: ObservableObject {
 
 extension View {
     /// The notch island's surface in the chosen style: solid black, or the
-    /// dark-tinted Liquid Glass (`wispNotchGlassSurface`).
-    @ViewBuilder
+    /// dark-tinted Liquid Glass (`wispNotchGlassSurface`). Both stay exactly as
+    /// they always were unless the user switched on "Tint the island with my
+    /// theme", the only way a theme reaches the notch.
     func wispNotchIslandSurface<IslandShape: Shape>(
         in islandShape: IslandShape,
         style surfaceStyle: NotchIslandSurfaceStyle
     ) -> some View {
+        modifier(WispNotchIslandSurfaceModifier(islandShape: islandShape, surfaceStyle: surfaceStyle))
+    }
+}
+
+/// Draws the island surface and re-draws when the tint switch or theme changes.
+/// A modifier (not a plain function) so it can observe `WispThemeStore`: the
+/// surface colour is read at draw time, and nothing else would invalidate it.
+private struct WispNotchIslandSurfaceModifier<IslandShape: Shape>: ViewModifier {
+    let islandShape: IslandShape
+    let surfaceStyle: NotchIslandSurfaceStyle
+
+    @ObservedObject private var themeStore = WispThemeStore.shared
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
         switch surfaceStyle {
         case .black:
-            background(WispColor.Island.surface, in: islandShape)
+            content.background(
+                WispColor.Island.surfaceColor(tinted: themeStore.tintsIsland, theme: themeStore.currentTheme),
+                in: islandShape
+            )
         case .liquidGlass:
-            wispNotchGlassSurface(in: islandShape)
+            if themeStore.tintsIsland {
+                // The same dark-tinted glass, with the theme's island tone as the tint
+                // instead of plain black, at the same strength.
+                content.glassEffect(
+                    .regular.tint(Color(hex: themeStore.currentTheme.islandTintHex).opacity(0.72)),
+                    in: islandShape
+                )
+            } else {
+                content.wispNotchGlassSurface(in: islandShape)
+            }
         }
     }
 }

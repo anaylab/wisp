@@ -3,9 +3,11 @@
 //  leanring-buddy
 //
 //  Summoning a buddy, in two steps. First pick what it's good at, from a quiet
-//  grid of specialty cards. Then name it and give it a mission and a schedule,
-//  with everything the specialty implies already filled in and every field
-//  editable.
+//  grid of specialty cards. Then name it, pick how it works (its personality),
+//  and give it a mission and a schedule, with everything the specialty implies
+//  already filled in and every field editable. Buddies are first-class, so the
+//  specialties and colours are always shown; Advanced features add only
+//  importing a shared buddy and a per-buddy model.
 //
 
 import SwiftUI
@@ -24,6 +26,7 @@ struct BuddyCreationView: View {
     @State private var step: Step = .pickSpecialty
     @State private var specialty: BuddySpecialty = .general
     @State private var colorIndex = 0
+    @State private var personality: BuddyPersonality = .coach
     @State private var instructionText = ""
     @State private var nameText = ""
     @State private var hasEditedName = false
@@ -52,11 +55,6 @@ struct BuddyCreationView: View {
                 .frame(maxWidth: 860)
                 .frame(maxWidth: .infinity)
             }
-        }
-        .onAppear {
-            // Without Advanced features there are no specialties to pick, so go
-            // straight to naming the buddy with the general template.
-            if !advancedFeatures.isEnabled && step == .pickSpecialty { choose(.general) }
         }
     }
 
@@ -158,16 +156,12 @@ struct BuddyCreationView: View {
 
     private var detailsStep: some View {
         VStack(alignment: .leading, spacing: 22) {
-            if advancedFeatures.isEnabled {
-                Button {
-                    withAnimation(WispMotion.island) { step = .pickSpecialty }
-                } label: {
-                    Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
-            } else if !isFirstBuddy {
-                Button("Cancel", action: onCancel).buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
+            Button {
+                withAnimation(WispMotion.island) { step = .pickSpecialty }
+            } label: {
+                Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .medium))
             }
+            .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
 
             HStack(alignment: .center, spacing: 18) {
                 BuddyCharacter(colorIndex: colorIndex, size: 84, mood: .idle, liveliness: .full, looksAtPointer: true)
@@ -180,17 +174,15 @@ struct BuddyCreationView: View {
                         .onChange(of: nameText) { _, _ in
                             if nameText != suggestedName() { hasEditedName = true }
                         }
-                    if advancedFeatures.isEnabled {
-                        HStack(spacing: 9) {
-                            ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { index in
-                                Button { withAnimation(WispMotion.quick) { colorIndex = index } } label: {
-                                    Circle()
-                                        .fill(BuddyAppearance.lightColor(forColorIndex: index))
-                                        .frame(width: 20, height: 20)
-                                        .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(colorIndex == index ? 0.85 : 0), lineWidth: 1.5).padding(-3))
-                                }
-                                .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(index + 1)")
+                    HStack(spacing: 9) {
+                        ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { index in
+                            Button { withAnimation(WispMotion.quick) { colorIndex = index } } label: {
+                                Circle()
+                                    .fill(BuddyAppearance.lightColor(forColorIndex: index))
+                                    .frame(width: 20, height: 20)
+                                    .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(colorIndex == index ? 0.85 : 0), lineWidth: 1.5).padding(-3))
                             }
+                            .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(index + 1)")
                         }
                     }
                 }
@@ -230,6 +222,14 @@ struct BuddyCreationView: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 10) {
+                Text("How it works")
+                    .font(.system(size: 12.5, weight: .medium)).foregroundStyle(WispColor.textSecondary)
+                BuddyPersonalityPicker(selection: $personality)
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(WispColor.surface2.opacity(0.6)))
+
             VStack(alignment: .leading, spacing: 14) {
                 BuddyScheduleEditor(schedule: Binding(
                     get: { schedule },
@@ -263,6 +263,7 @@ struct BuddyCreationView: View {
                         modelChoice: modelChoice,
                         toolAccess: toolAccess,
                         specialty: specialty,
+                        personality: personality,
                         name: nameText,
                         colorIndex: colorIndex,
                         runImmediately: !schedule.isRepeating

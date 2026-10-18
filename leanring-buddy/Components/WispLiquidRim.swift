@@ -179,12 +179,13 @@ extension WispIslandState {
     /// in lavender (the accent reserved for "Wisp is working"); a pending
     /// decision and the success / error flashes light the whole rim in their
     /// semantic colour; rest and a lingering answer keep just the highlight.
+    /// The flowing colour is lavender unless the island is tinted with the theme.
     var rimLight: WispLiquidRimLight {
         switch self {
         case .idle, .preview:
             return .resting
         case .listening, .thinking, .processing, .executing, .responding:
-            return .flowing(WispColor.Brand.lavender)
+            return .flowing(WispColor.Island.activityAccent)
         case .confirmation:
             return .glowing(WispColor.warning)
         case .success:

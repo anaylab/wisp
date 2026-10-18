@@ -52,9 +52,11 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   banner on Today and "Listening paused" in the notch chat's talk pill. The window
   (`WispWindow/`) replaced the old dashboard, the pop-out conversation window, the notch's own
   settings pages and the big menu bar panel, so every setting has exactly one home. It has no sidebar:
-  a slim top bar (`WispWindowView`) holds the `WispSection`s as icons — **four by default** (Today, Chat, Jobs, Settings), nine with
-  Settings → General → **Advanced features** on (`WispAdvancedFeaturesPreference`, off by default, adds Buddies, Brain, Routines, History,
-  Connections; with it off Routines, History and Connections open as Settings pages). Hiding only gates visibility and launch-time work: no
+  a slim top bar (`WispWindowView`) holds the `WispSection`s as icons — **four by default** (Today, Chat, Buddies, Settings), eight with
+  Settings → General → **Advanced features** on (`WispAdvancedFeaturesPreference`, off by default, adds Brain, Routines, History,
+  Connections; with it off Routines, History and Connections open as Settings pages). Buddies are first-class and never hidden — Advanced
+  hides only buddy delegation (`ask_buddy`), per-buddy models and sharing/importing, plus those four sections; automations and the Canvas
+  page live inside Buddies (pages Buddies / Automations / Canvas). Hiding only gates visibility and launch-time work: no
   code or stored buddy/brain data is removed, and the brain is never switched off (`MemoryStore` needs `me.md`) — the open one expands to its name and the pill slides between tabs
   (`matchedGeometryEffect`) — with a status pill (mark + state + model) at the end, and a section with several
   pages (`WispPage`) gets a segmented strip beneath. The `NSWindow` is full-size-content with a transparent title
@@ -65,7 +67,7 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   `WispWindowNavigator.open(_:)` (closes the notch workspace + quick panel first). On launch with a
   permission missing, the window opens on Today, which leads with the `PermissionsChecklist`.
   Look: calm and tactile — `WispColor` surface tokens, hairlines, and **one button treatment**: the lit-edge pill
-  (`Components/WispPill.swift`: `WispBevel` + `WispPillButtonStyle`, prominent = tinted with the accent, otherwise
+  (`Components/WispPill.swift`: `WispBevel` + `WispPillButtonStyle`, prominent = tinted with the accent plus a glossy sheen, springy squish on press via `WispMotion.bouncy`, otherwise
   neutral; lift on hover, dip on press, sizes follow `controlSize`). Use it instead of `.bordered` /
   `.borderedProminent` / the notch's glass button style in window pages (the glass style is white-on-dark and
   nearly invisible in light mode). Wisp colours are accents only (`.tint(WispColor.accentText)`).
@@ -178,6 +180,16 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   Reusable components live in `Components/` (`WispGlassPanel`/`WispGlassButtonStyle`/`WispGlassIcon`,
   `WispMark`, `WispIcon`). **Do not reintroduce hardcoded hex** — reference the
   tokens.
+- **Themes + glass** (`DesignSystem/WispTheme*.swift`): six `WispTheme`s (Sage default, Candy, Sunset, Mint, Berry Night, Mono; pure
+  value types, hex only in their definitions) chosen in Settings → General → Appearance (`AppearanceSettingsCard`, `WispThemePicker`).
+  `WispThemeStore` (UserDefaults, with a lock-guarded cache so the dynamic `NSColor` providers can read it off the main actor) is the one
+  source of truth; `WispColor` accent/lavender/gradient tokens resolve through the current theme, so call sites reskin without edits and
+  the window root rebuilds on `.wispThemeDidChange`. The window gets a soft blurred-gradient backdrop (`WispThemeBackdrop`, drifts only
+  while the window is active and Reduce Motion is off); cards, the top bar and pills sit on `.glassEffect` in `GlassEffectContainer`.
+  `WispThemeContrast` (pure) checks text contrast for every theme in light and dark (`Tests/WispTheme`). **The notch island stays solid
+  black unless "Tint the island with my theme" (`WispThemeStore.tintsIsland`, off by default) is on**; then the island surface/rim (and the
+  opt-in Liquid Glass island) take the theme. **Playful** (`isPlayful`, default on, always yields to Reduce Motion via
+  `allowsPlayfulMotion`) gates the backdrop drift, pill squish (`WispMotion.bouncy`), buddy bounce and checklist burst.
 - **Light/dark**: the **Wisp window follows the system appearance** (its `WispColor` tokens resolve
   light or dark). The **notch HUD, on-screen overlay, and menu-bar panel stay a dark glass
   material in every appearance** — they pin `.environment(\.colorScheme, .dark)` so their adaptive
@@ -278,6 +290,40 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   the thread shows only the user's words plus file chips (`BuddyThreadExchange.attachmentNames`), and a buddy with a
   library gets the run-only `read_my_file` tool. `BuddyStore.sendMessage(_:attachmentFileURLs:toBuddyWithID:)` is the
   async entry point. Tested by `Tests/AgentRuntimeIntegration/BuddyRedesignTests.swift`.
+- **Buddy personalities, starter buddies, playful touches** (`Buddies/`): `BuddyPersonality` presets (Coach, Chill, Hype, Deadpan,
+  Teacher) set the persona line, reply length/tone (`BuddyReplyStyle`, folded into the system-prompt addendum) and a voice profile
+  (Kokoro voice id + rate; not yet audible, the engine loads one voice). Chosen when summoning (`BuddyPersonalityPicker`), editable later.
+  `StarterBuddies` creates a Planner (Canvas + checklist), a Briefer (morning brief, meeting prep) and a Focus buddy (study blocks) once, from
+  first-run setup (`BuddyStore.ensureStarterBuddies`); fixed ids so templates and migration can name them, and deleting one sticks.
+  `BuddyGreetingPolicy` picks the day's buddy (stable per day, Briefer favoured) for Today's greeting; `ChecklistStreak` remembers only day
+  keys of fully finished checklists; `PlayfulCelebration` is the squish/burst, shown only when Playful is on. The working buddy's character
+  sits in the notch's left flank and its face marks each NEW result.
+- **Automations** (`Automations/`, `WispWindow/Automations/`, `docs/fun-glass-buddies-automations-plan.md`, `docs/fun-glass-contracts.md`):
+  one model replaces Routines, buddy jobs and the Jobs page. `Automation` = **Trigger → Source → Action → Output → Notify**, owned by a buddy.
+  Triggers: `schedule` (once/daily/weekdays/weekly/monthly, `AutomationSchedule`: next run, DST, a missed slot runs once), `event` (new Canvas
+  item, meeting starting in N minutes, screen text appears via the watchers, file dropped in a folder) or `manual` (button, notch chip, routine
+  digit). Sources: nothing, today's calendar, Canvas deadlines, Reminders, clipboard, screen text, folder files. Actions: ask the buddy,
+  sync Canvas, build the daily checklist, propose study blocks (the last three are views onto `JobsEngine`, which keeps its own timers; the
+  engine never schedules them twice). Outputs: notch card, Reminders checklist, Calendar block, notification, buddy-thread message, spoken line.
+  **Three setup paths, one editable draft card** (`AutomationDraftCardView`, chips for trigger/source/output/buddy/notify, Test run, Save):
+  (1) **Say it** — `AutomationDraftParser` is deterministic first (the 3B model is weak at this); only when unsure may a model fill the card,
+  and it never runs anything; (2) **Template gallery** (`AutomationTemplates`: Morning brief, Canvas deadlines, Daily checklist, Weekly review,
+  Meeting prep, Focus block, Study plan, Screen watch); (3) **Save as automation** on a History answer. `AutomationStore` keeps
+  `automations.json` and `automation-runs.json` (run records: status, capped result text, failure reason, 30 days; 0600) under
+  `~/Library/Application Support/Wisp/`; failures surface in Today's "Needs you", next runs in a Today tile. `AutomationEngine` (30s clock,
+  one run per automation at a time, injected `AutomationEngineDependencies`; real adapters in `AutomationLiveWiring`, run entry
+  `CompanionManager.startAutomationRun`). **Safety**: a scheduled/event/test run is unattended and gets only tools that never prompt
+  (`AutomationToolPolicy`; outward-facing tools are absent, not gated) and never auto-approves; `calendarBlock` always asks; source data is
+  fenced as DATA; a cloud-model buddy gets private sources only after the card showed "this leaves your Mac"
+  (`acknowledgedSourceLeavesMac`); a Test run reads but writes nothing. **Migration** (`AutomationMigration` pure + `AutomationMigrationRunner`)
+  reads Routines, buddy jobs and the Jobs Canvas/checklist once into automations by `legacyOrigin` (incremental, old stores untouched, a
+  deleted automation does not return); a migrated routine's digit still fires through `RoutineStore`.
+- **Quick add and first run**: `AutomationQuickAddRouter` / `AutomationQuickAddPlanner` (`QuickAdd/`) are asked first by
+  `sendTranscriptToClaudeWithScreenshot` (voice, composer and Today's ask bar alike): "remind me…", "every…", "when…" open the draft card
+  (`WispWindowRouter.presentAutomationDraft`) instead of a model turn; biased toward not matching, "remind me in 10 minutes"/timers stay with
+  `FastCommandRouter`. `FirstRunSetupFlow` (`FirstRun/`, once, flag in `WispFirstRunState`, "Run setup again" in Settings → General) is four
+  skippable steps over Today: theme, Planner personality, Canvas link (optional), up to three templates; nothing is on until tapped. The menu
+  bar gains New Automation…; nothing else.
 - **Buddies** (HeyClicky's "Clickys"): named, coloured agents that each own one job, listed under
   BUDDIES in the notch chat's sidebar (+ to summon). `BuddyStore` (`~/Library/Application
   Support/Wisp/buddies.json`) holds identity (name from `BuddyNameGenerator` — subject + role word,
@@ -367,8 +413,8 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   → an "N new" flank badge and a **NEW** section in the full panel, marked seen when the panel
   closes. Both switches live in the Agent tab's Announcements card (`AnnouncementPreferences`),
   which also has a "Show now" preview.
-- **Jobs** (`Jobs/`, `docs/jobs-revamp-plan.md`; a job is Source -> Rule -> Output -> Cadence, quiet unless something changed):
-  **Job 1, Canvas calendar manager**: the user pastes their Canvas calendar feed (`.ics`) URL once in the Jobs tab. The URL is a
+- **Jobs** (`Jobs/`, `docs/jobs-revamp-plan.md`; now the engine behind the Canvas page and the Canvas/checklist automations; a job is Source -> Rule -> Output -> Cadence, quiet unless something changed):
+  **Job 1, Canvas calendar manager**: the user pastes their Canvas calendar feed (`.ics`) URL once on the Canvas page (inside Buddies). The URL is a
   secret: it lives only in the Keychain (`CanvasFeedKeychainStore`, service `com.wisp.canvas-feed`), is validated on save (https only,
   `webcal://` rewritten, no userinfo), is never put in UserDefaults, logs, History, errors or notifications, and the UI shows only a
   masked host. `JobsEngine` (`@MainActor` singleton, `start()` beside `MorningBriefingController.shared.start()`) fetches it on launch
@@ -1175,6 +1221,33 @@ Grouped by what they do. Line counts are approximate.
 | `Jobs/ChecklistModels.swift`, `Jobs/DayChecklistBuilder.swift` | ~550 | Checklist model, the pure builder (rollover, cap, dedupe) and `JobsEventKitPlanning` (write plans). Tested by `Tests/DayChecklist`. |
 | `Jobs/WispCalendarWriter.swift`, `Jobs/WispTodayReminders.swift` | ~470 | Thin EventKit actors for the "Wisp" calendar and the "Wisp Today" list. |
 
+### Automations, quick add, first run
+| File | Lines | Purpose |
+|------|-------|---------|
+| `Automations/Automation.swift` | ~320 | Pure `Automation` and its trigger/event/source/action/output/notify enums, `AutomationLegacyOrigin`, validation, blanks, cloud-privacy rule. |
+| `Automations/AutomationSchedule.swift` | ~480 | Pure schedules: next run (DST-safe), missed-slot rule, plain-words summary. Tested by `Tests/AutomationSchedule`. |
+| `Automations/AutomationDraft.swift` / `AutomationDraftParser.swift` | ~250/~745 | Draft card model and the deterministic "say it" parser (+ model-assist prompt/reply that only fills the card). Tested by `Tests/AutomationDraft`. |
+| `Automations/AutomationTemplates.swift` | ~155 | The eight gallery templates, as data. |
+| `Automations/AutomationStore.swift` / `AutomationRunRecord.swift` | ~300/~255 | Persistence of automations and run history (0600, 30-day retention), default-buddy assignment. |
+| `Automations/AutomationEngine.swift` | ~1000 | Clock, run rules, `AutomationToolPolicy`, unattended-safe runs, history to "Needs you". Tested by `Tests/AutomationEngine`. |
+| `Automations/AutomationLiveWiring.swift` | ~515 | Real adapters (model via `startAutomationRun`, EventKit, notifications, notch, JobsEngine, watchers). |
+| `Automations/AutomationMigration.swift` / `AutomationMigrationRunner.swift` | ~170/~125 | Pure plan and one-time runner from Routines, buddy jobs and Jobs. Tested by `Tests/AutomationMigration`. |
+| `WispWindow/Automations/*.swift` | ~3000 | `AutomationsHubView` (say-it box, list, gallery; embedded in Buddies), `AutomationDraftCardView`, chip editors, run history, next-runs tile, template gallery, `BuddyAutomationsSection`, `SaveAsAutomationButton`, display text/support. |
+| `QuickAdd/AutomationQuickAddPlanner.swift` / `AutomationQuickAddRouter.swift` | ~70/~35 | Pure "is this an automation?" decision and the router that opens the draft card. Tested by `Tests/AutomationQuickAdd`. |
+| `FirstRun/FirstRunSetupFlow.swift` / `WispFirstRunState.swift` | ~305/~40 | The four-step first-run setup and its once-only flag. |
+
+### Themes and buddy personality
+| File | Lines | Purpose |
+|------|-------|---------|
+| `DesignSystem/WispTheme.swift` | ~265 | Pure `WispTheme` definitions (six themes; the only place theme hex lives). |
+| `DesignSystem/WispThemeStore.swift` | ~150 | Chosen theme, island-tint and Playful switches, thread-safe cache for dynamic colours, `.wispThemeDidChange`. |
+| `DesignSystem/WispThemeContrast.swift` | ~170 | Pure contrast-ratio checks per theme, light and dark. Tested by `Tests/WispTheme`. |
+| `Components/WispThemeBackdrop.swift` / `WispThemePicker.swift` | ~165/~120 | The window's blurred-gradient backdrop and the swatch picker. |
+| `WispWindow/AppearanceSettingsCard.swift` | ~45 | Settings → General → Appearance: window appearance, themes, island tint, Playful. |
+| `Buddies/BuddyPersonality.swift` / `BuddyPersonalityPicker.swift` | ~190/~65 | Five personality presets (persona, reply style, voice profile) and the picker. Tested by `Tests/BuddyPersonality`. |
+| `Buddies/StarterBuddies.swift` / `BuddyGreeting.swift` | ~80/~85 | Planner/Briefer/Focus starters with fixed ids; the day's-buddy rule and greeting. |
+| `Buddies/ChecklistStreak.swift` / `PlayfulCelebration.swift` | ~110/~110 | Day-key streak store and the squish/burst, gated by Playful. |
+
 ### Voice modes, glance cards & sources
 | File | Lines | Purpose |
 |------|-------|---------|
@@ -1205,8 +1278,8 @@ Grouped by what they do. Line counts are approximate.
 | `Jobs/ChecklistModels.swift` / `DayChecklistBuilder.swift` | ~85/~490 | `ChecklistItem` and the pure daily-checklist builder (rollover, caps, day keys). |
 | `Jobs/WispCalendarWriter.swift` / `WispTodayReminders.swift` | ~285/~205 | Actors writing only the "Wisp" calendar and the "Wisp Today" Reminders list (EventKit). |
 | `Jobs/JobsEngine.swift` / `JobsEngineLiveDependencies.swift` | ~690/~135 | The orchestrator (launch + hourly sync, diff, study-block approval, checklist rebuild, published state for the window and notch) and its live EventKit/network wiring. |
-| `WispWindow/JobsTab.swift` | ~515 | Jobs section: Canvas setup flow, sync status, change cards, study-block approval, settings. |
-| `WispWindow/WispAdvancedFeaturesPreference.swift` | ~35 | Persisted Advanced features switch (`isEnabledNow` for non-UI code). |
+| `WispWindow/JobsTab.swift` | ~515 | Canvas page (inside Buddies): Canvas setup flow, sync status, change cards, study-block approval, settings. |
+| `WispWindow/WispAdvancedFeaturesPreference.swift` | ~35 | Persisted Advanced features switch (`isEnabledNow` for non-UI code); hides delegation, per-buddy models, sharing and four sections, never buddies. |
 | `DynamicIsland/DailyChecklistView.swift` / `CanvasDiffCardView.swift` | ~130/~100 | The notch's tickable checklist and Canvas change card. |
 
 ### Wisp window, notch and UI
@@ -1339,6 +1412,13 @@ running):
 ./Tests/DayChecklist/run.sh              # daily checklist builder + EventKit write planning
 ./Tests/JobsEngine/run.sh                # Jobs engine flow with fakes (sync, throttle, approval, checklist)
 ./Tests/MCPStructuredContent/run.sh      # MCP structuredContent rendering + caps, cua-driver floor and cards
+./Tests/WispTheme/run.sh                 # themes: contrast ratio for every theme, light and dark
+./Tests/BuddyPersonality/run.sh          # personality presets, greeting rule, streak policy
+./Tests/AutomationDraft/run.sh           # "say it" phrases -> drafts, ambiguous -> asks, templates
+./Tests/AutomationSchedule/run.sh        # next run, DST, missed slot runs once
+./Tests/AutomationEngine/run.sh          # engine with fakes: unattended tool policy, approvals, privacy, test runs
+./Tests/AutomationMigration/run.sh       # routines/buddy jobs/Jobs -> automations, incremental
+./Tests/AutomationQuickAdd/run.sh        # quick add: automation vs ordinary question
 ./Tests/CanvasSync/run.sh                # Canvas ICS parsing, diff, study-block planner
 ./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
 ./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies

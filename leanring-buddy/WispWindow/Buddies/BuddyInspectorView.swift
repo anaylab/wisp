@@ -142,13 +142,20 @@ struct BuddyInspectorView: View {
     private func automationTab(for buddy: WispBuddy) -> some View {
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
         let runRecords = Array(buddyStore.runRecords(of: buddy, in: taskRegistry).suffix(6).reversed())
+        // Once an Automation owns this buddy's job, the old schedule editor would edit a
+        // schedule nothing reads any more, so it gives way to the automations list.
+        let scheduleIsOwnedByAutomations = buddyStore.buddyIDsWhoseSchedulesAreOwnedByAutomations.contains(buddy.id)
         return VStack(alignment: .leading, spacing: 18) {
+            BuddyAutomationsSection(buddyID: buddy.id)
+
             VStack(alignment: .leading, spacing: 10) {
-                row("Next run", value: buddy.schedule.isRepeating ? BuddyFormatting.nextRunPhrase(for: buddy).capitalizedFirst : "On request")
-                BuddyScheduleEditor(schedule: Binding(
-                    get: { buddy.schedule },
-                    set: { buddyStore.updateSchedule(ofBuddyWithID: buddy.id, to: $0) }
-                ))
+                if !scheduleIsOwnedByAutomations {
+                    row("Next run", value: buddy.schedule.isRepeating ? BuddyFormatting.nextRunPhrase(for: buddy).capitalizedFirst : "On request")
+                    BuddyScheduleEditor(schedule: Binding(
+                        get: { buddy.schedule },
+                        set: { buddyStore.updateSchedule(ofBuddyWithID: buddy.id, to: $0) }
+                    ))
+                }
                 Toggle(isOn: Binding(
                     get: { buddy.postsNotificationWhenFinished },
                     set: { buddyStore.setNotifiesWhenFinished(buddyWithID: buddy.id, notifiesWhenFinished: $0) }
@@ -297,36 +304,44 @@ struct BuddyInspectorView: View {
                     .onSubmit { buddyStore.rename(buddyWithID: buddy.id, to: editedName) }
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                header("Colour")
+                HStack(spacing: 9) {
+                    ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { colorIndex in
+                        Button { buddyStore.updateColor(ofBuddyWithID: buddy.id, to: colorIndex) } label: {
+                            Circle()
+                                .fill(BuddyAppearance.lightColor(forColorIndex: colorIndex))
+                                .frame(width: 20, height: 20)
+                                .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(buddy.colorIndex == colorIndex ? 0.85 : 0), lineWidth: 1.5).padding(-3))
+                        }
+                        .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(colorIndex + 1)")
+                    }
+                }
+                .animation(WispMotion.quick, value: buddy.colorIndex)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                header("Specialty")
+                Picker("Specialty", selection: Binding(
+                    get: { buddy.specialty ?? .general },
+                    set: { buddyStore.updateSpecialty(ofBuddyWithID: buddy.id, to: $0, appliesToolLimits: true) }
+                )) {
+                    ForEach(BuddySpecialty.allCases) { specialty in
+                        Label(specialty.title, systemImage: specialty.symbolName).tag(specialty)
+                    }
+                }
+                .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                header("How it works")
+                BuddyPersonalityPicker(selection: Binding(
+                    get: { buddy.personality ?? .coach },
+                    set: { buddyStore.updatePersonality(ofBuddyWithID: buddy.id, to: $0) }
+                ))
+            }
+
             if advancedFeatures.isEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    header("Colour")
-                    HStack(spacing: 9) {
-                        ForEach(0..<BuddyAppearance.paletteCount, id: \.self) { colorIndex in
-                            Button { buddyStore.updateColor(ofBuddyWithID: buddy.id, to: colorIndex) } label: {
-                                Circle()
-                                    .fill(BuddyAppearance.lightColor(forColorIndex: colorIndex))
-                                    .frame(width: 20, height: 20)
-                                    .overlay(Circle().strokeBorder(WispColor.textPrimary.opacity(buddy.colorIndex == colorIndex ? 0.85 : 0), lineWidth: 1.5).padding(-3))
-                            }
-                            .buttonStyle(.plain).pointerCursor().accessibilityLabel("Colour \(colorIndex + 1)")
-                        }
-                    }
-                    .animation(WispMotion.quick, value: buddy.colorIndex)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    header("Specialty")
-                    Picker("Specialty", selection: Binding(
-                        get: { buddy.specialty ?? .general },
-                        set: { buddyStore.updateSpecialty(ofBuddyWithID: buddy.id, to: $0, appliesToolLimits: true) }
-                    )) {
-                        ForEach(BuddySpecialty.allCases) { specialty in
-                            Label(specialty.title, systemImage: specialty.symbolName).tag(specialty)
-                        }
-                    }
-                    .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
-                }
-
                 VStack(alignment: .leading, spacing: 8) {
                     header("Model")
                     BuddyModelEditor(modelChoice: Binding(

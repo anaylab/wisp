@@ -2,11 +2,14 @@
 //  WispAdvancedFeaturesPreference.swift
 //  leanring-buddy
 //
-//  One persisted switch for the surfaces most people never need: buddy
-//  characters' styling choices, specialties, buddies asking each other for help,
-//  a per-buddy model, sharing, and the buddy/brain sections of the window. Off by
-//  default. Turning it off only hides things -- no code, stored buddy or brain
-//  data is removed, and existing buddies keep running exactly as configured.
+//  One persisted switch for the surfaces most people never need: buddies asking
+//  each other for help (`ask_buddy`), a per-buddy model, sharing/importing
+//  buddies and routines, and the Brain, Routines, History and Connections
+//  sections of the window. Buddies themselves are first-class and never hidden:
+//  their characters, moods, personalities, specialties and automations are
+//  always visible. Off by default. Turning it off only hides things -- no code,
+//  stored buddy or brain data is removed, and existing buddies keep running
+//  exactly as configured.
 //
 
 import Combine

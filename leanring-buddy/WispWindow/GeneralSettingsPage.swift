@@ -20,7 +20,6 @@ struct GeneralSettingsPage: View {
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
     @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
-    @ObservedObject private var windowAppearance = WispAppearancePreference.shared
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
 
     var body: some View {
@@ -34,6 +33,7 @@ struct GeneralSettingsPage: View {
                 islandCard
                 voiceCard
                 advancedCard
+                DashboardCard(title: "Setup") { FirstRunSetupAgainRow() }
             }
             .padding(20)
             .frame(maxWidth: 720, alignment: .leading)
@@ -42,13 +42,13 @@ struct GeneralSettingsPage: View {
         .background(WispColor.windowBackground)
     }
 
-    /// Buddies and Brain stay out of the window until asked for; nothing is
+    /// Brain, buddy delegation, per-buddy models and sharing stay out until asked for; nothing is
     /// removed when this is off, so turning it back on restores them as they were.
     private var advancedCard: some View {
         DashboardCard(title: "Advanced") {
             SettingRow(
                 title: "Advanced features",
-                detail: "Shows Buddies and Brain in the window."
+                detail: "Shows Brain, and buddy delegation, per-buddy models and sharing."
             ) {
                 Toggle("Advanced features", isOn: $advancedFeatures.isEnabled)
                     .labelsHidden()
@@ -59,15 +59,7 @@ struct GeneralSettingsPage: View {
     }
 
     private var appearanceCard: some View {
-        DashboardCard(title: "Appearance") {
-            SettingRow(title: "Window", detail: "") {
-                WispSegmented(
-                    options: WispAppearancePreference.Mode.allCases,
-                    title: { $0.displayName },
-                    selection: $windowAppearance.mode
-                )
-            }
-        }
+        AppearanceSettingsCard()
     }
 
     private var islandCard: some View {

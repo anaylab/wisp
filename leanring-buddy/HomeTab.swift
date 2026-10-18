@@ -35,6 +35,7 @@ struct HomeTab: View {
     @ObservedObject private var brainIngestQueue = BrainIngestQueue.shared
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var jobsEngine = JobsEngine.shared
+    @ObservedObject private var automationEngine = AutomationEngine.shared
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
 
     /// Moves the Wisp window to another page (e.g. "All routines").
@@ -124,10 +125,9 @@ struct HomeTab: View {
             runningNowTile.wispEntrance(order: 2)
 
             HStack(alignment: .top, spacing: tileSpacing) {
-                // Buddies and Brain tiles only exist with Advanced features on.
-                if advancedFeatures.isEnabled {
-                    buddiesTile.frame(minWidth: 200)
-                }
+                // Buddies are first-class; only the Brain tile waits for Advanced.
+                buddiesTile.frame(minWidth: 200)
+                automationNextRunsTile.frame(minWidth: 200)
                 upNextTile.frame(minWidth: 180)
                 if advancedFeatures.isEnabled {
                     brainTile.frame(width: 150)
@@ -154,9 +154,8 @@ struct HomeTab: View {
             needsYouStrip.wispEntrance(order: 2)
             runningNowTile.wispEntrance(order: 2)
             todayTile(fillsRowHeight: false).wispEntrance(order: 3)
-            if advancedFeatures.isEnabled {
-                buddiesTile.wispEntrance(order: 3)
-            }
+            buddiesTile.wispEntrance(order: 3)
+            automationNextRunsTile.wispEntrance(order: 4)
             upNextTile.wispEntrance(order: 4)
             routinesTile.wispEntrance(order: 4)
             if advancedFeatures.isEnabled {
@@ -166,11 +165,19 @@ struct HomeTab: View {
         }
     }
 
+    // MARK: - Next automation runs
+
+    /// The soonest scheduled automations. The tile itself belongs to the
+    /// Automations views; Today only gives it a place on the grid.
+    private var automationNextRunsTile: some View {
+        AutomationNextRunsTile()
+    }
+
     // MARK: - Checklist
 
-    /// Today's checklist from the Jobs engine: Canvas due dates and calendar
+    /// Today's checklist from the Jobs engine (set up under Buddies → Canvas): Canvas due dates and calendar
     /// events, tickable here and in the notch, with Reminders as the source of
-    /// truth. Without one, a single pill leads to Jobs setup.
+    /// truth. Without one, a single pill leads to Canvas setup.
     private var checklistTile: some View {
         let checklistItems = jobsEngine.todayChecklist
         let completedCount = checklistItems.filter(\.isCompleted).count
@@ -181,7 +188,7 @@ struct HomeTab: View {
             accessory: AnyView(
                 Group {
                     if checklistItems.isEmpty {
-                        WispBentoLink(title: "Jobs") { onSelectPage(.jobs) }
+                        WispBentoLink(title: "Canvas") { onSelectPage(.canvas) }
                     } else {
                         Text("\(completedCount) of \(checklistItems.count)")
                             .font(WispFont.caption)
@@ -197,11 +204,11 @@ struct HomeTab: View {
                             .font(.callout)
                             .foregroundStyle(WispColor.textSecondary)
                         Spacer(minLength: 0)
-                        Button(jobsEngine.hasCanvasFeed ? "Plan my day" : "Set up Jobs") {
+                        Button(jobsEngine.hasCanvasFeed ? "Plan my day" : "Set up Canvas") {
                             if jobsEngine.hasCanvasFeed {
                                 Task { await jobsEngine.rebuildChecklistNow() }
                             } else {
-                                onSelectPage(.jobs)
+                                onSelectPage(.canvas)
                             }
                         }
                         .buttonStyle(WispPillButtonStyle())
@@ -213,7 +220,7 @@ struct HomeTab: View {
                         checklistRow(checklistItem)
                     }
                     if checklistItems.count > maximumVisibleRows {
-                        WispBentoLink(title: "All \(checklistItems.count)") { onSelectPage(.jobs) }
+                        WispBentoLink(title: "All \(checklistItems.count)") { onSelectPage(.canvas) }
                     }
                 }
             }
@@ -268,6 +275,8 @@ struct HomeTab: View {
                     Text(greeting)
                         .font(WispFont.hero)
                         .foregroundStyle(WispColor.textPrimary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 voiceModeButton
@@ -393,7 +402,17 @@ struct HomeTab: View {
             : "Silent: replies show in the notch only. Click to have them spoken.")
     }
 
+    /// The day's buddy greets in its own voice (stable all day, a different
+    /// buddy tomorrow); with no buddies it is the plain time-of-day greeting.
     private var greeting: String {
+        let currentHour = Calendar.current.component(.hour, from: Date())
+        if let dayBuddy = buddyStore.dayBuddy(on: Date()) {
+            return BuddyStore.greetingLine(for: dayBuddy, hour: currentHour)
+        }
+        return plainTimeOfDayGreeting
+    }
+
+    private var plainTimeOfDayGreeting: String {
         switch Calendar.current.component(.hour, from: Date()) {
         case 5..<12: return "Good morning"
         case 12..<18: return "Good afternoon"
@@ -645,6 +664,9 @@ struct HomeTab: View {
         let detail: String
         let actionTitle: String?
         let action: (() -> Void)?
+        /// Set for an automation's failure or approval request, so dismissing
+        /// the card also tells the engine and it stays gone.
+        var automationAttentionItemID: UUID? = nil
     }
 
     private var needsYouAlerts: [NeedsYouAlert] {
@@ -705,6 +727,24 @@ struct HomeTab: View {
                 detail: failureDetail(for: recentFailure),
                 actionTitle: "See in History",
                 action: { onSelectPage(.timeline) }
+            ))
+        }
+
+        // Automations that failed, or were declined because they needed an OK
+        // nobody was there to give. The engine decides what belongs here; Today
+        // only renders it.
+        for attentionItem in automationEngine.needsYou {
+            alerts.append(NeedsYouAlert(
+                id: "automation-\(attentionItem.id.uuidString)",
+                symbolName: "exclamationmark.arrow.triangle.2.circlepath",
+                title: attentionItem.title,
+                detail: attentionItem.detail,
+                actionTitle: "Open",
+                action: {
+                    WispWindowRouter.shared.automationIDToOpen = attentionItem.automationID
+                    onSelectPage(.automations)
+                },
+                automationAttentionItemID: attentionItem.id
             ))
         }
 
@@ -777,6 +817,9 @@ struct HomeTab: View {
             }
             Button {
                 withAnimation(WispMotion.island) { _ = dismissedAlertIDs.insert(alert.id) }
+                if let automationAttentionItemID = alert.automationAttentionItemID {
+                    automationEngine.dismissAttentionItem(id: automationAttentionItemID)
+                }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))

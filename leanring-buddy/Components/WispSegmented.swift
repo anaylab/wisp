@@ -26,7 +26,7 @@ struct WispSegmented<Value: Hashable>: View {
                 } label: {
                     Text(title(option))
                         .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                        .foregroundStyle(isSelected ? WispColor.textPrimary : WispColor.textSecondary)
+                        .foregroundStyle(isSelected ? WispColor.accentText : WispColor.textSecondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background {

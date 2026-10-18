@@ -6,11 +6,19 @@
 //  `JobsEngine.setChecklistItem`, which writes the Reminders list, so the notch and
 //  Reminders never disagree. Island styling only (WispColor.Island.*).
 //
+//  Finishing the last item is a small moment when Playful is on: the "All done"
+//  label bounces, a soft burst of dots plays, and the day streak ticks up. The
+//  island stays black; only the burst takes a colour (the day's buddy, else the
+//  theme accent).
+//
 
 import SwiftUI
 
 struct DailyChecklistView: View {
     @ObservedObject private var jobsEngine = JobsEngine.shared
+    @ObservedObject private var streakStore = ChecklistStreakStore.shared
+    @ObservedObject private var themeStore = WispThemeStore.shared
+    @ObservedObject private var buddyStore = BuddyStore.shared
 
     /// Rows to show before "+ N more". The compact drop-down card shows fewer than
     /// the hover panel.
@@ -22,6 +30,16 @@ struct DailyChecklistView: View {
 
     private var remainingCount: Int {
         checklistItems.filter { !$0.isCompleted }.count
+    }
+
+    private var isEveryItemComplete: Bool {
+        !checklistItems.isEmpty && remainingCount == 0
+    }
+
+    /// The burst takes the day's buddy colour, so the celebration is theirs.
+    private var celebrationAccentColor: Color {
+        buddyStore.dayBuddy(on: Date()).map { BuddyAppearance.lightColor(forColorIndex: $0.colorIndex) }
+            ?? WispColor.accentText
     }
 
     /// Unfinished first (in the builder's order), done ones sink so ticking
@@ -39,9 +57,20 @@ struct DailyChecklistView: View {
                         .foregroundColor(WispColor.Island.textTertiary)
                         .tracking(0.6)
                     Spacer(minLength: 0)
+                    if themeStore.isPlayful && isEveryItemComplete && streakStore.currentStreakDays >= 2 {
+                        Text("\(streakStore.currentStreakDays)-day streak")
+                            .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                            .foregroundColor(WispColor.Island.textSecondary)
+                            .transition(.opacity)
+                    }
                     Text(remainingCount == 0 ? "All done" : "\(remainingCount) left")
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                         .foregroundColor(WispColor.Island.textTertiary)
+                        .playfulBounce(trigger: streakStore.celebrationTrigger)
+                        .background {
+                            PlayfulBurst(trigger: streakStore.celebrationTrigger, accentColor: celebrationAccentColor)
+                                .frame(width: 80, height: 80)
+                        }
                 }
             }
 
@@ -60,6 +89,12 @@ struct DailyChecklistView: View {
                     .padding(.leading, 9)
             }
         }
+        .onChange(of: isEveryItemComplete) { _, isNowComplete in
+            // The last item was just ticked (here or in Reminders). Recording is
+            // idempotent per day, so un-ticking and re-ticking doesn't celebrate twice.
+            if isNowComplete { streakStore.recordChecklistFinished(today: Date()) }
+        }
+        .onAppear { streakStore.refreshStreak(today: Date()) }
         .task {
             // Reminders is the source of truth, so a tick made over there shows
             // up as soon as the user looks here.

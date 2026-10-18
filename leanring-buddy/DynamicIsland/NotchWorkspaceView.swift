@@ -212,7 +212,8 @@ struct NotchWorkspaceView: View {
                     Text(BuddyStatusText.line(
                         for: buddy,
                         isRunning: isRunning,
-                        latestRunRecord: buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
+                        latestRunRecord: buddyStore.latestRunRecord(of: buddy, in: taskRegistry),
+                        restingMoodWord: buddy.personality?.reaction.moodWord(for: buddyStore.mood(of: buddy, in: taskRegistry))
                     ))
                     .font(.system(size: 10.5))
                     .foregroundColor(WispColor.Island.textSecondary)

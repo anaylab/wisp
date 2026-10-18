@@ -20,6 +20,8 @@ swiftc -target arm64-apple-macos26.0 \
   -o "$BUILD_DIR/buddy-thread" \
   Tests/BuddyThread/main.swift \
   leanring-buddy/Buddies/BuddyThread.swift \
+  leanring-buddy/Buddies/BuddyPersonality.swift \
+  leanring-buddy/Buddies/BuddyMood.swift \
   leanring-buddy/Buddies/BuddyListPolicy.swift \
   leanring-buddy/BuddyChatTypes.swift \
   leanring-buddy/ToolMetadata.swift

@@ -29,6 +29,13 @@
 //  file, so the whole app reskins from one place without every call site
 //  changing.
 //
+//  Theming: the accent family (`accent`, `accentHover`, `accentText`,
+//  `accentSubtle`, `intelligence`) and the glass tints are *themed* — they read
+//  the current `WispTheme` inside a dynamic `NSColor`, so picking a theme reskins
+//  every call site with no edits. Neutrals (background, surfaces, text, borders)
+//  never change with a theme, which keeps contrast predictable. `Brand` stays the
+//  Sage theme's raw values, used by the logo and app icon.
+//
 
 import SwiftUI
 import AppKit
@@ -99,26 +106,32 @@ enum WispColor {
     static let textPrimary   = adaptive(light: Brand.ink,   dark: "#F2F1EC")
     static let textSecondary = adaptive(light: "#5A5C55",   dark: "#ADB2A8")
     static let textTertiary  = adaptive(light: "#8A8C83",   dark: "#6E736B")
-    /// Text/icon colour on top of the accent fill. White reads AA+ on both the
-    /// light (deep moss) and dark (dark moss) accent fills.
-    static let textOnAccent: Color = .white
 
-    // ── Accent ──
-    /// The filled-accent colour (buttons, toggles). Deep moss in light mode and
-    /// dark moss in dark mode — both dark enough to carry white text at AA.
-    static let accent      = adaptive(light: Brand.deepMoss, dark: Brand.darkMoss)
+    // ── Accent (themed) ──
+    /// Text/icon colour on top of the accent fill. Every theme's accent fill is
+    /// checked to carry this at 4.5:1 or better.
+    static let textOnAccent: Color = themedFixedColor { NSColor(wispHex: $0.textOnAccentHex) }
+
+    /// The filled-accent colour (buttons, toggles). Sage: deep moss in light mode
+    /// and dark moss in dark mode, both dark enough to carry white text at AA.
+    static let accent      = themedColor { $0.accent }
     /// Hover/pressed state for the accent fill — a touch lifted.
-    static let accentHover = adaptive(light: "#47543F",     dark: "#67765F")
+    static let accentHover = themedColor { $0.accentHover }
     /// Accent-coloured text/icons on surfaces (links, active nav, highlights).
-    /// Deep moss on light, brighter sage on dark for legibility.
-    static let accentText  = adaptive(light: Brand.deepMoss, dark: Brand.sage)
-    /// Very subtle accent tint for selected rows and hovered brand chips.
-    static let accentSubtle = adaptive(light: Brand.sage.opacity(0.14),
-                                       dark:  Brand.sage.opacity(0.16))
+    /// Checked at 4.5:1 on the window background in light and dark.
+    static let accentText  = themedColor { $0.accentText }
+    /// A second hue for secondary highlights.
+    static let secondaryAccent = themedColor { $0.secondaryAccent }
+    /// Very subtle accent tint for selected rows and hovered brand chips. Built
+    /// from the bright (dark-mode) accent text so it reads as a wash of the accent.
+    static let accentSubtle = themedColor(
+        lightValue: { NSColor(wispHex: $0.accentText.darkHex, alpha: 0.14) },
+        darkValue:  { NSColor(wispHex: $0.accentText.darkHex, alpha: 0.16) }
+    )
 
-    /// The intelligence accent as an adaptive token — full lavender on light,
-    /// muted on dark.
-    static let intelligence = adaptive(light: Brand.lavender, dark: Brand.mutedLavender)
+    /// The intelligence accent as an adaptive token — the AI-activity colour of
+    /// the current theme (Sage: lavender, deepened in light mode for 3:1).
+    static let intelligence = themedColor { $0.aiActivityAccent }
 
     // ── Adaptive glass tints ──
     // For Liquid Glass surfaces that FOLLOW the system appearance (the dashboard
@@ -126,12 +139,34 @@ enum WispColor {
     // Always-dark surfaces (notch, overlay) pin their window to `.darkAqua`, so
     // these resolve dark there too.
 
-    /// Tint for a primary adaptive glass surface (sidebar, panel).
-    static let glassTint = adaptive(light: Color.white.opacity(0.55),
-                                    dark:  Color(hex: "#0E100D").opacity(0.55))
+    /// Tint for a primary adaptive glass surface (sidebar, panel, top bar). The
+    /// theme's middle backdrop stop, blended in at the theme's glass strength over
+    /// the same frosted-light / dark base the surface always used.
+    static let glassTint = themedColor(
+        lightValue: { theme in
+            NSColor(wispHex: WispThemeContrast.blendedHex(
+                foregroundHex: theme.backdropStops[1].lightHex, alpha: theme.glassTintStrength, overBackgroundHex: "#FFFFFF"),
+                alpha: 0.55)
+        },
+        darkValue: { theme in
+            NSColor(wispHex: WispThemeContrast.blendedHex(
+                foregroundHex: theme.backdropStops[1].darkHex, alpha: theme.glassTintStrength, overBackgroundHex: "#0E100D"),
+                alpha: 0.55)
+        }
+    )
     /// Tint for a nested adaptive glass card.
-    static let glassCardTint = adaptive(light: Color.white.opacity(0.5),
-                                        dark:  Color.black.opacity(0.22))
+    static let glassCardTint = themedColor(
+        lightValue: { theme in
+            NSColor(wispHex: WispThemeContrast.blendedHex(
+                foregroundHex: theme.backdropStops[0].lightHex, alpha: theme.glassTintStrength, overBackgroundHex: "#FFFFFF"),
+                alpha: 0.5)
+        },
+        darkValue: { theme in
+            NSColor(wispHex: WispThemeContrast.blendedHex(
+                foregroundHex: theme.backdropStops[0].darkHex, alpha: theme.glassTintStrength, overBackgroundHex: "#000000"),
+                alpha: 0.3)
+        }
+    )
 
     // ── Native window surfaces ──
     // The Wisp window is a standard macOS window, so its page background and
@@ -185,8 +220,34 @@ enum WispColor {
     /// lavender activity light — never from the surface or the text.
     enum Island {
         /// Pure black, to match the physical notch exactly. Any tint or
-        /// translucency leaves a visible seam where the hardware ends.
-        static let surface = Color.black
+        /// translucency leaves a visible seam where the hardware ends. The one
+        /// exception is the user's own opt-in, "Tint the island with my theme":
+        /// then it is the theme's (always dark) island tone. Nothing else tints it.
+        static var surface: Color {
+            surfaceColor(tinted: WispThemeStore.tintsIslandNow, theme: WispThemeStore.currentThemeNow)
+        }
+
+        /// The island surface for explicit inputs, for non-view code and previews.
+        static func surfaceColor(tinted: Bool, theme: WispTheme) -> Color {
+            tinted ? Color(hex: theme.islandTintHex) : Color.black
+        }
+
+        /// The colour of "Wisp is working" light on the island (the rim, the live
+        /// dot): the original lavender, unless the island is tinted, then the
+        /// theme's AI-activity accent in its dark-surface form.
+        static var activityAccent: Color {
+            WispThemeStore.tintsIslandNow
+                ? Color(hex: WispThemeStore.currentThemeNow.aiActivityAccent.darkHex)
+                : Brand.lavender
+        }
+
+        /// The accent for chips and prominent glass buttons that sit on the island:
+        /// sage, unless the island is tinted, then the theme's bright accent.
+        static var accent: Color {
+            WispThemeStore.tintsIslandNow
+                ? Color(hex: WispThemeStore.currentThemeNow.accentText.darkHex)
+                : Brand.sage
+        }
 
         static let textPrimary   = Color.white
         static let textSecondary = Color.white.opacity(0.62)
@@ -230,5 +291,49 @@ enum WispColor {
 
     static func adaptive(light: String, dark: Color) -> Color {
         adaptive(light: Color(hex: light), dark: dark)
+    }
+
+    // MARK: - Themed helpers
+
+    /// A colour that re-reads the current theme every time AppKit resolves it, so a
+    /// theme change reskins every call site once its view is rebuilt. `nonisolated`
+    /// because AppKit calls the provider off the main actor.
+    nonisolated static func themedColor(
+        lightValue: @escaping @Sendable (WispTheme) -> NSColor,
+        darkValue: @escaping @Sendable (WispTheme) -> NSColor
+    ) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let currentTheme = WispThemeStore.currentThemeNow
+            return isDark ? darkValue(currentTheme) : lightValue(currentTheme)
+        })
+    }
+
+    /// A themed colour taken straight from one of the theme's light/dark pairs.
+    nonisolated static func themedColor(_ pick: @escaping @Sendable (WispTheme) -> WispThemeColorPair) -> Color {
+        themedColor(
+            lightValue: { NSColor(wispHex: pick($0).lightHex) },
+            darkValue: { NSColor(wispHex: pick($0).darkHex) }
+        )
+    }
+
+    /// A themed colour that is the same in light and dark.
+    nonisolated static func themedFixedColor(_ pick: @escaping @Sendable (WispTheme) -> NSColor) -> Color {
+        themedColor(lightValue: pick, darkValue: pick)
+    }
+}
+
+extension NSColor {
+    /// An sRGB colour from "#RRGGBB". Hex literals live only in theme definitions
+    /// and the fixed brand/neutral tokens; this is how they become colours off the
+    /// main actor. A malformed string reads as black rather than crashing a draw.
+    nonisolated convenience init(wispHex hex: String, alpha: CGFloat = 1) {
+        let components = WispThemeContrast.rgbComponents(ofHex: hex) ?? (0, 0, 0)
+        self.init(
+            srgbRed: CGFloat(components.red) / 255.0,
+            green: CGFloat(components.green) / 255.0,
+            blue: CGFloat(components.blue) / 255.0,
+            alpha: alpha
+        )
     }
 }

@@ -4,7 +4,7 @@
 //
 //  A buddy's face. `BuddyAvatar` is the small, cheap form used in lists and the
 //  notch (still at rest, bobbing while it works); the full expressive character
-//  is `BuddyCharacter`. Colours are the buddies' vivid palette.
+//  is `BuddyCharacter`. Colours come from the current theme's buddy palette.
 //
 
 import SwiftUI
@@ -15,25 +15,23 @@ import SwiftUI
 /// buttons; gradients stay within one hue and a small tonal range, never a
 /// rainbow, so nothing looks airbrushed.
 enum BuddyAppearance {
-    private static let palette: [(light: Color, deep: Color)] = [
-        (Color(red: 0.60, green: 0.80, blue: 0.68), Color(red: 0.25, green: 0.52, blue: 0.40)), // sage
-        (Color(red: 0.66, green: 0.64, blue: 0.92), Color(red: 0.38, green: 0.35, blue: 0.74)), // iris
-        (Color(red: 0.94, green: 0.69, blue: 0.58), Color(red: 0.76, green: 0.40, blue: 0.29)), // clay
-        (Color(red: 0.93, green: 0.65, blue: 0.75), Color(red: 0.72, green: 0.34, blue: 0.51)), // rose
-        (Color(red: 0.60, green: 0.78, blue: 0.95), Color(red: 0.27, green: 0.49, blue: 0.78)), // sky
-        (Color(red: 0.93, green: 0.82, blue: 0.54), Color(red: 0.70, green: 0.53, blue: 0.16)), // sand
-        (Color(red: 0.55, green: 0.83, blue: 0.83), Color(red: 0.19, green: 0.52, blue: 0.57)), // teal
-        (Color(red: 0.80, green: 0.66, blue: 0.88), Color(red: 0.52, green: 0.34, blue: 0.64)), // plum
-    ]
-
-    static var paletteCount: Int { palette.count }
+    /// The eight colours come from the current theme (`WispTheme.buddyPalette`),
+    /// in a fixed index order, so a buddy's `colorIndex` keeps meaning "the same
+    /// slot" when the theme changes. The Sage theme holds the original hues:
+    /// sage, iris, clay, rose, sky, sand, teal, plum.
+    static var paletteCount: Int { WispTheme.buddyPaletteCount }
 
     static func lightColor(forColorIndex colorIndex: Int) -> Color {
-        palette[abs(colorIndex) % palette.count].light
+        Color(hex: themedPaletteEntry(forColorIndex: colorIndex).lightHex)
     }
 
     static func deepColor(forColorIndex colorIndex: Int) -> Color {
-        palette[abs(colorIndex) % palette.count].deep
+        Color(hex: themedPaletteEntry(forColorIndex: colorIndex).deepHex)
+    }
+
+    private static func themedPaletteEntry(forColorIndex colorIndex: Int) -> WispThemeBuddyColor {
+        let themedPalette = WispThemeStore.currentThemeNow.buddyPalette
+        return themedPalette[abs(colorIndex) % themedPalette.count]
     }
 
     /// Top-to-bottom body tone: the light colour easing a little toward the
@@ -57,14 +55,22 @@ struct BuddyAvatar: View {
     let colorIndex: Int
     var size: CGFloat = 32
     var isWorking: Bool = false
+    /// Change this value to make the buddy squish, e.g. when its run finishes.
+    /// The caller only changes it when Playful motion is allowed.
+    var bounceTrigger: Int = 0
+    /// Decorative by default. Pass words when the avatar is the only sign of a state
+    /// (for example "Sky is working"), so VoiceOver can say it.
+    var accessibilityDescription: String? = nil
 
     var body: some View {
         BuddyCharacter(
             colorIndex: colorIndex,
             size: size,
             mood: isWorking ? .working : .idle,
-            liveliness: isWorking ? .working : .still
+            liveliness: isWorking ? .working : .still,
+            bounceTrigger: bounceTrigger
         )
-        .accessibilityHidden(true)
+        .accessibilityHidden(accessibilityDescription == nil)
+        .accessibilityLabel(accessibilityDescription ?? "")
     }
 }

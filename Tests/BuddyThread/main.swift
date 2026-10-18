@@ -47,6 +47,23 @@ check(longAnswerHistory.last?.combinedText.count == BuddyThreadPolicy.maximumAns
 let addendum = BuddyThreadPolicy.systemPromptAddendum(buddyName: "Gmail Digest", job: "summarize my Gmail")
 check(addendum.contains("Gmail Digest") && addendum.contains("summarize my Gmail"), "addendum names the buddy and its job")
 
+// A personality's work-style line rides in the addendum after the specialty line, and a
+// neutral buddy's prompt is unchanged.
+let neutralAddendum = BuddyThreadPolicy.systemPromptAddendum(buddyName: "Gmail Digest", job: "summarize my Gmail", specialtyLine: "You are an inbox specialist.")
+let hypeAddendum = BuddyThreadPolicy.systemPromptAddendum(
+    buddyName: "Gmail Digest", job: "summarize my Gmail",
+    specialtyLine: "You are an inbox specialist.", personalityLine: BuddyPersonality.hype.personaLine
+)
+check(!neutralAddendum.contains("Work style"), "no personality adds no work-style line")
+check(hypeAddendum.contains(BuddyPersonality.hype.personaLine), "the personality line reaches the prompt")
+check(hypeAddendum.contains("You are an inbox specialist.") && hypeAddendum.contains("summarize my Gmail"), "specialty and job are kept alongside a personality")
+check(hypeAddendum.count > neutralAddendum.count, "a personality only adds text")
+check(
+    (hypeAddendum.range(of: "inbox specialist")?.lowerBound ?? hypeAddendum.endIndex)
+        < (hypeAddendum.range(of: "Work style")?.lowerBound ?? hypeAddendum.startIndex),
+    "the work-style line follows the specialty line"
+)
+
 // MARK: - Stored cap
 
 var storedExchanges: [BuddyThreadExchange] = []

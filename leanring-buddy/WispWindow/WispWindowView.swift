@@ -3,7 +3,7 @@
 //  leanring-buddy
 //
 //  The Wisp window's shell. There is no sidebar: a slim bar along the top holds
-//  the sections (four by default, nine with Advanced features on) as icons — the open one expands to show its name and
+//  the sections (four by default, eight with Advanced features on) as icons — the open one expands to show its name and
 //  slides to the next as you move — with Wisp's own state and model at the far
 //  end, and a section with several pages gets a quiet segmented strip beneath
 //  it. That gives every page the full width, which the Buddies messenger and
@@ -26,6 +26,7 @@ struct WispWindowView: View {
     @ObservedObject private var brainIngestQueue = BrainIngestQueue.shared
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var jobsEngine = JobsEngine.shared
+    @ObservedObject private var automationEngine = AutomationEngine.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var sectionTabNamespace
     @Namespace private var pageTabNamespace
@@ -38,29 +39,32 @@ struct WispWindowView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            if visiblePagesInSelectedSection.count > 1 {
-                pageStrip
-                    .transition(.opacity)
+        // The themed backdrop supplies the window's base colour and the glass
+        // container lets cards and pills refract it, so the shell itself paints
+        // no opaque background of its own.
+        WispThemedWindowSurface {
+            VStack(spacing: 0) {
+                topBar
+                if visiblePagesInSelectedSection.count > 1 {
+                    pageStrip
+                        .transition(.opacity)
+                }
+                // Each page gets its own identity so switching pages crossfades
+                // with a small lift instead of swapping in place.
+                ZStack {
+                    pageContent(router.selectedPage)
+                        .id(router.selectedPage)
+                        .transition(pageTransition)
+                }
+                .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.9), value: router.selectedPage)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            // Each page gets its own identity so switching pages crossfades
-            // with a small lift instead of swapping in place.
-            ZStack {
-                pageContent(router.selectedPage)
-                    .id(router.selectedPage)
-                    .transition(pageTransition)
-            }
-            .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.9), value: router.selectedPage)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(WispColor.windowBackground)
         }
-        .background(WispColor.windowBackground)
         .animation(reduceMotion ? nil : WispMotion.smooth, value: router.selectedSection)
         .background(sectionShortcutButtons)
         .tint(WispColor.accentText)
         .ignoresSafeArea(.container, edges: .top)
-        // Turning Advanced off while on a Buddies or Brain page moves the window
+        // Turning Advanced off while on a Brain page moves the window
         // to Settings instead of leaving a hidden page on screen.
         .onChange(of: advancedFeatures.isEnabled) { _, _ in
             router.reconcileWithAdvancedSetting()
@@ -165,14 +169,16 @@ struct WispWindowView: View {
     /// Running work shows where the user would go to see it.
     private func sidebarBadgeCount(for section: WispSection) -> Int {
         switch section {
-        case .jobs:
-            // Something to look at: a change from Canvas or study blocks to approve.
-            return (jobsEngine.latestDiff != nil || !jobsEngine.pendingStudyBlocks.isEmpty) ? 1 : 0
         case .history:
             return taskRegistry.runningRecords.count
         case .buddies:
-            // Working, or finished with something the user hasn't read.
+            // Working, or finished with something the user hasn't read; plus what
+            // used to badge Jobs (a Canvas change or study blocks to approve) and
+            // automations that failed or are waiting for an OK.
+            let canvasNeedsLook = (jobsEngine.latestDiff != nil || !jobsEngine.pendingStudyBlocks.isEmpty) ? 1 : 0
             return buddyStore.buddiesNeedingAttentionCount(in: taskRegistry)
+                + canvasNeedsLook
+                + automationEngine.needsYou.count
         case .brain:
             // Things still being read into the brain.
             return brainIngestQueue.pendingJobCount
@@ -235,12 +241,16 @@ struct WispWindowView: View {
                 companionManager: companionManager,
                 onSelectPage: { router.select($0) }
             )
-        case .jobs:
-            JobsTab()
         case .chat:
             ChatPage(companionManager: companionManager, taskRegistry: taskRegistry)
         case .buddies:
             BuddiesPage(taskRegistry: taskRegistry)
+        case .automations:
+            AutomationsHubView()
+        case .canvas:
+            // The old Jobs page, kept whole: Canvas feed link, daily checklist
+            // and study blocks. Automations the Planner buddy owns run on it.
+            JobsTab()
         case .routines:
             RoutinesTab(companionManager: companionManager)
         case .timeline:

@@ -177,6 +177,11 @@ final class AgentToolRegistry: ObservableObject {
         toolsByName[name]?.definition.requiresConfirmation ?? true
     }
 
+    /// What a registered tool declared about itself. Nil for an unknown name.
+    func metadata(forToolNamed name: String) -> ToolMetadata? {
+        toolsByName[name]?.definition.metadata
+    }
+
     func register(
         _ definition: BuddyToolDefinition,
         preparingInputWith inputPreparer: ToolInputPreparer? = nil,

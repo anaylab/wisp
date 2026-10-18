@@ -325,6 +325,7 @@ final class CompanionManager: ObservableObject {
                 }
             }
         registerBackgroundWorkTool()
+        AutomationEngine.shared.configureLive(companionManager: self)
         // The browser step loop marks what it acts on; this is how it reaches
         // the overlay this object owns.
         AgentToolRegistry.shared.browserCursorGuide = self
@@ -1571,6 +1572,20 @@ final class CompanionManager: ObservableObject {
                     self.scheduleTransientHideIfNeeded()
                 }
             }
+            return
+        }
+
+        // "Remind me tomorrow at 6 to …", "every weekday at 8 tell me …" and
+        // "when a new Canvas item shows up …" are automations, not questions:
+        // the editable draft card opens and nothing is saved or run until the
+        // user presses Save. Skipped for titled routine/skill runs and while a
+        // confirmation card is waiting; anything unclear carries on as a turn.
+        if historyTitle == nil,
+           pendingToolConfirmation == nil,
+           AutomationQuickAddRouter.route(transcript, buddyStore: BuddyStore.shared, now: Date()) {
+            PerfMetricsRecorder.shared.abandonTurn()
+            voiceState = .idle
+            scheduleTransientHideIfNeeded()
             return
         }
 
@@ -2863,7 +2878,8 @@ final class CompanionManager: ObservableObject {
                 + BuddyThreadPolicy.systemPromptAddendum(
                     buddyName: buddy.name,
                     job: buddy.instruction,
-                    specialtyLine: buddy.specialty?.personaLine
+                    specialtyLine: buddy.specialty?.personaLine,
+                    personalityLine: buddy.personality?.personaLine
                 )
                 + (request.requesterName.map(BuddyThreadPolicy.delegatedRequestAddendum(requesterName:)) ?? "")
                 + BuddyMemoryStore.shared.promptInstructions(forBuddyWithID: buddyID)
@@ -2910,6 +2926,197 @@ final class CompanionManager: ObservableObject {
             attachmentNames: request.attachmentNames
         )
         return runTaskID
+    }
+
+    // MARK: Automation runs (AutomationEngine)
+    //
+    // Mirrors `startBuddyRun`, because the system prompt, the selected model and the speech
+    // provider are private to this file. Differences: the toolkit. A scheduled, event or test run
+    // (`isUnattended`) is offered only tools that never prompt (`AutomationToolPolicy`), so
+    // nothing it does can lean on session auto-approve; a person pressing Run now gets the
+    // buddy's normal toolkit and the normal confirmation floor.
+
+    /// Whether this automation's model leaves the Mac (a cloud buddy, or Wisp set to a cloud provider).
+    func automationRunSendsDataOffThisMachine(buddy: WispBuddy?) -> Bool {
+        automationModelProvider(for: buddy).deployment.sendsDataOffThisMachine
+    }
+
+    private func automationModelProvider(for buddy: WispBuddy?) -> any ModelProvider {
+        buddy?.modelChoice.map(ModelProviderFactory.make) ?? selectedModelProvider
+    }
+
+    private func automationSystemPrompt(for buddy: WispBuddy?, continuesBuddyThread: Bool) -> String {
+        guard let buddy else { return Self.companionVoiceResponseSystemPrompt }
+        return Self.companionVoiceResponseSystemPrompt
+            + BuddyThreadPolicy.systemPromptAddendum(
+                buddyName: buddy.name,
+                job: buddy.instruction,
+                specialtyLine: buddy.specialty?.personaLine,
+                personalityLine: buddy.personality?.personaLine
+            )
+            + (continuesBuddyThread ? BuddyMemoryStore.shared.promptInstructions(forBuddyWithID: buddy.id) : "")
+    }
+
+    private func automationToolkit(buddy: WispBuddy?, modelSendsDataOffThisMachine: Bool, isUnattended: Bool) -> AgentRunToolkit {
+        var excludedToolNames = BuddyRunToolPolicy.excludedToolNames(modelSendsDataOffThisMachine: modelSendsDataOffThisMachine)
+        excludedToolNames.insert("do_in_background")
+
+        guard isUnattended else {
+            if let buddy {
+                return BuddyRunToolkitBuilder.toolkit(
+                    forBuddyWithID: buddy.id,
+                    modelSendsDataOffThisMachine: modelSendsDataOffThisMachine,
+                    toolAccess: buddy.toolAccess,
+                    // An automation never asks another buddy: no chains, no hidden cloud hop.
+                    delegation: nil
+                )
+            }
+            return AgentRunToolkit(excludedToolNames: excludedToolNames)
+        }
+
+        let buddyToolAccess = buddy?.toolAccess
+        return AgentRunToolkit(
+            excludedToolNames: excludedToolNames,
+            // The registry is main-actor; the run loop asks from the main actor.
+            permitsRegistryTool: { toolName in
+                let toolFacts = MainActor.assumeIsolated {
+                    (
+                        requiresConfirmation: AgentToolRegistry.shared.requiresConfirmation(forToolNamed: toolName),
+                        // An unknown tool declares nothing, so it is treated as writing.
+                        isReadOnly: AgentToolRegistry.shared.metadata(forToolNamed: toolName)?.readOnly ?? false,
+                        readsLocalOrAccountData: AgentToolRegistry.shared.metadata(forToolNamed: toolName).map { $0.dataSource != .none } ?? true
+                    )
+                }
+                return AutomationToolPolicy.permitsToolInUnattendedRun(
+                    toolName: toolName,
+                    requiresConfirmation: toolFacts.requiresConfirmation,
+                    isReadOnly: toolFacts.isReadOnly,
+                    readsLocalOrAccountData: toolFacts.readsLocalOrAccountData,
+                    runsOffThisMachine: modelSendsDataOffThisMachine
+                )
+                    && BuddyToolAccessPolicy.isPermitted(
+                        toolNamed: toolName,
+                        access: buddyToolAccess,
+                        modelSendsDataOffThisMachine: modelSendsDataOffThisMachine
+                    )
+            },
+            refusalForCall: { toolName, toolInput in
+                BuddyToolAccessPolicy.appRefusalReason(toolName: toolName, toolInput: toolInput, access: buddyToolAccess)
+            },
+            // No per-buddy memory tools: an unattended run reads data nobody vetted, and what it
+            // writes would shape every later prompt.
+            additionalTools: []
+        )
+    }
+
+    /// Starts one automation run as a background task. Returns the task id, or nil when the
+    /// background-task limit is reached (the engine retries a scheduled run on a later tick).
+    func startAutomationRun(
+        automation: Automation,
+        buddy: WispBuddy?,
+        resolvedInstruction: String,
+        isUnattended: Bool,
+        onSucceeded: @escaping @MainActor (UUID, String) -> Void
+    ) -> UUID? {
+        let modelProvider = automationModelProvider(for: buddy)
+        let runsOffThisMachine = modelProvider.deployment.sendsDataOffThisMachine
+        guard BackgroundTaskLauncher.canStartAnotherTask(runsOffThisMachine: runsOffThisMachine) else { return nil }
+
+        // The buddy's thread only grows when the automation's outputs say so.
+        let continuedBuddyID: UUID? = automation.outputs.contains(.buddyThreadMessage) ? buddy?.id : nil
+        let buddyThreadStore = BuddyThreadStore.shared
+
+        guard let runTaskID = BackgroundTaskLauncher.start(
+            request: resolvedInstruction,
+            title: AgentTaskRecord.buddyRunTitlePrefix + (buddy?.name ?? automation.name),
+            modelProvider: modelProvider,
+            systemPrompt: automationSystemPrompt(for: buddy, continuesBuddyThread: continuedBuddyID != nil),
+            conversationHistory: continuedBuddyID.map { buddyThreadStore.historyMessages(forBuddyWithID: $0) } ?? [],
+            toolkit: automationToolkit(
+                buddy: buddy,
+                modelSendsDataOffThisMachine: runsOffThisMachine,
+                isUnattended: isUnattended
+            ),
+            onSucceeded: { finishedTaskID, answerText in
+                if let continuedBuddyID {
+                    buddyThreadStore.completeExchange(
+                        forBuddyWithID: continuedBuddyID,
+                        taskID: finishedTaskID,
+                        answerText: AnswerDisplayText.cleaned(answerText)
+                    )
+                }
+                onSucceeded(finishedTaskID, answerText)
+            },
+            // The engine decides whether a run notifies (its notify policy).
+            completionNotification: nil,
+            speakConfirmation: { [weak self] question in
+                guard let self else { return }
+                try? await self.ttsProvider.speakText(question)
+            }
+        ) else { return nil }
+
+        if let continuedBuddyID {
+            var displayedInstruction = automation.name
+            if case .askBuddy(let instruction) = automation.action { displayedInstruction = instruction }
+            buddyThreadStore.beginExchange(
+                forBuddyWithID: continuedBuddyID,
+                taskID: runTaskID,
+                origin: .job,
+                userText: displayedInstruction
+            )
+        }
+        return runTaskID
+    }
+
+    /// A test run: the same read-only toolkit, but no History entry, no thread exchange and no
+    /// usage record. Returns the answer text.
+    func previewAutomationRun(
+        automation: Automation,
+        buddy: WispBuddy?,
+        resolvedInstruction: String
+    ) async throws -> String {
+        let modelProvider = automationModelProvider(for: buddy)
+        let runner = AgentTurnRunner(
+            modelProvider: modelProvider,
+            priority: .background,
+            toolkit: automationToolkit(
+                buddy: buddy,
+                modelSendsDataOffThisMachine: modelProvider.deployment.sendsDataOffThisMachine,
+                isUnattended: true
+            ),
+            speakConfirmation: { _ in }
+        )
+        let outcome = try await runner.run(
+            userText: resolvedInstruction,
+            images: [],
+            systemPrompt: automationSystemPrompt(for: buddy, continuesBuddyThread: false),
+            conversationHistory: [],
+            onNarration: { _ in },
+            onStep: { _ in }
+        )
+        return outcome.terminalText
+    }
+
+    /// Puts an automation's result in the notch when Wisp is idle (never over a live turn).
+    func presentAutomationResult(_ resultText: String) {
+        flashIsland(.success)
+        guard voiceState == .idle else { return }
+        currentReplyText = resultText
+    }
+
+    /// Speaks an automation's `[SAY: ...]` line, only when Wisp is idle.
+    func speakAutomationLine(_ spokenLine: String) {
+        guard voiceState == .idle else { return }
+        currentResponseTask?.cancel()
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            self.voiceState = .responding
+            try? await self.ttsProvider.speakText(spokenLine)
+            if !Task.isCancelled {
+                self.voiceState = .idle
+                self.scheduleTransientHideIfNeeded()
+            }
+        }
     }
 
     /// Starts any configured MCP servers.

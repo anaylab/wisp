@@ -99,8 +99,17 @@ enum BuddyThreadPolicy {
 
     /// Appended to the shared companion prompt so the buddy knows who it is and
     /// that it is continuing a conversation rather than starting one.
-    static func systemPromptAddendum(buddyName: String, job: String, specialtyLine: String? = nil) -> String {
-        (specialtyLine.map { "\n\n" + $0 } ?? "") + """
+    ///
+    /// The personality line (work style, reply length) follows the specialty
+    /// line and is nil for a neutral buddy, which keeps the prompt exactly as
+    /// it was before personalities existed.
+    static func systemPromptAddendum(
+        buddyName: String,
+        job: String,
+        specialtyLine: String? = nil,
+        personalityLine: String? = nil
+    ) -> String {
+        (specialtyLine.map { "\n\n" + $0 } ?? "") + (personalityLine.map { "\n\n" + $0 } ?? "") + """
 
         You are \(buddyName), a persistent assistant inside Wisp with one standing job: \(job)
         You keep a single ongoing conversation with the user. Earlier exchanges are above. \

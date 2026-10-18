@@ -134,6 +134,12 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// What this buddy is good at (`BuddySpecialty`); nil for buddies made before
     /// specialties existed, which read as an all-rounder.
     var specialty: BuddySpecialty?
+    /// How the buddy works (tone, reply length, celebration); nil is neutral,
+    /// exactly as buddies behaved before personalities.
+    var personality: BuddyPersonality?
+    /// Set only on the three built-in starters, so Wisp can tell them from buddies
+    /// the user made.
+    var starterKind: StarterBuddyKind?
 
     // List state, as Rakazo's bot list. All optional so older files still load.
     /// Kept at the top of the list.
@@ -249,6 +255,12 @@ final class BuddyStore: ObservableObject {
     private let buddiesFileURL: URL
     private var scheduleCheckTimer: Timer?
 
+    /// Buddies whose standing job an Automation now schedules. `runDueBuddies`
+    /// skips them, otherwise the job would run twice (once from here, once from
+    /// the Automation engine). Filled at launch by the automation migration; never
+    /// saved, so an empty set (the default) is exactly the old behaviour.
+    var buddyIDsWhoseSchedulesAreOwnedByAutomations: Set<UUID> = []
+
     /// Starts one run for a buddy — its job, or a message the user sent it —
     /// and returns its background task id, or nil when it couldn't start (e.g.
     /// the background-task limit is reached). The run is recorded in the buddy's
@@ -269,6 +281,10 @@ final class BuddyStore: ObservableObject {
     /// Safe to call more than once.
     func start(runStarter: @escaping (WispBuddy, BuddyRunRequest) -> UUID?) {
         self.runStarter = runStarter
+        // First launch only (the flag is remembered): the rail is never empty.
+        // Only the app's own store seeds; a store a test made on a temporary
+        // file stays exactly as it was built.
+        if self === Self.shared { ensureStarterBuddies() }
         guard scheduleCheckTimer == nil else { return }
         let timer = Timer(timeInterval: Self.scheduleCheckIntervalSeconds, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -278,7 +294,9 @@ final class BuddyStore: ObservableObject {
         timer.tolerance = 10
         RunLoop.main.add(timer, forMode: .common)
         scheduleCheckTimer = timer
-        runDueBuddies(now: Date())
+        // No immediate runDueBuddies here: the automation migration (which fills
+        // `buddyIDsWhoseSchedulesAreOwnedByAutomations`) runs on a later main-actor turn, and
+        // running now would fire an overdue migrated job a second time. The first tick follows.
     }
 
     /// Runs every repeating buddy whose time has come. A buddy already running
@@ -286,6 +304,7 @@ final class BuddyStore: ObservableObject {
     /// keeps its due date and is tried again next minute.
     func runDueBuddies(now: Date) {
         for buddy in buddies {
+            guard !buddyIDsWhoseSchedulesAreOwnedByAutomations.contains(buddy.id) else { continue }
             guard let nextScheduledRunAt = buddy.nextScheduledRunAt, nextScheduledRunAt <= now else { continue }
             if isRunning(buddy) {
                 advanceSchedule(ofBuddyWithID: buddy.id, after: now)
@@ -389,6 +408,7 @@ final class BuddyStore: ObservableObject {
         modelChoice: BuddyModelChoice? = nil,
         toolAccess: BuddyToolAccess? = nil,
         specialty: BuddySpecialty? = nil,
+        personality: BuddyPersonality? = nil,
         name chosenName: String? = nil,
         colorIndex chosenColorIndex: Int? = nil,
         runImmediately: Bool
@@ -409,7 +429,8 @@ final class BuddyStore: ObservableObject {
             nextScheduledRunAt: schedule.nextRunDate(after: now, calendar: .current),
             modelChoice: modelChoice,
             toolAccess: toolAccess,
-            specialty: specialty
+            specialty: specialty,
+            personality: personality
         )
         buddies.insert(newBuddy, at: 0)
         saveBuddies()
@@ -539,6 +560,12 @@ final class BuddyStore: ObservableObject {
         }
     }
 
+    /// Changes how the buddy works. Its job, thread and notes are untouched; the
+    /// next run simply reads in the new tone.
+    func updatePersonality(ofBuddyWithID buddyID: UUID, to newPersonality: BuddyPersonality?) {
+        mutateBuddy(withID: buddyID) { $0.personality = newPersonality }
+    }
+
     func updateColor(ofBuddyWithID buddyID: UUID, to newColorIndex: Int) {
         mutateBuddy(withID: buddyID) { $0.colorIndex = abs(newColorIndex) % BuddyAppearance.paletteCount }
     }
@@ -607,6 +634,7 @@ final class BuddyStore: ObservableObject {
             modelChoice: originalBuddy.modelChoice,
             toolAccess: originalBuddy.toolAccess,
             specialty: originalBuddy.specialty,
+            personality: originalBuddy.personality,
             notifiesWhenFinished: originalBuddy.notifiesWhenFinished
         )
         buddies.insert(duplicatedBuddy, at: 0)
@@ -634,6 +662,11 @@ final class BuddyStore: ObservableObject {
         BuddyMemoryStore.shared.deleteMemory(ofBuddyWithID: buddyID)
         BuddyFileLibrary.shared.deleteLibrary(ofBuddyWithID: buddyID)
         buddies.removeAll { $0.id == buddyID }
+        saveBuddies()
+    }
+
+    fileprivate func insertBuddyAtFront(_ buddy: WispBuddy) {
+        buddies.insert(buddy, at: 0)
         saveBuddies()
     }
 
@@ -673,5 +706,64 @@ final class BuddyStore: ObservableObject {
             withIntermediateDirectories: true
         )
         try? fileData.write(to: buddiesFileURL, options: .atomic)
+    }
+}
+
+// MARK: - Starter buddies, greeting
+
+extension BuddyStore {
+    static let startersSeededUserDefaultsKey = "wisp.buddies.startersSeeded"
+
+    /// Adds the Planner, Briefer and Focus buddies once. The flag is set the first
+    /// time this runs, so a starter the user deletes stays deleted. Inserts without
+    /// running anything: `createBuddy` runs a one-off buddy straight away, which a
+    /// starter must never do on first launch.
+    func ensureStarterBuddies(userDefaults: UserDefaults = .standard) {
+        guard !userDefaults.bool(forKey: Self.startersSeededUserDefaultsKey) else { return }
+        userDefaults.set(true, forKey: Self.startersSeededUserDefaultsKey)
+
+        let now = Date()
+        for starterDefinition in StarterBuddyDefinition.all where buddy(withID: starterDefinition.id) == nil {
+            let starterBuddy = WispBuddy(
+                id: starterDefinition.id,
+                name: BuddyNameGenerator.uniqueName(starterDefinition.name, avoiding: buddies.map(\.name)),
+                instruction: starterDefinition.jobInstruction,
+                colorIndex: starterDefinition.colorIndex,
+                schedule: .once,
+                createdAt: now,
+                runTaskIDs: [],
+                nextScheduledRunAt: nil,
+                toolAccess: starterDefinition.specialty.toolAccess,
+                specialty: starterDefinition.specialty,
+                personality: starterDefinition.defaultPersonality,
+                starterKind: starterDefinition.kind,
+                // Nothing has been read or run yet, so a starter isn't "news".
+                lastReadAt: now
+            )
+            insertBuddyWithoutRunning(starterBuddy)
+        }
+    }
+
+    /// Adds `buddy` to the list as it is. Unlike `createBuddy` it never starts a
+    /// run, even for a one-off buddy.
+    func insertBuddyWithoutRunning(_ buddy: WispBuddy) {
+        guard self.buddy(withID: buddy.id) == nil else { return }
+        insertBuddyAtFront(buddy)
+    }
+
+    /// The buddy who greets the user today: stable all day, different tomorrow,
+    /// the Briefer favoured. Nil with no buddies.
+    func dayBuddy(on date: Date, calendar: Calendar = .current) -> WispBuddy? {
+        let dayBuddyID = BuddyGreetingPolicy.dayBuddyID(
+            candidateBuddyIDs: buddies.map(\.id),
+            preferredBuddyID: StarterBuddyDefinition.brieferBuddyID,
+            dayKey: ChecklistStreakPolicy.dayKey(for: date, calendar: calendar)
+        )
+        return dayBuddyID.flatMap { buddy(withID: $0) }
+    }
+
+    /// "Morning. No rush, we'll get through it." in the buddy's personality.
+    static func greetingLine(for buddy: WispBuddy, hour: Int) -> String {
+        BuddyGreetingPolicy.greetingLine(for: buddy.personality, buddyName: buddy.name, hour: hour)
     }
 }

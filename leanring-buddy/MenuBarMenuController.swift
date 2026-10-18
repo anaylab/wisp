@@ -89,6 +89,7 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(actionItem(title: "Ask Wisp…", action: #selector(askWisp)))
+        menu.addItem(actionItem(title: "New Automation…", action: #selector(newAutomation)))
         menu.addItem(actionItem(title: "Ask About a Part…", action: #selector(askAboutPart)))
         let saveWorkedSolutionItem = actionItem(title: "Save Worked Solution…", action: #selector(saveWorkedSolution))
         // Only a drawing with a handwritten note or a circle is a worked solution.
@@ -96,10 +97,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         menu.addItem(saveWorkedSolutionItem)
         menu.addItem(actionItem(title: "Open Wisp", action: #selector(openToday), keyEquivalent: "o"))
         menu.addItem(actionItem(title: "Chat", action: #selector(openChat)))
-        // Buddies and Brain have no page while Advanced features are off (the router
-        // would land the click on Settings), so the items are left out until then.
+        // Buddies are first-class. Brain has no page while Advanced features are off (the
+        // router would land the click on Settings), so its items wait until then.
+        menu.addItem(actionItem(title: "Buddies", action: #selector(openBuddies)))
         if WispAdvancedFeaturesPreference.isEnabledNow {
-            menu.addItem(actionItem(title: "Buddies", action: #selector(openBuddies)))
             menu.addItem(actionItem(title: "Brain", action: #selector(openBrain)))
             menu.addItem(actionItem(title: "Add to Brain…", action: #selector(addToBrain)))
         }
@@ -151,6 +152,11 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
     @objc private func askWisp() {
         companionManager.openAskComposer()
+    }
+
+    @objc private func newAutomation() {
+        WispWindowRouter.shared.presentNewAutomation()
+        WispWindowNavigator.open(.automations)
     }
 
     @objc private func askAboutPart() {

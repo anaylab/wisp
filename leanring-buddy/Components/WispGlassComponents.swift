@@ -24,6 +24,7 @@ import SwiftUI
 /// of glass hovering over the desktop. Content is padded and clipped to a
 /// continuous rounded rectangle, with a soft island shadow.
 struct WispGlassPanel<Content: View>: View {
+    @ObservedObject private var themeStore = WispThemeStore.shared
     var cornerRadius: CGFloat = WispRadius.panel
     var padding: CGFloat = WispSpacing.lg
     var shadow: WispShadow = .floating
@@ -35,7 +36,17 @@ struct WispGlassPanel<Content: View>: View {
         let panelShape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content()
             .padding(padding)
-            .wispGlassSurface(cornerRadius: cornerRadius)
+            // Panels float over the desktop (the island's confirmation card), so
+            // they keep the dark glass tint and only take the theme if the user
+            // turned on "Tint the island with my theme".
+            .glassEffect(
+                .regular.tint(
+                    themeStore.tintsIsland
+                        ? Color(hex: themeStore.currentTheme.islandTintHex).opacity(0.55)
+                        : WispColor.OnGlass.tint
+                ),
+                in: panelShape
+            )
             .overlay(
                 panelShape
                     .strokeBorder(WispColor.OnGlass.borderSubtle, lineWidth: 1)
@@ -102,17 +113,18 @@ struct WispGlassButtonStyle: ButtonStyle {
             if isHovered { return Color.white.opacity(0.10) }
             return WispColor.OnGlass.chipFill
         case .prominent:
-            let sage = WispColor.Brand.sage
-            if isPressed { return sage.opacity(0.42) }
-            if isHovered { return sage.opacity(0.34) }
-            return sage.opacity(0.24)
+            // Sage on the black island; the theme's accent only when the island is tinted.
+            let islandAccent = WispColor.Island.accent
+            if isPressed { return islandAccent.opacity(0.42) }
+            if isHovered { return islandAccent.opacity(0.34) }
+            return islandAccent.opacity(0.24)
         }
     }
 
     private var border: Color {
         switch prominence {
         case .subtle:    return WispColor.OnGlass.borderSubtle
-        case .prominent: return WispColor.Brand.sage.opacity(isHovered ? 0.6 : 0.4)
+        case .prominent: return WispColor.Island.accent.opacity(isHovered ? 0.6 : 0.4)
         }
     }
 }

@@ -11,7 +11,7 @@
 
 import Foundation
 
-enum BuddyMood: Equatable, Sendable {
+nonisolated enum BuddyMood: Equatable, Sendable {
     case idle
     case working
     /// Just finished something. Fades back to `.idle` (see `happyDurationSeconds`).

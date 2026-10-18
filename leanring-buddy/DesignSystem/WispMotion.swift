@@ -22,6 +22,10 @@ enum WispMotion {
     /// Standard content transitions — reveals, colour changes.
     static let smooth = Animation.easeOut(duration: 0.25)
 
+    /// Button press/hover: a quick spring with a little overshoot, so a pill squishes
+    /// on press and bounces back (the tactile feel of HeyClicky's buttons).
+    static let bouncy = Animation.spring(response: 0.22, dampingFraction: 0.58)
+
     /// Slower, deliberate — fades, celebratory resolves.
     static let gentle = Animation.easeInOut(duration: 0.4)
 

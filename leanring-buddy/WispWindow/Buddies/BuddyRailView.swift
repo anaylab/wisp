@@ -84,6 +84,11 @@ private struct BuddyRailItem: View {
     @State private var bounceCount = 0
     @State private var isHovering = false
 
+    /// How the buddy feels, in its own words; only buddies with a personality say one.
+    private var moodWord: String? {
+        buddy.personality?.reaction.moodWord(for: mood)
+    }
+
     var body: some View {
         Button {
             bounceCount += 1
@@ -126,8 +131,17 @@ private struct BuddyRailItem: View {
         .buttonStyle(.plain)
         .pointerCursor()
         .onHover { isHovering = $0 }
+        .onChange(of: mood) { _, newMood in
+            // A finished run earns a squish, in the buddy's own measure (a Chill or
+            // Deadpan buddy stays composed), and only while Playful is on.
+            let celebrationLevel = buddy.personality?.reaction.celebrationLevel ?? 1
+            if newMood == .happy, celebrationLevel > 0, WispThemeStore.shared.allowsPlayfulMotion {
+                bounceCount += 1
+            }
+        }
         .animation(WispMotion.quick, value: isSelected)
         .animation(WispMotion.quick, value: isHovering)
-        .accessibilityLabel("\(buddy.name)\(isUnread ? ", unread" : "")")
+        .accessibilityLabel("\(buddy.name)\(isUnread ? ", unread" : "")\(moodWord.map { ", \($0)" } ?? "")")
+        .nativeTooltip(moodWord.map { "\(buddy.name) · \($0)" } ?? buddy.name)
     }
 }

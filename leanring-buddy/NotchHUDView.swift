@@ -36,10 +36,22 @@ struct NotchHUDView: View {
     @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
     @ObservedObject private var screenWatcherStore = ScreenWatcherStore.shared
+    /// The buddy whose automation or run is in flight shows its character in the
+    /// left flank, so these are observed to redraw when one starts or finishes.
+    @ObservedObject private var automationEngine = AutomationEngine.shared
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @ObservedObject private var themeStore = WispThemeStore.shared
 
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
     @State private var answerContentHeight: CGFloat = 0
+
+    /// The buddy shown in the left flank: the one working now, kept for a moment
+    /// after it finishes so its bounce can be seen before the flank goes back to
+    /// the mark.
+    @State private var flankBuddyID: UUID?
+    /// Change to make the flank buddy bounce (a run finished, Playful on).
+    @State private var flankBuddyBounceTrigger = 0
 
     /// The measured natural height of the quick panel's middle sections, so it
     /// wraps short content and scrolls only once it would overflow the window.
@@ -329,6 +341,7 @@ struct NotchHUDView: View {
             || morningBriefing.hasPendingBriefing
             || hasJobsContentToDrop
             || !screenWatcherStore.activeWatchers.isEmpty
+            || flankBuddyID != nil
     }
 
     /// Whether a flank is showing a label (step count, task count, countdown)
@@ -386,14 +399,68 @@ struct NotchHUDView: View {
     /// left, time on the right.
     @ViewBuilder
     private var notchLeftFlank: some View {
-        if companionManager.voiceState == .idle && !isExecutingBrowserTask && !runningBackgroundTasks.isEmpty {
-            flankActivityLabel("\(runningBackgroundTasks.count)")
-                .nativeTooltip(runningBackgroundTasks.count == 1
-                    ? "1 task running in the background"
-                    : "\(runningBackgroundTasks.count) tasks running in the background")
-        } else {
-            WispMark(state: companionManager.islandState.markState, size: 15)
+        Group {
+            if companionManager.voiceState == .idle && !isExecutingBrowserTask,
+               let flankBuddy = flankBuddyID.flatMap({ buddyStore.buddy(withID: $0) }) {
+                // The buddy doing the work, instead of an anonymous spinner.
+                BuddyAvatar(
+                    colorIndex: flankBuddy.colorIndex,
+                    size: 20,
+                    isWorking: workingBuddyID == flankBuddy.id,
+                    bounceTrigger: flankBuddyBounceTrigger,
+                    accessibilityDescription: workingBuddyID == flankBuddy.id ? "\(flankBuddy.name) is working" : "\(flankBuddy.name) is done"
+                )
+                .nativeTooltip(workingBuddyID == flankBuddy.id ? "\(flankBuddy.name) is working" : "\(flankBuddy.name) is done")
+            } else if companionManager.voiceState == .idle && !isExecutingBrowserTask && !runningBackgroundTasks.isEmpty {
+                flankActivityLabel("\(runningBackgroundTasks.count)")
+                    .nativeTooltip(runningBackgroundTasks.count == 1
+                        ? "1 task running in the background"
+                        : "\(runningBackgroundTasks.count) tasks running in the background")
+            } else {
+                WispMark(state: companionManager.islandState.markState, size: 15)
+            }
         }
+        .onAppear { flankBuddyID = flankBuddyID ?? workingBuddyID }
+        .onChange(of: workingBuddyID) { _, newWorkingBuddyID in
+            if let newWorkingBuddyID {
+                flankBuddyID = newWorkingBuddyID
+            } else if themeStore.allowsPlayfulMotion {
+                // Linger so the finish bounce is seen, then give the flank back.
+                let finishedFlankBuddyID = flankBuddyID
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(2.5))
+                    if flankBuddyID == finishedFlankBuddyID && workingBuddyID == nil { flankBuddyID = nil }
+                }
+            } else {
+                flankBuddyID = nil
+            }
+        }
+        .onChange(of: automationEngine.finishedBounceTrigger) { _, _ in
+            // A buddy with a composed personality (Chill, Deadpan) doesn't bounce.
+            let celebrationLevel = flankBuddyID.flatMap { buddyStore.buddy(withID: $0)?.personality?.reaction.celebrationLevel } ?? 1
+            if themeStore.allowsPlayfulMotion, celebrationLevel > 0 {
+                flankBuddyBounceTrigger += 1
+            }
+        }
+    }
+
+    /// The buddy with a run in flight right now: an automation of theirs is
+    /// running, or their own job or a message to them is.
+    private var workingBuddyID: UUID? {
+        buddyStore.buddies.first { buddy in
+            automationEngine.activeBuddyIDs.contains(buddy.id) || buddyStore.isRunning(buddy, in: taskRegistry)
+        }?.id
+    }
+
+    /// The buddy that produced a finished background task, for the face beside a
+    /// NEW result: from an automation run if there is one, else the buddy whose
+    /// run list holds the task.
+    private func buddyBehind(_ finishedRecord: AgentTaskRecord) -> WispBuddy? {
+        if let automationBuddyID = AutomationRunHistoryStore.shared.buddyID(forTaskID: finishedRecord.id),
+           let automationBuddy = buddyStore.buddy(withID: automationBuddyID) {
+            return automationBuddy
+        }
+        return buddyStore.buddies.first { $0.runTaskIDs.contains(finishedRecord.id) }
     }
 
     /// The live section at the top of the hover panel: the running browser task's
@@ -800,12 +867,26 @@ struct NotchHUDView: View {
         let resultLine = didSucceed
             ? AnswerDisplayText.cleaned(finishedRecord.finalText ?? "Done")
             : "Didn't finish — see History for details"
+        let resultBuddy = buddyBehind(finishedRecord)
         return HStack(alignment: .top, spacing: 8) {
-            Image(systemName: didSucceed ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(didSucceed ? DS.Colors.success : DS.Colors.destructive)
-                .frame(width: 12)
-                .padding(.top, 1)
+            if let resultBuddy {
+                // The buddy's face says who did it and how it went (beaming or worried).
+                BuddyCharacter(
+                    colorIndex: resultBuddy.colorIndex,
+                    size: 20,
+                    mood: didSucceed ? .happy : .oops,
+                    liveliness: .still
+                )
+                .frame(width: 24, height: 24)
+                .padding(.top, -2)
+                .accessibilityLabel("\(resultBuddy.name), \(didSucceed ? "finished" : "did not finish")")
+            } else {
+                Image(systemName: didSucceed ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(didSucceed ? DS.Colors.success : DS.Colors.destructive)
+                    .frame(width: 12)
+                    .padding(.top, 1)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(finishedRecord.title)
                     .font(.system(size: 12, weight: .medium))

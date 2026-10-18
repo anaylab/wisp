@@ -347,7 +347,9 @@ extension BuddyModelChoice {
 /// The one-line status under a buddy's name in every buddy list:
 /// "Working…", "Done · 10:39 PM", "Failed · 10:39 PM", "Next · Tue 9:00 AM", "Ready".
 enum BuddyStatusText {
-    static func line(for buddy: WispBuddy, isRunning: Bool, latestRunRecord: AgentTaskRecord?) -> String {
+    /// `restingMoodWord` is the buddy's own word for how it feels (its personality's
+    /// `moodWord`); it stands in for a plain "Ready" when nothing else needs saying.
+    static func line(for buddy: WispBuddy, isRunning: Bool, latestRunRecord: AgentTaskRecord?, restingMoodWord: String? = nil) -> String {
         if isRunning { return "Working…" }
         if let latestRunRecord {
             let finishedText = (latestRunRecord.finishedAt ?? latestRunRecord.startedAt)
@@ -364,7 +366,7 @@ enum BuddyStatusText {
                 : nextScheduledRunAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
             return "Next · \(nextRunText)"
         }
-        return "Ready"
+        return restingMoodWord.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "Ready"
     }
 }
 
@@ -1145,6 +1147,7 @@ struct NewBuddyForm: View {
     @State private var hasChosenScheduleByHand = false
     @State private var modelChoice: BuddyModelChoice?
     @State private var toolAccess: BuddyToolAccess?
+    @State private var personality: BuddyPersonality = .coach
     @FocusState private var isInstructionFieldFocused: Bool
 
     private var trimmedInstruction: String {
@@ -1211,6 +1214,8 @@ struct NewBuddyForm: View {
                 }
             ))
 
+            BuddyPersonalityPicker(selection: $personality)
+
             if advancedFeatures.isEnabled {
                 BuddyModelEditor(modelChoice: $modelChoice)
             }
@@ -1232,6 +1237,7 @@ struct NewBuddyForm: View {
                         schedule: schedule,
                         modelChoice: modelChoice,
                         toolAccess: toolAccess,
+                        personality: personality,
                         runImmediately: !schedule.isRepeating
                     )
                     onCreated(newBuddy.id)

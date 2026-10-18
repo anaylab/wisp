@@ -119,8 +119,9 @@ struct WispBentoPressStyle: ButtonStyle {
 // MARK: - Surface
 
 extension View {
-    /// The tile surface shared by bento tiles and `DashboardCard`: the native
-    /// grouped-card fill, a hairline edge, a soft shadow that deepens under the
+    /// The tile surface shared by bento tiles and `DashboardCard`: real Liquid
+    /// Glass over the theme backdrop (inside a `WispGlassContainer`; the native
+    /// grouped-card fill anywhere else), a hairline edge, a soft shadow that deepens under the
     /// pointer, and an optional flowing rim for live work.
     func wispBentoSurface(isHovered: Bool = false, isInteractive: Bool = false, isLive: Bool = false) -> some View {
         modifier(WispBentoSurfaceModifier(isHovered: isHovered, isInteractive: isInteractive, isLive: isLive))
@@ -141,7 +142,7 @@ private struct WispBentoSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         let tileShape = RoundedRectangle(cornerRadius: WispBentoMetrics.cornerRadius, style: .continuous)
         content
-            .background(tileShape.fill(WispColor.groupedCardBackground))
+            .wispWindowGlass(in: tileShape)
             .overlay(
                 tileShape.strokeBorder(
                     isHovered && isInteractive ? WispColor.accentText.opacity(0.35) : WispColor.cardSeparator,
@@ -182,7 +183,7 @@ struct WispLiveRim: View {
                         colors: [
                             WispColor.intelligence.opacity(0.0),
                             WispColor.intelligence.opacity(0.95),
-                            WispColor.Brand.sage.opacity(0.7),
+                            WispColor.accentText.opacity(0.7),
                             WispColor.intelligence.opacity(0.0),
                             WispColor.intelligence.opacity(0.0),
                         ],

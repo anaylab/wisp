@@ -9,25 +9,46 @@
 //  every component; that is what would tip Wisp into "AI slop".
 //
 
+import AppKit
 import SwiftUI
 
 enum WispGradient {
 
-    /// The signature stops, in order. Sourced from the brand spec:
-    /// `#9AA88F → #C9CBC1 → #AAA7D9`.
-    static let signatureStops: [Color] = [
-        Color(hex: "#9AA88F"),   // sage
-        Color(hex: "#C9CBC1"),   // mist
-        Color(hex: "#AAA7D9")    // soft lavender
-    ]
+    /// The signature stops, in order — the current theme's three backdrop stops
+    /// (light values, in both appearances, so the mark reads the same on any
+    /// surface). Sage: `#9AA88F → #C9CBC1 → #AAA7D9`, the original brand spec.
+    /// Each is a dynamic colour that re-reads the theme when it is drawn, so the
+    /// names and types are unchanged for every call site.
+    static var signatureStops: [Color] {
+        (0..<3).map { stopIndex in
+            WispColor.themedFixedColor { theme in
+                NSColor(wispHex: theme.backdropStops[stopIndex].lightHex)
+            }
+        }
+    }
+
+    /// The signature stops the *island* uses. The island is black by default, so
+    /// its mark keeps the original Sage gradient unless the user turned on "Tint
+    /// the island with my theme". Island views (and `WispMark` when drawn on the
+    /// island) read this instead of `signatureStops`.
+    static var islandSignatureStops: [Color] {
+        return (0..<3).map { stopIndex in
+            WispColor.themedFixedColor { theme in
+                let stopSource = WispThemeStore.tintsIslandNow ? theme : WispTheme.sage
+                return NSColor(wispHex: stopSource.backdropStops[stopIndex].lightHex)
+            }
+        }
+    }
 
     /// The signature gradient as a diagonal linear gradient — the default for a
     /// logo fill or an active-state wash.
-    static let signature = LinearGradient(
-        colors: signatureStops,
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static var signature: LinearGradient {
+        LinearGradient(
+            colors: signatureStops,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 
     /// A linear gradient along a custom axis, for the flowing-ribbon logo where
     /// the light should travel along the stroke rather than corner-to-corner.
