@@ -92,6 +92,15 @@ struct ShortcutsTab: View {
                     keys: bindingStore.primaryHoldChord.keyCapsuleLabels + [bindingStore.saveWorkedSolutionKey.capsuleLabel],
                     trailing: AnyView(saveWorkedSolutionKeyPicker)
                 )
+
+                Divider().overlay(DS.Colors.borderSubtle)
+
+                bindingRow(
+                    name: "Quick menu",
+                    description: "While holding the Talk chord, press R for a ring of quick actions around the pointer. Point at one and click, or press its number.",
+                    keys: bindingStore.primaryHoldChord.keyCapsuleLabels + ["R"],
+                    trailing: AnyView(EmptyView())
+                )
             }
         }
     }

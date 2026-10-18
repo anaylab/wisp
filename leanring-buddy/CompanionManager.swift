@@ -568,6 +568,8 @@ final class CompanionManager: ObservableObject {
 
     private var askAboutPartShortcutCancellable: AnyCancellable?
     private var saveWorkedSolutionShortcutCancellable: AnyCancellable?
+    private var radialMenuShortcutCancellable: AnyCancellable?
+    private let radialMenuController = RadialMenuController()
     /// The capture / save-panel round trip of "Save Worked Solution…", kept so
     /// a second request while one is open is ignored.
     var workedSolutionSaveTask: Task<Void, Never>?
@@ -642,6 +644,21 @@ final class CompanionManager: ObservableObject {
                 self.voiceState = .idle
                 self.setActiveCommandMode(nil)
                 self.beginAskAboutRegion()
+            }
+
+        radialMenuShortcutCancellable = globalPushToTalkShortcutMonitor
+            .radialMenuShortcutPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self, !self.isListeningPaused else { return }
+                // The hold that carried the shortcut would otherwise be heard
+                // as a talk gesture.
+                self.pendingKeyboardShortcutStartTask?.cancel()
+                self.pendingKeyboardShortcutStartTask = nil
+                self.buddyDictationManager.cancelCurrentDictation(preserveDraftText: false)
+                self.voiceState = .idle
+                self.setActiveCommandMode(nil)
+                self.showRadialMenu()
             }
 
         saveWorkedSolutionShortcutCancellable = globalPushToTalkShortcutMonitor
@@ -1061,6 +1078,36 @@ final class CompanionManager: ObservableObject {
     /// `conversationTranscript` is private to this file.
     var lastQuestionAskedByUser: String? {
         conversationTranscript.turns.last?.userText
+    }
+
+    /// The radial quick menu (Talk chord + R): the handful of things people reach for
+    /// most, in a ring around the pointer.
+    func showRadialMenu() {
+        guard !radialMenuController.isShowing else { return }
+        NotificationCenter.default.post(name: .wispDismissPanel, object: nil)
+        radialMenuController.show(items: [
+            RadialMenuItem(id: "ask", title: "Ask", symbolName: "text.cursor") { [weak self] in
+                self?.openTextComposer()
+            },
+            RadialMenuItem(id: "askAboutPart", title: "Ask about a part", symbolName: "viewfinder") { [weak self] in
+                self?.beginAskAboutRegion()
+            },
+            RadialMenuItem(id: "newAutomation", title: "New automation", symbolName: "bolt.fill") {
+                WispWindowRouter.shared.presentNewAutomation()
+                WispWindowNavigator.open(.automations)
+            },
+            RadialMenuItem(
+                id: "listening",
+                title: isListeningPaused ? "Resume listening" : "Pause listening",
+                symbolName: isListeningPaused ? "play.circle.fill" : "pause.circle.fill"
+            ) { [weak self] in
+                guard let self else { return }
+                self.setListeningPaused(!self.isListeningPaused)
+            },
+            RadialMenuItem(id: "openWisp", title: "Open Wisp", symbolName: "macwindow") {
+                WispWindowNavigator.open(.home)
+            },
+        ])
     }
 
     /// The menu bar's "Ask About a Part…": a drag-to-select overlay, then the

@@ -36,6 +36,13 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// Worked Solution". Another gesture layered on the hold.
     let saveWorkedSolutionShortcutPublisher = PassthroughSubject<Void, Never>()
 
+    /// Fires when R is pressed while the Talk chord is held — ⌃⌥R opens the radial
+    /// quick menu around the pointer. Another gesture layered on the hold.
+    let radialMenuShortcutPublisher = PassthroughSubject<Void, Never>()
+
+    /// The key pressed with the Talk chord for the radial quick menu (ANSI R).
+    nonisolated(unsafe) static var radialMenuKeyCode: UInt16 = 15
+
     /// The key pressed with the Talk chord for "Save Worked Solution" (ANSI key
     /// code; S by default). Kept current by `ShortcutBindingStore`.
     nonisolated(unsafe) static var saveWorkedSolutionKeyCode: UInt16 = 1
@@ -230,6 +237,18 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
            Self.saveWorkedSolutionKeyCode != Self.askAboutPartKeyCode {
             didFireRoutineShortcutDuringCurrentHold = true
             saveWorkedSolutionShortcutPublisher.send()
+        }
+
+        if isShortcutCurrentlyPressed,
+           activeInvocationMode == .assistant,
+           eventType == .keyDown,
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+           eventKeyCode == Self.radialMenuKeyCode,
+           // A letter someone bound to another gesture keeps that gesture.
+           Self.radialMenuKeyCode != Self.askAboutPartKeyCode,
+           Self.radialMenuKeyCode != Self.saveWorkedSolutionKeyCode {
+            didFireRoutineShortcutDuringCurrentHold = true
+            radialMenuShortcutPublisher.send()
         }
 
         let shortcutTransition = BuddyPushToTalkShortcut.shortcutTransition(
