@@ -2,8 +2,8 @@
 //  WispThemeBackdrop.swift
 //  leanring-buddy
 //
-//  The Wisp window's liquid-glass stage. Three soft blobs of the theme's backdrop
-//  colours drift slowly behind the content, and the window's cards, top bar and
+//  The Wisp window's liquid-glass stage. A 3x3 `MeshGradient` of the theme's backdrop
+//  colours flows slowly behind the content, and the window's cards, top bar and
 //  pills are real `.glassEffect` surfaces that refract them.
 //
 //  Three pieces, usually used together through `WispThemedWindowSurface`:
@@ -44,13 +44,12 @@ struct WispThemeBackdrop: View {
         self.isActive = isActive
     }
 
-    /// Where each blob rests, as a fraction of the window, and how far and how fast
-    /// it wanders. Different periods keep the three from ever lining up.
-    private static let blobs: [(anchor: CGPoint, wander: CGFloat, periodSeconds: Double, radiusFraction: CGFloat)] = [
-        (CGPoint(x: 0.12, y: 0.10), 0.07, 47, 0.62),
-        (CGPoint(x: 0.88, y: 0.38), 0.09, 61, 0.58),
-        (CGPoint(x: 0.34, y: 0.96), 0.08, 53, 0.66),
-    ]
+    /// How far each moving point of the mesh wanders, as a fraction of the window, and how
+    /// long one lap takes. Different periods keep them from ever lining up, so the colours
+    /// swirl instead of pulsing together.
+    private static let centreWander: CGFloat = 0.13
+    private static let edgeWander: CGFloat = 0.09
+    private static let periodsSeconds: [Double] = [41, 53, 47, 59, 67]
 
     private var isDrifting: Bool {
         isActive && controlActiveState != .inactive && themeStore.isPlayful && !reduceMotion
@@ -60,36 +59,52 @@ struct WispThemeBackdrop: View {
         let stopColors = themeStore.currentTheme.backdropStops.map {
             Color(hex: colorScheme == .dark ? $0.darkHex : $0.lightHex)
         }
-        // Dark blobs sit on a near-black window and need more weight to show at all.
-        let blobStrength: Double = colorScheme == .dark ? 0.85 : 0.60
+        // Dark glows sit on a near-black window and need more weight to show at all.
+        let glowStrength: Double = colorScheme == .dark ? 0.90 : 0.78
 
         ZStack {
             WispColor.windowBackground
             TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isDrifting)) { timeline in
                 let elapsedSeconds = isDrifting ? timeline.date.timeIntervalSinceReferenceDate : 0
-                Canvas { context, size in
-                    for (blobIndex, blob) in Self.blobs.enumerated() {
-                        let phase = elapsedSeconds / blob.periodSeconds * 2 * .pi
-                        let centre = CGPoint(
-                            x: (blob.anchor.x + blob.wander * CGFloat(sin(phase + Double(blobIndex)))) * size.width,
-                            y: (blob.anchor.y + blob.wander * CGFloat(cos(phase * 0.8 + Double(blobIndex)))) * size.height
-                        )
-                        let radius = max(size.width, size.height) * blob.radiusFraction
-                        context.fill(
-                            Path(ellipseIn: CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2)),
-                            with: .radialGradient(
-                                Gradient(colors: [stopColors[blobIndex].opacity(blobStrength), stopColors[blobIndex].opacity(0)]),
-                                center: centre,
-                                startRadius: 0,
-                                endRadius: radius
-                            )
-                        )
-                    }
-                }
+                MeshGradient(
+                    width: 3,
+                    height: 3,
+                    points: meshPoints(elapsedSeconds: elapsedSeconds),
+                    colors: meshColors(stopColors: stopColors, glowStrength: glowStrength)
+                )
             }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    /// A 3x3 mesh: corners fixed, the four edge midpoints sliding along their edge, and the
+    /// centre wandering. That is enough movement for the colour to flow like liquid without
+    /// the window's edges ever showing a seam.
+    private func meshPoints(elapsedSeconds: Double) -> [SIMD2<Float>] {
+        func wave(_ index: Int, amplitude: CGFloat, offset: Double = 0) -> Float {
+            let phase = elapsedSeconds / Self.periodsSeconds[index] * 2 * .pi + offset
+            return Float(amplitude * CGFloat(sin(phase)))
+        }
+        return [
+            SIMD2(0, 0), SIMD2(0.5 + wave(0, amplitude: Self.edgeWander), 0), SIMD2(1, 0),
+            SIMD2(0, 0.5 + wave(1, amplitude: Self.edgeWander, offset: 1.3)),
+            SIMD2(0.5 + wave(2, amplitude: Self.centreWander), 0.5 + wave(3, amplitude: Self.centreWander, offset: 0.9)),
+            SIMD2(1, 0.5 + wave(4, amplitude: Self.edgeWander, offset: 2.1)),
+            SIMD2(0, 1), SIMD2(0.5 + wave(1, amplitude: Self.edgeWander, offset: 3.0), 1), SIMD2(1, 1),
+        ]
+    }
+
+    /// The theme's three backdrop colours spread across the mesh, with the quiet window
+    /// colour between them so there is calm space around each glow.
+    private func meshColors(stopColors: [Color], glowStrength: Double) -> [Color] {
+        let calm = WispColor.windowBackground.opacity(0)
+        let glow = stopColors.map { $0.opacity(glowStrength) }
+        return [
+            glow[0], calm, glow[1],
+            calm, glow[2].opacity(0.55), calm,
+            glow[2], calm, glow[0],
+        ]
     }
 }
 

@@ -60,7 +60,7 @@ struct WispBentoTile<Content: View>: View {
         .wispBentoSurface(isHovered: isHovered, isInteractive: action != nil, isLive: isLive)
         .offset(y: isHovered && action != nil && !reduceMotion ? -2 : 0)
         .onHover { hovering in
-            withAnimation(WispMotion.smooth) { isHovered = hovering }
+            withAnimation(WispMotion.hover) { isHovered = hovering }
         }
         .contentShape(RoundedRectangle(cornerRadius: WispBentoMetrics.cornerRadius, style: .continuous))
     }
@@ -112,7 +112,7 @@ struct WispBentoPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.975 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: configuration.isPressed)
+            .animation(WispMotion.press, value: configuration.isPressed)
     }
 }
 

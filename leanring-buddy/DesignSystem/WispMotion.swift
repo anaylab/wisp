@@ -26,6 +26,25 @@ enum WispMotion {
     /// on press and bounces back (the tactile feel of HeyClicky's buttons).
     static let bouncy = Animation.spring(response: 0.22, dampingFraction: 0.58)
 
+    // Interaction springs: each kind of touch gets its own feel, so a press snaps, a
+    // hover eases up, a selection slides and a celebration pops, instead of every
+    // change sharing one curve.
+
+    /// Pressing down on something: fast, with a little overshoot when it springs back.
+    static let press = Animation.spring(response: 0.2, dampingFraction: 0.62)
+
+    /// Pointer arriving or leaving: soft and settled, no wobble.
+    static let hover = Animation.spring(response: 0.32, dampingFraction: 0.78)
+
+    /// Something coming to rest after a move (a row reordering, a panel resizing).
+    static let settle = Animation.spring(response: 0.45, dampingFraction: 0.82)
+
+    /// A shape changing identity (the sidebar's selection sliding to another row).
+    static let morph = Animation.spring(duration: 0.5, bounce: 0.22)
+
+    /// A small celebration (a tick landing, a buddy finishing): bouncy on purpose.
+    static let pop = Animation.spring(response: 0.3, dampingFraction: 0.5)
+
     /// Slower, deliberate — fades, celebratory resolves.
     static let gentle = Animation.easeInOut(duration: 0.4)
 

@@ -1633,7 +1633,7 @@ struct NotchHUDView: View {
             .pointerCursor()
             .nativeTooltip("Open the chat in the notch — your conversations, talk or type")
             Button {
-                WispWindowNavigator.open(.home)
+                WispWindowNavigator.open(.buddies)
             } label: {
                 Text("Open Wisp")
                     .font(.system(size: 11, weight: .medium))

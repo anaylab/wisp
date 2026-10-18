@@ -293,11 +293,13 @@ struct BuddyChatView: View {
             }
             Text(exchange.userText)
                 .font(.system(size: 13.5))
-                .foregroundStyle(Color.white)
+                .foregroundStyle(WispColor.textOnAccent)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 13).padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex)))
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                // The user's side is the theme's accent (black in Paper), so the buddies'
+                // own colours stay theirs and a conversation reads as two clear voices.
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.accent))
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 70)
@@ -340,7 +342,7 @@ struct BuddyChatView: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 13).padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(WispColor.surface2.opacity(0.9)))
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface2.opacity(0.9)))
 
                 HStack(spacing: 2) {
                     Text(meta)

@@ -61,6 +61,82 @@ private struct BuddyScreenFrameReader: NSViewRepresentable {
     }
 }
 
+/// The silhouettes buddies come in, so a rail of them reads as a cast of different
+/// characters rather than eight recolours of one cloud. A buddy's colour slot picks
+/// its shape, so the pairing is stable (the same buddy is always the same creature).
+enum BuddyShape: CaseIterable {
+    case cloud, drop, circle, roundedSquare, triangle, pill, bean, wideBlob
+
+    init(colorIndex: Int) {
+        // Slot order is chosen so neighbouring colours never share a silhouette.
+        let slotShapes: [BuddyShape] = [.circle, .drop, .cloud, .roundedSquare, .triangle, .pill, .bean, .wideBlob]
+        self = slotShapes[abs(colorIndex) % slotShapes.count]
+    }
+
+    /// How far down the face sits, as a fraction of the body size. A drop and a
+    /// triangle are narrow at the top, so their faces ride low where the room is.
+    var faceOffsetY: CGFloat {
+        switch self {
+        case .drop: return 0.09
+        case .triangle: return 0.13
+        case .cloud: return 0.0
+        case .pill: return -0.02
+        case .bean: return -0.03
+        default: return 0.0
+        }
+    }
+
+    /// The body outline, centred on the origin, y pointing down.
+    func path(bodySize: CGFloat) -> Path {
+        let size = bodySize
+        switch self {
+        case .cloud:
+            let puffs: [(x: CGFloat, y: CGFloat, diameter: CGFloat)] = [
+                (0.30, 0.56, 0.50), (0.50, 0.42, 0.60), (0.71, 0.55, 0.50), (0.50, 0.64, 0.56),
+            ]
+            var path = Path()
+            for puff in puffs {
+                let diameter = puff.diameter * size
+                path.addEllipse(in: CGRect(
+                    x: (puff.x - 0.5) * size - diameter / 2,
+                    y: (puff.y - 0.5) * size - diameter / 2,
+                    width: diameter,
+                    height: diameter
+                ))
+            }
+            return path
+        case .circle:
+            return Path(ellipseIn: CGRect(x: -0.43 * size, y: -0.43 * size, width: 0.86 * size, height: 0.86 * size))
+        case .drop:
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: -0.50 * size))
+            path.addQuadCurve(to: CGPoint(x: 0.35 * size, y: 0.12 * size), control: CGPoint(x: 0.30 * size, y: -0.22 * size))
+            path.addArc(center: CGPoint(x: 0, y: 0.12 * size), radius: 0.35 * size,
+                        startAngle: .degrees(0), endAngle: .degrees(180), clockwise: false)
+            path.addQuadCurve(to: CGPoint(x: 0, y: -0.50 * size), control: CGPoint(x: -0.30 * size, y: -0.22 * size))
+            path.closeSubpath()
+            return path
+        case .roundedSquare:
+            return Path(roundedRect: CGRect(x: -0.38 * size, y: -0.38 * size, width: 0.76 * size, height: 0.76 * size), cornerRadius: 0.22 * size)
+        case .triangle:
+            let corners = [CGPoint(x: 0, y: -0.34 * size), CGPoint(x: 0.37 * size, y: 0.30 * size), CGPoint(x: -0.37 * size, y: 0.30 * size)]
+            var triangle = Path()
+            triangle.addLines(corners)
+            triangle.closeSubpath()
+            // A round join on the outline is what softens the three corners.
+            var rounded = triangle.strokedPath(StrokeStyle(lineWidth: 0.15 * size, lineJoin: .round))
+            rounded.addPath(triangle)
+            return rounded
+        case .pill:
+            return Path(roundedRect: CGRect(x: -0.46 * size, y: -0.25 * size, width: 0.92 * size, height: 0.50 * size), cornerRadius: 0.25 * size)
+        case .bean:
+            return Path(roundedRect: CGRect(x: -0.31 * size, y: -0.43 * size, width: 0.62 * size, height: 0.86 * size), cornerRadius: 0.30 * size)
+        case .wideBlob:
+            return Path(roundedRect: CGRect(x: -0.46 * size, y: -0.33 * size, width: 0.92 * size, height: 0.66 * size), cornerRadius: 0.30 * size)
+        }
+    }
+}
+
 struct BuddyCharacter: View {
     enum Liveliness {
         case still
@@ -140,8 +216,30 @@ struct BuddyCharacter: View {
         let bounceAmount: CGFloat = (isAnimating && bounceElapsed >= 0 && bounceElapsed < 1.2)
             ? CGFloat(exp(-4.2 * bounceElapsed) * cos(bounceElapsed * 16))
             : 0
-        let squishX = breathing + Double(bounceAmount) * 0.09
-        let squishY = breathing - Double(bounceAmount) * 0.09
+        // An idle hop every few seconds (each buddy on its own beat): squash down, spring
+        // up, land with a squash. Only while resting, so it never fights a working ring.
+        let hopPeriod = 5.2 + seed * 0.85
+        let hopPhase = animationTime.truncatingRemainder(dividingBy: hopPeriod)
+        var hopLift: CGFloat = 0
+        var hopSquash: Double = 0
+        if liveliness == .full, mood == .idle || mood == .happy {
+            if hopPhase < 0.16 {
+                hopSquash = Double(hopPhase / 0.16) * 0.10                       // crouch
+            } else if hopPhase < 0.62 {
+                let flight = (hopPhase - 0.16) / 0.46
+                hopLift = CGFloat(sin(flight * .pi)) * bodySize * 0.20           // up and over
+                hopSquash = -0.06 * sin(flight * .pi)                            // stretch tall in flight
+            } else if hopPhase < 0.84 {
+                hopSquash = 0.09 * exp(-6 * (hopPhase - 0.62))                   // land and settle
+            }
+        }
+        // Leans toward the pointer, and wiggles when poked.
+        let leanDegrees = Double(pointerDirection.width) * 5
+        let wiggleDegrees = (isAnimating && bounceElapsed >= 0 && bounceElapsed < 1.0)
+            ? sin(bounceElapsed * 22) * exp(-4 * bounceElapsed) * 7
+            : 0
+        let squishX = breathing + Double(bounceAmount) * 0.09 + hopSquash
+        let squishY = breathing - Double(bounceAmount) * 0.09 - hopSquash
 
         let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
 
@@ -163,11 +261,12 @@ struct BuddyCharacter: View {
 
         if mood == .working { drawWorkingRing(in: &context, center: center, bodySize: bodySize, time: animationTime) }
 
-        context.translateBy(x: center.x, y: center.y + floatOffset)
-        context.rotate(by: .degrees(tilt))
+        context.translateBy(x: center.x + CGFloat(pointerDirection.width) * bodySize * 0.03, y: center.y + floatOffset - hopLift)
+        context.rotate(by: .degrees(tilt + leanDegrees + wiggleDegrees))
         context.scaleBy(x: squishX, y: squishY)
 
-        let bodyPath = Self.cloudPath(bodySize: bodySize)
+        let buddyShape = BuddyShape(colorIndex: colorIndex)
+        let bodyPath = buddyShape.path(bodySize: bodySize)
         let lightColor = BuddyAppearance.lightColor(forColorIndex: colorIndex)
         let deepColor = BuddyAppearance.deepColor(forColorIndex: colorIndex)
         let lowerColor = lightColor.mix(with: deepColor, by: 0.38)
@@ -187,6 +286,7 @@ struct BuddyCharacter: View {
         )
         context.stroke(bodyPath, with: .color(.white.opacity(0.14)), lineWidth: max(0.5, bodySize * 0.012))
 
+        context.translateBy(x: 0, y: buddyShape.faceOffsetY * bodySize)
         drawFace(in: &context, bodySize: bodySize, time: animationTime, pointerDirection: pointerDirection)
 
         if mood == .waiting {
@@ -217,27 +317,6 @@ struct BuddyCharacter: View {
         )
     }
 
-    /// Overlapping puffs make the cloud, centred on the origin.
-    private static func cloudPath(bodySize: CGFloat) -> Path {
-        let puffs: [(x: CGFloat, y: CGFloat, diameter: CGFloat)] = [
-            (0.30, 0.56, 0.50),
-            (0.50, 0.42, 0.60),
-            (0.71, 0.55, 0.50),
-            (0.50, 0.64, 0.56),
-        ]
-        var path = Path()
-        for puff in puffs {
-            let diameter = puff.diameter * bodySize
-            path.addEllipse(in: CGRect(
-                x: (puff.x - 0.5) * bodySize - diameter / 2,
-                y: (puff.y - 0.5) * bodySize - diameter / 2,
-                width: diameter,
-                height: diameter
-            ))
-        }
-        return path
-    }
-
     private func drawFace(in context: inout GraphicsContext, bodySize: CGFloat, time: TimeInterval, pointerDirection: CGSize) {
         let ink = Self.inkColor
         let eyeSpacing = bodySize * 0.17
@@ -249,6 +328,25 @@ struct BuddyCharacter: View {
         if mood == .working {
             lookX = sin(time * 2.2) * 0.85
             lookY = -0.1
+        } else if pointerDirection == .zero, liveliness == .full {
+            // Nothing to follow: glance around every couple of seconds, easing between
+            // spots rather than snapping, on its own schedule per buddy.
+            let glanceInterval = 2.3 + Double(colorIndex % 3) * 0.6
+            let glanceNumber = floor(time / glanceInterval)
+            let sinceGlanceStarted = time - glanceNumber * glanceInterval
+            let easeIn = min(1, sinceGlanceStarted / 0.22)
+            let smoothedEase = easeIn * easeIn * (3 - 2 * easeIn)
+            func glanceTarget(_ number: Double) -> CGSize {
+                func unit(_ salt: Double) -> Double {
+                    let raw = sin((number + Double(colorIndex)) * 127.1 + salt * 311.7) * 43758.5453
+                    return (raw - floor(raw)) * 2 - 1
+                }
+                return CGSize(width: unit(1) * 0.9, height: unit(2) * 0.5)
+            }
+            let previousTarget = glanceTarget(glanceNumber - 1)
+            let nextTarget = glanceTarget(glanceNumber)
+            lookX = previousTarget.width + (nextTarget.width - previousTarget.width) * smoothedEase
+            lookY = previousTarget.height + (nextTarget.height - previousTarget.height) * smoothedEase
         }
         let pupilShift = CGSize(width: lookX * bodySize * 0.026, height: lookY * bodySize * 0.018)
 

@@ -172,7 +172,8 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openToday() {
-        WispWindowNavigator.open(.home)
+        // The messenger is the front door; Today is one click away in its sidebar.
+        WispWindowNavigator.open(.buddies)
     }
 
     @objc private func openChat() {
