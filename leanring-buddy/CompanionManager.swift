@@ -540,6 +540,9 @@ final class CompanionManager: ObservableObject {
                 guard self.voiceState != .responding else { return }
 
                 if isFinalizing {
+                    if self.voiceState == .listening {
+                        WispSoundPlayer.shared.play(.heard)
+                    }
                     self.voiceState = .processing
                 } else if isRecording {
                     // A soft cue the moment the mic actually opens, so the user
@@ -2820,6 +2823,10 @@ final class CompanionManager: ObservableObject {
             .sink { [weak self] confirmation in
                 guard let self else { return }
 
+                // Once, when the card first appears (the coordinator republishes on every edit).
+                if confirmation != nil && self.pendingToolConfirmation == nil {
+                    WispSoundPlayer.shared.play(.needsApproval)
+                }
                 withAnimation(.easeOut(duration: 0.18)) {
                     self.pendingToolConfirmation = confirmation
                 }

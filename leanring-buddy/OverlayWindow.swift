@@ -172,7 +172,8 @@ struct OverlayContentView: View {
                             ToolConfirmationCoordinator.shared.approveFromUserInterface()
                         },
                         onDeny: {
-                            companionManager.flashIsland(.error)
+                            // A choice, not a failure: no red flash, no error thud.
+                            WispSoundPlayer.shared.play(.declined)
                             ToolConfirmationCoordinator.shared.declineFromUserInterface()
                         }
                     )
