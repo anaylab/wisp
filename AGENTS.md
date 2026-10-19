@@ -774,7 +774,7 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   "ungroup my tabs") are recognised by `ChromeTabCommandRouter` inside `BrowserCommandRouter`
   (`.chromeTabs`) and run without the model's tool choice, like tab commands and without agent mode. The
   agent gets `chrome_list_tabs`/`chrome_organize_tabs`/`chrome_close_duplicate_tabs`/`chrome_close_tabs`/
-  `chrome_ungroup_tabs` (browser scope). Status and install help live in the Agent tab's Chrome Tabs card.
+  `chrome_ungroup_tabs`/`chrome_focus_tab`/`chrome_pin_tabs`/`chrome_mute_tabs`/`chrome_move_tabs_to_new_window` (browser scope); plain commands also cover collapse/expand groups and mute/unmute tabs. The extension needs no new permissions for these (reload it to pick them up). Status and install help live in the Agent tab's Chrome Tabs card.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,

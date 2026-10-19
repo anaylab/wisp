@@ -58,6 +58,19 @@ nonisolated enum ChromeTabCommandRouter {
         if text.contains("ungroup") {
             return .ungroupAll
         }
+        if text.contains("group") {
+            if containsWholePhrase("collapse", in: text) || containsWholePhrase("fold", in: text) {
+                return .collapseGroups
+            }
+            if containsWholePhrase("expand", in: text) || containsWholePhrase("unfold", in: text) {
+                return .expandGroups
+            }
+        }
+        if text.contains("mute") {
+            let mutesTabs = containsWholePhrase("mute", in: text) || containsWholePhrase("silence", in: text)
+            if text.contains("unmute") { return .unmuteTabs }
+            if mutesTabs { return .muteTabs }
+        }
         if organizeVerbs.contains(where: { verb in containsWholePhrase(verb, in: text) }) {
             let wantsSiteGrouping = siteStrategyPhrases.contains { text.contains($0) }
             return .organize(by: wantsSiteGrouping ? .site : .topic)
@@ -94,6 +107,10 @@ enum ChromeTabToolDefinitions {
     static let closeDuplicateTabsToolName = "chrome_close_duplicate_tabs"
     static let closeTabsToolName = "chrome_close_tabs"
     static let ungroupTabsToolName = "chrome_ungroup_tabs"
+    static let focusTabToolName = "chrome_focus_tab"
+    static let pinTabsToolName = "chrome_pin_tabs"
+    static let muteTabsToolName = "chrome_mute_tabs"
+    static let moveTabsToNewWindowToolName = "chrome_move_tabs_to_new_window"
 
     /// The tab list handed to the model is capped: it shares a context window
     /// with everything else in the turn.
@@ -155,6 +172,56 @@ enum ChromeTabToolDefinitions {
         metadata: .writing(.localMachine)
     )
 
+    private static func tabIDsSchema(_ extraProperties: [String: JSONValue] = [:], required: [String] = ["tab_ids"]) -> JSONValue {
+        var properties: [String: JSONValue] = [
+            "tab_ids": .object([
+                "type": .string("array"),
+                "items": .object(["type": .string("integer")]),
+                "description": .string("Tab ids from chrome_list_tabs.")
+            ])
+        ]
+        for (name, schema) in extraProperties { properties[name] = schema }
+        return .object([
+            "type": .string("object"),
+            "properties": .object(properties),
+            "required": .array(required.map { .string($0) })
+        ])
+    }
+
+    static let focusTab = BuddyToolDefinition(
+        name: focusTabToolName,
+        description: "Switch Chrome to a specific tab and bring its window to the front, using a tab id from chrome_list_tabs. Use for \"go to my gmail tab\".",
+        inputSchema: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "tab_id": .object(["type": .string("integer"), "description": .string("A tab id from chrome_list_tabs.")])
+            ]),
+            "required": .array([.string("tab_id")])
+        ]),
+        metadata: .writing(.localMachine)
+    )
+
+    static let pinTabs = BuddyToolDefinition(
+        name: pinTabsToolName,
+        description: "Pin or unpin specific Chrome tabs by id. Pinned tabs are left alone by chrome_organize_tabs and duplicate cleanup.",
+        inputSchema: tabIDsSchema(["pinned": .object(["type": .string("boolean"), "description": .string("true to pin (default), false to unpin.")])]),
+        metadata: .writing(.localMachine)
+    )
+
+    static let muteTabs = BuddyToolDefinition(
+        name: muteTabsToolName,
+        description: "Mute or unmute specific Chrome tabs by id. Muting is reversible and doesn't pause or close anything.",
+        inputSchema: tabIDsSchema(["muted": .object(["type": .string("boolean"), "description": .string("true to mute (default), false to unmute.")])]),
+        metadata: .writing(.localMachine)
+    )
+
+    static let moveTabsToNewWindow = BuddyToolDefinition(
+        name: moveTabsToNewWindowToolName,
+        description: "Move specific Chrome tabs into a new window, e.g. to split work from browsing.",
+        inputSchema: tabIDsSchema(),
+        metadata: .writing(.localMachine)
+    )
+
     /// One line per tab, grouped by window, for `chrome_list_tabs`.
     static func tabListDescription(for snapshot: ChromeTabsSnapshot) -> String {
         guard !snapshot.tabs.isEmpty else { return "chrome has no open tabs." }
@@ -180,6 +247,7 @@ enum ChromeTabToolDefinitions {
                 if windowTab.active { tabFacts.append("showing") }
                 if windowTab.pinned { tabFacts.append("pinned") }
                 if windowTab.audible { tabFacts.append("playing sound") }
+                if windowTab.muted == true { tabFacts.append("muted") }
                 if windowTab.isInGroup {
                     let groupTitle = groupTitlesByID[windowTab.groupId].flatMap { $0.isEmpty ? nil : $0 } ?? "unnamed"
                     tabFacts.append("group \"\(groupTitle)\"")
@@ -253,5 +321,65 @@ extension AgentToolRegistry {
         register(ChromeTabToolDefinitions.ungroupTabs) { _ in
             try await ChromeTabOrganizer.ungroupAllTabs()
         }
+
+        register(ChromeTabToolDefinitions.focusTab) { input in
+            guard case .object(let arguments) = input,
+                  let requestedTabID = Self.chromeTabIDs(from: arguments["tab_id"]).first else {
+                return "i need a tab id from chrome_list_tabs."
+            }
+            let openTabIDs = Set(try await ChromeTabOrganizer.fetchSnapshot().tabs.map(\.id))
+            guard openTabIDs.contains(requestedTabID) else {
+                return "that tab isn't open. call chrome_list_tabs for the current ids."
+            }
+            try await ChromeTabOrganizer.focusTab(withID: requestedTabID)
+            return "switched to that tab."
+        }
+
+        register(ChromeTabToolDefinitions.pinTabs) { input in
+            let (openTabIDs, shouldApply) = try await Self.openTabIDsAndFlag(from: input, flagName: "pinned")
+            guard !openTabIDs.isEmpty else { return "none of those tab ids are open. call chrome_list_tabs for the current ids." }
+            try await ChromeTabOrganizer.setTabsPinned(withIDs: openTabIDs, pinned: shouldApply)
+            return "\(shouldApply ? "pinned" : "unpinned") \(openTabIDs.count) tabs."
+        }
+
+        register(ChromeTabToolDefinitions.muteTabs) { input in
+            let (openTabIDs, shouldApply) = try await Self.openTabIDsAndFlag(from: input, flagName: "muted")
+            guard !openTabIDs.isEmpty else { return "none of those tab ids are open. call chrome_list_tabs for the current ids." }
+            try await ChromeTabOrganizer.setTabsMuted(withIDs: openTabIDs, muted: shouldApply)
+            return "\(shouldApply ? "muted" : "unmuted") \(openTabIDs.count) tabs."
+        }
+
+        register(ChromeTabToolDefinitions.moveTabsToNewWindow) { input in
+            let (openTabIDs, _) = try await Self.openTabIDsAndFlag(from: input, flagName: "")
+            guard !openTabIDs.isEmpty else { return "none of those tab ids are open. call chrome_list_tabs for the current ids." }
+            try await ChromeTabOrganizer.moveTabsToNewWindow(withIDs: openTabIDs)
+            return "moved \(openTabIDs.count) tabs to a new window."
+        }
+    }
+
+    /// Tab ids from a tool argument that may be one number, a numeric string or a list of either.
+    private static func chromeTabIDs(from rawValue: JSONValue?) -> [Int] {
+        func tabID(from element: JSONValue) -> Int? {
+            switch element {
+            case .number(let numericTabID): return Int(exactly: numericTabID)
+            case .string(let textTabID): return Int(textTabID)
+            default: return nil
+            }
+        }
+        guard let rawValue else { return [] }
+        if case .array(let elements) = rawValue { return elements.compactMap(tabID(from:)) }
+        return tabID(from: rawValue).map { [$0] } ?? []
+    }
+
+    /// The requested `tab_ids` that are open right now (so an invented id
+    /// touches nothing) plus an optional boolean argument, true when absent.
+    private static func openTabIDsAndFlag(from input: JSONValue, flagName: String) async throws -> ([Int], Bool) {
+        guard case .object(let arguments) = input else { return ([], true) }
+        let requestedTabIDs = chromeTabIDs(from: arguments["tab_ids"])
+        var flagValue = true
+        if case .bool(let providedFlag)? = arguments[flagName] { flagValue = providedFlag }
+        guard !requestedTabIDs.isEmpty else { return ([], flagValue) }
+        let openTabIDs = Set(try await ChromeTabOrganizer.fetchSnapshot().tabs.map(\.id))
+        return (requestedTabIDs.filter { openTabIDs.contains($0) }, flagValue)
     }
 }

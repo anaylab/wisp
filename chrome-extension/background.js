@@ -140,6 +140,7 @@ const requestHandlers = {
         pinned: Boolean(tab.pinned),
         active: Boolean(tab.active),
         audible: Boolean(tab.audible),
+        muted: Boolean(tab.mutedInfo?.muted),
         groupId: tab.groupId ?? -1,
         lastAccessed: tab.lastAccessed ?? 0,
       }));
@@ -193,7 +194,67 @@ const requestHandlers = {
     await chrome.tabs.remove(tabIds);
     return { closedCount: tabIds.length };
   },
+
+  // Brings a tab to the front: selects it and raises its window.
+  async focusTab({ tabId }) {
+    requireTabID(tabId);
+    const tab = await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    return { tabId, windowId: tab.windowId };
+  },
+
+  async pinTabs({ tabIds, pinned }) {
+    requireTabIDs(tabIds);
+    const shouldPin = pinned !== false;
+    for (const tabID of tabIds) {
+      await chrome.tabs.update(tabID, { pinned: shouldPin });
+    }
+    return { changedCount: tabIds.length, pinned: shouldPin };
+  },
+
+  // Muting is per tab and reversible; nothing is closed or paused.
+  async muteTabs({ tabIds, muted }) {
+    requireTabIDs(tabIds);
+    const shouldMute = muted !== false;
+    for (const tabID of tabIds) {
+      await chrome.tabs.update(tabID, { muted: shouldMute });
+    }
+    return { changedCount: tabIds.length, muted: shouldMute };
+  },
+
+  // Collapses or expands tab groups: the ones in groupIds, or every group in
+  // every normal window when groupIds is omitted.
+  async setGroupsCollapsed({ groupIds, collapsed }) {
+    const shouldCollapse = collapsed !== false;
+    let targetGroupIDs = groupIds;
+    if (!Array.isArray(targetGroupIDs)) {
+      const allGroups = await chrome.tabGroups.query({});
+      targetGroupIDs = allGroups.map((group) => group.id);
+    }
+    for (const groupID of targetGroupIDs) {
+      await chrome.tabGroups.update(groupID, { collapsed: shouldCollapse });
+    }
+    return { changedCount: targetGroupIDs.length, collapsed: shouldCollapse };
+  },
+
+  // Moves the given tabs into one new window. Pinned and grouped state is
+  // dropped by Chrome when a tab changes window, which is expected here.
+  async moveTabsToNewWindow({ tabIds }) {
+    requireTabIDs(tabIds);
+    const [firstTabID, ...remainingTabIDs] = tabIds;
+    const newWindow = await chrome.windows.create({ tabId: firstTabID });
+    if (remainingTabIDs.length > 0) {
+      await chrome.tabs.move(remainingTabIDs, { windowId: newWindow.id, index: -1 });
+    }
+    return { windowId: newWindow.id, movedCount: tabIds.length };
+  },
 };
+
+function requireTabID(tabId) {
+  if (!Number.isInteger(tabId)) {
+    throw new Error("tabId must be a tab id");
+  }
+}
 
 function requireTabIDs(tabIds) {
   if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((tabID) => Number.isInteger(tabID))) {

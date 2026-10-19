@@ -38,6 +38,8 @@ nonisolated struct ChromeTab: Decodable, Equatable, Sendable {
     let pinned: Bool
     let active: Bool
     let audible: Bool
+    /// Nil from an older extension build that doesn't report it.
+    let muted: Bool?
     /// `ChromeTab.noGroupID` when the tab is in no group.
     let groupId: Int
     /// Milliseconds since 1970, or 0 when Chrome doesn't say.
@@ -446,6 +448,10 @@ nonisolated enum ChromeTabCommand: Equatable, Sendable {
     case organize(by: OrganizeStrategy)
     case closeDuplicates
     case ungroupAll
+    case collapseGroups
+    case expandGroups
+    case muteTabs
+    case unmuteTabs
 }
 
 @MainActor
@@ -462,6 +468,14 @@ enum ChromeTabOrganizer {
                 replyText = try await closeDuplicateTabs()
             case .ungroupAll:
                 replyText = try await ungroupAllTabs()
+            case .collapseGroups:
+                replyText = try await setGroupsCollapsed(true)
+            case .expandGroups:
+                replyText = try await setGroupsCollapsed(false)
+            case .muteTabs:
+                replyText = try await setAudibleTabsMuted(true)
+            case .unmuteTabs:
+                replyText = try await setAudibleTabsMuted(false)
             }
             return (replyText, true)
         } catch {
@@ -593,6 +607,83 @@ enum ChromeTabOrganizer {
             resultType: JSONValue.self
         )
         return "ungrouped \(groupedTabIDs.count) tabs."
+    }
+
+    private struct SetGroupsCollapsedParameters: Encodable {
+        let collapsed: Bool
+    }
+
+    static func setGroupsCollapsed(_ shouldCollapse: Bool) async throws -> String {
+        let snapshot = try await fetchSnapshot()
+        guard !snapshot.groups.isEmpty else { return "none of your tabs are in a group." }
+        _ = try await ChromeExtensionBridge.shared.sendRequest(
+            method: "setGroupsCollapsed",
+            parameters: SetGroupsCollapsedParameters(collapsed: shouldCollapse),
+            resultType: JSONValue.self
+        )
+        let groupCountText = snapshot.groups.count == 1 ? "1 group" : "\(snapshot.groups.count) groups"
+        return shouldCollapse ? "collapsed \(groupCountText)." : "expanded \(groupCountText)."
+    }
+
+    private struct MuteTabsParameters: Encodable {
+        let tabIds: [Int]
+        let muted: Bool
+    }
+
+    /// Muting touches only tabs that are making sound; unmuting touches only
+    /// tabs the extension reports as muted, so nothing else is disturbed.
+    static func setAudibleTabsMuted(_ shouldMute: Bool) async throws -> String {
+        let snapshot = try await fetchSnapshot()
+        let affectedTabIDs = snapshot.tabs
+            .filter { shouldMute ? $0.audible : ($0.muted ?? false) }
+            .map(\.id)
+        guard !affectedTabIDs.isEmpty else {
+            return shouldMute ? "no tab is playing sound." : "none of your tabs are muted."
+        }
+        try await setTabsMuted(withIDs: affectedTabIDs, muted: shouldMute)
+        let tabCountText = affectedTabIDs.count == 1 ? "1 tab" : "\(affectedTabIDs.count) tabs"
+        return shouldMute ? "muted \(tabCountText)." : "unmuted \(tabCountText)."
+    }
+
+    static func setTabsMuted(withIDs tabIDs: [Int], muted: Bool) async throws {
+        _ = try await ChromeExtensionBridge.shared.sendRequest(
+            method: "muteTabs",
+            parameters: MuteTabsParameters(tabIds: tabIDs, muted: muted),
+            resultType: JSONValue.self
+        )
+    }
+
+    private struct PinTabsParameters: Encodable {
+        let tabIds: [Int]
+        let pinned: Bool
+    }
+
+    static func setTabsPinned(withIDs tabIDs: [Int], pinned: Bool) async throws {
+        _ = try await ChromeExtensionBridge.shared.sendRequest(
+            method: "pinTabs",
+            parameters: PinTabsParameters(tabIds: tabIDs, pinned: pinned),
+            resultType: JSONValue.self
+        )
+    }
+
+    private struct FocusTabParameters: Encodable {
+        let tabId: Int
+    }
+
+    static func focusTab(withID tabID: Int) async throws {
+        _ = try await ChromeExtensionBridge.shared.sendRequest(
+            method: "focusTab",
+            parameters: FocusTabParameters(tabId: tabID),
+            resultType: JSONValue.self
+        )
+    }
+
+    static func moveTabsToNewWindow(withIDs tabIDs: [Int]) async throws {
+        _ = try await ChromeExtensionBridge.shared.sendRequest(
+            method: "moveTabsToNewWindow",
+            parameters: TabIDsParameters(tabIds: tabIDs),
+            resultType: JSONValue.self
+        )
     }
 
     private struct EmptyParameters: Encodable {}

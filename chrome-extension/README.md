@@ -6,8 +6,10 @@ Lets Wisp organize your Chrome tabs. Say (or type) to Wisp:
 - **"group my tabs by site"**: one group per website, with no model call
 - **"close duplicate tabs"**: keeps one copy of each page (never closes pinned tabs or tabs playing sound)
 - **"ungroup my tabs"**
+- **"collapse my tab groups"** / **"expand my tab groups"**
+- **"mute my tabs"** / **"unmute my tabs"**: mutes only tabs making sound
 
-With agent mode on, the model also gets `chrome_list_tabs` and `chrome_close_tabs` ("close all my youtube tabs").
+With agent mode on, the model also gets `chrome_list_tabs`, `chrome_close_tabs` ("close all my youtube tabs"), `chrome_focus_tab` ("go to my gmail tab"), `chrome_pin_tabs`, `chrome_mute_tabs` and `chrome_move_tabs_to_new_window`.
 
 Pinned tabs and groups you made yourself are never touched. Tabs never move between windows.
 
@@ -26,6 +28,6 @@ Wisp accepts the connection only when the handshake's `Origin` is this extension
 `kpblnefdnmlodeagdnfodnbbdbkacnce`, which is pinned by the `key` in `manifest.json`. A web page can't
 forge `Origin`, so sites you visit can't connect and read your tabs. Nothing leaves your Mac.
 
-The extension only exposes primitives (`getTabs`, `groupTabs`, `ungroupTabs`, `closeTabs`). Wisp decides
+The extension only exposes primitives (`getTabs`, `groupTabs`, `ungroupTabs`, `closeTabs`, `focusTab`, `pinTabs`, `muteTabs`, `setGroupsCollapsed`, `moveTabsToNewWindow`). Wisp decides
 what to do with them (`ChromeTabOrganizer.swift`). If you change the `key`, update
 `ChromeExtensionBridge.allowedExtensionID` to match.
