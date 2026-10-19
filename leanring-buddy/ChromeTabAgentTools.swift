@@ -66,10 +66,11 @@ nonisolated enum ChromeTabCommandRouter {
                 return .expandGroups
             }
         }
-        if text.contains("mute") {
-            let mutesTabs = containsWholePhrase("mute", in: text) || containsWholePhrase("silence", in: text)
-            if text.contains("unmute") { return .unmuteTabs }
-            if mutesTabs { return .muteTabs }
+        if text.contains("unmute") {
+            return .unmuteTabs
+        }
+        if containsWholePhrase("mute", in: text) || containsWholePhrase("silence", in: text) {
+            return .muteTabs
         }
         if organizeVerbs.contains(where: { verb in containsWholePhrase(verb, in: text) }) {
             let wantsSiteGrouping = siteStrategyPhrases.contains { text.contains($0) }
