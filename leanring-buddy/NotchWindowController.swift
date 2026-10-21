@@ -259,6 +259,7 @@ final class NotchWindowController {
             .sink { [weak self] isExpanded in
                 self?.panel?.ignoresMouseEvents = !isExpanded
                 if isExpanded {
+                    WispHapticPlayer.shared.play(.tick)
                     _ = SkillManager.shared.loadSkills()
                 }
             }

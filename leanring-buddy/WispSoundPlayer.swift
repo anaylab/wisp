@@ -180,6 +180,20 @@ final class WispSoundPlayer {
             }
         }
 
+        /// The trackpad feel that goes with this cue.
+        fileprivate var haptic: WispHapticPlayer.Feel {
+            switch self {
+            case .listening:     return .tap
+            case .heard:         return .tick
+            case .thinking:      return .tick
+            case .reply:         return .tick
+            case .success:       return .success
+            case .needsApproval: return .attention
+            case .declined:      return .soft
+            case .error:         return .problem
+            }
+        }
+
         /// A low playback volume (0–1) so the cue stays a gentle tick.
         fileprivate var volume: Float {
             switch self {
@@ -201,6 +215,8 @@ final class WispSoundPlayer {
     /// `NSSound` is created per call so a cue can retrigger before the previous
     /// one has finished.
     func play(_ cue: SoundCue) {
+        // Haptics have their own switch, so they play even with the sounds muted.
+        WispHapticPlayer.shared.play(cue.haptic)
         guard WispSoundPreference.shared.areSoundCuesEnabled else { return }
         let wavData = cachedWavDataByCue[cue] ?? WispSoundSynthesizer.wavData(for: cue.notes)
         cachedWavDataByCue[cue] = wavData

@@ -117,6 +117,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         let soundCuesItem = actionItem(title: "Sound Cues", action: #selector(toggleSoundCues))
         soundCuesItem.state = WispSoundPreference.shared.areSoundCuesEnabled ? .on : .off
         menu.addItem(soundCuesItem)
+
+        let hapticsItem = actionItem(title: "Haptics", action: #selector(toggleHaptics))
+        hapticsItem.state = WispHapticPreference.shared.areHapticsEnabled ? .on : .off
+        menu.addItem(hapticsItem)
         menu.addItem(.separator())
 
         menu.addItem(actionItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
@@ -207,6 +211,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
     @objc private func toggleSoundCues() {
         WispSoundPreference.shared.areSoundCuesEnabled.toggle()
+    }
+
+    @objc private func toggleHaptics() {
+        WispHapticPreference.shared.areHapticsEnabled.toggle()
     }
 
     @objc private func quitWisp() {

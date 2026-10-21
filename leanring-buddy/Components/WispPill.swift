@@ -155,6 +155,10 @@ private struct WispPillBody: View {
             .opacity(isEnabled ? 1 : 0.5)
             .contentShape(Capsule())
             .onHover { isHovering = $0 }
+            // The finger is on the trackpad for a click, so this one always lands.
+            .onChange(of: configuration.isPressed) { _, isNowPressed in
+                if isNowPressed && isEnabled { WispHapticPlayer.shared.play(.tick) }
+            }
             .animation(reducesMotion ? WispMotion.quick : WispMotion.bouncy, value: isHovering)
             .animation(reducesMotion ? WispMotion.quick : WispMotion.bouncy, value: configuration.isPressed)
     }
