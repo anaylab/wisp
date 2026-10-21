@@ -944,6 +944,33 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   is background priority through `ModelAccessGate`; switches live in `BrainPreferences`. UI: sidebar
   **Brain** with Pages (reader/editor, backlinks), Graph (force layout), Inbox (drop zone, jobs,
   notes import), Health, Log (undo), Settings.
+- **Reliability guards** (modeled on HeyClicky's support-mail fixes):
+  - **One copy only**: `SingleInstanceGuard` runs first in `applicationDidFinishLaunching`. A second copy (another path, e.g. a
+    DerivedData build beside an installed one) would install a second Talk event tap and answer everything twice. Instead it posts a
+    distributed notification (the running copy opens its window), quits, and skips `applicationWillTerminate`'s saves.
+  - **Muted speaker**: before speaking the main reply's `[SAY:]` line, `SystemAudioOutput.isDefaultOutputSilent()` (CoreAudio mute +
+    virtual main volume on the default output; a device with neither control counts as audible) is checked. If the output is silent,
+    the whole reply goes to the clipboard instead, and the notch shows "Your Mac is muted, so it's on the clipboard" with **Turn sound on**
+    (`CompanionManager.mutedReplyNoticeText`, matched against `currentReplyText` so a newer answer drops it). Short fixed replies
+    (window layout, timers) aren't covered.
+  - **Microphone fallback** (`MicrophoneInputDevices.swift`, used by `BuddyDictationManager`): each session records from the system default
+    unless it would hear nothing, using `MicrophoneInputChoicePolicy`. That means the built-in mic with the lid closed (`AppleClamshellState`
+    from IOPMrootDomain), or a mic that went silent in the last 10 minutes. Virtual/aggregate loopback devices (Teams Audio, BlackHole) are
+    never picked. A device switch replaces the `AVAudioEngine` (a reconfigured engine keeps the old format and the tap won't install) and pins
+    it with `kAudioOutputUnitProperty_CurrentDevice`. Two seconds into a hold, `MicrophoneSignalMeter` (written on the audio thread) checks for
+    no buffers or exact digital zeros. If so, Wisp switches once per hold and restarts the transcription session (callbacks from the replaced
+    session are ignored via `transcriptionSessionGeneration`). An engine that fails to start also tries another device once. The user sees
+    `CompanionManager.microphoneNotice` as a `MicrophoneNoticeIndicator` capsule under the notch.
+  - **Unattended work waits for a ready Mac** (`SystemReadinessMonitor`: NSWorkspace sleep/wake + `NWPathMonitor`, started at launch).
+    Scheduled and event automation runs, and `BuddyStore.runDueBuddies`, hold until 45s after wake. Runs that need the internet
+    (`AutomationNetworkPolicy`: a cloud-model buddy or the Canvas sync; the local model doesn't) also hold while offline. A held run leaves no
+    record and stays due; the automation row says "Waiting for the internet" (`AutomationEngine.automationIDsWaitingForInternet`). Run now is
+    never held.
+  - **Three failures pause an automation** (`AutomationFailurePausePolicy`): three unattended failures in a row pause it and set
+    `Automation.pausedReason` ("Paused after 3 failed runs in a row. Last time: …"). That reason shows on its row, in Needs you and in the
+    notification, and resuming clears it. Failures excused by `AutomationRunRecord.failureDoesNotCountTowardPause` don't count: the
+    connection dropped mid-run, or Wisp quit mid-run. Run now failures and skips neither count nor reset the streak. A declined approval
+    resets it. Tested by `Tests/AutomationEngine` and `Tests/AudioDevices`.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: none. `WispAnalytics.swift` is gated off and sends nothing.
 - **Usage log** (local, private; `UsageLogStore`): a record per finished model turn — timestamp, provider kind,
@@ -1087,6 +1114,10 @@ Grouped by what they do. Line counts are approximate.
 | `KokoroSpeechSynthesisClient.swift` | ~330 | Default TTS client: Kokoro sentence-by-sentence through `AVAudioPlayerNode` (next sentence synthesised while the current plays), immediate `stopPlayback`, Apple-voice fallback while loading / on failure. Also `KokoroSpeechTextChunker`. |
 | `AppleSpeechSynthesisClient.swift` | ~205 | TTS with `AVSpeechSynthesizer` and the built-in macOS voices — on-device, no server, no model memory. Kokoro's fallback, and the client when `VoiceTTSProvider = apple`. |
 | `AppleSpeechTranscriptionProvider.swift` | ~147 | On-device STT via the Speech framework. Parakeet's fallback, and the provider when `VoiceTranscriptionProvider = apple`. |
+| `MicrophoneInputDevices.swift` | ~210 | Microphone fallback: pure `MicrophoneInputChoicePolicy` (lid closed, recently silent, never virtual devices) and `MicrophoneSignalPolicy`, the thread-safe `MicrophoneSignalMeter`, and the CoreAudio/IOKit reads (default + live input devices, clamshell state). |
+| `SystemAudioOutput.swift` | ~105 | Whether the default output is muted or at zero (`SystemAudioOutputPolicy`), and `turnSoundOnForDefaultOutput` for the notch's Turn sound on. |
+| `SystemReadinessMonitor.swift` | ~90 | Sleep/wake + network reachability for unattended work (`isSettledAfterWake`, `isNetworkReachable`; pure `SystemReadinessPolicy`). |
+| `SingleInstanceGuard.swift` | ~50 | Detects another running Wisp, tells it to open its window (distributed notification), so the second copy can quit. |
 | `BuddyTranscriptionProvider.swift` | ~60 | STT protocol (`BuddyTranscriptionProvider` / `BuddyStreamingTranscriptionSession`) and the factory: Parakeet (with Apple fallback) unless `VoiceTranscriptionProvider = apple`. `isParakeetConfigured`. |
 | `SpokenSentenceStreamer.swift` | ~120 | Token stream → speakable sentences (tags held back). Left over from the retired whole-reply streaming: `CompanionManager` still holds an optional instance but never creates one. |
 | `ModelAccessGate.swift` | ~104 | Actor serialising all model calls, with interactive priority, so background work never evicts the prefix cache a live turn depends on. |
@@ -1422,6 +1453,7 @@ running):
 ./Tests/CanvasSync/run.sh                # Canvas ICS parsing, diff, study-block planner
 ./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
 ./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
+./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
 ```
 

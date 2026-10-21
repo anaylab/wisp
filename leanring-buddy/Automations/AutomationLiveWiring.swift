@@ -127,6 +127,8 @@ final class LiveAutomationDependencies: AutomationEngineDependencies {
 
     var currentDate: Date { Date() }
     var calendar: Calendar { .current }
+    var isSettledAfterWake: Bool { SystemReadinessMonitor.shared.isSettledAfterWake() }
+    var isNetworkReachable: Bool { SystemReadinessMonitor.shared.isNetworkReachable }
     var isVoiceModeOn: Bool { VoiceOutputPreference.shared.isReplySpeechEnabled }
 
     // MARK: Buddies and the model

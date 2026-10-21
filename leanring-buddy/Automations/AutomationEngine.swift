@@ -188,6 +188,11 @@ nonisolated struct AutomationTestResult: Equatable, Sendable {
 protocol AutomationEngineDependencies: AnyObject {
     var currentDate: Date { get }
     var calendar: Calendar { get }
+    /// False while the Mac is asleep and for a short while after it wakes, when connected apps,
+    /// the network and the model are still coming back. Unattended runs wait it out.
+    var isSettledAfterWake: Bool { get }
+    /// Whether the Mac has a usable internet connection. Runs that need it wait while it's down.
+    var isNetworkReachable: Bool { get }
 
     func buddyDescriptor(forBuddyID buddyID: UUID?) -> AutomationBuddyDescriptor?
     func canStartModelRun(for buddy: AutomationBuddyDescriptor?) -> Bool
@@ -238,6 +243,8 @@ protocol AutomationEngineDependencies: AnyObject {
 final class UnconfiguredAutomationDependencies: AutomationEngineDependencies {
     var currentDate: Date { Date() }
     var calendar: Calendar { .current }
+    var isSettledAfterWake: Bool { true }
+    var isNetworkReachable: Bool { true }
     func buddyDescriptor(forBuddyID buddyID: UUID?) -> AutomationBuddyDescriptor? { nil }
     func canStartModelRun(for buddy: AutomationBuddyDescriptor?) -> Bool { false }
     func fetchSourceText(for source: AutomationSource) async -> AutomationSourceFetchResult { .unavailable("Wisp isn't ready yet.") }
@@ -294,6 +301,9 @@ final class AutomationEngine: ObservableObject {
     @Published private(set) var lastFinishedBuddyID: UUID?
     /// Failures and declined approvals from the last 24h that the user has not dismissed.
     @Published private(set) var needsYou: [AutomationAttentionItem] = []
+    /// Automations whose run is due but held back because the Mac is offline and the run needs
+    /// the internet. Shown as "Waiting for the internet"; they run on the first tick after it's back.
+    @Published private(set) var automationIDsWaitingForInternet: Set<UUID> = []
 
     /// Runs once from `start()`: the live wiring puts the legacy migration here.
     var migrationHook: (@MainActor () -> Void)?
@@ -416,6 +426,25 @@ final class AutomationEngine: ObservableObject {
         }
 
         let buddyDescriptor = dependencies.buddyDescriptor(forBuddyID: automation.buddyID)
+        let needsInternet = AutomationNetworkPolicy.needsInternet(
+            action: automation.action,
+            buddySendsDataOffThisMachine: buddyDescriptor?.sendsDataOffThisMachine == true
+        )
+
+        // Schedules and events wait for a Mac that is awake and online, instead of failing on
+        // apps that haven't come back yet. Like the model limit below, a held-back run leaves no
+        // record and no "ran" mark, so a schedule runs on the first tick it can; an event that
+        // arrives in that window is dropped (the watchers re-arm on their own). Run now still
+        // runs, because a person is there to see what happens.
+        if reason == .schedule || reason == .missedSchedule || reason == .event {
+            guard dependencies.isSettledAfterWake else { return nil }
+            if needsInternet && !dependencies.isNetworkReachable {
+                automationIDsWaitingForInternet.insert(automationID)
+                return nil
+            }
+        }
+        automationIDsWaitingForInternet.remove(automationID)
+
         if case .askBuddy = automation.action, !dependencies.canStartModelRun(for: buddyDescriptor) {
             if isUnattended { return nil }
             let refusedRecord = AutomationRunRecord(
@@ -458,6 +487,10 @@ final class AutomationEngine: ObservableObject {
         record.outcome = execution.outcome
         record.resultText = execution.resultText
         record.backgroundTaskID = execution.taskID
+        // The connection dropped while it ran: the failure is the network's, not the automation's.
+        if case .failed = execution.outcome, needsInternet, !dependencies.isNetworkReachable {
+            record.failureDoesNotCountTowardPause = true
+        }
         historyStore.update(record)
 
         var nextRunAt: Date?
@@ -469,13 +502,27 @@ final class AutomationEngine: ObservableObject {
             store.rememberParameterValues(parameterValues, forAutomationID: automationID)
         }
 
+        // Three unattended failures in a row: stop retrying every slot and say why. The record's
+        // reason carries the pause so Needs you and the notification both explain it.
+        if reason.isUnattended,
+           case .failed(let lastFailureReason)? = record.outcome,
+           store.automation(withID: automationID)?.isEnabled == true,
+           AutomationFailurePausePolicy.shouldPause(recordsNewestFirst: historyStore.records(forAutomationID: automationID)) {
+            let pausedReason = AutomationFailurePausePolicy.pausedReason(lastFailureReason: lastFailureReason)
+            setPaused(true, forAutomationID: automationID)
+            store.setPausedReason(pausedReason, forAutomationID: automationID)
+            record.outcome = .failed(reason: pausedReason)
+            historyStore.update(record)
+        }
+        let finalOutcome = record.outcome ?? execution.outcome
+
         if execution.outcome.isSuccess {
             finishedBounceTrigger += 1
             lastFinishedBuddyID = automation.buddyID
         }
-        if AutomationNotificationDecision.shouldPost(outcome: execution.outcome, outputs: automation.outputs, policy: automation.notify) {
+        if AutomationNotificationDecision.shouldPost(outcome: finalOutcome, outputs: automation.outputs, policy: automation.notify) {
             let notificationBody: String
-            switch execution.outcome {
+            switch finalOutcome {
             case .failed(let failureReason): notificationBody = failureReason
             case .needsApproval: notificationBody = "Needs your OK."
             default: notificationBody = AutomationResultText.summary(of: execution.resultText ?? "")
@@ -961,8 +1008,19 @@ final class AutomationEngine: ObservableObject {
 
     private func recomputeDerivedState() {
         refreshActiveBuddyIDs()
+        refreshAutomationIDsWaitingForInternet()
         recomputeNextRuns()
         recomputeNeedsYou()
+    }
+
+    /// Nothing waits once the connection is back (the clock runs them), and a paused or deleted
+    /// automation is not waiting for anything.
+    private func refreshAutomationIDsWaitingForInternet() {
+        guard !automationIDsWaitingForInternet.isEmpty else { return }
+        let stillWaitingIDs: Set<UUID> = dependencies.isNetworkReachable
+            ? []
+            : automationIDsWaitingForInternet.filter { store.automation(withID: $0)?.isEnabled == true }
+        if stillWaitingIDs != automationIDsWaitingForInternet { automationIDsWaitingForInternet = stillWaitingIDs }
     }
 
     private func recomputeNextRuns() {

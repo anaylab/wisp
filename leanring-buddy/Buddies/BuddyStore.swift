@@ -303,9 +303,17 @@ final class BuddyStore: ObservableObject {
     /// is skipped for this slot; one that can't start (the background limit)
     /// keeps its due date and is tried again next minute.
     func runDueBuddies(now: Date) {
+        // Right after wake the network and connected apps are still coming back; a job started
+        // then just fails. Leaving the due date alone means the next minute's check runs it.
+        let readinessMonitor = SystemReadinessMonitor.shared
+        guard readinessMonitor.isSettledAfterWake(now: now) else { return }
         for buddy in buddies {
             guard !buddyIDsWhoseSchedulesAreOwnedByAutomations.contains(buddy.id) else { continue }
             guard let nextScheduledRunAt = buddy.nextScheduledRunAt, nextScheduledRunAt <= now else { continue }
+            // A cloud-model buddy can't do anything offline; hold its slot until the connection is back.
+            let buddySendsDataOffThisMachine = buddy.modelChoice?.sendsDataOffThisMachine
+                ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine
+            if buddySendsDataOffThisMachine && !readinessMonitor.isNetworkReachable { continue }
             if isRunning(buddy) {
                 advanceSchedule(ofBuddyWithID: buddy.id, after: now)
                 continue

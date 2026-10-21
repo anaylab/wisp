@@ -32,12 +32,30 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private var notchWindowController: NotchWindowController?
     private let companionManager = CompanionManager()
     private var wispWindowController: WispWindowController?
+    /// Set when another copy was already running and this one is quitting without starting:
+    /// it must not save anything on the way out over the running copy's files.
+    private var isQuittingAsSecondCopy = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if SingleInstanceGuard.otherRunningInstance() != nil {
+            print("🎯 Wisp: another copy is already running; asking it to show its window and quitting")
+            isQuittingAsSecondCopy = true
+            SingleInstanceGuard.notifyRunningInstanceThatSecondCopyLaunched()
+            NSApp.terminate(nil)
+            return
+        }
+        SingleInstanceGuard.observeSecondCopyLaunches {
+            WispWindowNavigator.open(.home)
+        }
+
         print("🎯 Wisp: Starting...")
         print("🎯 Wisp: Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
 
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 0])
+
+        // Before anything schedules work: automations and buddy jobs read it to wait for a Mac
+        // that is awake and online.
+        SystemReadinessMonitor.shared.start()
 
         WispAnalytics.configure()
         WispAnalytics.trackAppOpened()
@@ -67,6 +85,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        guard !isQuittingAsSecondCopy else { return }
         companionManager.stop()
         // After stop(), so any task it cancelled is saved in its final state.
         AgentTaskRegistry.shared.saveHistoryImmediately()

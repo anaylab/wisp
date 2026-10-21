@@ -85,6 +85,10 @@ final class CompanionManager: ObservableObject {
     /// speech off, this is the only place the answer appears. Cleared at the
     /// start of the next turn and on `.wispDismissPanel`, like the card.
     @Published var currentReplyText: String = ""
+    /// The reply that was meant to be spoken but went to the clipboard because the Mac's sound
+    /// was muted (or at zero). The notch shows "Your Mac is muted — copied" with a Turn sound on
+    /// button while this still equals `currentReplyText`, so a newer answer drops the notice.
+    @Published private(set) var mutedReplyNoticeText: String?
 
     /// The in-flight weather fetch for the current card, held so a new turn can
     /// cancel it before starting its own (cancel-on-replace).
@@ -604,6 +608,9 @@ final class CompanionManager: ObservableObject {
         buddyDictationManager.onKeyboardShortcutHoldEndedWithoutSpeech = { [weak self] in
             self?.openComposerAfterEmptyShortHold()
         }
+        buddyDictationManager.onMicrophoneNotice = { [weak self] noticeText in
+            self?.showMicrophoneNotice(noticeText)
+        }
 
         noteStepShortcutCancellable = globalPushToTalkShortcutMonitor
             .noteStepShortcutPublisher
@@ -743,6 +750,21 @@ final class CompanionManager: ObservableObject {
     /// overlay so they can see what their key-chord did. Set when a gesture
     /// fires, cleared when it ends. See `PushToTalkCommandMode`.
     @Published private(set) var activeCommandMode: PushToTalkCommandMode?
+
+    /// A line under the notch when recording moved to another microphone (lid closed, a mic that
+    /// sent no sound) or none can hear anything. Cleared after a few seconds.
+    @Published private(set) var microphoneNotice: String?
+    private var microphoneNoticeClearWorkItem: DispatchWorkItem?
+
+    private func showMicrophoneNotice(_ noticeText: String) {
+        microphoneNoticeClearWorkItem?.cancel()
+        microphoneNotice = noticeText
+        let clearWorkItem = DispatchWorkItem { [weak self] in
+            self?.microphoneNotice = nil
+        }
+        microphoneNoticeClearWorkItem = clearWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7, execute: clearWorkItem)
+    }
 
     /// Auto-dismiss for a transient mode badge (the tap-to-type confirmation),
     /// held so a later gesture can cancel it before it fires.
@@ -2188,7 +2210,14 @@ final class CompanionManager: ObservableObject {
                 // simply skipped in both cases — the answer still shows in the
                 // notch. Keep the spinner (processing state) until the audio
                 // actually starts, then switch to responding.
-                if let lineToSpeak, !lineToSpeak.isEmpty {
+                // A line spoken into a muted speaker is lost without a trace: copy the
+                // whole answer instead and say so in the notch, where the text already is.
+                var lineToSpeakUnlessMuted = lineToSpeak
+                if let lineToSpeak, !lineToSpeak.isEmpty, SystemAudioOutput.isDefaultOutputSilent() {
+                    copyReplyToClipboardBecauseOutputIsMuted(replyText: spokenText)
+                    lineToSpeakUnlessMuted = nil
+                }
+                if let lineToSpeak = lineToSpeakUnlessMuted, !lineToSpeak.isEmpty {
                     do {
                         // Measures time to the first audible audio — the latency
                         // the user feels.
@@ -3159,6 +3188,24 @@ final class CompanionManager: ObservableObject {
     }
 
     /// Speaks an automation's `[SAY: ...]` line, only when Wisp is idle.
+    // MARK: - Muted output
+
+    private func copyReplyToClipboardBecauseOutputIsMuted(replyText: String) {
+        let trimmedReplyText = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedReplyText.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(trimmedReplyText, forType: .string)
+        mutedReplyNoticeText = currentReplyText
+        print("🔇 Wisp: output is muted; copied the reply to the clipboard instead of speaking it")
+    }
+
+    /// The notch's "Turn sound on" button: unmutes the output (and lifts a zero volume).
+    func turnSoundOnAfterMutedReply() {
+        if SystemAudioOutput.turnSoundOnForDefaultOutput() {
+            mutedReplyNoticeText = nil
+        }
+    }
+
     func speakAutomationLine(_ spokenLine: String) {
         guard voiceState == .idle else { return }
         currentResponseTask?.cancel()

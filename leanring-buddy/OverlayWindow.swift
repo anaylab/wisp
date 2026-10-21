@@ -198,6 +198,15 @@ struct OverlayContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            // The microphone moved (lid closed, a mic that sent no sound), under the badge so
+            // it is read while still talking. Main screen when no gesture badge picked one.
+            if let microphoneNotice = companionManager.microphoneNotice,
+               companionManager.activeCommandMode == nil ? screenFrame == NSScreen.screens.first?.frame : isCursorOnThisScreen {
+                MicrophoneNoticeIndicator(noticeText: microphoneNotice)
+                    .position(x: screenFrame.width / 2, y: companionManager.activeCommandMode == nil ? 64 : 102)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Live browser-task progress, in the badge's spot while no gesture
             // badge needs it. Shown on the main screen's overlay only, where the
             // notch is, so one task does not print its progress on every monitor.
@@ -250,6 +259,7 @@ struct OverlayContentView: View {
         }
         .animation(.easeOut(duration: 0.18), value: companionManager.activeCommandMode)
         .animation(.easeOut(duration: 0.18), value: companionManager.browserActivityText.isEmpty)
+        .animation(.easeOut(duration: 0.18), value: companionManager.microphoneNotice)
         .animation(WispMotion.smooth, value: companionManager.voiceState == .listening)
     }
 }

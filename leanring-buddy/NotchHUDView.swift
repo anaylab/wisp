@@ -1371,6 +1371,9 @@ struct NotchHUDView: View {
             } else {
                 answerSurface
                 if hasReplyText {
+                    if isShowingMutedReplyNotice {
+                        mutedReplyNotice
+                    }
                     replyActionRow
                 }
             }
@@ -1383,6 +1386,33 @@ struct NotchHUDView: View {
 
     private var hasReplyText: Bool {
         !companionManager.currentReplyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The answer was meant to be spoken but the Mac's sound is off, so it went to the clipboard.
+    private var isShowingMutedReplyNotice: Bool {
+        companionManager.mutedReplyNoticeText != nil
+            && companionManager.mutedReplyNoticeText == companionManager.currentReplyText
+    }
+
+    private var mutedReplyNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "speaker.slash.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(WispColor.Island.textSecondary)
+            Text("Your Mac is muted, so it's on the clipboard")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(WispColor.Island.textSecondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Button("Turn sound on") {
+                companionManager.turnSoundOnAfterMutedReply()
+            }
+            .buttonStyle(WispIslandButtonStyle())
+            .font(.system(size: 11, weight: .medium))
+            .controlSize(.small)
+            .pointerCursor()
+            .accessibilityHint("Unmutes your Mac's sound output")
+        }
     }
 
     /// Icon-only buttons (the tooltips name them), so the row reads as a quiet

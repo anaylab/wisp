@@ -147,8 +147,16 @@ final class AutomationStore: ObservableObject {
         if isEnabled {
             // Resuming after a pause must not fire a slot that came due while it was paused.
             automations[index].scheduleBaselineAt = currentDate()
+            automations[index].pausedReason = nil
         }
         automations[index].nextRunAt = isEnabled ? computedNextRunDate(for: automations[index]) : nil
+        save()
+    }
+
+    /// Records why Wisp paused this automation itself; cleared when it is switched back on.
+    func setPausedReason(_ pausedReason: String?, forAutomationID automationID: UUID) {
+        guard let index = automations.firstIndex(where: { $0.id == automationID }) else { return }
+        automations[index].pausedReason = pausedReason
         save()
     }
 
@@ -286,6 +294,8 @@ final class AutomationRunHistoryStore: ObservableObject {
                     var interruptedRecord = record
                     interruptedRecord.finishedAt = record.startedAt
                     interruptedRecord.outcome = .failed(reason: "Wisp quit before this finished.")
+                    // Quitting is not the automation's fault, so it never counts toward the pause.
+                    interruptedRecord.failureDoesNotCountTowardPause = true
                     return interruptedRecord
                 }
             trimToLimits()

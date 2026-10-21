@@ -66,6 +66,9 @@ nonisolated struct AutomationRunRecord: Codable, Identifiable, Equatable, Sendab
     var backgroundTaskID: UUID?
     /// Test runs are never persisted.
     var isTestRun: Bool
+    /// A failure that was not the automation's fault (the internet dropped mid-run, Wisp quit
+    /// mid-run), so it does not count toward `AutomationFailurePausePolicy`. Nil = counts.
+    var failureDoesNotCountTowardPause: Bool?
 
     init(
         id: UUID = UUID(),
@@ -77,7 +80,8 @@ nonisolated struct AutomationRunRecord: Codable, Identifiable, Equatable, Sendab
         outcome: AutomationRunOutcome? = nil,
         resultText: String? = nil,
         backgroundTaskID: UUID? = nil,
-        isTestRun: Bool = false
+        isTestRun: Bool = false,
+        failureDoesNotCountTowardPause: Bool? = nil
     ) {
         self.id = id
         self.automationID = automationID
@@ -89,6 +93,7 @@ nonisolated struct AutomationRunRecord: Codable, Identifiable, Equatable, Sendab
         self.resultText = resultText
         self.backgroundTaskID = backgroundTaskID
         self.isTestRun = isTestRun
+        self.failureDoesNotCountTowardPause = failureDoesNotCountTowardPause
     }
 
     var isRunning: Bool { outcome == nil }
@@ -234,6 +239,54 @@ nonisolated enum AutomationNotificationDecision {
         case .failed, .needsApproval:
             return policy == .always || policy == .onlyOnFailure
         case .skippedBusy, .skippedPaused:
+            return false
+        }
+    }
+}
+
+/// When Wisp pauses an automation itself: after three unattended runs in a row failed, so a
+/// broken automation stops retrying (and spending model time, or cloud tokens) every slot.
+nonisolated enum AutomationFailurePausePolicy {
+    static let consecutiveFailuresBeforePause = 3
+
+    /// `recordsNewestFirst` is one automation's history. Counts unattended failures back from
+    /// the newest finished run until anything that worked (attended or not). Skips, test runs,
+    /// excused failures (offline, quit) and the user's own Run now failures neither count nor
+    /// break the streak; a declined approval breaks it, since the automation itself was fine.
+    static func shouldPause(recordsNewestFirst: [AutomationRunRecord]) -> Bool {
+        var consecutiveFailureCount = 0
+        for record in recordsNewestFirst where !record.isTestRun {
+            guard let outcome = record.outcome else { continue }
+            switch outcome {
+            case .skippedBusy, .skippedPaused:
+                continue
+            case .succeeded, .succeededNothingNew, .needsApproval:
+                return false
+            case .failed:
+                if record.failureDoesNotCountTowardPause == true || !record.reason.isUnattended { continue }
+                consecutiveFailureCount += 1
+                if consecutiveFailureCount >= consecutiveFailuresBeforePause { return true }
+            }
+        }
+        return false
+    }
+
+    static func pausedReason(lastFailureReason: String) -> String {
+        "Paused after \(consecutiveFailuresBeforePause) failed runs in a row. Last time: \(lastFailureReason)"
+    }
+}
+
+/// Whether an automation needs the internet to run at all. The local model, EventKit and the
+/// screen do not; a cloud-model buddy and the Canvas feed do. An offline Mac holds these runs
+/// back ("waiting for the internet") instead of letting them fail.
+nonisolated enum AutomationNetworkPolicy {
+    static func needsInternet(action: AutomationAction, buddySendsDataOffThisMachine: Bool) -> Bool {
+        switch action {
+        case .syncCanvas:
+            return true
+        case .askBuddy:
+            return buddySendsDataOffThisMachine
+        case .buildDailyChecklist, .proposeStudyBlocks:
             return false
         }
     }

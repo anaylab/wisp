@@ -51,6 +51,10 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
     /// private source (reminders, clipboard, screen text, folder files) read by a cloud-model
     /// buddy. Without it the engine refuses to hand that data to a cloud model.
     var acknowledgedSourceLeavesMac: Bool?
+    /// Added beyond the contract. Why Wisp paused this automation itself (three unattended
+    /// failures in a row), shown on its row until the user resumes it; nil when it is running
+    /// or the user paused it.
+    var pausedReason: String?
 
     static let currentSchemaVersion = 1
 
@@ -73,7 +77,8 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
         legacyOrigin: AutomationLegacyOrigin? = nil,
         schemaVersion: Int = Automation.currentSchemaVersion,
         scheduleBaselineAt: Date? = nil,
-        acknowledgedSourceLeavesMac: Bool? = nil
+        acknowledgedSourceLeavesMac: Bool? = nil,
+        pausedReason: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -94,6 +99,7 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
         self.schemaVersion = schemaVersion
         self.scheduleBaselineAt = scheduleBaselineAt
         self.acknowledgedSourceLeavesMac = acknowledgedSourceLeavesMac
+        self.pausedReason = pausedReason
     }
 
     /// Whether this automation is a view onto JobsEngine's own timers (Canvas sync, morning

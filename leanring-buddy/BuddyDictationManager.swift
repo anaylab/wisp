@@ -8,6 +8,7 @@
 //
 
 import AppKit
+import AudioToolbox
 import AVFoundation
 import Combine
 import Foundation
@@ -338,7 +339,25 @@ final class BuddyDictationManager: NSObject, ObservableObject {
     }
 
     private let transcriptionProvider: any BuddyTranscriptionProvider
-    private let audioEngine = AVAudioEngine()
+    /// Replaced (not reconfigured) whenever recording moves to another microphone, because an
+    /// engine whose input device changed underneath it keeps the old device's format and the tap
+    /// then refuses to install.
+    private var audioEngine = AVAudioEngine()
+    /// The microphone `audioEngine` is pinned to; nil = the system default input.
+    private var pinnedInputDevice: MicrophoneInputDevice?
+    /// Microphones that delivered no sound, by unique id, with when. Passed over for
+    /// `MicrophoneSignalPolicy.silentDeviceAvoidanceSeconds`, then tried again.
+    private var silentInputDeviceDatesByIdentifier: [String: Date] = [:]
+    private let microphoneSignalMeter = MicrophoneSignalMeter()
+    private var microphoneSignalCheckWorkItem: DispatchWorkItem?
+    /// At most one switch per hold, so two dead microphones can't bounce back and forth.
+    private var hasSwitchedMicrophoneThisSession = false
+    /// Bumped for every transcription session, so callbacks from one that was replaced mid-hold
+    /// (a microphone switch cancels it) are ignored instead of ending the new one.
+    private var transcriptionSessionGeneration = 0
+    /// Told when recording moved to another microphone, or none can hear anything, with a short
+    /// line for the user. `CompanionManager` shows it under the notch.
+    var onMicrophoneNotice: ((String) -> Void)?
     private var activeTranscriptionSession: (any BuddyStreamingTranscriptionSession)?
     private var activeStartSource: BuddyDictationStartSource?
     private var draftCallbacks: BuddyDictationDraftCallbacks?
@@ -522,6 +541,8 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             return
         }
 
+        hasSwitchedMicrophoneThisSession = false
+
         do {
             try await startRecognitionSession()
             guard !Task.isCancelled else {
@@ -537,6 +558,7 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             }
             isPreparingToRecord = false
             print("🎙️ BuddyDictationManager: recognition session started")
+            scheduleMicrophoneSignalCheck()
         } catch {
             isPreparingToRecord = false
             lastErrorMessage = userFacingErrorMessage(
@@ -589,6 +611,8 @@ final class BuddyDictationManager: NSObject, ObservableObject {
     private func startRecognitionSession() async throws {
         activeTranscriptionSession?.cancel()
         activeTranscriptionSession = nil
+        transcriptionSessionGeneration += 1
+        let sessionGeneration = transcriptionSessionGeneration
 
         print("🎙️ BuddyDictationManager: opening transcription provider \(transcriptionProvider.displayName)")
 
@@ -597,12 +621,13 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             localeIdentifier: DictationSettingsStore.shared.selectedLanguageLocaleIdentifier,
             onTranscriptUpdate: { [weak self] transcriptText in
                 Task { @MainActor in
-                    self?.latestRecognizedText = transcriptText
+                    guard let self, self.transcriptionSessionGeneration == sessionGeneration else { return }
+                    self.latestRecognizedText = transcriptText
                 }
             },
             onFinalTranscriptReady: { [weak self] transcriptText in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.transcriptionSessionGeneration == sessionGeneration else { return }
                     self.latestRecognizedText = transcriptText
 
                     if self.isFinalizingTranscript {
@@ -614,7 +639,8 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             },
             onError: { [weak self] error in
                 Task { @MainActor in
-                    self?.handleRecognitionError(error)
+                    guard let self, self.transcriptionSessionGeneration == sessionGeneration else { return }
+                    self.handleRecognitionError(error)
                 }
             }
         )
@@ -622,17 +648,149 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         self.activeTranscriptionSession = activeTranscriptionSession
         print("🎙️ BuddyDictationManager: provider ready, starting audio engine")
 
+        pinAudioEngineToUsableMicrophone()
+        do {
+            try installTapAndStartAudioEngine()
+        } catch {
+            // The microphone wouldn't start (unplugged mid-use, wedged driver): try another once.
+            guard let failedDevice = pinnedInputDevice ?? MicrophoneInputDevices.defaultInputDevice() else { throw error }
+            print("⚠️ BuddyDictationManager: \(failedDevice.name) failed to start (\(error)); trying another microphone")
+            silentInputDeviceDatesByIdentifier[failedDevice.uniqueIdentifier] = Date()
+            let previousPinnedDevice = pinnedInputDevice
+            pinAudioEngineToUsableMicrophone(announcesChange: false)
+            guard let replacementDevice = pinnedInputDevice, replacementDevice != previousPinnedDevice else { throw error }
+            try installTapAndStartAudioEngine()
+            onMicrophoneNotice?("\(failedDevice.name) couldn't start, so Wisp is listening on \(replacementDevice.name)")
+        }
+    }
+
+    private func installTapAndStartAudioEngine() throws {
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
+        let microphoneSignalMeter = microphoneSignalMeter
+        microphoneSignalMeter.reset()
 
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
+            if let channelData = buffer.floatChannelData {
+                microphoneSignalMeter.record(samples: channelData[0], frameCount: Int(buffer.frameLength))
+            }
             self?.activeTranscriptionSession?.appendAudioBuffer(buffer)
             self?.updateAudioPowerLevel(from: buffer)
         }
 
         audioEngine.prepare()
         try audioEngine.start()
+    }
+
+    // MARK: - Microphone fallback
+
+    private var currentlyAvoidedInputDeviceIdentifiers: Set<String> {
+        let now = Date()
+        silentInputDeviceDatesByIdentifier = silentInputDeviceDatesByIdentifier.filter { _, silentSince in
+            now.timeIntervalSince(silentSince) < MicrophoneSignalPolicy.silentDeviceAvoidanceSeconds
+        }
+        return Set(silentInputDeviceDatesByIdentifier.keys)
+    }
+
+    /// Records from the system default unless it would hear nothing (the built-in mic with the
+    /// lid closed, or a mic that just went silent), in which case another input is used.
+    private func pinAudioEngineToUsableMicrophone(announcesChange: Bool = true) {
+        let defaultDevice = MicrophoneInputDevices.defaultInputDevice()
+        let isLidClosed = MicrophoneInputDevices.isLidClosed()
+        let replacementDevice = MicrophoneInputChoicePolicy.deviceToUseInsteadOfDefault(
+            defaultDevice: defaultDevice,
+            availableDevices: MicrophoneInputDevices.availableInputDevices(),
+            isLidClosed: isLidClosed,
+            recentlySilentDeviceIdentifiers: currentlyAvoidedInputDeviceIdentifiers
+        )
+        guard replacementDevice?.uniqueIdentifier != pinnedInputDevice?.uniqueIdentifier else { return }
+
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine = AVAudioEngine()
+        pinnedInputDevice = replacementDevice
+
+        guard let replacementDevice else {
+            print("🎙️ BuddyDictationManager: back to the system default microphone")
+            return
+        }
+        if let inputAudioUnit = audioEngine.inputNode.audioUnit {
+            var replacementDeviceID = replacementDevice.deviceID
+            let status = AudioUnitSetProperty(
+                inputAudioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &replacementDeviceID,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+            if status != noErr {
+                print("⚠️ BuddyDictationManager: couldn't switch to \(replacementDevice.name) (status \(status))")
+            }
+        }
+        print("🎙️ BuddyDictationManager: recording from \(replacementDevice.name) instead of \(defaultDevice?.name ?? "the default")")
+        if announcesChange {
+            let reason = (defaultDevice?.isBuiltIn == true && isLidClosed)
+                ? "The lid is closed"
+                : "\(defaultDevice?.name ?? "Your microphone") wasn't picking up sound"
+            onMicrophoneNotice?("\(reason), so Wisp is listening on \(replacementDevice.name)")
+        }
+    }
+
+    /// A couple of seconds into a hold, checks that sound is actually arriving. If not, the
+    /// microphone is wedged or muted at the hardware: switch to another one and start over.
+    /// Nothing usable was captured, so nothing is lost.
+    private func scheduleMicrophoneSignalCheck() {
+        microphoneSignalCheckWorkItem?.cancel()
+        let sessionGenerationAtStart = transcriptionSessionGeneration
+        let signalCheckWorkItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                guard let self,
+                      self.transcriptionSessionGeneration == sessionGenerationAtStart,
+                      self.isRecordingFromKeyboardShortcut || self.isRecordingFromMicrophoneButton,
+                      !self.hasSwitchedMicrophoneThisSession,
+                      self.microphoneSignalMeter.looksDead else { return }
+                await self.switchToAnotherMicrophoneAfterSilence()
+            }
+        }
+        microphoneSignalCheckWorkItem = signalCheckWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + MicrophoneSignalPolicy.checkDelaySeconds, execute: signalCheckWorkItem)
+    }
+
+    private func switchToAnotherMicrophoneAfterSilence() async {
+        guard let silentDevice = pinnedInputDevice ?? MicrophoneInputDevices.defaultInputDevice() else { return }
+        hasSwitchedMicrophoneThisSession = true
+        silentInputDeviceDatesByIdentifier[silentDevice.uniqueIdentifier] = Date()
+        print("⚠️ BuddyDictationManager: no sound from \(silentDevice.name) after \(MicrophoneSignalPolicy.checkDelaySeconds)s")
+
+        let hasAlternative = MicrophoneInputChoicePolicy.alternative(
+            to: silentDevice,
+            among: MicrophoneInputDevices.availableInputDevices(),
+            isLidClosed: MicrophoneInputDevices.isLidClosed(),
+            recentlySilentDeviceIdentifiers: currentlyAvoidedInputDeviceIdentifiers
+        ) != nil
+        guard hasAlternative else {
+            // Nothing to switch to: still say so, since silence otherwise looks like Wisp ignoring you.
+            silentInputDeviceDatesByIdentifier[silentDevice.uniqueIdentifier] = nil
+            onMicrophoneNotice?("\(silentDevice.name) isn't picking up any sound. Check that it's on and not muted.")
+            return
+        }
+
+        do {
+            // The new session re-picks the device, and now passes over the silent one.
+            try await startRecognitionSession()
+            guard isRecordingFromKeyboardShortcut || isRecordingFromMicrophoneButton else {
+                // Released while switching: the release already asked for the final transcript.
+                audioEngine.stop()
+                audioEngine.inputNode.removeTap(onBus: 0)
+                return
+            }
+        } catch {
+            print("❌ BuddyDictationManager: couldn't restart on another microphone: \(error)")
+            lastErrorMessage = userFacingErrorMessage(from: error, fallback: "couldn't start voice input. try again.")
+            cancelCurrentDictation(preserveDraftText: true)
+        }
     }
 
     private func handleRecognitionError(_ error: Error) {
@@ -715,6 +873,8 @@ final class BuddyDictationManager: NSObject, ObservableObject {
 
     private func resetSessionState() {
         pendingStartRequestIdentifier = UUID()
+        microphoneSignalCheckWorkItem?.cancel()
+        microphoneSignalCheckWorkItem = nil
         activeTranscriptionSession = nil
         draftCallbacks = nil
         activeStartSource = nil

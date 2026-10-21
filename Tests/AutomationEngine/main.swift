@@ -42,6 +42,8 @@ func waitUntil(timeoutSeconds: Double = 3, _ condition: () -> Bool) async {
 final class FakeAutomationDependencies: AutomationEngineDependencies {
     var currentDate = makeDate(14, 10) // Wednesday 10:00
     var calendar: Calendar { testCalendar }
+    var isSettledAfterWake = true
+    var isNetworkReachable = true
 
     var buddyDescriptors: [UUID: AutomationBuddyDescriptor] = [:]
     var canStartModel = true
@@ -489,6 +491,112 @@ do {
     await waitUntil { !fixture.history.records.isEmpty }
     check(fixture.history.records.count == 1, "but its next real slot runs")
     await waitUntil { fixture.engine.runningAutomationIDs.isEmpty }
+}
+
+// MARK: - Wake and network: unattended runs wait, Run now does not
+
+check(!SystemReadinessPolicy.isSettledAfterWake(isAsleep: true, lastWakeDate: nil, now: makeDate(14, 10), settleSeconds: 45), "asleep is not settled")
+check(!SystemReadinessPolicy.isSettledAfterWake(isAsleep: false, lastWakeDate: makeDate(14, 10), now: makeDate(14, 10).addingTimeInterval(20), settleSeconds: 45), "20s after wake is not settled")
+check(SystemReadinessPolicy.isSettledAfterWake(isAsleep: false, lastWakeDate: makeDate(14, 10), now: makeDate(14, 10).addingTimeInterval(46), settleSeconds: 45), "46s after wake is settled")
+check(SystemReadinessPolicy.isSettledAfterWake(isAsleep: false, lastWakeDate: nil, now: makeDate(14, 10), settleSeconds: 45), "never slept is settled")
+
+check(AutomationNetworkPolicy.needsInternet(action: .askBuddy(instruction: "x"), buddySendsDataOffThisMachine: true), "a cloud buddy needs the internet")
+check(!AutomationNetworkPolicy.needsInternet(action: .askBuddy(instruction: "x"), buddySendsDataOffThisMachine: false), "a local buddy does not")
+check(AutomationNetworkPolicy.needsInternet(action: .syncCanvas, buddySendsDataOffThisMachine: false), "the Canvas sync does")
+check(!AutomationNetworkPolicy.needsInternet(action: .buildDailyChecklist, buddySendsDataOffThisMachine: false), "the checklist does not")
+
+do {
+    let fixture = makeFixture(); prepare(fixture)
+    let automation = fixture.store.add(makeAutomation(
+        trigger: .schedule(AutomationSchedule(recurrence: .daily, hour: 8, minute: 0)),
+        createdAt: makeDate(10, 9), lastRunAt: makeDate(13, 8)
+    ))
+    fixture.dependencies.isSettledAfterWake = false
+    let heldRecord = await fixture.engine.run(automationID: automation.id, reason: .missedSchedule, parameterValues: nil)
+    check(heldRecord == nil && fixture.history.records.isEmpty && fixture.dependencies.modelRunPrompts.isEmpty, "just after wake a scheduled run waits and leaves no trace")
+    check(fixture.store.automation(withID: automation.id)?.lastRunAt == makeDate(13, 8), "and stays due")
+    let eventRecord = await fixture.engine.run(automationID: automation.id, reason: .event, parameterValues: nil)
+    check(eventRecord == nil, "an event just after wake waits too")
+    let manualAutomation = fixture.store.add(makeAutomation(name: "Manual"))
+    let manualRecord = await fixture.engine.run(automationID: manualAutomation.id, reason: .manual, parameterValues: nil)
+    check(manualRecord?.outcome.map { $0.isSuccess } == true, "Run now still runs right after wake")
+
+    fixture.dependencies.isSettledAfterWake = true
+    fixture.engine.clockTick()
+    await waitUntil { fixture.history.records.contains { $0.reason == .missedSchedule } && fixture.engine.runningAutomationIDs.isEmpty }
+    check(fixture.history.records.contains { $0.reason == .missedSchedule }, "once settled, the missed slot runs")
+}
+
+do {
+    let fixture = makeFixture(); prepare(fixture)
+    let cloudAutomation = fixture.store.add(makeAutomation(name: "Cloud brief", buddyID: cloudBuddyID))
+    let localAutomation = fixture.store.add(makeAutomation(name: "Local brief", buddyID: localBuddyID))
+    fixture.dependencies.isNetworkReachable = false
+
+    let heldRecord = await fixture.engine.run(automationID: cloudAutomation.id, reason: .schedule, parameterValues: nil)
+    check(heldRecord == nil && fixture.dependencies.modelRunPrompts.isEmpty, "offline, a cloud buddy's scheduled run waits")
+    check(fixture.engine.automationIDsWaitingForInternet == [cloudAutomation.id], "and is shown as waiting for the internet")
+    let localRecord = await fixture.engine.run(automationID: localAutomation.id, reason: .schedule, parameterValues: nil)
+    check(localRecord?.outcome.map { $0.isSuccess } == true, "offline, a local buddy's run still goes ahead")
+
+    fixture.dependencies.isNetworkReachable = true
+    fixture.engine.clockTick()
+    check(fixture.engine.automationIDsWaitingForInternet.isEmpty, "nothing is waiting once the connection is back")
+    let laterRecord = await fixture.engine.run(automationID: cloudAutomation.id, reason: .schedule, parameterValues: nil)
+    check(laterRecord?.outcome.map { $0.isSuccess } == true, "and the cloud run goes ahead")
+
+    // The connection drops mid-run: the failure is excused.
+    fixture.dependencies.holdsModelUntilReleased = true
+    fixture.dependencies.modelResult = .failed(reason: "The network connection was lost.", taskID: nil)
+    let droppingRun = Task { @MainActor in await fixture.engine.run(automationID: cloudAutomation.id, reason: .schedule, parameterValues: nil) }
+    await waitUntil { fixture.dependencies.modelGate != nil }
+    fixture.dependencies.isNetworkReachable = false
+    fixture.dependencies.releaseModel()
+    let droppedRecord = await droppingRun.value
+    check(droppedRecord?.failureDoesNotCountTowardPause == true, "a failure while the connection dropped does not count toward a pause")
+}
+
+// MARK: - Three unattended failures in a row pause the automation
+
+do {
+    func record(_ reason: AutomationRunReason, _ outcome: AutomationRunOutcome, excused: Bool? = nil) -> AutomationRunRecord {
+        AutomationRunRecord(automationID: UUID(), buddyID: nil, reason: reason, startedAt: makeDate(14, 9), finishedAt: makeDate(14, 9), outcome: outcome, failureDoesNotCountTowardPause: excused)
+    }
+    let failed = AutomationRunOutcome.failed(reason: "x")
+    check(AutomationFailurePausePolicy.shouldPause(recordsNewestFirst: [record(.schedule, failed), record(.event, failed), record(.missedSchedule, failed)]), "three unattended failures pause")
+    check(!AutomationFailurePausePolicy.shouldPause(recordsNewestFirst: [record(.schedule, failed), record(.schedule, failed)]), "two do not")
+    check(!AutomationFailurePausePolicy.shouldPause(recordsNewestFirst: [record(.schedule, failed), record(.schedule, failed), record(.manual, .succeededNothingNew), record(.schedule, failed)]), "a success in between resets the streak")
+    check(AutomationFailurePausePolicy.shouldPause(recordsNewestFirst: [record(.schedule, failed), record(.schedule, .skippedBusy), record(.manual, failed), record(.schedule, failed), record(.schedule, failed)]), "skips and Run now failures neither count nor reset")
+    check(!AutomationFailurePausePolicy.shouldPause(recordsNewestFirst: [record(.schedule, failed), record(.schedule, failed, excused: true), record(.schedule, failed)]), "an excused failure does not count")
+    check(!AutomationFailurePausePolicy.shouldPause(recordsNewestFirst: [record(.schedule, failed), record(.schedule, .needsApproval), record(.schedule, failed), record(.schedule, failed)]), "a declined approval breaks the streak")
+}
+
+do {
+    let fixture = makeFixture(); prepare(fixture)
+    let automation = fixture.store.add(makeAutomation(name: "Flaky"))
+    fixture.dependencies.modelResult = .failed(reason: "Ollama isn't running.", taskID: nil)
+    _ = await fixture.engine.run(automationID: automation.id, reason: .schedule, parameterValues: nil)
+    _ = await fixture.engine.run(automationID: automation.id, reason: .schedule, parameterValues: nil)
+    check(fixture.store.automation(withID: automation.id)?.isEnabled == true, "two failures leave it on")
+    let thirdRecord = await fixture.engine.run(automationID: automation.id, reason: .schedule, parameterValues: nil)
+    let pausedAutomation = fixture.store.automation(withID: automation.id)
+    check(pausedAutomation?.isEnabled == false, "the third unattended failure in a row pauses it")
+    check(pausedAutomation?.pausedReason?.contains("3 failed runs") == true && pausedAutomation?.pausedReason?.contains("Ollama") == true, "and says why, with the last failure")
+    if case .failed(let reason)? = thirdRecord?.outcome {
+        check(reason.contains("Paused after"), "the failure record carries the pause")
+    } else {
+        check(false, "the third run should be a failure")
+    }
+    check(fixture.engine.needsYou.first?.detail.contains("Paused after") == true, "Needs you explains the pause")
+    check(fixture.dependencies.notifications.last?.body.contains("Paused after") == true, "the notification explains the pause")
+
+    let skippedRecord = await fixture.engine.run(automationID: automation.id, reason: .schedule, parameterValues: nil)
+    check(skippedRecord?.outcome == .skippedPaused && fixture.dependencies.modelRunPrompts.count == 3, "a paused automation stops retrying")
+
+    fixture.engine.setPaused(false, forAutomationID: automation.id)
+    check(fixture.store.automation(withID: automation.id)?.pausedReason == nil, "resuming clears the reason")
+    _ = await fixture.engine.run(automationID: automation.id, reason: .schedule, parameterValues: nil)
+    check(fixture.store.automation(withID: automation.id)?.isEnabled == false, "resumed and still failing: the old streak still counts, so it pauses again")
 }
 
 // MARK: - Calendar blocks always ask

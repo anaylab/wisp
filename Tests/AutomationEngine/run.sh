@@ -26,6 +26,7 @@ swiftc -target arm64-apple-macos26.0 \
   leanring-buddy/Automations/AutomationTemplates.swift \
   leanring-buddy/Automations/AutomationRunRecord.swift \
   leanring-buddy/Automations/AutomationStore.swift \
-  leanring-buddy/Automations/AutomationEngine.swift
+  leanring-buddy/Automations/AutomationEngine.swift \
+  leanring-buddy/SystemReadinessMonitor.swift
 
 "$BUILD_DIR/automation-engine"

@@ -495,13 +495,21 @@ private struct AutomationListRow: View {
     }
 
     private var statusLineIsProblem: Bool {
-        automation.isEnabled && latestOutcome?.needsAttention == true
+        if !automation.isEnabled { return automation.pausedReason != nil }
+        return latestOutcome?.needsAttention == true
     }
 
-    /// Paused, or the last problem, or when it runs next, or just the trigger in words.
+    /// Paused (with Wisp's reason, if it paused it), or the last problem, or when it runs next,
+    /// or just the trigger in words.
     private var statusLine: String {
-        if !automation.isEnabled { return "Paused · \(AutomationDisplayText.triggerSummary(automation.trigger))" }
+        if !automation.isEnabled {
+            if let pausedReason = automation.pausedReason { return pausedReason }
+            return "Paused · \(AutomationDisplayText.triggerSummary(automation.trigger))"
+        }
         if isRunning { return "Running…" }
+        if automationEngine.automationIDsWaitingForInternet.contains(automation.id) {
+            return "Waiting for the internet · runs when it's back"
+        }
         if statusLineIsProblem { return AutomationDisplayText.outcomeText(latestOutcome) }
         if case .schedule = automation.trigger, let nextRunAt = automation.nextRunAt {
             return "\(AutomationDisplayText.triggerSummary(automation.trigger)) · next \(AutomationDisplayText.whenText(nextRunAt))"

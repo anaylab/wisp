@@ -166,3 +166,36 @@ struct BrowserActivityIndicator: View {
         .animation(WispMotion.smooth, value: activityText)
     }
 }
+
+/// Which microphone Wisp switched to and why, as a glass capsule under the notch. Without it a
+/// dead or lid-closed mic just looks like Wisp ignoring you.
+struct MicrophoneNoticeIndicator: View {
+    let noticeText: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "mic.badge.xmark")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(DS.Colors.warning)
+            Text(noticeText)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+        .frame(maxWidth: 420, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(DS.Colors.warning.opacity(0.35), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 3)
+        )
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    }
+}

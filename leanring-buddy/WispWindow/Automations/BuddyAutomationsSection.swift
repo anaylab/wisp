@@ -142,7 +142,8 @@ struct BuddyAutomationsSection: View {
     }
 
     private func subtitle(for automation: Automation) -> String {
-        if !automation.isEnabled { return "Paused" }
+        if !automation.isEnabled { return automation.pausedReason ?? "Paused" }
+        if automationEngine.automationIDsWaitingForInternet.contains(automation.id) { return "Waiting for the internet" }
         if let failureText = failureText(for: automation) { return failureText }
         if case .schedule = automation.trigger, let nextRunAt = automation.nextRunAt {
             return "Next \(AutomationDisplayText.whenText(nextRunAt))"
