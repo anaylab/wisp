@@ -137,7 +137,7 @@ enum BrowserStepLoop {
             // so it must stay cheap.
             let snapshot: BrowserPageSnapshot
             do {
-                snapshot = try controller.snapshot(maximumTextCharacters: 500)
+                snapshot = try await controller.snapshot(maximumTextCharacters: 500)
             } catch {
                 return makeOutcome(didSucceed: false, failureReason: error.localizedDescription, snapshot: nil)
             }
@@ -190,7 +190,7 @@ enum BrowserStepLoop {
             switch action {
             case .done(let answer):
                 stepLog.append(answer.isEmpty ? "done" : "done: \(answer)")
-                let finalSnapshot = (try? controller.snapshot()) ?? snapshot
+                let finalSnapshot = (try? await controller.snapshot()) ?? snapshot
                 return makeOutcome(didSucceed: true, failureReason: nil, snapshot: finalSnapshot)
 
             case .fail(let reason):
@@ -205,7 +205,7 @@ enum BrowserStepLoop {
                 await guideCursor(toElementID: elementID, actionText: "click \(label)",
                                   controller: controller, cursorGuide: cursorGuide)
                 do {
-                    try controller.click(elementID: elementID)
+                    try await controller.click(elementID: elementID)
                     _ = await controller.waitUntilLoaded()
                     operationCount += 1
                     record("clicked \(elementID) (\(label))", history: "clicked \(elementID) (\(label))")
@@ -219,7 +219,7 @@ enum BrowserStepLoop {
                 await guideCursor(toElementID: elementID, actionText: "type into \(label)",
                                   controller: controller, cursorGuide: cursorGuide)
                 do {
-                    try controller.typeText(text, intoElementID: elementID, pressEnter: true)
+                    try await controller.typeText(text, intoElementID: elementID, pressEnter: true)
                     _ = await controller.waitUntilLoaded()
                     operationCount += 1
                     record("typed \"\(text)\" into \(elementID)", history: "typed \"\(text)\" into \(elementID)")
@@ -229,13 +229,13 @@ enum BrowserStepLoop {
                 }
 
             case .scroll(let direction):
-                try? controller.scroll(direction)
+                try? await controller.scroll(direction)
                 operationCount += 1
                 record("scrolled \(direction.rawValue)", history: "scrolled \(direction.rawValue)")
 
             case .open(let url):
                 do {
-                    try controller.navigate(to: url)
+                    try await controller.navigate(to: url)
                     _ = await controller.waitUntilLoaded()
                     operationCount += 1
                     let host = url.host() ?? url.absoluteString
@@ -246,7 +246,7 @@ enum BrowserStepLoop {
                 }
 
             case .back:
-                try? controller.goBack()
+                try? await controller.goBack()
                 _ = await controller.waitUntilLoaded()
                 operationCount += 1
                 record("went back", history: "went back")
@@ -259,7 +259,7 @@ enum BrowserStepLoop {
         return makeOutcome(
             didSucceed: false,
             failureReason: "couldn't finish within \(maximumSteps) steps",
-            snapshot: try? controller.snapshot()
+            snapshot: try? await controller.snapshot()
         )
     }
 
@@ -278,7 +278,7 @@ enum BrowserStepLoop {
         guard let cursorGuide else { return }
         // `try?` on a method that already returns an optional flattens to a
         // single optional, so one unwrap covers both a thrown error and a nil.
-        guard let located = try? controller.screenPoint(ofElementID: elementID) else { return }
+        guard let located = try? await controller.screenPoint(ofElementID: elementID) else { return }
         await cursorGuide.guideCursor(to: located.point, on: located.displayFrame, actionText: actionText)
     }
 

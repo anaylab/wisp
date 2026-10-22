@@ -287,10 +287,32 @@ final class AgentToolRegistry: ObservableObject {
 
     // MARK: - Built-in tools
 
-    /// The browser, driven through the DOM rather than the vision model.
+    /// The browser, driven through the DOM rather than the vision model, by
+    /// one of two controllers: the Chrome extension when it can do the job,
+    /// AppleScript otherwise (Safari, or no extension / no page permission).
     /// Internal so CompanionManager's direct browser-command route drives the
-    /// same controller — and so the same dedicated tab — as `browser_task`.
-    let browserController = AppleScriptBrowserController()
+    /// same controllers — and so the same dedicated tabs — as `browser_task`.
+    let appleScriptBrowserController = AppleScriptBrowserController()
+    let extensionBrowserController = ExtensionBrowserController()
+
+    /// The controller for the next piece of browser work, chosen afresh each
+    /// time by `BrowserControllerSelector`, so granting or removing the
+    /// extension's page permission takes effect on the very next task. Logs
+    /// which one served it.
+    func browserController(servingRequest requestDescription: String) -> BrowserController {
+        let chromeExtensionBridge = ChromeExtensionBridge.shared
+        let selection = BrowserControllerSelector.choose(BrowserControllerSelectionInputs(
+            isExtensionConnected: chromeExtensionBridge.isExtensionConnected,
+            extensionCanReadPages: chromeExtensionBridge.hasCapability(.pagesRead),
+            frontmostApplication: .init(bundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        ))
+        let servingName = selection.kind == .chromeExtension ? "the Chrome extension" : "AppleScript"
+        print("🌐 Browser: \(requestDescription.prefix(60)) — served by \(servingName) (\(selection.reason))")
+        switch selection.kind {
+        case .chromeExtension: return extensionBrowserController
+        case .appleScript: return appleScriptBrowserController
+        }
+    }
 
     /// Flies the on-screen cursor to elements the tier-2 browser loop acts on,
     /// so the user watches the work. Set by CompanionManager at startup; weak so
@@ -333,7 +355,7 @@ final class AgentToolRegistry: ObservableObject {
             let cursorGuide = self.browserCursorGuide
             let outcome = await BrowserAgent.run(
                 request: request,
-                controller: self.browserController,
+                controller: self.browserController(servingRequest: "browser_task \(request)"),
                 chatClient: BuddyVisionChatClientFactory.makeDefaultProvider(),
                 modelProvider: ModelProviderFactory.make(),
                 cursorGuide: cursorGuide,
@@ -358,7 +380,7 @@ final class AgentToolRegistry: ObservableObject {
         ) { [weak self] _ in
             guard let self else { return "couldn't read the page." }
             do {
-                return try self.browserController.snapshot().promptRepresentation()
+                return try await self.browserController(servingRequest: "read_page").snapshot().promptRepresentation()
             } catch {
                 return error.localizedDescription
             }
@@ -384,7 +406,7 @@ final class AgentToolRegistry: ObservableObject {
                   case .string(let text)? = arguments["url"] else { return "i need a web address." }
             let normalized = text.hasPrefix("http") ? text : "https://" + text
             guard let url = URL(string: normalized) else { return "that doesn't look like a web address." }
-            try? self.browserController.openURL(url)
+            try? await self.browserController(servingRequest: "open_url").openURL(url)
             return "opened \(normalized)."
         }
 
@@ -407,7 +429,7 @@ final class AgentToolRegistry: ObservableObject {
                   case .object(let arguments) = input,
                   case .string(let elementID)? = arguments["element_id"] else { return "i need an element id." }
             do {
-                try self.browserController.click(elementID: elementID)
+                try await self.browserController(servingRequest: "click_element").click(elementID: elementID)
                 return "clicked \(elementID)."
             } catch {
                 return error.localizedDescription

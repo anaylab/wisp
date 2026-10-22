@@ -134,7 +134,7 @@ enum BrowserTaskRunner {
                 return BrowserTaskResult(
                     goal: plan.goal,
                     stepLog: stepLog,
-                    finalSnapshot: try? controller.snapshot(),
+                    finalSnapshot: try? await controller.snapshot(),
                     totalDuration: Date().timeIntervalSince(startedAt),
                     browserOperationCount: operationCount,
                     didSucceed: false,
@@ -143,7 +143,7 @@ enum BrowserTaskRunner {
             }
         }
 
-        let snapshot = try? controller.snapshot()
+        let snapshot = try? await controller.snapshot()
         return BrowserTaskResult(
             goal: plan.goal,
             stepLog: stepLog,
@@ -158,39 +158,39 @@ enum BrowserTaskRunner {
     private static func perform(_ step: BrowserStep, using controller: BrowserController) async throws {
         switch step {
         case .open(let url):
-            try controller.openURL(url)
+            try await controller.openURL(url)
             _ = await controller.waitUntilLoaded(timeout: 10)
 
         case .navigate(let url):
-            try controller.navigate(to: url)
+            try await controller.navigate(to: url)
             _ = await controller.waitUntilLoaded(timeout: 10)
 
         case .typeInto(let fieldQuery, let text, let submit):
-            let element = try resolveField(matching: fieldQuery, using: controller)
-            try controller.typeText(text, intoElementID: element.id, pressEnter: submit)
+            let element = try await resolveField(matching: fieldQuery, using: controller)
+            try await controller.typeText(text, intoElementID: element.id, pressEnter: submit)
             if submit { _ = await controller.waitUntilLoaded(timeout: 10) }
 
         case .clickMatching(let query):
-            let candidates = try controller.findElements(matching: query)
+            let candidates = try await controller.findElements(matching: query)
             guard let best = candidates.first else {
                 throw BrowserControllerError.elementNotFound(query)
             }
-            try controller.click(elementID: best.id)
+            try await controller.click(elementID: best.id)
             _ = await controller.waitUntilLoaded(timeout: 10)
 
         case .scroll(let direction):
-            try controller.scroll(direction)
+            try await controller.scroll(direction)
 
         case .back:
-            try controller.goBack()
+            try await controller.goBack()
             _ = await controller.waitUntilLoaded(timeout: 10)
 
         case .forward:
-            try controller.goForward()
+            try await controller.goForward()
             _ = await controller.waitUntilLoaded(timeout: 10)
 
         case .read:
-            _ = try controller.snapshot()
+            _ = try await controller.snapshot()
         }
     }
 
@@ -203,16 +203,16 @@ enum BrowserTaskRunner {
     private static func resolveField(
         matching query: String,
         using controller: BrowserController
-    ) throws -> BrowserElement {
+    ) async throws -> BrowserElement {
         // Password and card fields are never a target: the controller refuses
         // them anyway, and picking one here would turn a search into an error.
-        let named = try controller.findElements(matching: query).filter { !$0.isSensitiveInput }
+        let named = try await controller.findElements(matching: query).filter { !$0.isSensitiveInput }
         if let match = named.first(where: { $0.role.contains("text") || $0.role == "search" }) {
             return match
         }
         if let anyMatch = named.first { return anyMatch }
 
-        let typeable = try controller.snapshot().elements.filter {
+        let typeable = try await controller.snapshot().elements.filter {
             !$0.isSensitiveInput
                 && ($0.role.contains("text") || $0.role.contains("search") || $0.role == "email")
         }

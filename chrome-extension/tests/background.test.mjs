@@ -21,6 +21,8 @@ test("background.js wires the bridge, handlers, capabilities and tab events", as
   assert.equal(fakeChrome.windows.onFocusChanged.listeners.length, 1);
   assert.equal(fakeChrome.permissions.onAdded.listeners.length, 1);
   assert.equal(fakeChrome.alarms.onAlarm.listeners.length, 1);
+  assert.equal(fakeChrome.webNavigation.onCommitted.listeners.length, 1);
+  assert.equal(fakeChrome.webNavigation.onCompleted.listeners.length, 1);
 
   const socket = FakeWebSocket.instances[0];
   try {
@@ -46,6 +48,12 @@ async function checkWiring(fakeChrome, socket) {
   // Granting a permission reaches Wisp as a capabilities message.
   await fakeChrome.permissions.request({ permissions: ["downloads"] });
   assert.deepEqual(socket.sentMessages.at(-1), { type: "capabilities", capabilities: ["tabs", "downloads"] });
+
+  // The DOM controller's handlers are registered and answer (the fake page
+  // has no agent to run, so this one answers with an error).
+  await socket.simulateMessage({ id: 3, method: "snapshotPage", params: { tabId: 1 } });
+  assert.equal(socket.sentMessages.at(-1).id, 3);
+  assert.ok(socket.sentMessages.at(-1).error);
 
   // Tab events go out through the same socket.
   await fakeChrome.windows.onFocusChanged.dispatch(1);

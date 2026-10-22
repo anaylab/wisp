@@ -794,6 +794,25 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   hello without capabilities reads as `tabs`). `sendRequest(…, timeoutSeconds:)` waits up to 30s and passes
   `params.timeoutSeconds` to the extension. Extension tests: `node --test chrome-extension/tests/` against
   `tests/fake-chrome.mjs`.
+  **DOM controller (phase 03)**: `ExtensionBrowserController` is a second `BrowserController`, carried over the
+  bridge to `handlers/dom-controller.js` and the injected `content/dom-agent.js` (a port of the AppleScript snapshot
+  JS: same `e7` ids stamped as `data-wisp-id`, dialog → in view → below order, labels/roles/states, React-safe setter,
+  pointer-event sequence; state on `window.__wispAgent`, so re-injection is a no-op). Both controllers' snapshot JSON is
+  decoded by `BrowserPageSnapshotDecoding`, so the page text the planners, validator and prompts read is identical; a
+  shared fixture (`Tests/ChromeExtDOMController/snapshot-fixture.json`) is checked by both the node and Swift suites.
+  The `BrowserController` requirements are now `async` (the AppleScript controller's synchronous methods still satisfy
+  them; the extension awaits the socket instead of blocking the main actor). `BrowserControllerSelector` picks the
+  extension per task (and per `read_page`/`click_element`) when it is connected, has `pages.read` and Safari isn't in
+  front, otherwise AppleScript; `AgentToolRegistry.browserController(servingRequest:)` logs which one served it. With the
+  extension the task tab opens **in the background** inside a purple **Wisp** tab group (expanded while working,
+  collapsed when idle unless the user is looking at it), addressed by its real tab id; `tab.removed` for it (or a
+  "No tab with id" reply) means stop (`.dedicatedTabClosed`). Cross-origin frames (found with `webNavigation.getAllFrames`,
+  ≤8) are read too, ids prefixed `f<frameId>e<n>`. Settling is one `waitForSettled` request (load, then 400ms of DOM quiet,
+  ≤3s). Screen points for the cursor marker come from the element's client rect + `chrome.windows.get`, only while the
+  tab is showing; `captureVisibleTab` (the `look` fallback) refuses a background tab. `lib/page-access.js` refuses
+  chrome://, extension, devtools, Web Store, data:/javascript: pages and (unless allowed) file://, which is read-only;
+  `[data-wisp-ignore]` regions and one-time-code fields are never listed or typed into. Events `nav.committed` /
+  `nav.completed` (main frame only). Tab commands (new tab, back…) still go through AppleScript.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1184,8 +1203,9 @@ Grouped by what they do. Line counts are approximate.
 | `MessageSendConfirmationView.swift` | ~305 | The Siri-style confirmation panel `ToolConfirmationView` shows for `send_imessage` (recipient, an editable message bubble, Cancel / Send); same consent flow underneath. |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
-| `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
-| `AppleScriptBrowserController.swift` | ~1105 | The `BrowserController` for Chrome/Safari: injected JS via AppleScript (one round trip per op, `data-wisp-id` stamping), tab commands, and the dedicated-tab session (`runInTargetTab`). |
+| `BrowserController.swift` | ~300 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the (async) `BrowserController` protocol. |
+| `BrowserPageSnapshotDecoding.swift` | ~75 | The one decoder from snapshot JSON to `BrowserPageSnapshot` (dialog/scroll lines, lenient fields), shared by the AppleScript and extension controllers. |
+| `AppleScriptBrowserController.swift` | ~1075 | The `BrowserController` for Chrome/Safari: injected JS via AppleScript (one round trip per op, `data-wisp-id` stamping), tab commands, and the dedicated-tab session (`runInTargetTab`). |
 | `BrowserAgent.swift` | ~375 | `BrowserAgent.run`: the tiered entry point (deterministic planner → one model-written plan → tier-2 step loop, or `BrowserAgentLoop` for cloud providers), dedicated tab begin/end, login walls as a dead end. |
 | `BrowserTask.swift` | ~395 | `BrowserStep`/`BrowserTaskPlan`/`BrowserTaskResult`, `BrowserTaskRunner` (executes a plan end to end) and `BrowserTaskPlanner` (tier 0, no model). |
 | `BrowserSiteRegistry.swift` | ~110 | The sites the deterministic planner knows, as data rows. |
@@ -1256,11 +1276,19 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `chrome-extension/lib/limits.js` | ~40 | `truncateText` / `capList` (20,000 chars, 500 items, `truncated`). |
 | `chrome-extension/handlers/tabs.js` | ~150 | Today's nine tab primitives (moved unchanged) and `describeTab`, the tab shape shared with events. |
 | `chrome-extension/handlers/capabilities.js` | ~20 | `getCapabilities`, `openPermissionsPage`. |
+| `chrome-extension/handlers/dom-controller.js` | ~570 | Phase 03 methods: `openTab`, `navigateTab`, `goBack/ForwardInTab`, `snapshotPage` (top frame + ≤8 cross-origin frames, one element budget), `findElements` (ranked by query, or one id placed on screen), `click/typeInto/hoverElement`, `pressKey`, `scrollPage`, `selectOption`, `waitForSettled`, `captureVisibleTab`, `getOrCreateWispGroup`. Injects `content/dom-agent.js` on demand; page-access checks before any injection. |
+| `chrome-extension/content/dom-agent.js` | ~530 | The in-page agent (classic script, `window.__wispAgent`): snapshot, click, type, hover, key, scroll, select, quietness, element geometry — a port of the AppleScript snapshot JS with predicate-based candidate finding. |
+| `chrome-extension/events/navigation.js` | ~35 | `nav.committed` / `nav.completed` from `webNavigation`, main frame only. |
+| `chrome-extension/lib/page-access.js` | ~55 | Pure: which URLs may be acted on, only read (file:// with access), are blank, or refused (contracts §6). |
+| `chrome-extension/tests/fake-dom.mjs` | ~310 | Tiny fake DOM + a `vm` loader that runs the real `content/dom-agent.js`, and a stand-in for executeScript's `func` form. |
+| `ChromeExtension/ExtensionBrowserController.swift` | ~450 | `BrowserController` over the extension: background task tab in the Wisp group, tab-removed → stop, snapshot via `BrowserPageSnapshotDecoding`, one-request settling, screen points, 896px `captureVisibleTab` screenshot. |
+| `ChromeExtension/ExtensionBrowserReplies.swift` | ~110 | Pure: action statuses → `BrowserControllerError` (AppleScript wording), element-id guard, missing-tab detection, top-left → AppKit point, settle timeouts. Tested by `Tests/ChromeExtDOMController`. |
+| `ChromeExtension/BrowserControllerSelector.swift` | ~85 | Pure: extension vs AppleScript per task (connected + `pages.read` + not Safari in front), with a reason for the log. Tested by `Tests/ChromeExtDOMController`. |
 | `chrome-extension/events/tabs.js` | ~115 | `tab.created/updated/removed/activated`, `window.focused`; per-tab 250ms debounce, reported fields only, no incognito. |
 | `chrome-extension/options.html` / `options.js` | ~70/~90 | The permissions page: each optional capability, what it allows, Allow / Remove (`chrome.permissions.request` / `remove`). |
 | `chrome-extension/popup.html` / `popup.js` | ~50/~55 | Connection status, Try again, the granted-capability line and a Permissions… link. |
 | `chrome-extension/tests/fake-chrome.mjs` | ~330 | In-memory `chrome.*` fake (tabs, tabGroups, windows, permissions, alarms, storage, runtime, scripting stub; `dispatch` on every event), `FakeWebSocket`, manual timers. |
-| `chrome-extension/tests/*.test.mjs` | ~715 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring. `chrome-extension/package.json` only tells Node the files are ES modules. |
+| `chrome-extension/tests/*.test.mjs` | ~1370 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring, the DOM agent (ids, dialog order, sensitive fields, select, settle, shared snapshot fixture), the DOM controller handlers (frames, Wisp group, page access, settling, capture) and navigation events. `chrome-extension/package.json` only tells Node the files are ES modules. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1496,6 +1524,7 @@ running):
 ./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
 ./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
 ./Tests/ChromeExtFoundation/run.sh       # Chrome extension frames: hello/ping/capabilities/event/reply parsing, payloads, timeout cap
+./Tests/ChromeExtDOMController/run.sh    # extension vs AppleScript selection, snapshot decoding (shared fixture), action replies
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
