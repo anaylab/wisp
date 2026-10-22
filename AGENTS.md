@@ -303,8 +303,8 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   Triggers: `schedule` (once/daily/weekdays/weekly/monthly, `AutomationSchedule`: next run, DST, a missed slot runs once), `event` (new Canvas
   item, meeting starting in N minutes, screen text appears via the watchers, file dropped in a folder) or `manual` (button, notch chip, routine
   digit). Sources: nothing, today's calendar, Canvas deadlines, Reminders, clipboard, screen text, folder files. Actions: ask the buddy,
-  sync Canvas, build the daily checklist, propose study blocks (the last three are views onto `JobsEngine`, which keeps its own timers; the
-  engine never schedules them twice). Outputs: notch card, Reminders checklist, Calendar block, notification, buddy-thread message, spoken line.
+  sync Canvas, build the daily checklist, propose study blocks (those three are views onto `JobsEngine`, which keeps its own timers; the
+  engine never schedules them twice), start Chrome focus mode (phase 09, no model). Outputs: notch card, Reminders checklist, Calendar block, notification, buddy-thread message, spoken line.
   **Three setup paths, one editable draft card** (`AutomationDraftCardView`, chips for trigger/source/output/buddy/notify, Test run, Save):
   (1) **Say it** — `AutomationDraftParser` is deterministic first (the 3B model is weak at this); only when unsure may a model fill the card,
   and it never runs anything; (2) **Template gallery** (`AutomationTemplates`: Morning brief, Canvas deadlines, Daily checklist, Weekly review,
@@ -859,6 +859,22 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   kept in memory 10 minutes. Quiet mode holds the card back (a ↓ badge in the flank instead). "Add to brain" uses
   `BrainIngestQueue.enqueue(fileURL:)` for types the brain reads. Agent tools `chrome_list_downloads` (read) and
   `chrome_file_download` (from/to resolved before the card; on `ToolCallSafety.alwaysAskBareToolNames`).
+  **Focus mode (phase 09, `tabs` only)**: "focus on my essay for 45 minutes" / "stop focus" (`ChromeFocusCommandParser`,
+  checked first in `ChromeTabCommandRouter` → `ChromeTabCommand.focus`; needs a length, a topic with "focus mode", or
+  "chrome"/"tabs" named — a bare "focus mode" is left to the model, it likely means macOS Focus), the `chrome_focus_mode`
+  tool (`.writing(.localMachine)`), `AutomationAction.startChromeFocus(topic:minutes:)` (no model, runs unattended,
+  never replaces a running session, Test run only previews), the "Focus block" draft card's **Also focus Chrome during
+  each block** switch (`Automation.focusesChromeDuringStudyBlocks`) and a **Focus** chip on study-block rows of the notch
+  checklist. `ChromeFocusPlanner` (pure) decides: on-task = allow-listed host or a shared content word with the topic;
+  distracting = the editable host list (YouTube, Reddit, X, Instagram, TikTok, Netflix); everything else is "unsure" and
+  stays put (only muted if audible). Off-task expanded groups collapse, loose on-task tabs group as "Focus", distracting
+  unpinned tabs optionally move to a minimised Later window (off by default). The extension's `applyFocusLayout` keeps
+  the prior state in `chrome.storage.session` under a restore token and `restoreFocusLayout` puts it back, skipping tabs
+  closed or moved meanwhile. **Nothing is ever closed.** `ChromeFocusSession` runs one session at a time with a
+  `WispTimerStore` countdown (notch timer card; its Cancel = stop), persists only token/topic/end date, and on the next
+  launch restores (never resumes) a session a quit interrupted, retrying pending tokens whenever the extension connects.
+  It also starts focus when an opted-in approved study block (`JobsEngine.approvedStudyBlocks`) begins, once per block
+  (`ChromeFocusStudyBlockPolicy`). Settings live in the Chrome Tabs card's Focus mode row (`ChromeFocusSettings`).
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1362,6 +1378,13 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `chrome-extension/handlers/downloads.js` | ~115 | `getDownloads` (newest first or one id) / `showDownload`, `describeDownload` (capped fields, `dangerous`). No move/rename. |
 | `chrome-extension/events/downloads.js` | ~95 | `download.created/completed/failed` with the source page + title; attaches when downloads are allowed, never twice. |
 | `chrome-extension/tests/*.test.mjs` | ~925 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring, downloads. `chrome-extension/package.json` only tells Node the files are ES modules. |
+| `chrome-extension/tests/*.test.mjs` | ~715 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring. `chrome-extension/package.json` only tells Node the files are ES modules. |
+| `ChromeExtension/ChromeFocusPlanner.swift` | ~240 | Pure focus-mode decisions: keep / collapse / mute / Focus-group / move from a `ChromeTabsSnapshot`, topic words, allow-list and distraction hosts; host matching and list parsing; reply wording; `ChromeFocusStudyBlockPolicy` (which approved study block starts focus, its topic and length). Tested by `Tests/ChromeExtFocusMode`. |
+| `ChromeExtension/ChromeFocusCommand.swift` | ~185 | Pure `ChromeFocusCommandParser`: spoken "focus on X for N minutes" / "stop focus" → `ChromeFocusCommand`, conservative (questions, screen things, bare "focus mode" fall through). Also used by the automation "say it" parser. |
+| `ChromeExtension/ChromeFocusSession.swift` | ~470 | `ChromeFocusSettings` (distracting / always-keep sites, Later-window switch) and `ChromeFocusSession`: start/stop, timer via `WispTimerStore`, restore on end / card Cancel / next launch, pending-token retries on connect, study-block auto-start, Test-run preview; `CompanionManager.presentChromeFocusUpdate` (notch card + line). |
+| `ChromeExtension/ChromeFocusAgentTools.swift` | ~70 | The `chrome_focus_mode` agent tool (start/stop, topic, minutes). |
+| `ChromeExtension/ChromeFocusSettingsRow.swift` | ~75 | Focus mode's row in the Agent tab's Chrome Tabs card: status + Stop, site lists, Later-window switch. |
+| `chrome-extension/handlers/focus-mode.js` | ~290 | `applyFocusLayout` / `restoreFocusLayout`: collapse, mute, group as "Focus", move to a minimised Later window, prior state in `chrome.storage.session` under a restore token; restore tolerates closed/moved tabs and closed windows. Never closes a tab. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1600,6 +1623,7 @@ running):
 ./Tests/ChromeExtDOMController/run.sh    # extension vs AppleScript selection, snapshot decoding (shared fixture), action replies
 ./Tests/ChromeExtTabLife/run.sh          # tab sessions (build, codec, cap, names, restore), stale rules, triage order, card text, router phrases
 ./Tests/ChromeExtDownloads/run.sh        # download concierge: rule matching, templates, suggested names, collisions, refusals
+./Tests/ChromeExtFocusMode/run.sh        # Chrome focus mode: planner keep/collapse/mute/move, study-block rule, "focus on X for N minutes" parsing
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
 ./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references

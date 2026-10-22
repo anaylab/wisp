@@ -55,6 +55,9 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
     /// failures in a row), shown on its row until the user resumes it; nil when it is running
     /// or the user paused it.
     var pausedReason: String?
+    /// Added beyond the contract (phase 09). On a study-block automation ("Focus block"): also
+    /// put Chrome into focus mode while each approved study block runs. Nil = off.
+    var focusesChromeDuringStudyBlocks: Bool?
 
     static let currentSchemaVersion = 1
 
@@ -78,7 +81,8 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
         schemaVersion: Int = Automation.currentSchemaVersion,
         scheduleBaselineAt: Date? = nil,
         acknowledgedSourceLeavesMac: Bool? = nil,
-        pausedReason: String? = nil
+        pausedReason: String? = nil,
+        focusesChromeDuringStudyBlocks: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -100,6 +104,7 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
         self.scheduleBaselineAt = scheduleBaselineAt
         self.acknowledgedSourceLeavesMac = acknowledgedSourceLeavesMac
         self.pausedReason = pausedReason
+        self.focusesChromeDuringStudyBlocks = focusesChromeDuringStudyBlocks
     }
 
     /// Whether this automation is a view onto JobsEngine's own timers (Canvas sync, morning
@@ -107,7 +112,7 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
     var isDrivenByJobsEngine: Bool {
         switch action {
         case .syncCanvas, .buildDailyChecklist: return true
-        case .askBuddy, .proposeStudyBlocks: return false
+        case .askBuddy, .proposeStudyBlocks, .startChromeFocus: return false
         }
     }
 
@@ -149,6 +154,10 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
             }
         }
 
+        if case .startChromeFocus(_, let minutes) = action, !AutomationAction.chromeFocusMinutesRange.contains(minutes) {
+            problems.append("Focus time must be 1 to 240 minutes.")
+        }
+
         switch source {
         case .canvasDeadlines(let withinDays):
             if !(1...60).contains(withinDays) { problems.append("Canvas look-ahead must be 1 to 60 days.") }
@@ -172,7 +181,7 @@ nonisolated struct Automation: Codable, Identifiable, Equatable, Sendable {
             return true
         case .askBuddy(let instruction):
             return instruction.lowercased().contains("schedule")
-        case .syncCanvas, .buildDailyChecklist:
+        case .syncCanvas, .buildDailyChecklist, .startChromeFocus:
             return false
         }
     }
@@ -240,6 +249,11 @@ nonisolated enum AutomationAction: Codable, Equatable, Sendable {
     case buildDailyChecklist
     /// Existing StudyBlockPlanner proposals; writing them always asks.
     case proposeStudyBlocks
+    /// Chrome focus mode (phase 09), no model: collapse/mute what's off-topic for `minutes`,
+    /// then put it all back. `topic` may be empty (only allow-listed sites stay in view).
+    case startChromeFocus(topic: String, minutes: Int)
+
+    static let chromeFocusMinutesRange = 1...240
 }
 
 nonisolated enum AutomationOutput: Codable, Equatable, Hashable, Sendable {

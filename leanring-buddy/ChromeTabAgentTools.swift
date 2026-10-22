@@ -53,6 +53,11 @@ nonisolated enum ChromeTabCommandRouter {
             return .tabLife(tabLifeCommand)
         }
 
+        // Focus mode (phase 09): a focus command needn't say "tab" ("focus on my essay for 45 minutes").
+        if let focusCommand = ChromeFocusCommandParser.command(for: transcript) {
+            return .focus(focusCommand)
+        }
+
         let text = normalized(transcript)
         let words = text.split(separator: " ").map(String.init)
         guard !words.isEmpty, words.count <= maximumCommandWordCount else { return nil }

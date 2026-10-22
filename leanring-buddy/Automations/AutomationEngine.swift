@@ -163,6 +163,14 @@ nonisolated enum AutomationStudyBlockResult: Equatable, Sendable {
     case failed(String)
 }
 
+/// What starting Chrome focus mode from an automation came to (phase 09).
+nonisolated enum AutomationChromeFocusResult: Equatable, Sendable {
+    case started(summary: String)
+    /// A focus session (maybe the user's own) is already running; it is left alone.
+    case alreadyFocusing
+    case failed(String)
+}
+
 nonisolated struct AutomationJobsResult: Equatable, Sendable {
     let summary: String
     let hasNews: Bool
@@ -220,6 +228,11 @@ protocol AutomationEngineDependencies: AnyObject {
     /// A test run's stand-in for the study-block flow: what would be proposed, writing nothing.
     func previewStudyBlockSummary() async -> String
 
+    // Chrome focus mode (phase 09). No model; reversible; restores itself when time is up.
+    func startChromeFocus(topic: String, minutes: Int) async -> AutomationChromeFocusResult
+    /// A test run's stand-in: what focus mode would change in Chrome right now, changing nothing.
+    func previewChromeFocus(topic: String, minutes: Int) async -> String
+
     // JobsEngine (the engine never schedules these two itself).
     func syncCanvasNow() async -> AutomationJobsResult
     func rebuildChecklistNow() async -> AutomationJobsResult
@@ -259,6 +272,8 @@ final class UnconfiguredAutomationDependencies: AutomationEngineDependencies {
     func speak(line: String) {}
     var isVoiceModeOn: Bool { false }
     func previewStudyBlockSummary() async -> String { "" }
+    func startChromeFocus(topic: String, minutes: Int) async -> AutomationChromeFocusResult { .failed("Wisp isn't ready yet.") }
+    func previewChromeFocus(topic: String, minutes: Int) async -> String { "" }
     func syncCanvasNow() async -> AutomationJobsResult { AutomationJobsResult(summary: "", hasNews: false, problem: "Wisp isn't ready yet.") }
     func rebuildChecklistNow() async -> AutomationJobsResult { AutomationJobsResult(summary: "", hasNews: false, problem: "Wisp isn't ready yet.") }
     func jobsSwitchIsOn(for action: AutomationAction) -> Bool? { nil }
@@ -564,6 +579,9 @@ final class AutomationEngine: ObservableObject {
         case .proposeStudyBlocks:
             return await runStudyBlocks(automation: automation)
 
+        case .startChromeFocus(let topic, let minutes):
+            return await runChromeFocus(automation: automation, topic: topic, minutes: minutes)
+
         case .askBuddy(let instruction):
             if let cloudProblem = cloudDataProblem(for: automation, buddy: buddy) {
                 return Execution(outcome: .failed(reason: cloudProblem))
@@ -687,6 +705,21 @@ final class AutomationEngine: ObservableObject {
         }
     }
 
+    private func runChromeFocus(automation: Automation, topic: String, minutes: Int) async -> Execution {
+        switch await dependencies.startChromeFocus(topic: topic, minutes: minutes) {
+        case .started(let summary):
+            if automation.outputs.contains(.notchCard) {
+                dependencies.showInNotch(text: summary, buddyID: automation.buddyID, automationName: automation.name)
+            }
+            return Execution(outcome: .succeeded(summary: AutomationResultText.summary(of: summary)), resultText: summary)
+        case .alreadyFocusing:
+            // Never replace a session that is already running, possibly one the user started.
+            return Execution(outcome: .succeededNothingNew, resultText: "Chrome was already in focus mode.")
+        case .failed(let message):
+            return Execution(outcome: .failed(reason: AutomationFailureText.sanitized(message)))
+        }
+    }
+
     /// The privacy rule: a cloud-model buddy gets no private source unless the card said so.
     private func cloudDataProblem(for automation: Automation, buddy: AutomationBuddyDescriptor?) -> String? {
         guard AutomationCloudPrivacy.readsPrivateDataForModel(source: automation.source, trigger: automation.trigger, action: automation.action),
@@ -794,6 +827,13 @@ final class AutomationEngine: ObservableObject {
             return AutomationTestResult(
                 previewText: proposalSummary.isEmpty ? "No study blocks to propose right now." : proposalSummary,
                 wouldWrite: wouldWrite + ["Calendar: study blocks (will ask first)"],
+                problem: nil
+            )
+        case .startChromeFocus(let topic, let minutes):
+            let preview = await dependencies.previewChromeFocus(topic: topic, minutes: minutes)
+            return AutomationTestResult(
+                previewText: preview,
+                wouldWrite: wouldWrite + ["Chrome: focus mode for \(minutes) min, put back afterwards (nothing is closed)"],
                 problem: nil
             )
         case .askBuddy(let instruction):

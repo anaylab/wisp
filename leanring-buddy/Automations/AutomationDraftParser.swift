@@ -443,6 +443,12 @@ nonisolated enum AutomationDraftParser {
         }
         leftoverText = tidied(leftoverText)
 
+        // "every weekday at 9 focus on my essay for 45 minutes": Chrome focus mode, no model.
+        // The same conservative phrase rule as the spoken command (`ChromeFocusCommandParser`).
+        if case .start(let topic, let minutes)? = ChromeFocusCommandParser.command(for: leftoverText) {
+            return .startChromeFocus(topic: topic, minutes: minutes)
+        }
+
         if isEventTrigger, leftoverText.split(separator: " ").count <= 2, let eventDefaultInstruction {
             return .askBuddy(instruction: eventDefaultInstruction)
         }
@@ -551,7 +557,7 @@ nonisolated enum AutomationDraftParser {
             default: break
             }
             switch action {
-            case .syncCanvas, .buildDailyChecklist, .proposeStudyBlocks: return true
+            case .syncCanvas, .buildDailyChecklist, .proposeStudyBlocks, .startChromeFocus: return true
             case .askBuddy: break
             }
             return ["checklist", "plan my", "deadline", "assignment"].contains { lowercasedText.contains($0) }

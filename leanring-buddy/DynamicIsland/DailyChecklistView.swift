@@ -76,7 +76,10 @@ struct DailyChecklistView: View {
 
             let visibleItems = Array(orderedItems.prefix(maximumVisibleRows))
             ForEach(visibleItems) { checklistItem in
-                DailyChecklistRow(checklistItem: checklistItem) { newCompletion in
+                DailyChecklistRow(
+                    checklistItem: checklistItem,
+                    chromeFocusStudyBlockID: chromeFocusStudyBlockID(for: checklistItem)
+                ) { newCompletion in
                     Task { await jobsEngine.setChecklistItem(id: checklistItem.id, isCompleted: newCompletion) }
                 }
             }
@@ -103,8 +106,23 @@ struct DailyChecklistView: View {
     }
 }
 
+extension DailyChecklistView {
+    /// The approved study block behind a study-block row that hasn't ended yet, so its row
+    /// can offer the Chrome focus chip. Nil for every other row.
+    fileprivate func chromeFocusStudyBlockID(for checklistItem: ChecklistItem) -> String? {
+        guard checklistItem.origin == .studyBlock, !checklistItem.isCompleted else { return nil }
+        let now = Date()
+        // Row ids are "studyBlock:<block id>:<yyyyMMdd>" (DayChecklistBuilder).
+        return jobsEngine.approvedStudyBlocks.first { approvedBlock in
+            checklistItem.id.hasPrefix("studyBlock:\(approvedBlock.id):") && approvedBlock.end > now
+        }?.id
+    }
+}
+
 private struct DailyChecklistRow: View {
     let checklistItem: ChecklistItem
+    /// Set on a study-block row that can still focus Chrome.
+    var chromeFocusStudyBlockID: String?
     let onToggle: (Bool) -> Void
 
     @State private var isHovered = false
@@ -133,7 +151,8 @@ private struct DailyChecklistRow: View {
                             .lineLimit(1)
                     }
                 }
-                Spacer(minLength: 0)
+                // Room for the focus chip laid over the trailing edge.
+                Spacer(minLength: chromeFocusStudyBlockID == nil ? 0 : 66)
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
@@ -146,6 +165,12 @@ private struct DailyChecklistRow: View {
         .buttonStyle(PressableScaleButtonStyle())
         .pointerCursor()
         .onHover { isHovered = $0 }
+        .overlay(alignment: .trailing) {
+            if let chromeFocusStudyBlockID {
+                ChromeFocusStudyBlockChip(studyBlockID: chromeFocusStudyBlockID)
+                    .padding(.trailing, 6)
+            }
+        }
         .accessibilityLabel(checklistItem.title)
         .accessibilityValue(checklistItem.isCompleted ? "Done" : "Not done")
         .accessibilityHint("Double tap to mark \(checklistItem.isCompleted ? "not done" : "done")")
@@ -161,5 +186,43 @@ private struct DailyChecklistRow: View {
             return [checklistItem.subtitle, "from yesterday"].compactMap { $0 }.joined(separator: " · ")
         }
         return checklistItem.subtitle
+    }
+}
+
+/// "Focus Chrome" on a study-block row: when the block runs, collapse and mute what's
+/// off-topic in Chrome, then put it back. A separate button laid over the row, so tapping it
+/// never ticks the item.
+private struct ChromeFocusStudyBlockChip: View {
+    let studyBlockID: String
+
+    @ObservedObject private var chromeFocusSession = ChromeFocusSession.shared
+    @State private var isHovered = false
+
+    private var isOptedIn: Bool { chromeFocusSession.isFocusOptedIn(forStudyBlockID: studyBlockID) }
+    private var isFocusingThisBlock: Bool { chromeFocusSession.activeSession?.studyBlockID == studyBlockID }
+
+    var body: some View {
+        Button {
+            chromeFocusSession.toggleFocus(forStudyBlockID: studyBlockID)
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "scope")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(isFocusingThisBlock ? "Focusing" : "Focus")
+                    .font(.system(size: 9.5, weight: .semibold))
+            }
+            .foregroundColor(isOptedIn || isFocusingThisBlock ? WispColor.Island.textPrimary : WispColor.Island.textTertiary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isOptedIn || isFocusingThisBlock || isHovered ? WispColor.Island.controlFillHovered : WispColor.Island.controlFill)
+            )
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .onHover { isHovered = $0 }
+        .help(isOptedIn ? "Chrome focus is on for this block. Click to turn it off." : "Focus Chrome while this block runs: off-topic tabs are collapsed and muted, then put back.")
+        .accessibilityLabel(isOptedIn ? "Chrome focus on" : "Focus Chrome during this block")
     }
 }

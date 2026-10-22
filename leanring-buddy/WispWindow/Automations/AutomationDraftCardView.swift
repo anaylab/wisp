@@ -98,6 +98,47 @@ struct AutomationDraftCardView: View {
                     .font(WispFont.callout)
                     .foregroundStyle(WispColor.textSecondary)
             }
+
+            if case .startChromeFocus(let topic, let minutes) = draft.action {
+                chromeFocusFields(topic: topic, minutes: minutes)
+            }
+            if draft.action == .proposeStudyBlocks {
+                Toggle("Also focus Chrome during each block", isOn: Binding(
+                    get: { draft.focusesChromeDuringStudyBlocks == true },
+                    set: { draft.focusesChromeDuringStudyBlocks = $0; testResult = nil }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .font(WispFont.callout)
+                .pointerCursor()
+                .help("Collapses and mutes off-topic tabs while an approved study block runs, then puts them back.")
+            }
+        }
+    }
+
+    /// Topic and length for a Chrome focus automation. The topic decides which tabs stay in view.
+    private func chromeFocusFields(topic: String, minutes: Int) -> some View {
+        HStack(spacing: 10) {
+            TextField("Topic (e.g. essay)", text: Binding(
+                get: { topic },
+                set: { draft.action = .startChromeFocus(topic: $0, minutes: minutes); testResult = nil }
+            ))
+            .textFieldStyle(.plain)
+            .font(WispFont.body)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(WispColor.surface3.opacity(0.5)))
+
+            Stepper(value: Binding(
+                get: { minutes },
+                set: { draft.action = .startChromeFocus(topic: topic, minutes: $0); testResult = nil }
+            ), in: AutomationAction.chromeFocusMinutesRange, step: 5) {
+                Text("\(minutes) min")
+                    .font(WispFont.callout.monospacedDigit())
+                    .foregroundStyle(WispColor.textSecondary)
+            }
+            .controlSize(.small)
+            .pointerCursor()
         }
     }
 
@@ -106,6 +147,7 @@ struct AutomationDraftCardView: View {
         case .syncCanvas: return "Checks your Canvas feed and keeps the Wisp calendar in step. No model involved."
         case .buildDailyChecklist: return "Builds today's tick-off list in Reminders. No model involved."
         case .proposeStudyBlocks: return "Finds free time for study blocks and asks before booking any."
+        case .startChromeFocus: return "Collapses and mutes off-topic Chrome tabs for a while, then puts them back. Nothing is closed."
         case .askBuddy: return ""
         }
     }
@@ -401,7 +443,7 @@ extension AutomationAction {
     var isManagedByJobsEngine: Bool {
         switch self {
         case .syncCanvas, .buildDailyChecklist: return true
-        case .askBuddy, .proposeStudyBlocks: return false
+        case .askBuddy, .proposeStudyBlocks, .startChromeFocus: return false
         }
     }
 }

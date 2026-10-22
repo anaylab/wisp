@@ -286,7 +286,7 @@ nonisolated enum AutomationNetworkPolicy {
             return true
         case .askBuddy:
             return buddySendsDataOffThisMachine
-        case .buildDailyChecklist, .proposeStudyBlocks:
+        case .buildDailyChecklist, .proposeStudyBlocks, .startChromeFocus:
             return false
         }
     }

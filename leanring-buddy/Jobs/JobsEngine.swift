@@ -154,6 +154,9 @@ final class JobsEngine: ObservableObject {
     }
 
     var hasChecklist: Bool { !todayChecklist.isEmpty && isDailyChecklistEnabled }
+    /// Study blocks the user approved (already in the "Wisp" calendar). Read by Chrome focus
+    /// mode, which can start when one begins.
+    var approvedStudyBlocks: [StudyBlockProposal] { persistedState.approvedStudyBlocks }
     var hasCanvasFeed: Bool { dependencies.feedConfiguration.hasFeedURL() }
 
     // MARK: Constants

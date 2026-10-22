@@ -339,6 +339,7 @@ struct AgentTab: View {
                 DownloadConciergeSettingsRow()
                 chromePermissionsButton
                 ChromeTabSessionsRow()
+                ChromeFocusSettingsRow()
             }
         }
     }

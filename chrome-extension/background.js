@@ -23,6 +23,7 @@ import { domControllerHandlers } from "./handlers/dom-controller.js";
 import { pageReadingHandlers } from "./handlers/page-reading.js";
 import { tabLifeHandlers } from "./handlers/tab-life.js";
 import { downloadHandlers } from "./handlers/downloads.js";
+import { focusModeHandlers } from "./handlers/focus-mode.js";
 import { startTabEvents } from "./events/tabs.js";
 import { startNavigationEvents } from "./events/navigation.js";
 import { startDownloadEvents } from "./events/downloads.js";
@@ -33,6 +34,7 @@ registerHandlers(domControllerHandlers);
 registerHandlers(pageReadingHandlers);
 registerHandlers(tabLifeHandlers);
 registerHandlers(downloadHandlers);
+registerHandlers(focusModeHandlers);
 
 startCapabilityBroadcasts(sendCapabilities);
 startTabEvents();

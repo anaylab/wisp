@@ -28,6 +28,7 @@ swiftc -target arm64-apple-macos14.0 \
   leanring-buddy/ChromeExtension/ChromeStaleTabFinder.swift \
   leanring-buddy/ChromeExtension/ChromeTabTriagePlanner.swift \
   leanring-buddy/ChromeExtension/ChromeTabLifeCommand.swift \
-  leanring-buddy/ChromeExtension/ChromeTabLifeCardText.swift
+  leanring-buddy/ChromeExtension/ChromeTabLifeCardText.swift \
+  leanring-buddy/ChromeExtension/ChromeFocusCommand.swift
 
 "$BUILD_DIR/chrome-ext-tab-life"

@@ -46,3 +46,15 @@ final class ChromeExtensionBridge {
         fatalError("not used by the suite")
     }
 }
+
+// Focus mode (phase 09) is one more `ChromeTabCommand` case that
+// `ChromeTabOrganizer.perform` hands to the session; the real session reaches
+// the timer store and the notch, so it is stubbed like the rest of the app.
+@MainActor
+final class ChromeFocusSession {
+    static let shared = ChromeFocusSession()
+
+    func perform(_ command: ChromeFocusCommand) async -> (replyText: String, didSucceed: Bool) {
+        ("", true)
+    }
+}

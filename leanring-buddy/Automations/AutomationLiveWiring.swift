@@ -358,6 +358,17 @@ final class LiveAutomationDependencies: AutomationEngineDependencies {
         return "\(proposals.count) study block\(proposals.count == 1 ? "" : "s") to propose:\n" + lines.joined(separator: "\n")
     }
 
+    func startChromeFocus(topic: String, minutes: Int) async -> AutomationChromeFocusResult {
+        let focusSession = ChromeFocusSession.shared
+        guard !focusSession.isFocusing else { return .alreadyFocusing }
+        let (replyText, didSucceed) = await focusSession.startFocus(topic: topic, minutes: minutes)
+        return didSucceed ? .started(summary: replyText) : .failed(replyText)
+    }
+
+    func previewChromeFocus(topic: String, minutes: Int) async -> String {
+        await ChromeFocusSession.shared.previewText(topic: topic, minutes: minutes)
+    }
+
     func postNotification(title: String, body: String) {
         // Silent while another app is using the mic or camera (quiet mode), like finished tasks.
         guard !QuietModeMonitor.shared.isQuiet else { return }
@@ -427,7 +438,7 @@ final class LiveAutomationDependencies: AutomationEngineDependencies {
         switch action {
         case .syncCanvas: return JobsEngine.shared.isCanvasJobEnabled
         case .buildDailyChecklist: return JobsEngine.shared.isDailyChecklistEnabled
-        case .askBuddy, .proposeStudyBlocks: return nil
+        case .askBuddy, .proposeStudyBlocks, .startChromeFocus: return nil
         }
     }
 
@@ -435,7 +446,7 @@ final class LiveAutomationDependencies: AutomationEngineDependencies {
         switch action {
         case .syncCanvas: JobsEngine.shared.isCanvasJobEnabled = isOn
         case .buildDailyChecklist: JobsEngine.shared.isDailyChecklistEnabled = isOn
-        case .askBuddy, .proposeStudyBlocks: break
+        case .askBuddy, .proposeStudyBlocks, .startChromeFocus: break
         }
     }
 
@@ -445,7 +456,7 @@ final class LiveAutomationDependencies: AutomationEngineDependencies {
             guard let lastSyncedAt = JobsEngine.shared.lastSyncedAt else { return nil }
             // JobsEngine checks hourly; a due sync happens within the next minute.
             return max(lastSyncedAt.addingTimeInterval(JobsEngine.scheduledSyncIntervalSeconds), date.addingTimeInterval(60))
-        case .buildDailyChecklist, .askBuddy, .proposeStudyBlocks:
+        case .buildDailyChecklist, .askBuddy, .proposeStudyBlocks, .startChromeFocus:
             return nil
         }
     }
