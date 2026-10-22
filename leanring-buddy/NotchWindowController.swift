@@ -172,6 +172,15 @@ final class NotchWindowController {
             companionManager?.flashIsland(.success)
         }
         JobsEngine.shared.start()
+        // Chrome focus mode: restores a layout a quit left focused, and starts focus when an
+        // opted-in study block begins. The notch shows its countdown card and its endings.
+        ChromeFocusSession.shared.presentInNotch = { [weak companionManager] message, timerID in
+            companionManager?.presentChromeFocusUpdate(message: message, timerID: timerID)
+        }
+        ChromeFocusSession.shared.flashIsland = { [weak companionManager] didSucceed in
+            companionManager?.flashIsland(didSucceed ? .success : .error)
+        }
+        ChromeFocusSession.shared.start()
         // Buddies' scheduled runs; each run is a background task started here.
         BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
             companionManager?.startBuddyRun(buddy, request: runRequest)

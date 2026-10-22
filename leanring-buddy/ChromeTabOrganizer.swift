@@ -452,6 +452,8 @@ nonisolated enum ChromeTabCommand: Equatable, Sendable {
     case expandGroups
     case muteTabs
     case unmuteTabs
+    /// Focus mode (phase 09): "focus on my essay for 45 minutes", "stop focus".
+    case focus(ChromeFocusCommand)
 }
 
 @MainActor
@@ -476,6 +478,8 @@ enum ChromeTabOrganizer {
                 replyText = try await setAudibleTabsMuted(true)
             case .unmuteTabs:
                 replyText = try await setAudibleTabsMuted(false)
+            case .focus(let focusCommand):
+                return await ChromeFocusSession.shared.perform(focusCommand)
             }
             return (replyText, true)
         } catch {

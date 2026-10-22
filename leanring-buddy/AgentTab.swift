@@ -337,6 +337,7 @@ struct AgentTab: View {
                     }
                 }
                 chromePermissionsButton
+                ChromeFocusSettingsRow()
             }
         }
     }

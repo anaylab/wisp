@@ -46,6 +46,8 @@ nonisolated struct AutomationDraft: Equatable, Sendable {
     var legacyOrigin: AutomationLegacyOrigin?
     /// Set by the draft card once it showed "this leaves your Mac" for a private source.
     var acknowledgedSourceLeavesMac: Bool?
+    /// The "Also focus Chrome" switch on a study-block draft (the "Focus block" template).
+    var focusesChromeDuringStudyBlocks: Bool?
 
     init(
         originalText: String = "",
@@ -65,7 +67,8 @@ nonisolated struct AutomationDraft: Equatable, Sendable {
         createdAt: Date? = nil,
         lastRunAt: Date? = nil,
         legacyOrigin: AutomationLegacyOrigin? = nil,
-        acknowledgedSourceLeavesMac: Bool? = nil
+        acknowledgedSourceLeavesMac: Bool? = nil,
+        focusesChromeDuringStudyBlocks: Bool? = nil
     ) {
         self.originalText = originalText
         self.name = name
@@ -85,6 +88,7 @@ nonisolated struct AutomationDraft: Equatable, Sendable {
         self.lastRunAt = lastRunAt
         self.legacyOrigin = legacyOrigin
         self.acknowledgedSourceLeavesMac = acknowledgedSourceLeavesMac
+        self.focusesChromeDuringStudyBlocks = focusesChromeDuringStudyBlocks
     }
 
     /// Valid and with nothing important left to guess: the trigger and the place the result
@@ -123,7 +127,9 @@ nonisolated struct AutomationDraft: Equatable, Sendable {
             lastRunAt: lastRunAt,
             nextRunAt: nextRunAt,
             legacyOrigin: legacyOrigin,
-            acknowledgedSourceLeavesMac: acknowledgedSourceLeavesMac
+            acknowledgedSourceLeavesMac: acknowledgedSourceLeavesMac,
+            // Only meaningful on a study-block automation; dropped if the action changed.
+            focusesChromeDuringStudyBlocks: action == .proposeStudyBlocks ? focusesChromeDuringStudyBlocks : nil
         )
     }
 
@@ -145,7 +151,8 @@ nonisolated struct AutomationDraft: Equatable, Sendable {
             createdAt: automation.createdAt,
             lastRunAt: automation.lastRunAt,
             legacyOrigin: automation.legacyOrigin,
-            acknowledgedSourceLeavesMac: automation.acknowledgedSourceLeavesMac
+            acknowledgedSourceLeavesMac: automation.acknowledgedSourceLeavesMac,
+            focusesChromeDuringStudyBlocks: automation.focusesChromeDuringStudyBlocks
         )
     }
 
@@ -198,6 +205,7 @@ nonisolated enum AutomationSymbolPolicy {
         case .syncCanvas: return "graduationcap"
         case .buildDailyChecklist: return "checklist"
         case .proposeStudyBlocks: return "timer"
+        case .startChromeFocus: return "scope"
         case .askBuddy: break
         }
         switch source {

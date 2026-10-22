@@ -75,6 +75,9 @@ final class FakeAutomationDependencies: AutomationEngineDependencies {
     var threadMessages: [String] = []
     var spokenLines: [String] = []
     var studyAskCount = 0
+    var chromeFocusResult: AutomationChromeFocusResult = .started(summary: "focusing on essay for 45 minutes — collapsed 2 groups.")
+    var chromeFocusStarts: [(topic: String, minutes: Int)] = []
+    var chromeFocusPreviewCount = 0
     var syncCount = 0
     var checklistCount = 0
 
@@ -108,6 +111,14 @@ final class FakeAutomationDependencies: AutomationEngineDependencies {
     func postNotification(title: String, body: String) { notifications.append((title, body)) }
     func fileMessageInBuddyThread(buddyID: UUID, automationName: String, text: String) { threadMessages.append(text) }
     func speak(line: String) { spokenLines.append(line) }
+    func startChromeFocus(topic: String, minutes: Int) async -> AutomationChromeFocusResult {
+        chromeFocusStarts.append((topic, minutes))
+        return chromeFocusResult
+    }
+    func previewChromeFocus(topic: String, minutes: Int) async -> String {
+        chromeFocusPreviewCount += 1
+        return "Right now this would collapse 2 groups."
+    }
     func previewStudyBlockSummary() async -> String { "2 blocks: Mon 4 PM, Tue 5 PM" }
     func syncCanvasNow() async -> AutomationJobsResult { syncCount += 1; return syncResult }
     func rebuildChecklistNow() async -> AutomationJobsResult { checklistCount += 1; return checklistResult }
@@ -625,6 +636,55 @@ do {
     fixture.dependencies.studyAskCount = 0
     let askingRecord = await fixture.engine.run(automationID: asking.id, reason: .schedule, parameterValues: nil)
     check(askingRecord?.outcome == .needsApproval && fixture.dependencies.studyAskCount == 1, "a calendar output on a model run asks, and a decline needs approval")
+}
+
+// MARK: - Chrome focus mode (phase 09)
+
+do {
+    let fixture = makeFixture(); prepare(fixture)
+    let focusAutomation = fixture.store.add(makeAutomation(
+        name: "Essay focus", trigger: .schedule(AutomationSchedule(recurrence: .weekdays, hour: 9, minute: 0)),
+        action: .startChromeFocus(topic: "essay", minutes: 45)
+    ))
+    let started = await fixture.engine.run(automationID: focusAutomation.id, reason: .schedule, parameterValues: nil)
+    check(started?.outcome.map { $0.isSuccess } == true, "a focus automation runs unattended (no model, reversible)")
+    check(fixture.dependencies.chromeFocusStarts.first?.topic == "essay" && fixture.dependencies.chromeFocusStarts.first?.minutes == 45, "it starts focus with its topic and length")
+    check(fixture.dependencies.notchShows.last?.contains("focusing on essay") == true, "the notch says what changed")
+    check(fixture.dependencies.modelRunPrompts.isEmpty, "no model is involved")
+
+    fixture.dependencies.chromeFocusResult = .alreadyFocusing
+    let skipped = await fixture.engine.run(automationID: focusAutomation.id, reason: .schedule, parameterValues: nil)
+    check(skipped?.outcome == .succeededNothingNew, "a session already running is left alone and isn't a failure")
+
+    fixture.dependencies.chromeFocusResult = .failed("the wisp tabs extension isn't connected.")
+    let failed = await fixture.engine.run(automationID: focusAutomation.id, reason: .manual, parameterValues: nil)
+    if case .failed? = failed?.outcome {
+        check(true, "no extension is a failure")
+    } else {
+        check(false, "no extension should fail, got \(String(describing: failed?.outcome))")
+    }
+
+    let startsBeforeTest = fixture.dependencies.chromeFocusStarts.count
+    let testResult = await fixture.engine.testRun(automationID: focusAutomation.id)
+    check(fixture.dependencies.chromeFocusStarts.count == startsBeforeTest && fixture.dependencies.chromeFocusPreviewCount == 1, "a test run previews and changes nothing in Chrome")
+    check(testResult.previewText.contains("collapse") && testResult.wouldWrite.contains { $0.hasPrefix("Chrome:") }, "the test run says what it would do")
+
+    check(!AutomationNetworkPolicy.needsInternet(action: .startChromeFocus(topic: "x", minutes: 5), buddySendsDataOffThisMachine: true), "focus mode never needs the internet")
+    check(makeAutomation(action: .startChromeFocus(topic: "x", minutes: 0)).validationProblems().contains { $0.contains("1 to 240") }, "a zero-minute focus is invalid")
+    check(makeAutomation(action: .startChromeFocus(topic: "", minutes: 30)).validationProblems().isEmpty, "an empty topic is allowed (allow-listed sites only)")
+
+    // The Focus block template's switch survives the round trip through the draft card.
+    var focusBlockDraft = AutomationDraft(template: AutomationTemplates.template(withID: .focusBlock), buddyID: nil)
+    focusBlockDraft.focusesChromeDuringStudyBlocks = true
+    let savedFocusBlock = focusBlockDraft.makeAutomation(id: UUID(), now: makeDate(14, 10))
+    check(savedFocusBlock.focusesChromeDuringStudyBlocks == true, "the Also focus Chrome switch is saved")
+    check(AutomationDraft(from: savedFocusBlock).focusesChromeDuringStudyBlocks == true, "and comes back when editing")
+    var changedActionDraft = AutomationDraft(from: savedFocusBlock)
+    changedActionDraft.action = .askBuddy(instruction: "Plan my day")
+    check(changedActionDraft.makeAutomation(id: UUID(), now: makeDate(14, 10)).focusesChromeDuringStudyBlocks == nil, "it is dropped when the action is no longer study blocks")
+    let encodedFocusBlock = try? JSONEncoder().encode(savedFocusBlock)
+    let decodedFocusBlock = encodedFocusBlock.flatMap { try? JSONDecoder().decode(Automation.self, from: $0) }
+    check(decodedFocusBlock == savedFocusBlock, "it is stored with the automation")
 }
 
 // MARK: - Reminders output

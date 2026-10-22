@@ -23,6 +23,7 @@ swiftc -target arm64-apple-macos26.0 \
   leanring-buddy/Automations/AutomationSchedule.swift \
   leanring-buddy/Automations/AutomationDraft.swift \
   leanring-buddy/Automations/AutomationDraftParser.swift \
-  leanring-buddy/Automations/AutomationTemplates.swift
+  leanring-buddy/Automations/AutomationTemplates.swift \
+  leanring-buddy/ChromeExtension/ChromeFocusCommand.swift
 
 "$BUILD_DIR/automation-draft"

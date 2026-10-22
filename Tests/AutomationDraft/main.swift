@@ -195,6 +195,13 @@ do {
     check(draft?.makeAutomation(id: UUID(), now: now).validationProblems().isEmpty == true, "study block automation is valid")
 }
 do {
+    let draft = draftOf(parse("every weekday at 9 focus on my essay for 45 minutes"))
+    check(draft?.action == .startChromeFocus(topic: "my essay", minutes: 45), "a focus phrase picks Chrome focus mode, got \(String(describing: draft?.action))")
+    check(draft?.makeAutomation(id: UUID(), now: now).validationProblems().isEmpty == true, "the focus automation is valid")
+    let studyDraft = draftOf(parse("every Monday at 4pm block off focus blocks for study"))
+    check(studyDraft?.action == .proposeStudyBlocks, "\"focus blocks\" still means study blocks")
+}
+do {
     let draft = draftOf(parse("when a file lands in my downloads folder tell me what it is"))
     check(draft?.trigger == .event(.fileDropped(folderPath: "~/Downloads")), "downloads folder event")
     check(draft?.source == .folderFiles(path: "~/Downloads"), "the watched folder is also the source")

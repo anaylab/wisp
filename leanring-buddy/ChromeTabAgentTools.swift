@@ -45,6 +45,10 @@ nonisolated enum ChromeTabCommandRouter {
     /// model. Biased toward nil: a miss costs one ordinary turn, a false match
     /// rearranges the user's browser.
     static func command(for transcript: String) -> ChromeTabCommand? {
+        // Checked first: a focus command needn't say "tab" ("focus on my essay for 45 minutes").
+        if let focusCommand = ChromeFocusCommandParser.command(for: transcript) {
+            return .focus(focusCommand)
+        }
         let text = normalized(transcript)
         let words = text.split(separator: " ").map(String.init)
         guard !words.isEmpty, words.count <= maximumCommandWordCount else { return nil }
