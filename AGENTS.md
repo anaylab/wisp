@@ -775,6 +775,25 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   (`.chromeTabs`) and run without the model's tool choice, like tab commands and without agent mode. The
   agent gets `chrome_list_tabs`/`chrome_organize_tabs`/`chrome_close_duplicate_tabs`/`chrome_close_tabs`/
   `chrome_ungroup_tabs`/`chrome_focus_tab`/`chrome_pin_tabs`/`chrome_mute_tabs`/`chrome_move_tabs_to_new_window` (browser scope); plain commands also cover collapse/expand groups and mute/unmute tabs. The extension needs no new permissions for these (reload it to pick them up). Status and install help live in the Agent tab's Chrome Tabs card.
+  **Foundation (1.1.0, `docs/chrome-extension/`)**: the extension is the base for a 13-phase roadmap, and
+  `docs/chrome-extension/contracts.md` is binding for it. The service worker is an ES module: `background.js`
+  only wires `lib/bridge.js` (socket, keep-alive, reconnect alarm, request dispatcher over `registerHandlers`
+  maps, fire-and-forget `sendEvent`; nothing is queued while disconnected), `lib/capabilities.js`,
+  `lib/limits.js` (text ≤20,000 chars, lists ≤500, `truncated: true`), `handlers/*.js` and `events/*.js`. The
+  manifest is written in full for every phase (optional `scripting`/`downloads`/`<all_urls>`,
+  `"incognito": "not_allowed"`, omnibox `w`, an `ask-wisp-about-page` command). **Capabilities**
+  (`ChromeExtensionCapability`: `tabs` always, `pages.read` = scripting + `<all_urls>`, `downloads`) come in
+  `hello` and again as a `capabilities` message on every permission change; the bridge keeps them in
+  `grantedCapabilities` (cleared on disconnect). Wisp can't grant a permission (Chrome prompts only from a click
+  in an extension page), so the Chrome Tabs card lists each capability and its button calls
+  `openPermissionsPage`, which opens the extension's `options.html` with Allow/Remove buttons. **Events**
+  (`{"type":"event"}`: `tab.created`/`tab.updated` (status/url/title/audible, 250ms per-tab debounce)/
+  `tab.removed`/`tab.activated`/`window.focused`, never incognito) go out on `extensionEventPublisher` as
+  `ChromeExtensionEvent`s; subscribers filter by name and decode the payload themselves, and the bridge knows no
+  event by name. Frames are read by the pure `ChromeExtensionIncomingMessage.parse` (16 MB frame cap; a 1.0.0
+  hello without capabilities reads as `tabs`). `sendRequest(…, timeoutSeconds:)` waits up to 30s and passes
+  `params.timeoutSeconds` to the extension. Extension tests: `node --test chrome-extension/tests/` against
+  `tests/fake-chrome.mjs`.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1084,7 +1103,7 @@ Grouped by what they do. Line counts are approximate.
 | `DictationTab.swift` | ~200 | Settings → Dictation: language picker (Automatic + on-device locales) and a removable-chip custom dictionary editor. |
 | `CursorAppearanceStore.swift` | ~90 | Source of truth for the cursor/annotation colour (blue/red/yellow/green). Observed by the overlay, annotation layer, and brand glyphs so a change applies live. |
 | `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
-| `AgentTab.swift` | ~395 | Settings → Agent: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), announcements, an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`) and the Chrome Tabs card. Permissions moved to Settings → General. |
+| `AgentTab.swift` | ~480 | Settings → Agent: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), announcements, an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`) and the Chrome Tabs card (connection, one row per `ChromeExtensionCapability`, "Choose what Wisp can do in Chrome…"). Permissions moved to Settings → General. |
 | `BuddyChatTypes.swift` | ~685 | Shared value types: `JSONValue`, `BuddyContentBlock`, `BuddyChatMessage`/`BuddyChatTurn`, `BuddyToolDefinition`, `ConversationTranscript`, and the `AgentTaskRecord`/`AgentStepRecord` history records. |
 | `AppBundleConfiguration.swift` | ~30 | Reads Info.plist string keys (`VoiceTranscriptionProvider`, `VoiceTTSProvider`, `AgentModeEnabled`, `OllamaModel`, …) from the built bundle. |
 | `DictatedTextInserter.swift` | ~135 | Dictate mode's text insertion into the focused field: Accessibility selected-text for native fields, clipboard + synthesised ⌘V for web content and apps where AX does nothing. |
@@ -1153,7 +1172,7 @@ Grouped by what they do. Line counts are approximate.
 |------|-------|---------|
 | `AgentTurnRunner.swift` | ~425 | The agent loop: max 4 iterations for the local model, 10 for a cloud model (`maximumIterationsForCloudModels` — acting in an app takes find/read/act/check), screenshot on iteration 0 only, per-tool timeouts. |
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
-| `ChromeExtensionBridge.swift` | ~330 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts, `connectionState` for the Agent tab. |
+| `ChromeExtensionBridge.swift` | ~410 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts (or `timeoutSeconds:`, ≤30s), `connectionState`, `grantedCapabilities` and `extensionEventPublisher`. |
 | `ChromeTabOrganizer.swift` | ~600 | Tab organizing: `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per-window plans, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered prompt + strict reply parsing), `ChromeTabCommand`, and `ChromeTabOrganizer` (runs a plan through the bridge). |
 | `MessageCommandParser.swift` | ~210 | Pure parsing of spoken message commands ("text X saying Y", "send X a text …", "tell X that Y", unseparated "text X Y" → longest-first splits). Conservative; declines pronouns and noun uses ("text size"). |
 | `ContactsDirectory.swift` | ~440 | `ContactRecord`/`ContactHandle` (preferred handle: mobile → phone → email), the pure `ContactMatcher` (ranked tiers, ambiguity, relation words via the Me card), `DirectMessagingHandleParser`, and `ContactsDirectory` (CNContactStore access + off-main fetch). |
@@ -1219,6 +1238,29 @@ Grouped by what they do. Line counts are approximate.
 | `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
 | `AgentTaskRegistry.swift` | ~165 | Task and step records backing History → Timeline. Loads saved history on launch and saves it (debounced) on every change. |
 | `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
+
+### Chrome extension
+The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side of it. `ChromeExtensionBridge.swift`,
+`ChromeTabOrganizer.swift` and `ChromeTabAgentTools.swift` are listed under Agent, tools and MCP. Roadmap and contracts:
+`docs/chrome-extension/`.
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `ChromeExtension/ChromeExtensionCapability.swift` | ~55 | Pure: `tabs` / `pages.read` / `downloads` (wire names, display copy, reading a wire list, unknown names ignored). |
+| `ChromeExtension/ChromeExtensionEvent.swift` | ~50 | Pure: `ChromeExtensionEvent` (name, raw payload JSON, time, `decodePayload(as:)`) and `ChromeExtensionTabEventPayload` (the tab events' shape). |
+| `ChromeExtension/ChromeExtensionIncomingMessage.swift` | ~140 | Pure frame parser: hello / ping / capabilities / event / reply, or nil (malformed, missing fields, unknown type, >16 MB). Also `ChromeExtensionRequestTimeout` (10s default, 30s cap). Tested by `Tests/ChromeExtFoundation`. |
+| `chrome-extension/manifest.json` | ~50 | MV3, module service worker, required + optional permissions (contracts §3), the `key` that pins the extension ID, options page, omnibox `w`, `ask-wisp-about-page` command. |
+| `chrome-extension/background.js` | ~30 | Wiring only: registers handler maps, starts capability broadcasts, tab events and the bridge. |
+| `chrome-extension/lib/bridge.js` | ~260 | `createBridge` (injectable WebSocket/chrome/timers): connect + hello with capabilities, 20s ping, 30s reconnect alarm, request dispatcher, `sendEvent`, `sendCapabilities`; shared-instance exports for the worker. |
+| `chrome-extension/lib/capabilities.js` | ~55 | `computeCapabilities` from `chrome.permissions.contains`, the permission sets behind each capability, re-broadcast on `onAdded`/`onRemoved`. |
+| `chrome-extension/lib/limits.js` | ~40 | `truncateText` / `capList` (20,000 chars, 500 items, `truncated`). |
+| `chrome-extension/handlers/tabs.js` | ~150 | Today's nine tab primitives (moved unchanged) and `describeTab`, the tab shape shared with events. |
+| `chrome-extension/handlers/capabilities.js` | ~20 | `getCapabilities`, `openPermissionsPage`. |
+| `chrome-extension/events/tabs.js` | ~115 | `tab.created/updated/removed/activated`, `window.focused`; per-tab 250ms debounce, reported fields only, no incognito. |
+| `chrome-extension/options.html` / `options.js` | ~70/~90 | The permissions page: each optional capability, what it allows, Allow / Remove (`chrome.permissions.request` / `remove`). |
+| `chrome-extension/popup.html` / `popup.js` | ~50/~55 | Connection status, Try again, the granted-capability line and a Permissions… link. |
+| `chrome-extension/tests/fake-chrome.mjs` | ~330 | In-memory `chrome.*` fake (tabs, tabGroups, windows, permissions, alarms, storage, runtime, scripting stub; `dispatch` on every event), `FakeWebSocket`, manual timers. |
+| `chrome-extension/tests/*.test.mjs` | ~715 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring. `chrome-extension/package.json` only tells Node the files are ES modules. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1453,6 +1495,8 @@ running):
 ./Tests/CanvasSync/run.sh                # Canvas ICS parsing, diff, study-block planner
 ./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
 ./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
+./Tests/ChromeExtFoundation/run.sh       # Chrome extension frames: hello/ping/capabilities/event/reply parsing, payloads, timeout cap
+node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
 ```

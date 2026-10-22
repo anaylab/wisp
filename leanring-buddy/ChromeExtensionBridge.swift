@@ -24,7 +24,12 @@
 //  The protocol is a tiny JSON request/response: Wisp sends
 //  `{id, method, params}`, the extension answers `{id, result}` or
 //  `{id, error}`. The extension also sends `{type: "hello"}` on connect and a
-//  `{type: "ping"}` every 20s to keep its service worker alive.
+//  `{type: "ping"}` every 20s to keep its service worker alive. Since 1.1.0 it
+//  also sends unsolicited `{type: "event"}` frames (published on
+//  `extensionEventPublisher`, never answered) and `{type: "capabilities"}`
+//  whenever the user grants or removes a permission
+//  (docs/chrome-extension/contracts.md). Frames are read by the pure
+//  `ChromeExtensionIncomingMessage.parse`.
 //
 
 import Combine
@@ -46,7 +51,7 @@ final class ChromeExtensionBridge: ObservableObject {
 
     /// Long enough for Chrome to group a few dozen tabs, short enough that a
     /// wedged service worker does not leave the user waiting on a spinner.
-    nonisolated static let requestTimeoutSeconds: Double = 10
+    nonisolated static let requestTimeoutSeconds: Double = ChromeExtensionRequestTimeout.defaultSeconds
 
     enum ConnectionState: Equatable {
         case notStarted
@@ -82,6 +87,19 @@ final class ChromeExtensionBridge: ObservableObject {
     }
 
     @Published private(set) var connectionState: ConnectionState = .notStarted
+
+    /// What the user has let the extension do, from its `hello` and later
+    /// `capabilities` messages. Empty while no extension is connected.
+    @Published private(set) var grantedCapabilities: Set<ChromeExtensionCapability> = []
+
+    /// Every event the extension sends. Subscribers filter by `eventName`;
+    /// the bridge itself knows nothing about specific events. Events are
+    /// fire-and-forget and are not replayed to late subscribers.
+    let extensionEventPublisher = PassthroughSubject<ChromeExtensionEvent, Never>()
+
+    func hasCapability(_ capability: ChromeExtensionCapability) -> Bool {
+        grantedCapabilities.contains(capability)
+    }
 
     var isExtensionConnected: Bool {
         if case .connected = connectionState { return true }
@@ -211,6 +229,7 @@ final class ChromeExtensionBridge: ObservableObject {
             orphanedRequest.continuation.resume(throwing: BridgeError.connectionClosed)
         }
 
+        grantedCapabilities = []
         if listener != nil {
             connectionState = .waitingForExtension
         }
@@ -235,32 +254,31 @@ final class ChromeExtensionBridge: ObservableObject {
     }
 
     private func handleMessageFromExtension(_ messageData: Data) {
-        guard let message = (try? JSONSerialization.jsonObject(with: messageData)) as? [String: Any] else { return }
+        guard let incomingMessage = ChromeExtensionIncomingMessage.parse(messageData) else { return }
 
-        if let messageType = message["type"] as? String {
-            if messageType == "hello" {
-                let extensionVersion = message["extensionVersion"] as? String ?? "unknown"
-                let browserName = message["browserName"] as? String ?? "Chrome"
-                connectionState = .connected(extensionVersion: extensionVersion, browserName: browserName)
-                print("🧩 Chrome bridge: extension \(extensionVersion) connected from \(browserName)")
+        switch incomingMessage {
+        case .hello(let extensionVersion, let browserName, let capabilities):
+            grantedCapabilities = capabilities
+            connectionState = .connected(extensionVersion: extensionVersion, browserName: browserName)
+            print("🧩 Chrome bridge: extension \(extensionVersion) connected from \(browserName) — \(capabilities.map(\.rawValue).sorted())")
+        case .ping:
+            // Only exists to keep the service worker alive.
+            break
+        case .capabilities(let capabilities):
+            grantedCapabilities = capabilities
+        case .event(let extensionEvent):
+            extensionEventPublisher.send(extensionEvent)
+        case .reply(let requestID, let outcome):
+            guard let pendingRequest = pendingRequestsByID.removeValue(forKey: requestID) else { return }
+            switch outcome {
+            case .result(let resultData):
+                pendingRequest.continuation.resume(returning: resultData)
+            case .error(let extensionErrorMessage):
+                pendingRequest.continuation.resume(throwing: BridgeError.extensionReportedError(extensionErrorMessage))
+            case .unreadableResult:
+                pendingRequest.continuation.resume(throwing: BridgeError.unreadableReply)
             }
-            // "ping" only exists to keep the service worker alive.
-            return
         }
-
-        guard let requestID = message["id"] as? Int,
-              let pendingRequest = pendingRequestsByID.removeValue(forKey: requestID) else { return }
-
-        if let extensionErrorMessage = message["error"] as? String {
-            pendingRequest.continuation.resume(throwing: BridgeError.extensionReportedError(extensionErrorMessage))
-            return
-        }
-        let resultObject = message["result"] ?? [String: Any]()
-        guard let resultData = try? JSONSerialization.data(withJSONObject: resultObject, options: [.fragmentsAllowed]) else {
-            pendingRequest.continuation.resume(throwing: BridgeError.unreadableReply)
-            return
-        }
-        pendingRequest.continuation.resume(returning: resultData)
     }
 
     // MARK: - Requests
@@ -277,7 +295,40 @@ final class ChromeExtensionBridge: ObservableObject {
         parameters: Parameters,
         resultType: Result.Type
     ) async throws -> Result {
-        let resultData = try await sendRequestReturningData(method: method, parameters: parameters)
+        let request = try makeRequestFrame(method: method, parameters: parameters, timeoutSecondsForExtension: nil)
+        let resultData = try await sendRequestReturningData(
+            method: method,
+            request: request,
+            timeoutSeconds: Self.requestTimeoutSeconds
+        )
+        return try decodeResult(resultData, as: Result.self)
+    }
+
+    /// Sends one request that may take longer than the default 10s (a long
+    /// page read, waiting for a page to settle). The wait is capped at 30s,
+    /// and the same number goes to the extension as `params.timeoutSeconds`
+    /// so its handler can budget its own work (contracts.md §1).
+    func sendRequest<Parameters: Encodable, Result: Decodable>(
+        method: String,
+        parameters: Parameters,
+        resultType: Result.Type,
+        timeoutSeconds: Double
+    ) async throws -> Result {
+        let clampedTimeoutSeconds = ChromeExtensionRequestTimeout.clampedSeconds(timeoutSeconds)
+        let request = try makeRequestFrame(
+            method: method,
+            parameters: parameters,
+            timeoutSecondsForExtension: clampedTimeoutSeconds
+        )
+        let resultData = try await sendRequestReturningData(
+            method: method,
+            request: request,
+            timeoutSeconds: clampedTimeoutSeconds
+        )
+        return try decodeResult(resultData, as: Result.self)
+    }
+
+    private func decodeResult<Result: Decodable>(_ resultData: Data, as resultType: Result.Type) throws -> Result {
         do {
             return try JSONDecoder().decode(Result.self, from: resultData)
         } catch {
@@ -285,17 +336,45 @@ final class ChromeExtensionBridge: ObservableObject {
         }
     }
 
-    private func sendRequestReturningData<Parameters: Encodable>(
+    /// One encoded request and the id its reply will carry.
+    private struct RequestFrame {
+        let requestID: Int
+        let frameData: Data
+    }
+
+    private func makeRequestFrame<Parameters: Encodable>(
         method: String,
-        parameters: Parameters
+        parameters: Parameters,
+        timeoutSecondsForExtension: Double?
+    ) throws -> RequestFrame {
+        let requestID = nextRequestID
+        nextRequestID += 1
+
+        let envelopeData = try JSONEncoder().encode(RequestEnvelope(id: requestID, method: method, params: parameters))
+        guard let timeoutSecondsForExtension else {
+            return RequestFrame(requestID: requestID, frameData: envelopeData)
+        }
+
+        // Adds `timeoutSeconds` inside `params` without each caller's
+        // parameter struct having to carry it.
+        guard var envelopeObject = (try? JSONSerialization.jsonObject(with: envelopeData)) as? [String: Any] else {
+            return RequestFrame(requestID: requestID, frameData: envelopeData)
+        }
+        var parametersObject = envelopeObject["params"] as? [String: Any] ?? [:]
+        parametersObject["timeoutSeconds"] = timeoutSecondsForExtension
+        envelopeObject["params"] = parametersObject
+        return RequestFrame(requestID: requestID, frameData: try JSONSerialization.data(withJSONObject: envelopeObject))
+    }
+
+    private func sendRequestReturningData(
+        method: String,
+        request: RequestFrame,
+        timeoutSeconds: Double
     ) async throws -> Data {
+        let requestID = request.requestID
         guard isExtensionConnected, let connection = activeConnection else {
             throw BridgeError.extensionNotConnected
         }
-
-        let requestID = nextRequestID
-        nextRequestID += 1
-        let requestData = try JSONEncoder().encode(RequestEnvelope(id: requestID, method: method, params: parameters))
 
         return try await withCheckedThrowingContinuation { continuation in
             pendingRequestsByID[requestID] = PendingRequest(method: method, continuation: continuation)
@@ -303,7 +382,7 @@ final class ChromeExtensionBridge: ObservableObject {
             let textFrameMetadata = NWProtocolWebSocket.Metadata(opcode: .text)
             let sendContext = NWConnection.ContentContext(identifier: "wisp-request", metadata: [textFrameMetadata])
             connection.send(
-                content: requestData,
+                content: request.frameData,
                 contentContext: sendContext,
                 isComplete: true,
                 completion: .contentProcessed { [weak self] sendError in
@@ -315,7 +394,7 @@ final class ChromeExtensionBridge: ObservableObject {
             )
 
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(Self.requestTimeoutSeconds))
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
                 self?.failPendingRequest(requestID, with: BridgeError.timedOut(method: method))
             }
         }

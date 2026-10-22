@@ -50,6 +50,23 @@ func hasCapability(_ capability: ChromeExtensionCapability) -> Bool
 
 Subscribers filter by `eventName`, and nothing else in the bridge knows about specific events.
 
+### Phase 01 event payloads
+
+Tab payloads use the field names of a `getTabs` tab (`id`, `windowId`, `index`, `title`, `url`, `pinned`,
+`active`, `audible`, `muted`, `groupId`, `lastAccessed`), with `title`/`url` capped and `truncated: true` when
+cut. Swift decodes them with `ChromeExtensionTabEventPayload`.
+
+| Event | `data` |
+|---|---|
+| `tab.created` | the tab |
+| `tab.updated` | the tab + `status` + `changedFields` (subset of `status`/`url`/`title`/`audible`, merged over the 250ms per-tab debounce) |
+| `tab.activated` | the tab |
+| `tab.removed` | `{id, windowId, isWindowClosing}` |
+| `window.focused` | `{focusedWindowId}`, `null` when Chrome itself lost focus |
+
+`getCapabilities` returns `{capabilities: […]}`. `openPermissionsPage` returns `{opened: true}`. A `hello`
+without `capabilities` (an extension older than 1.1.0) reads as `["tabs"]`. Wisp drops frames over 16 MB.
+
 ## 2. Methods and events: names and owners
 
 Only the owning phase adds a name. Names are `camelCase` for methods and `area.verb` for events.

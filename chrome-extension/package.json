@@ -1,0 +1,9 @@
+{
+  "//": "Only for `node --test chrome-extension/tests/`: tells Node the extension's .js files are ES modules, as Chrome loads them. Chrome ignores this file.",
+  "name": "wisp-tabs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

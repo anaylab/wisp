@@ -1,284 +1,30 @@
 // Wisp Tabs — background service worker.
 //
 // This extension is deliberately thin. It holds one WebSocket to Wisp on this
-// Mac and exposes a handful of tab primitives (list, group, ungroup, close).
-// Every decision about *how* to organize tabs is made by Wisp, where it
+// Mac and exposes primitives (tab ops today; page reading and more as the user
+// grants them). Every decision about *what* to do is made by Wisp, where it
 // can be tested and where the model lives; the extension only does what it is
-// told, and only through Chrome's tab APIs.
+// told, and only through Chrome's APIs.
 //
-// Why a WebSocket that the extension dials out on: an MV3 service worker cannot
-// listen for connections, and Wisp already runs on the same machine. The socket
-// only ever goes to 127.0.0.1, and Wisp only accepts it because the handshake's
-// Origin is this extension's fixed ID (pinned by the "key" in manifest.json).
+// This file only wires the pieces together (contracts.md §4):
+//   lib/bridge.js         the socket to Wisp, requests, events, reconnecting
+//   lib/capabilities.js   what the user has allowed, re-sent when it changes
+//   handlers/*.js         one map of request handlers per feature
+//   events/*.js           chrome.* listeners that send events to Wisp
+//
+// Everything here runs synchronously at the top level, so Chrome finds every
+// listener in place when it wakes the worker for an event.
 
-const WISP_BRIDGE_URL = "ws://127.0.0.1:47823";
-const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+import { registerHandlers, sendCapabilities, startBridge } from "./lib/bridge.js";
+import { startCapabilityBroadcasts } from "./lib/capabilities.js";
+import { tabHandlers } from "./handlers/tabs.js";
+import { capabilityHandlers } from "./handlers/capabilities.js";
+import { startTabEvents } from "./events/tabs.js";
 
-// Chrome ends an idle MV3 service worker after ~30s. Traffic on an open
-// WebSocket extends its life (Chrome 116+), so a small ping keeps it resident
-// while Wisp is connected.
-const KEEP_ALIVE_INTERVAL_MILLISECONDS = 20 * 1000;
+registerHandlers(tabHandlers);
+registerHandlers(capabilityHandlers);
 
-// When Wisp isn't running there is no socket to keep the worker alive, so an
-// alarm wakes it to try again. 30s is the shortest period Chrome allows.
-const RECONNECT_ALARM_NAME = "wisp-reconnect";
-const RECONNECT_ALARM_PERIOD_MINUTES = 0.5;
+startCapabilityBroadcasts(sendCapabilities);
+startTabEvents();
 
-let wispSocket = null;
-let keepAliveTimerID = null;
-
-// MARK: - Connection
-
-function connectToWisp() {
-  if (wispSocket && (wispSocket.readyState === WebSocket.OPEN || wispSocket.readyState === WebSocket.CONNECTING)) {
-    return;
-  }
-
-  let socket;
-  try {
-    socket = new WebSocket(WISP_BRIDGE_URL);
-  } catch (error) {
-    recordConnectionStatus(false);
-    return;
-  }
-  wispSocket = socket;
-
-  socket.onopen = () => {
-    sendToWisp({ type: "hello", extensionVersion: EXTENSION_VERSION, browserName: browserName() });
-    startKeepAlive();
-    recordConnectionStatus(true);
-  };
-
-  socket.onmessage = (event) => {
-    handleMessageFromWisp(event.data);
-  };
-
-  socket.onclose = () => {
-    if (wispSocket === socket) {
-      wispSocket = null;
-    }
-    stopKeepAlive();
-    recordConnectionStatus(false);
-  };
-
-  // A failed connect fires onerror then onclose; onclose does the cleanup.
-  socket.onerror = () => {};
-}
-
-function sendToWisp(message) {
-  if (wispSocket && wispSocket.readyState === WebSocket.OPEN) {
-    wispSocket.send(JSON.stringify(message));
-  }
-}
-
-function startKeepAlive() {
-  stopKeepAlive();
-  keepAliveTimerID = setInterval(() => sendToWisp({ type: "ping" }), KEEP_ALIVE_INTERVAL_MILLISECONDS);
-}
-
-function stopKeepAlive() {
-  if (keepAliveTimerID !== null) {
-    clearInterval(keepAliveTimerID);
-    keepAliveTimerID = null;
-  }
-}
-
-function recordConnectionStatus(isConnectedToWisp) {
-  chrome.storage.session.set({ isConnectedToWisp, connectionStatusChangedAt: Date.now() });
-}
-
-function browserName() {
-  const userAgentBrands = navigator.userAgentData?.brands ?? [];
-  const namedBrand = userAgentBrands.find((brand) => !/not.a.brand|chromium/i.test(brand.brand));
-  return namedBrand?.brand ?? "Chrome";
-}
-
-// MARK: - Requests from Wisp
-
-async function handleMessageFromWisp(rawMessage) {
-  let request;
-  try {
-    request = JSON.parse(rawMessage);
-  } catch (error) {
-    return;
-  }
-  if (typeof request.id !== "number" || typeof request.method !== "string") {
-    return;
-  }
-
-  const handler = requestHandlers[request.method];
-  if (!handler) {
-    sendToWisp({ id: request.id, error: `unknown method ${request.method}` });
-    return;
-  }
-
-  try {
-    const result = await handler(request.params ?? {});
-    sendToWisp({ id: request.id, result: result ?? {} });
-  } catch (error) {
-    sendToWisp({ id: request.id, error: String(error?.message ?? error) });
-  }
-}
-
-const requestHandlers = {
-  // Every tab in every normal window (not popups or app windows), plus the
-  // tab groups that exist, so Wisp can see the whole picture in one call.
-  async getTabs() {
-    const normalWindows = await chrome.windows.getAll({ windowTypes: ["normal"] });
-    const normalWindowIDs = new Set(normalWindows.map((browserWindow) => browserWindow.id));
-    const focusedWindowID = normalWindows.find((browserWindow) => browserWindow.focused)?.id ?? null;
-
-    const allTabs = await chrome.tabs.query({});
-    const tabs = allTabs
-      .filter((tab) => normalWindowIDs.has(tab.windowId))
-      .map((tab) => ({
-        id: tab.id,
-        windowId: tab.windowId,
-        index: tab.index,
-        title: tab.title ?? "",
-        url: tab.url ?? tab.pendingUrl ?? "",
-        pinned: Boolean(tab.pinned),
-        active: Boolean(tab.active),
-        audible: Boolean(tab.audible),
-        muted: Boolean(tab.mutedInfo?.muted),
-        groupId: tab.groupId ?? -1,
-        lastAccessed: tab.lastAccessed ?? 0,
-      }));
-
-    const allGroups = await chrome.tabGroups.query({});
-    const groups = allGroups
-      .filter((group) => normalWindowIDs.has(group.windowId))
-      .map((group) => ({
-        id: group.id,
-        windowId: group.windowId,
-        title: group.title ?? "",
-        color: group.color,
-        collapsed: Boolean(group.collapsed),
-      }));
-
-    return { tabs, groups, focusedWindowId: focusedWindowID };
-  },
-
-  // Groups tabs (all from one window) into a new group, or adds them to an
-  // existing one when groupId is given.
-  async groupTabs({ tabIds, title, color, collapsed, groupId }) {
-    requireTabIDs(tabIds);
-    let resultingGroupID;
-    if (typeof groupId === "number") {
-      resultingGroupID = await chrome.tabs.group({ tabIds, groupId });
-    } else {
-      const firstTab = await chrome.tabs.get(tabIds[0]);
-      resultingGroupID = await chrome.tabs.group({ tabIds, createProperties: { windowId: firstTab.windowId } });
-    }
-
-    const groupUpdate = {};
-    if (typeof title === "string") groupUpdate.title = title;
-    if (typeof color === "string") groupUpdate.color = color;
-    if (typeof collapsed === "boolean") groupUpdate.collapsed = collapsed;
-    if (Object.keys(groupUpdate).length > 0) {
-      await chrome.tabGroups.update(resultingGroupID, groupUpdate);
-    }
-    return { groupId: resultingGroupID };
-  },
-
-  async ungroupTabs({ tabIds }) {
-    requireTabIDs(tabIds);
-    await chrome.tabs.ungroup(tabIds);
-    return { ungroupedCount: tabIds.length };
-  },
-
-  // Closed tabs stay in Chrome's history and "Reopen closed tab", so this is
-  // recoverable; Wisp still asks before it runs as an agent tool.
-  async closeTabs({ tabIds }) {
-    requireTabIDs(tabIds);
-    await chrome.tabs.remove(tabIds);
-    return { closedCount: tabIds.length };
-  },
-
-  // Brings a tab to the front: selects it and raises its window.
-  async focusTab({ tabId }) {
-    requireTabID(tabId);
-    const tab = await chrome.tabs.update(tabId, { active: true });
-    await chrome.windows.update(tab.windowId, { focused: true });
-    return { tabId, windowId: tab.windowId };
-  },
-
-  async pinTabs({ tabIds, pinned }) {
-    requireTabIDs(tabIds);
-    const shouldPin = pinned !== false;
-    for (const tabID of tabIds) {
-      await chrome.tabs.update(tabID, { pinned: shouldPin });
-    }
-    return { changedCount: tabIds.length, pinned: shouldPin };
-  },
-
-  // Muting is per tab and reversible; nothing is closed or paused.
-  async muteTabs({ tabIds, muted }) {
-    requireTabIDs(tabIds);
-    const shouldMute = muted !== false;
-    for (const tabID of tabIds) {
-      await chrome.tabs.update(tabID, { muted: shouldMute });
-    }
-    return { changedCount: tabIds.length, muted: shouldMute };
-  },
-
-  // Collapses or expands tab groups: the ones in groupIds, or every group in
-  // every normal window when groupIds is omitted.
-  async setGroupsCollapsed({ groupIds, collapsed }) {
-    const shouldCollapse = collapsed !== false;
-    let targetGroupIDs = groupIds;
-    if (!Array.isArray(targetGroupIDs)) {
-      const allGroups = await chrome.tabGroups.query({});
-      targetGroupIDs = allGroups.map((group) => group.id);
-    }
-    for (const groupID of targetGroupIDs) {
-      await chrome.tabGroups.update(groupID, { collapsed: shouldCollapse });
-    }
-    return { changedCount: targetGroupIDs.length, collapsed: shouldCollapse };
-  },
-
-  // Moves the given tabs into one new window. Pinned and grouped state is
-  // dropped by Chrome when a tab changes window, which is expected here.
-  async moveTabsToNewWindow({ tabIds }) {
-    requireTabIDs(tabIds);
-    const [firstTabID, ...remainingTabIDs] = tabIds;
-    const newWindow = await chrome.windows.create({ tabId: firstTabID });
-    if (remainingTabIDs.length > 0) {
-      await chrome.tabs.move(remainingTabIDs, { windowId: newWindow.id, index: -1 });
-    }
-    return { windowId: newWindow.id, movedCount: tabIds.length };
-  },
-};
-
-function requireTabID(tabId) {
-  if (!Number.isInteger(tabId)) {
-    throw new Error("tabId must be a tab id");
-  }
-}
-
-function requireTabIDs(tabIds) {
-  if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((tabID) => Number.isInteger(tabID))) {
-    throw new Error("tabIds must be a non-empty list of tab ids");
-  }
-}
-
-// MARK: - Lifecycle
-
-chrome.alarms.create(RECONNECT_ALARM_NAME, { periodInMinutes: RECONNECT_ALARM_PERIOD_MINUTES });
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === RECONNECT_ALARM_NAME) connectToWisp();
-});
-
-chrome.runtime.onStartup.addListener(connectToWisp);
-chrome.runtime.onInstalled.addListener(connectToWisp);
-
-// The popup's "Try again" button.
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === "reconnect") {
-    connectToWisp();
-    sendResponse({ ok: true });
-  }
-});
-
-connectToWisp();
+startBridge();
