@@ -99,6 +99,8 @@ enum ToolCallSafety {
         let bareName = ToolCallInspection.bareToolName(toolName)
 
         if alwaysAskBareToolNames.contains(bareName) { return true }
+        // Closing tabs (stale sweep, triage) and big restores always get their card.
+        if ChromeTabLifeToolNames.mustAlwaysAsk(bareToolName: bareName) { return true }
 
         // cua-driver clicks, types and presses keys in the user's real apps.
         // None of those verbs is in the vocabulary below, so its action tools

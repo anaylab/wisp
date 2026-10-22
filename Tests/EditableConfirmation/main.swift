@@ -285,5 +285,45 @@ if let shortcutCard = ToolConfirmationCardBuilder.confirmationCard(forToolNamed:
     check(remainingRowLabels.contains("Does whatever this shortcut is built to do"), "the warning row (with an icon) is kept")
 }
 
+// MARK: - Chrome tab life (phase 04)
+
+let staleSweepInput: JSONValue = .object([
+    "session_name": .string("Cleanup Oct 21"),
+    "minimum_days": .number(14),
+    "tabs": .array((1...10).map { tabNumber in
+        .object(["id": .number(Double(tabNumber)), "title": .string("Tab \(tabNumber)"), "url": .string("https://site\(tabNumber).example/")])
+    }),
+])
+for tabLifeToolName in ["chrome_close_stale_tabs", "chrome_apply_tab_triage", "chrome_restore_tab_session"] {
+    check(
+        ToolCallSafety.mustAskEvenWithSessionAutoApprove(toolName: tabLifeToolName, toolInput: staleSweepInput, agentWorkingDirectoryPath: "/tmp/agent"),
+        "\(tabLifeToolName) asks even under session auto-approve"
+    )
+}
+check(
+    !ToolCallSafety.mustAskEvenWithSessionAutoApprove(toolName: "chrome_list_tab_sessions", toolInput: .object([:]), agentWorkingDirectoryPath: "/tmp/agent"),
+    "listing tab sessions doesn't"
+)
+if let staleSweepCard = ToolConfirmationCardBuilder.confirmationCard(forToolNamed: "chrome_close_stale_tabs", toolInput: staleSweepInput, agentWorkingDirectoryPath: nil),
+   case .header(let headerTitle, _, _)? = staleSweepCard.blocks.first {
+    check(headerTitle == "Close 10 tabs · saved as 'Cleanup Oct 21' first", "stale sweep card headline")
+    let titleRows = staleSweepCard.blocks.flatMap { block -> [GlanceKeyValuePair] in
+        if case .keyValue(let pairs) = block { return pairs }
+        return []
+    }
+    check(titleRows.count == 8 && titleRows.first?.key == "Tab 1", "up to 8 tab titles")
+    let footerTexts = staleSweepCard.blocks.flatMap { block -> [String] in
+        if case .list(let rows) = block { return rows.map(\.text) }
+        return []
+    }
+    check(footerTexts.contains("and 2 more"), "the rest are counted")
+} else {
+    check(false, "stale sweep card is built")
+}
+check(
+    EditableConfirmationFields.editableFields(forToolNamed: "chrome_close_stale_tabs", toolInput: staleSweepInput).isEmpty,
+    "nothing on the stale sweep card is editable"
+)
+
 print("\n\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

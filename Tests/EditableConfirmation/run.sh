@@ -31,6 +31,8 @@ swiftc -target arm64-apple-macos14.0 \
   leanring-buddy/MCPToolResultRendering.swift \
   leanring-buddy/GlanceCard.swift \
   leanring-buddy/BuddyChatTypes.swift \
-  leanring-buddy/ToolMetadata.swift
+  leanring-buddy/ToolMetadata.swift \
+  leanring-buddy/ChromeExtension/ChromeTabLifeCards.swift \
+  leanring-buddy/ChromeExtension/ChromeTabLifeCardText.swift
 
 "$BUILD_DIR/editable-confirmation"
