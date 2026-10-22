@@ -45,6 +45,14 @@ nonisolated enum ChromeTabCommandRouter {
     /// model. Biased toward nil: a miss costs one ordinary turn, a false match
     /// rearranges the user's browser.
     static func command(for transcript: String) -> ChromeTabCommand? {
+        // Tab life (phase 04) first: "clean up old tabs" would otherwise read
+        // as "organize my tabs", and "save this window" has no "tab" word.
+        if let tabLifeCommand = ChromeTabLifeCommandRouter.command(
+            for: transcript, savedSessionNames: ChromeTabSessionStore.savedSessionNamesForRouting
+        ) {
+            return .tabLife(tabLifeCommand)
+        }
+
         let text = normalized(transcript)
         let words = text.split(separator: " ").map(String.init)
         guard !words.isEmpty, words.count <= maximumCommandWordCount else { return nil }

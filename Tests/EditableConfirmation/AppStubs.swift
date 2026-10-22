@@ -7,6 +7,7 @@
 enum ShortcutsToolRouting { static let runShortcutToolName = "run_shortcut" }
 enum BuddyDelegationToolNames { static let askBuddy = "ask_buddy" }
 enum MessagingToolNames { static let sendIMessage = "send_imessage" }
+enum JobsToolNames { static let applyStudyBlocks = "wisp_jobs_apply_study_blocks" }
 
 // `GlanceCard.swift` (the card model the confirmation card is made of) also
 // names the resolved states of the data-backed card kinds. Nothing here

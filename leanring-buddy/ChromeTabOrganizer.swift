@@ -452,6 +452,8 @@ nonisolated enum ChromeTabCommand: Equatable, Sendable {
     case expandGroups
     case muteTabs
     case unmuteTabs
+    /// Save / restore / list tab sessions, stale-tab sweep, triage (phase 04).
+    case tabLife(ChromeTabLifeCommand)
 }
 
 @MainActor
@@ -476,6 +478,8 @@ enum ChromeTabOrganizer {
                 replyText = try await setAudibleTabsMuted(true)
             case .unmuteTabs:
                 replyText = try await setAudibleTabsMuted(false)
+            case .tabLife(let tabLifeCommand):
+                replyText = try await ChromeTabLife.perform(tabLifeCommand, modelProvider: modelProvider)
             }
             return (replyText, true)
         } catch {
@@ -518,7 +522,7 @@ enum ChromeTabOrganizer {
         return describe(groupingPlan, fellBackToSiteGrouping: fellBackToSiteGrouping)
     }
 
-    private static func requestTopicGroups(
+    static func requestTopicGroups(
         for snapshot: ChromeTabsSnapshot,
         modelProvider: any ModelProvider
     ) async -> [(title: String, tabIDs: [Int])] {
@@ -544,7 +548,7 @@ enum ChromeTabOrganizer {
         let groupId: Int?
     }
 
-    private static func apply(_ groupingPlan: ChromeTabGroupingPlan) async throws {
+    static func apply(_ groupingPlan: ChromeTabGroupingPlan) async throws {
         for plannedGroup in groupingPlan.plannedGroups {
             _ = try await ChromeExtensionBridge.shared.sendRequest(
                 method: "groupTabs",

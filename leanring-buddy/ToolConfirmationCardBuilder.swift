@@ -90,6 +90,9 @@ enum ToolConfirmationCardBuilder {
         if ToolCallInspection.bareToolName(toolName) == JobsToolNames.applyStudyBlocks {
             return studyBlocksCard(toolInput: toolInput)
         }
+        if let chromeTabLifeCard = ChromeTabLifeCards.confirmationCard(forBareToolName: ToolCallInspection.bareToolName(toolName), toolInput: toolInput) {
+            return chromeTabLifeCard
+        }
         // Its prepared input names the resolved person and handle, which the
         // generic message shape would show only half of.
         if ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage {

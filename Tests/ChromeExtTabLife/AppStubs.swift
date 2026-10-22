@@ -1,0 +1,48 @@
+//
+//  Just enough of the app for `ChromeTabOrganizer.swift` to compile on its own,
+//  so this suite can use its pure planners (`ChromeTabGroupingPlanner`,
+//  `ChromeDuplicateTabFinder`) without building the whole app. Nothing here
+//  runs: the suite never calls `ChromeTabOrganizer`, which is the only code
+//  that reaches these.
+//
+
+import Foundation
+
+enum JSONValue: Decodable {
+    case null
+    init(from decoder: Decoder) throws { self = .null }
+}
+
+struct BuddyChatMessage {
+    enum Role { case user, assistant }
+    init(role: Role, text: String) {}
+}
+
+struct ModelRequest {
+    init(systemPrompt: String, messages: [BuddyChatMessage], maxOutputTokens: Int, temperature: Double) {}
+}
+
+struct StubModelTurn { let text: String }
+
+protocol ModelProvider {
+    func completeTurn(_ request: ModelRequest) async throws -> StubModelTurn
+}
+
+final class ModelAccessGate {
+    enum Priority { case interactive }
+    static let shared = ModelAccessGate()
+    func withAccess<Result>(priority: Priority, _ work: () async throws -> Result) async throws -> Result { try await work() }
+}
+
+enum ChromeTabLife {
+    static func perform(_ command: ChromeTabLifeCommand, modelProvider: any ModelProvider) async throws -> String { "" }
+}
+
+final class ChromeExtensionBridge {
+    static let shared = ChromeExtensionBridge()
+    func sendRequest<Parameters: Encodable, Result: Decodable>(
+        method: String, parameters: Parameters, resultType: Result.Type
+    ) async throws -> Result {
+        fatalError("not used by the suite")
+    }
+}
