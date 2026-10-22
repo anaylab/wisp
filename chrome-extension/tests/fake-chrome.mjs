@@ -46,6 +46,10 @@ export function createFakeChrome({
   // Permission names the fake Chrome doesn't know, so `contains` throws like
   // an older Chrome would.
   unknownPermissionNames = [],
+  // Phase 03: frames per tab for webNavigation.getAllFrames, and a stand-in
+  // for chrome.scripting.executeScript (injection) => results.
+  framesByTabID = {},
+  executeScript = null,
 } = {}) {
   const calls = [];
   const state = {
@@ -88,8 +92,41 @@ export function createFakeChrome({
     state,
 
     tabs: {
-      async query() {
-        return state.tabs.map((tab) => ({ ...tab }));
+      // Filters only on the query keys a test passes, so `query({})` is every tab.
+      async query(queryInfo = {}) {
+        const lastFocusedWindowID = state.windows.find((browserWindow) => browserWindow.focused)?.id;
+        return state.tabs
+          .filter((tab) => !("active" in queryInfo) || Boolean(tab.active) === queryInfo.active)
+          .filter((tab) => !("windowId" in queryInfo) || tab.windowId === queryInfo.windowId)
+          .filter((tab) => !queryInfo.lastFocusedWindow || tab.windowId === lastFocusedWindowID)
+          .map((tab) => ({ ...tab }));
+      },
+      async create(createProperties) {
+        calls.push(["tabs.create", createProperties]);
+        const newTab = {
+          id: state.nextTabID++,
+          windowId: createProperties.windowId ?? 1,
+          index: state.tabs.length,
+          url: createProperties.url ?? "about:blank",
+          title: "",
+          active: Boolean(createProperties.active),
+          status: "complete",
+          groupId: -1,
+        };
+        state.tabs.push(newTab);
+        return { ...newTab };
+      },
+      async goBack(tabID) {
+        calls.push(["tabs.goBack", tabID]);
+        findTab(tabID);
+      },
+      async goForward(tabID) {
+        calls.push(["tabs.goForward", tabID]);
+        findTab(tabID);
+      },
+      async captureVisibleTab(windowID, options) {
+        calls.push(["tabs.captureVisibleTab", windowID, options]);
+        return "data:image/jpeg;base64,RkFLRQ==";
       },
       async get(tabID) {
         return { ...findTab(tabID) };
@@ -100,6 +137,7 @@ export function createFakeChrome({
         if ("pinned" in updateProperties) tab.pinned = updateProperties.pinned;
         if ("active" in updateProperties) tab.active = updateProperties.active;
         if ("muted" in updateProperties) tab.mutedInfo = { muted: updateProperties.muted };
+        if ("url" in updateProperties) tab.url = updateProperties.url;
         return { ...tab };
       },
       async group({ tabIds, groupId, createProperties }) {
@@ -149,6 +187,16 @@ export function createFakeChrome({
         return state.windows
           .filter((browserWindow) => !windowTypes || windowTypes.includes(browserWindow.type))
           .map((browserWindow) => ({ ...browserWindow }));
+      },
+      async get(windowID) {
+        const browserWindow = state.windows.find((candidateWindow) => candidateWindow.id === windowID);
+        if (!browserWindow) throw new Error(`No window with id: ${windowID}.`);
+        return { ...browserWindow };
+      },
+      async getLastFocused() {
+        const focusedWindow = state.windows.find((browserWindow) => browserWindow.focused) ?? state.windows[0];
+        if (!focusedWindow) throw new Error("No last-focused window");
+        return { ...focusedWindow };
       },
       async update(windowID, updateProperties) {
         calls.push(["windows.update", windowID, updateProperties]);
@@ -233,12 +281,26 @@ export function createFakeChrome({
       onMessage: createFakeEvent(),
     },
 
-    // Filled in by the phases that inject content scripts.
+    // Filled in by the phases that inject content scripts: pass
+    // `executeScript` to play the page.
     scripting: {
       async executeScript(injection) {
         calls.push(["scripting.executeScript", injection]);
-        return [];
+        return executeScript ? executeScript(injection) : [];
       },
+    },
+
+    webNavigation: {
+      async getAllFrames({ tabId }) {
+        return (framesByTabID[tabId] ?? [{ frameId: 0, parentFrameId: -1, url: findTab(tabId).url }]).map((frame) => ({ ...frame }));
+      },
+      async getFrame({ tabId, frameId }) {
+        const frames = framesByTabID[tabId] ?? [{ frameId: 0, parentFrameId: -1, url: findTab(tabId).url }];
+        const frame = frames.find((candidateFrame) => candidateFrame.frameId === frameId);
+        return frame ? { ...frame } : null;
+      },
+      onCommitted: createFakeEvent(),
+      onCompleted: createFakeEvent(),
     },
   };
   return fakeChrome;

@@ -4200,7 +4200,6 @@ extension CompanionManager {
         currentReplyText = ""
         WispSoundPlayer.shared.play(.thinking)
         let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
-        let controller = AgentToolRegistry.shared.browserController
 
         currentResponseTask = Task { [weak self] in
             guard let self else { return }
@@ -4211,7 +4210,8 @@ extension CompanionManager {
             switch route {
             case .tabCommand(let command):
                 do {
-                    try await controller.performTabCommand(command)
+                    // Tab commands are plain AppleScript (no page access needed).
+                    try await AgentToolRegistry.shared.appleScriptBrowserController.performTabCommand(command)
                     replyText = command.confirmation
                     didSucceed = true
                 } catch {
@@ -4220,6 +4220,7 @@ extension CompanionManager {
                 }
 
             case .browserTask(let request):
+                let controller = AgentToolRegistry.shared.browserController(servingRequest: request)
                 (replyText, didSucceed) = await self.runDirectBrowserTask(request: request, controller: controller)
 
             case .chromeTabs(let chromeTabCommand):
@@ -4273,7 +4274,7 @@ extension CompanionManager {
     /// Runs a web task and turns its outcome into one short reply.
     private func runDirectBrowserTask(
         request: String,
-        controller: AppleScriptBrowserController
+        controller: BrowserController
     ) async -> (replyText: String, didSucceed: Bool) {
         let modelProvider = selectedModelProvider
         let outcome = await BrowserAgent.run(

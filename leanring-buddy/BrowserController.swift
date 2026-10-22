@@ -124,6 +124,9 @@ enum BrowserAvailability: Sendable, Equatable {
     /// JavaScript-from-Apple-Events disabled, and it is a setting only the user
     /// can turn on.
     case javaScriptFromAppleEventsDisabled(browserName: String, instructions: String)
+    /// The Chrome extension is connected but the user hasn't let it read pages
+    /// yet — a permission only they can grant, in Chrome.
+    case extensionNeedsPermission(browserName: String, instructions: String)
     case noSupportedBrowser
 
     var isReady: Bool {
@@ -145,6 +148,9 @@ enum BrowserControllerError: LocalizedError {
             if case .javaScriptFromAppleEventsDisabled(_, let instructions) = availability {
                 return instructions
             }
+            if case .extensionNeedsPermission(_, let instructions) = availability {
+                return instructions
+            }
             return "The browser isn't available to control right now."
         case .scriptFailed(let detail): return detail
         case .elementNotFound(let id): return "No element \(id) on the page any more."
@@ -156,20 +162,29 @@ enum BrowserControllerError: LocalizedError {
 // MARK: - Protocol
 
 /// The operations an agent needs, none of which require a model.
+///
+/// Operations are `async`. `AppleScriptBrowserController` answers each one
+/// synchronously (NSAppleScript blocks the main actor for one round trip, as it
+/// always has), and a synchronous method satisfies an `async` requirement, so it
+/// conforms unchanged. `ExtensionBrowserController` talks to the Chrome
+/// extension over a WebSocket, which is genuinely asynchronous; making the
+/// requirements `async` lets it await the reply instead of blocking the main
+/// actor on a socket — which would deadlock, since the reply is delivered on
+/// the main actor too.
 @MainActor
 protocol BrowserController: AnyObject {
     var browserName: String { get }
 
     func checkAvailability() -> BrowserAvailability
 
-    func openURL(_ url: URL) throws
+    func openURL(_ url: URL) async throws
     /// Points the current tab at `url`, rather than opening a new one.
-    func navigate(to url: URL) throws
-    func goBack() throws
-    func goForward() throws
+    func navigate(to url: URL) async throws
+    func goBack() async throws
+    func goForward() async throws
 
-    func currentURL() throws -> String
-    func pageTitle() throws -> String
+    func currentURL() async throws -> String
+    func pageTitle() async throws -> String
 
     /// Reads the page as structured text. The replacement for a screenshot.
     ///
@@ -177,27 +192,27 @@ protocol BrowserController: AnyObject {
     /// listed first, so a small budget still covers what the user can see.
     /// Element ids are stable across snapshots of the same page, so an id the
     /// agent saw one step ago still means the same element now.
-    func snapshot(maximumTextCharacters: Int, elementLimit: Int) throws -> BrowserPageSnapshot
+    func snapshot(maximumTextCharacters: Int, elementLimit: Int) async throws -> BrowserPageSnapshot
 
     /// Finds elements whose label matches `query`, best match first.
     ///
     /// Returns candidates rather than one answer: "login" legitimately matches
     /// a button and a link on many pages, and picking silently would hide that
     /// from the caller who has to live with the click.
-    func findElements(matching query: String) throws -> [BrowserElement]
+    func findElements(matching query: String) async throws -> [BrowserElement]
 
-    func click(elementID: String) throws
-    func typeText(_ text: String, intoElementID: String, pressEnter: Bool) throws
+    func click(elementID: String) async throws
+    func typeText(_ text: String, intoElementID: String, pressEnter: Bool) async throws
     /// Moves the pointer over an element, for menus that only open on hover.
-    func hover(elementID: String) throws
+    func hover(elementID: String) async throws
     /// Sends one key to whatever has focus: "Enter", "Escape", "Tab",
     /// "ArrowDown", "ArrowUp", "Backspace"… Closing a modal or stepping through
     /// an autocomplete list needs these; a click alone cannot do it.
-    func pressKey(_ keyName: String) throws
-    func scroll(_ direction: BrowserScrollDirection) throws
+    func pressKey(_ keyName: String) async throws
+    func scroll(_ direction: BrowserScrollDirection) async throws
 
     /// Chooses an option in a `<select>` by visible text.
-    func selectOption(_ optionLabel: String, inElementID elementID: String) throws
+    func selectOption(_ optionLabel: String, inElementID elementID: String) async throws
 
     /// Blocks until the page has finished loading, or the deadline passes.
     ///
@@ -230,7 +245,7 @@ protocol BrowserController: AnyObject {
     /// frame, or gone. This is purely for the watching user; nothing depends on
     /// it to actually click, so a nil answer is a missing animation, not a
     /// missing action.
-    func screenPoint(ofElementID elementID: String) throws -> (point: CGPoint, displayFrame: CGRect)?
+    func screenPoint(ofElementID elementID: String) async throws -> (point: CGPoint, displayFrame: CGRect)?
 
     /// Opens a tab of Wisp's own (or reuses the one from the last task) and
     /// points every operation at it until `endDedicatedTabSession`.
@@ -247,7 +262,7 @@ protocol BrowserController: AnyObject {
 
     /// Brings the working tab to the front, for the one action that needs it
     /// visible: a screenshot.
-    func revealDedicatedTab()
+    func revealDedicatedTab() async
 }
 
 extension BrowserController {
@@ -256,12 +271,12 @@ extension BrowserController {
     /// Protocol requirements cannot carry default arguments, so this exists to
     /// keep every call site from having to restate a number whose value is
     /// argued for in one place — and whose whole point is that it stays small.
-    func snapshot() throws -> BrowserPageSnapshot {
-        try snapshot(maximumTextCharacters: AppleScriptBrowserController.defaultTextCharacterLimit)
+    func snapshot() async throws -> BrowserPageSnapshot {
+        try await snapshot(maximumTextCharacters: AppleScriptBrowserController.defaultTextCharacterLimit)
     }
 
-    func snapshot(maximumTextCharacters: Int) throws -> BrowserPageSnapshot {
-        try snapshot(
+    func snapshot(maximumTextCharacters: Int) async throws -> BrowserPageSnapshot {
+        try await snapshot(
             maximumTextCharacters: maximumTextCharacters,
             elementLimit: AppleScriptBrowserController.defaultElementLimit
         )
@@ -278,10 +293,10 @@ extension BrowserController {
     /// Controllers without tabs of their own act wherever they already act.
     func beginDedicatedTabSession() async throws -> BrowserTabDescription? { nil }
     func endDedicatedTabSession() {}
-    func revealDedicatedTab() {}
+    func revealDedicatedTab() async {}
 
     /// Controllers that cannot place an element on screen simply do not animate.
-    func screenPoint(ofElementID elementID: String) throws -> (point: CGPoint, displayFrame: CGRect)? {
+    func screenPoint(ofElementID elementID: String) async throws -> (point: CGPoint, displayFrame: CGRect)? {
         nil
     }
 }

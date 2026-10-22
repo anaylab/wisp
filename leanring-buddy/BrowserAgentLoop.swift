@@ -171,7 +171,7 @@ enum BrowserAgentLoop {
             // Observe.
             let snapshot: BrowserPageSnapshot?
             do {
-                snapshot = try controller.snapshot(
+                snapshot = try await controller.snapshot(
                     maximumTextCharacters: nextSnapshotTextBudget,
                     elementLimit: elementBudget
                 )
@@ -263,7 +263,7 @@ enum BrowserAgentLoop {
                     return makeOutcome(
                         didSucceed: true,
                         answer: answer.isEmpty ? "done" : answer,
-                        snapshot: try? controller.snapshot(maximumTextCharacters: 300, elementLimit: 0)
+                        snapshot: try? await controller.snapshot(maximumTextCharacters: 300, elementLimit: 0)
                     )
 
                 case .ask(let question):
@@ -287,7 +287,7 @@ enum BrowserAgentLoop {
                     // The working tab may be behind the user's own tabs; a
                     // screenshot of whatever else is in front would be useless.
                     if modelProvider.capabilities.supportsVision {
-                        controller.revealDedicatedTab()
+                        await controller.revealDedicatedTab()
                         try? await Task.sleep(for: .milliseconds(400))
                     }
                     if modelProvider.capabilities.supportsVision,
@@ -330,7 +330,7 @@ enum BrowserAgentLoop {
         return makeOutcome(
             didSucceed: false,
             failureReason: "couldn't finish within \(maximumSteps) steps",
-            snapshot: try? controller.snapshot()
+            snapshot: try? await controller.snapshot()
         )
     }
 
@@ -374,7 +374,7 @@ enum BrowserAgentLoop {
                 }
                 progress("Clicking \(element(elementID).map { "“\($0.label.prefix(40))”" } ?? elementID)")
                 await guideCursor(to: elementID, actionText: "click", controller: controller, cursorGuide: cursorGuide)
-                try controller.click(elementID: elementID)
+                try await controller.click(elementID: elementID)
                 _ = await controller.waitUntilSettled()
                 return ActionOutcome(historyLine: "clicked \(name(elementID))", countsAsOperation: true)
 
@@ -398,7 +398,7 @@ enum BrowserAgentLoop {
                 }
                 progress("Typing into \(element(elementID).map { "“\($0.label.prefix(40))”" } ?? elementID)")
                 await guideCursor(to: elementID, actionText: "type", controller: controller, cursorGuide: cursorGuide)
-                try controller.typeText(text, intoElementID: elementID, pressEnter: submit)
+                try await controller.typeText(text, intoElementID: elementID, pressEnter: submit)
                 if submit { _ = await controller.waitUntilSettled() }
                 return ActionOutcome(
                     historyLine: "typed “\(text.prefix(80))” into \(name(elementID))\(submit ? " and pressed enter" : "")",
@@ -408,25 +408,25 @@ enum BrowserAgentLoop {
             case .select(let elementID, let optionLabel):
                 progress("Choosing “\(optionLabel.prefix(40))”")
                 await guideCursor(to: elementID, actionText: "select", controller: controller, cursorGuide: cursorGuide)
-                try controller.selectOption(optionLabel, inElementID: elementID)
+                try await controller.selectOption(optionLabel, inElementID: elementID)
                 _ = await controller.waitUntilSettled(timeout: 3)
                 return ActionOutcome(historyLine: "selected “\(optionLabel)” in \(name(elementID))", countsAsOperation: true)
 
             case .hover(let elementID):
                 await guideCursor(to: elementID, actionText: "hover", controller: controller, cursorGuide: cursorGuide)
-                try controller.hover(elementID: elementID)
+                try await controller.hover(elementID: elementID)
                 _ = await controller.waitUntilSettled(timeout: 2)
                 return ActionOutcome(historyLine: "hovered over \(name(elementID))", countsAsOperation: true)
 
             case .key(let keyName):
                 progress("Pressing \(keyName)")
-                try controller.pressKey(keyName)
+                try await controller.pressKey(keyName)
                 _ = await controller.waitUntilSettled(timeout: 4)
                 return ActionOutcome(historyLine: "pressed \(keyName)", countsAsOperation: true)
 
             case .scroll(let direction):
                 progress("Scrolling \(direction.rawValue)")
-                try controller.scroll(direction)
+                try await controller.scroll(direction)
                 try? await Task.sleep(for: .milliseconds(250))
                 return ActionOutcome(historyLine: "scrolled \(direction.rawValue)", countsAsOperation: true)
 
@@ -436,22 +436,22 @@ enum BrowserAgentLoop {
                 // Navigating the current tab when there is one keeps the task in
                 // a single tab; with no window yet, opening creates one.
                 do {
-                    try controller.navigate(to: url)
+                    try await controller.navigate(to: url)
                 } catch {
-                    try controller.openURL(url)
+                    try await controller.openURL(url)
                 }
                 _ = await controller.waitUntilSettled(timeout: 12)
                 return ActionOutcome(historyLine: "opened \(url.absoluteString.prefix(120))", countsAsOperation: true)
 
             case .back:
                 progress("Going back")
-                try controller.goBack()
+                try await controller.goBack()
                 _ = await controller.waitUntilSettled()
                 return ActionOutcome(historyLine: "went back", countsAsOperation: true)
 
             case .forward:
                 progress("Going forward")
-                try controller.goForward()
+                try await controller.goForward()
                 _ = await controller.waitUntilSettled()
                 return ActionOutcome(historyLine: "went forward", countsAsOperation: true)
 
@@ -497,7 +497,7 @@ enum BrowserAgentLoop {
         cursorGuide: BrowserCursorGuide?
     ) async {
         guard let cursorGuide else { return }
-        guard let located = try? controller.screenPoint(ofElementID: elementID) else { return }
+        guard let located = try? await controller.screenPoint(ofElementID: elementID) else { return }
         await cursorGuide.guideCursor(to: located.point, on: located.displayFrame, actionText: actionText)
     }
 

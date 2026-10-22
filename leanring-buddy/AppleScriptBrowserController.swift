@@ -554,51 +554,16 @@ final class AppleScriptBrowserController: BrowserController {
         }
 
         guard let data = json.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let pageSnapshot = BrowserPageSnapshotDecoding.snapshot(fromJSONData: data) else {
             throw BrowserControllerError.scriptFailed("The page returned something unreadable.")
-        }
-
-        let elements: [BrowserElement] = (root["elements"] as? [[String: Any]] ?? []).compactMap {
-            guard let id = $0["id"] as? String,
-                  let role = $0["role"] as? String,
-                  let label = $0["label"] as? String else { return nil }
-            let state = $0["state"] as? String
-            return BrowserElement(
-                id: id,
-                role: role,
-                label: label,
-                href: $0["href"] as? String,
-                value: $0["value"] as? String,
-                state: (state?.isEmpty ?? true) ? nil : state,
-                isSensitiveInput: ($0["sensitive"] as? Bool) ?? false
-            )
-        }
-
-        var text = root["text"] as? String ?? ""
-        // Where the viewport sits in the page, so the agent knows whether
-        // scrolling could reveal more — and when it has reached the bottom.
-        if let scrollDescription = root["scroll"] as? String, !scrollDescription.isEmpty {
-            text = "(\(scrollDescription))\n" + text
-        }
-        // A modal is the one thing on the page that must be dealt with before
-        // anything behind it can be clicked, so it is named outright.
-        if let dialogLabel = root["dialog"] as? String, !dialogLabel.isEmpty {
-            text = "(a dialog is open: \(dialogLabel) — its elements are listed first)\n" + text
         }
 
         // Keeps the working tab recognisable: Safari re-finds a tab whose
         // position moved by the page it was last seen on.
-        if isDrivingDedicatedTab, let pageURL = root["url"] as? String {
-            dedicatedTab?.lastKnownURL = pageURL
+        if isDrivingDedicatedTab, !pageSnapshot.url.isEmpty {
+            dedicatedTab?.lastKnownURL = pageSnapshot.url
         }
-
-        return BrowserPageSnapshot(
-            url: root["url"] as? String ?? "",
-            title: root["title"] as? String ?? "",
-            headings: root["headings"] as? [String] ?? [],
-            elements: elements,
-            text: text
-        )
+        return pageSnapshot
     }
 
     // MARK: - Acting
@@ -774,7 +739,11 @@ final class AppleScriptBrowserController: BrowserController {
         let normalizedQuery = query.lowercased().trimmingCharacters(in: .whitespaces)
         guard !normalizedQuery.isEmpty else { return [] }
 
-        let elements = try snapshot().elements
+        // Its own synchronous snapshot, at the protocol's default budget.
+        let elements = try snapshot(
+            maximumTextCharacters: Self.defaultTextCharacterLimit,
+            elementLimit: Self.defaultElementLimit
+        ).elements
 
         func score(_ element: BrowserElement) -> Int {
             let label = element.label.lowercased()

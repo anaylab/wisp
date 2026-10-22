@@ -1,0 +1,54 @@
+{
+  "url": "https://shop.example/checkout",
+  "title": "Checkout",
+  "headings": [
+    "Checkout"
+  ],
+  "elements": [
+    {
+      "id": "e0",
+      "role": "button",
+      "label": "Not now"
+    },
+    {
+      "id": "e1",
+      "role": "button",
+      "label": "Save",
+      "state": "disabled"
+    },
+    {
+      "id": "e2",
+      "role": "textbox:email",
+      "label": "Email",
+      "state": "required",
+      "value": "ada@example.com"
+    },
+    {
+      "id": "e3",
+      "role": "textbox:password",
+      "label": "Password",
+      "sensitive": true
+    },
+    {
+      "id": "e4",
+      "role": "select",
+      "label": "Shipping",
+      "value": "Express"
+    },
+    {
+      "id": "e5",
+      "role": "checkbox",
+      "label": "Accept terms",
+      "state": "checked"
+    },
+    {
+      "id": "e6",
+      "role": "link",
+      "label": "Back to cart",
+      "href": "https://shop.example/cart"
+    }
+  ],
+  "text": "Not now Save",
+  "scroll": "scrolled 0% down the page",
+  "dialog": "Save card?"
+}
