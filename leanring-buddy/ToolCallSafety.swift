@@ -65,7 +65,9 @@ enum ToolCallSafety {
     /// Routine" may only read the weather or may text half the user's
     /// contacts. Listed by name so the guarantee does not depend on word
     /// matching (though "run" + "shortcut" would also catch it).
-    static let alwaysAskBareToolNames: Set<String> = ["run_shortcut", BuddyDelegationToolNames.askBuddy, JobsToolNames.applyStudyBlocks]
+    // "chrome_file_download" (`ChromeDownloadToolNames.fileDownload`, spelled out so the standalone
+    // suites needn't compile the download tools): renaming or moving a download always asks.
+    static let alwaysAskBareToolNames: Set<String> = ["run_shortcut", BuddyDelegationToolNames.askBuddy, JobsToolNames.applyStudyBlocks, "chrome_file_download"]
 
     /// Verbs that write to the file system. Deletion is already in
     /// `alwaysIrreversibleWords`, so these are the recoverable-inside-the-agent-

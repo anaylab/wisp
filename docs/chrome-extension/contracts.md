@@ -67,6 +67,21 @@ cut. Swift decodes them with `ChromeExtensionTabEventPayload`.
 `getCapabilities` returns `{capabilities: […]}`. `openPermissionsPage` returns `{opened: true}`. A `hello`
 without `capabilities` (an extension older than 1.1.0) reads as `["tabs"]`. Wisp drops frames over 16 MB.
 
+### Phase 07 download payloads
+
+Downloads use one shape (`describeDownload`, Swift `ChromeDownloadItem`): `id`, `filename` (absolute path),
+`mime`, `fileSize`, `state`, `error`, `danger`, `dangerous` (anything but `"safe"`), `exists`, `startTime`,
+`endTime`, `url`, `finalUrl`, `referrer`, `sourcePageUrl`, `pageTitle`, and `truncated` when a text field was
+cut. `sourcePageUrl`/`pageTitle` are filled only in events (the page from a matching tab, never incognito).
+
+| Event / method | `data` / result |
+|---|---|
+| `download.created` / `download.completed` / `download.failed` | the download |
+| `getDownloads({limit?, downloadId?})` | `{downloads: […], truncated?}` (newest first, limit 1–100, default 20) |
+| `showDownload({downloadId})` | `{shown: true}` (reveals it in Finder) |
+
+The extension never renames, moves or deletes a downloaded file.
+
 ## 2. Methods and events: names and owners
 
 Only the owning phase adds a name. Names are `camelCase` for methods and `area.verb` for events.

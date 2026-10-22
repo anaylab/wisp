@@ -50,6 +50,8 @@ export function createFakeChrome({
   // for chrome.scripting.executeScript (injection) => results.
   framesByTabID = {},
   executeScript = null,
+  // Download items for the `downloads` fake (phase 07).
+  downloads = [],
 } = {}) {
   const calls = [];
   const state = {
@@ -65,6 +67,8 @@ export function createFakeChrome({
     nextGroupID: 500,
     nextWindowID: 50,
     optionsPageOpenCount: 0,
+    downloads: downloads.map((downloadItem) => ({ ...downloadItem })),
+    shownDownloadIDs: [],
   };
 
   function findTab(tabID) {
@@ -222,6 +226,7 @@ export function createFakeChrome({
         checkPermissionNames(requestedPermissions);
         for (const name of requestedPermissions?.permissions ?? []) state.grantedPermissionNames.add(name);
         for (const origin of requestedPermissions?.origins ?? []) state.grantedOrigins.add(origin);
+        syncOptionalAPIs();
         await fakeChrome.permissions.onAdded.dispatch(requestedPermissions);
         return true;
       },
@@ -229,6 +234,7 @@ export function createFakeChrome({
         calls.push(["permissions.remove", removedPermissions]);
         for (const name of removedPermissions?.permissions ?? []) state.grantedPermissionNames.delete(name);
         for (const origin of removedPermissions?.origins ?? []) state.grantedOrigins.delete(origin);
+        syncOptionalAPIs();
         await fakeChrome.permissions.onRemoved.dispatch(removedPermissions);
         return true;
       },
@@ -303,7 +309,46 @@ export function createFakeChrome({
       onCompleted: createFakeEvent(),
     },
   };
+
+  // Like Chrome, `chrome.downloads` only exists while the optional
+  // `downloads` permission is granted. Its events persist across a grant,
+  // remove and re-grant, so a test can check listeners aren't doubled.
+  const fakeDownloadsAPI = createFakeDownloadsAPI(state, calls);
+  function syncOptionalAPIs() {
+    if (state.grantedPermissionNames.has("downloads")) {
+      fakeChrome.downloads = fakeDownloadsAPI;
+    } else {
+      delete fakeChrome.downloads;
+    }
+  }
+  syncOptionalAPIs();
+
   return fakeChrome;
+}
+
+// `chrome.downloads`: search by id or newest first with a limit, and show.
+function createFakeDownloadsAPI(state, calls) {
+  return {
+    async search(query = {}) {
+      let matchingDownloads = state.downloads.map((downloadItem) => ({ ...downloadItem }));
+      if (typeof query.id === "number") {
+        matchingDownloads = matchingDownloads.filter((downloadItem) => downloadItem.id === query.id);
+      }
+      if ((query.orderBy ?? []).includes("-startTime")) {
+        matchingDownloads.sort((first, second) => String(second.startTime ?? "").localeCompare(String(first.startTime ?? "")));
+      }
+      if (typeof query.limit === "number" && query.limit > 0) {
+        matchingDownloads = matchingDownloads.slice(0, query.limit);
+      }
+      return matchingDownloads;
+    },
+    show(downloadID) {
+      calls.push(["downloads.show", downloadID]);
+      state.shownDownloadIDs.push(downloadID);
+    },
+    onCreated: createFakeEvent(),
+    onChanged: createFakeEvent(),
+  };
 }
 
 function pickKeys(storageObject, keys) {
