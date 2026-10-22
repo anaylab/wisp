@@ -813,6 +813,21 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   chrome://, extension, devtools, Web Store, data:/javascript: pages and (unless allowed) file://, which is read-only;
   `[data-wisp-ignore]` regions and one-time-code fields are never listed or typed into. Events `nav.committed` /
   `nav.completed` (main frame only). Tab commands (new tab, back…) still go through AppleScript.
+  **Page reading (phase 02)**: with `pages.read`, `getPageText`/`getSelection`/`getPageOutline` inject
+  `content/read-page.js` (on demand, top frame) and return a page's main text (Readability-style, written from scratch:
+  `<main>`/a dominant `<article>` over the body, nav/aside/footer/hidden/cookie furniture dropped, headings as `#`, list
+  items as `- `, table rows as `a | b`), metadata and word count, capped at 20,000 chars. Form controls are never read and
+  `[data-wisp-ignore]` is skipped; chrome://, extension, devtools, Web Store and incognito pages are refused, `file://`
+  only with Chrome's file-access switch. A turn whose question is about the page's *content* (`ChromePageContentRequestClassifier`,
+  biased toward no; any look/place/control word keeps the screenshot) while Chrome is frontmost and the extension may
+  read pages sends that text instead of the screenshot (`CompanionManager.chromePageTextReplacingScreenshot`, run beside
+  the capture, ≤4s, ≥25 words else the screenshot stays). The text rides the per-turn context block (stripped from history
+  like `a`/`t` ids), fenced as page DATA and trimmed to 6k chars for the local model / 20k for cloud (`ChromePageTextPrompt`);
+  History gets a "Read the Chrome tab's text instead of a screenshot" step. Agent tools `chrome_read_tab` (tab by id, title
+  or address fragment, `ChromeTabReferenceResolver` never guesses) and `chrome_read_selection` (read-only). "Add this page
+  to my brain" in Chrome enqueues the tab's text (`BrainCommandTargetResolver.resolvePreferringChromeExtensionText` →
+  `BrainIngestQueue.enqueue(text:title:sourceWebPageURL:)`, URL kept as the source), falling back to fetching the URL. The
+  extraction tests need `npm install` in `chrome-extension/` (linkedom, dev-only; skipped with a reason without it).
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1287,6 +1302,16 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `chrome-extension/events/tabs.js` | ~115 | `tab.created/updated/removed/activated`, `window.focused`; per-tab 250ms debounce, reported fields only, no incognito. |
 | `chrome-extension/options.html` / `options.js` | ~70/~90 | The permissions page: each optional capability, what it allows, Allow / Remove (`chrome.permissions.request` / `remove`). |
 | `chrome-extension/popup.html` / `popup.js` | ~50/~55 | Connection status, Try again, the granted-capability line and a Permissions… link. |
+| `chrome-extension/content/read-page.js` | ~530 | Injected on demand (phase 02): defines `wispPageReader` — `readPageText` (main-content choice, furniture/hidden/secret skips, heading/list/table-row lines, title/canonical/lang/description/published date, word count, 20k cap), `readSelection` (selection + ~300 chars of context, nothing from ignored regions or secret fields), `readPageOutline`. |
+| `chrome-extension/handlers/page-reading.js` | ~190 | `getPageText` / `getSelection` / `getPageOutline`: `pages.read` check ("missing capability pages.read"), tab choice (given id, else the last-focused window's showing tab), `forbiddenPageReason` (http(s) only, file:// with Chrome's switch, never incognito or the Web Store), injection and caps. |
+| `chrome-extension/tests/page-reading.test.mjs` / `tests/fixtures/*.html` | ~300 | Extraction against fixture pages (article, docs with sidebar, password field, over-cap page) via linkedom, plus the handlers against the fake `chrome`. |
+| `ChromeExtension/ChromePageTextPrompt.swift` | ~190 | Pure: `ChromePageText`/`ChromePageSelection`/`ChromePageOutline` (the replies), per-model budgets (6k local / 20k cloud), the `<<< >>>` page-DATA fence (defused), paragraph/sentence-aware trimming. Tested by `Tests/ChromeExtPageReading`. |
+| `ChromeExtension/ChromePageContentRequestClassifier.swift` | ~120 | Pure: is the question about what the page says (summarize, price, explain this article) rather than how it looks? Biased toward no. |
+| `ChromeExtension/ChromeTabReferenceResolver.swift` | ~120 | Pure: a `tab` argument (id, title or address fragment, or nothing) → one open tab, `.ambiguous` candidates or `.notFound`. |
+| `ChromeExtension/ChromePageReader.swift` | ~150 | `readPage`/`readSelection`/`readOutline` over the bridge, the `pages.read` check, and errors in Wisp's voice (how to allow reading pages). |
+| `ChromeExtension/ChromePageReadingAgentTools.swift` | ~130 | `chrome_read_tab` and `chrome_read_selection` (`registerChromePageReadingTools()`). |
+| `ChromeExtension/CompanionManager+ChromePageReading.swift` | ~80 | `chromePageTextReplacingScreenshot`: the turn path's page-text-instead-of-screenshot decision, History step and perf note. |
+| `ChromeExtension/BrainChromePageTarget.swift` | ~55 | `BrainCommandTargetResolver.resolvePreferringChromeExtensionText`: "add this page to my brain" reads the Chrome tab's text, else falls back to the URL. |
 | `chrome-extension/tests/fake-chrome.mjs` | ~330 | In-memory `chrome.*` fake (tabs, tabGroups, windows, permissions, alarms, storage, runtime, scripting stub; `dispatch` on every event), `FakeWebSocket`, manual timers. |
 | `chrome-extension/tests/*.test.mjs` | ~1370 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring, the DOM agent (ids, dialog order, sensitive fields, select, settle, shared snapshot fixture), the DOM controller handlers (frames, Wisp group, page access, settling, capture) and navigation events. `chrome-extension/package.json` only tells Node the files are ES modules. |
 
@@ -1526,6 +1551,8 @@ running):
 ./Tests/ChromeExtFoundation/run.sh       # Chrome extension frames: hello/ping/capabilities/event/reply parsing, payloads, timeout cap
 ./Tests/ChromeExtDOMController/run.sh    # extension vs AppleScript selection, snapshot decoding (shared fixture), action replies
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
+node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
+./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
 ```

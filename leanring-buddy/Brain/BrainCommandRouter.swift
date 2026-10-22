@@ -179,10 +179,15 @@ enum BrainCommandTargetResolver {
     struct WebPage: Equatable {
         var url: URL
         var title: String
+        /// The browser the page was read from ("" when unknown).
+        var browserBundleIdentifier: String = ""
     }
 
     enum Target: Equatable {
         case webPage(WebPage)
+        /// A page whose text the Chrome extension read in the user's own tab:
+        /// what they see, logged in, rather than a fresh fetch of the URL.
+        case webPageWithText(WebPage, pageText: String)
         case files([URL])
         /// Why nothing could be found, as a short reply for the notch.
         case unavailable(String)
@@ -257,7 +262,11 @@ enum BrainCommandTargetResolver {
               urlText.hasPrefix("http"),
               let pageURL = URL(string: urlText) else { return nil }
         let pageTitle = replyParts.count > 1 ? replyParts[1].trimmingCharacters(in: .whitespaces) : ""
-        return WebPage(url: pageURL, title: pageTitle.isEmpty ? (pageURL.host ?? urlText) : pageTitle)
+        return WebPage(
+            url: pageURL,
+            title: pageTitle.isEmpty ? (pageURL.host ?? urlText) : pageTitle,
+            browserBundleIdentifier: bundleIdentifier
+        )
     }
 
     private static func finderSelectionTarget() -> Target {

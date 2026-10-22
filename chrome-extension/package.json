@@ -1,9 +1,12 @@
 {
-  "//": "Only for `node --test chrome-extension/tests/`: tells Node the extension's .js files are ES modules, as Chrome loads them. Chrome ignores this file.",
+  "//": "Only for `node --test chrome-extension/tests/`: tells Node the extension's .js files are ES modules, as Chrome loads them, and installs linkedom (`npm install` here) so the page-reading tests can parse fixture HTML. Nothing the extension loads imports it. Chrome ignores this file.",
   "name": "wisp-tabs",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test tests/"
+  },
+  "devDependencies": {
+    "linkedom": "^0.18.14"
   }
 }
