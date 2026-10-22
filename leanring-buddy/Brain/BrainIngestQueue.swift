@@ -136,8 +136,20 @@ final class BrainIngestQueue: ObservableObject {
         return add(job)
     }
 
+    /// `sourceWebPageURL` marks the text as that web page's (read in the
+    /// user's own tab by the Chrome extension), so the source page and the
+    /// raw copy name the address rather than "pasted text".
     @discardableResult
-    func enqueue(text: String, title: String, origin: BrainEditProvenance.Origin = .ingest) -> UUID {
+    func enqueue(
+        text: String,
+        title: String,
+        origin: BrainEditProvenance.Origin = .ingest,
+        sourceWebPageURL: URL? = nil
+    ) -> UUID {
+        if let sourceWebPageURL,
+           let existingJob = jobs.first(where: { !$0.state.isFinal && $0.sourceWebPageURL == sourceWebPageURL }) {
+            return existingJob.id
+        }
         let cleanTitle = BrainEditPlanner.cleanedTitle(title)
         let (cappedText, _) = BrainTextExtractor.capped(text, maximumCharacters: Self.maximumTextJobCharacters)
         var job = BrainIngestJob(
@@ -146,7 +158,8 @@ final class BrainIngestQueue: ObservableObject {
             source: .text(title: cleanTitle.isEmpty ? "Pasted text" : cleanTitle, body: cappedText),
             provenanceOrigin: origin,
             state: .queued,
-            createdDate: Date()
+            createdDate: Date(),
+            sourceWebPageURL: sourceWebPageURL
         )
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             job.state = .failed("there was no text to read")
@@ -348,6 +361,19 @@ final class BrainIngestQueue: ObservableObject {
             return material(for: updatedJob, text: fetchedPage.text, materialDescription: "\(fetchedPage.materialDescription) (\(webPageURL.absoluteString))")
 
         case .text(let title, let body):
+            if let sourceWebPageURL = job.sourceWebPageURL {
+                // A page's text from the Chrome extension: stored and described
+                // like a fetched web page, with its address as the source.
+                if job.storedRawSourceURL == nil {
+                    let storedFileURL = try? BrainStore.shared.storeRawText(
+                        "# \(title)\n\nsource: \(sourceWebPageURL.absoluteString)\nsaved: \(BrainDateFormat.dayString(from: Date()))\n\n\(body)\n",
+                        fileName: Self.rawFileName(forTitle: title, jobID: jobID),
+                        subfolder: rawSubfolder
+                    )
+                    mutateJob(jobID) { $0.storedRawSourceURL = storedFileURL }
+                }
+                return material(for: job, text: body, materialDescription: "a web page (\(sourceWebPageURL.absoluteString)), read in the user's browser")
+            }
             if job.storedRawSourceURL == nil {
                 let storedFileURL = try? BrainStore.shared.storeRawText(
                     "# \(title)\n\n\(body)\n",

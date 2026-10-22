@@ -44,6 +44,9 @@ struct BrainIngestJob: Identifiable, Equatable, Sendable, Codable {
     /// resumed or retried job reads that copy (an inbox file has been moved
     /// by then) and doesn't store the original a second time.
     var storedRawSourceURL: URL? = nil
+    /// For a `.text` job that is a web page's text (read in the user's tab by
+    /// the Chrome extension): the page's address, kept as the source.
+    var sourceWebPageURL: URL? = nil
 }
 
 /// Reads and writes the unfinished jobs. Only jobs that haven't ended are

@@ -1800,6 +1800,20 @@ final class CompanionManager: ObservableObject {
             let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
 
             do {
+                // "Summarize this page" in Chrome sends the page's text, read
+                // by the Wisp Tabs extension, instead of the screenshot (see
+                // CompanionManager+ChromePageReading.swift). Started now so it
+                // runs beside the capture; nil keeps the screenshot.
+                let chromePageTextTask: Task<String?, Never>? = shouldAttachScreenshot && focusedScreenRegion == nil
+                    ? Task {
+                        await self.chromePageTextReplacingScreenshot(
+                            for: transcript,
+                            isLocalModel: self.isSelectedModelProviderLocal,
+                            taskID: taskID
+                        )
+                    }
+                    : nil
+
                 // Read the frontmost native app's Accessibility tree alongside
                 // the screen capture, so the model can point at an element by
                 // id ([POINT:a12:label]) instead of guessing its pixel
@@ -1820,13 +1834,16 @@ final class CompanionManager: ObservableObject {
                 PerfMetricsRecorder.shared.endPhase(.screenCapture)
 
                 let accessibilityElementSnapshot = await accessibilityElementSnapshotTask?.value
+                let chromePageTextPromptText = await chromePageTextTask?.value
+                // From here on, whether a screenshot really goes with the turn.
+                let isAttachingScreenshot = shouldAttachScreenshot && chromePageTextPromptText == nil
                 // On-device OCR of the same screenshots, started when they were
                 // captured, so the model can quote the screen's text and point
                 // at a line by id ([POINT:t7:label]). Waits at most ~400ms for
                 // recognition still running. Its text joins the Accessibility
                 // list in the same screen-context block, so the request and the
                 // history-stripping below handle both alike.
-                let screenTextSnapshot = shouldAttachScreenshot
+                let screenTextSnapshot = isAttachingScreenshot
                     ? await ScreenTextRecognizer.shared.snapshot(
                         for: screenCaptures,
                         waitingAtMost: ScreenTextRecognizer.turnWaitBudgetSeconds
@@ -1856,7 +1873,7 @@ final class CompanionManager: ObservableObject {
                 // are readable.
                 var focusedRegionCloseUpImage: (data: Data, label: String)?
                 var focusedRegionPromptText = ""
-                if shouldAttachScreenshot, let focusedRegion = focusedScreenRegion,
+                if isAttachingScreenshot, let focusedRegion = focusedScreenRegion,
                    let focusedCaptureIndex = screenCaptures.firstIndex(where: {
                        $0.displayFrame == focusedRegion.displayFrameInAppKitCoordinates
                    }) {
@@ -1877,7 +1894,9 @@ final class CompanionManager: ObservableObject {
                     )
                 }
 
-                let perTurnContextText = [accessibilityElementPromptText, focusedRegionPromptText, brainPromptContextText]
+                let perTurnContextText = [
+                    chromePageTextPromptText ?? "", accessibilityElementPromptText, focusedRegionPromptText, brainPromptContextText,
+                ]
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n\n")
 
@@ -1892,7 +1911,7 @@ final class CompanionManager: ObservableObject {
                 // model answers the question itself rather than describing
                 // whatever is on screen. Screens are still captured (cheaply,
                 // speculatively) so the choice stays here and nowhere else.
-                let labeledImages: [(data: Data, label: String)] = shouldAttachScreenshot ? screenCaptures.map { capture in
+                let labeledImages: [(data: Data, label: String)] = isAttachingScreenshot ? screenCaptures.map { capture in
                     let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
                     return (data: capture.imageData, label: capture.label + dimensionInfo)
                 } : []
@@ -2247,7 +2266,7 @@ final class CompanionManager: ObservableObject {
                     providerIdentifier: usageLogProviderIdentifier,
                     counts: usageCountsFromThisTurn,
                     durationSeconds: Date().timeIntervalSince(usageLogTurnStartedAt),
-                    screenshotWasAttached: shouldAttachScreenshot,
+                    screenshotWasAttached: isAttachingScreenshot,
                     isBackgroundRun: false
                 )
                 PerfMetricsRecorder.shared.completeTurn()
@@ -4122,11 +4141,34 @@ extension CompanionManager {
         let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
         PerfMetricsRecorder.shared.abandonTurn()
 
+        // A Chrome page is read through the Wisp Tabs extension when it may
+        // read pages, which is a round trip to the browser, so the target is
+        // found off this call; everything after it is as before.
+        currentResponseTask = Task { [weak self] in
+            let brainTarget = await BrainCommandTargetResolver.resolvePreferringChromeExtensionText(brainCommand.targetHint)
+            guard let self else { return }
+            guard !Task.isCancelled else {
+                AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+                return
+            }
+            self.finishDirectBrainCommand(brainTarget, taskID: taskID, transcript: transcript)
+        }
+    }
+
+    private func finishDirectBrainCommand(
+        _ brainTarget: BrainCommandTargetResolver.Target,
+        taskID: UUID,
+        transcript: String
+    ) {
         let replyText: String
         let didSucceed: Bool
-        switch BrainCommandTargetResolver.resolve(brainCommand.targetHint) {
+        switch brainTarget {
         case .webPage(let webPage):
             BrainIngestQueue.shared.enqueue(webPageURL: webPage.url)
+            replyText = BrainCommandRouter.queuedReply(forTitles: [webPage.title])
+            didSucceed = true
+        case .webPageWithText(let webPage, let pageText):
+            BrainIngestQueue.shared.enqueue(text: pageText, title: webPage.title, sourceWebPageURL: webPage.url)
             replyText = BrainCommandRouter.queuedReply(forTitles: [webPage.title])
             didSucceed = true
         case .files(let fileURLs):

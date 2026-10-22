@@ -19,10 +19,12 @@ import { registerHandlers, sendCapabilities, startBridge } from "./lib/bridge.js
 import { startCapabilityBroadcasts } from "./lib/capabilities.js";
 import { tabHandlers } from "./handlers/tabs.js";
 import { capabilityHandlers } from "./handlers/capabilities.js";
+import { pageReadingHandlers } from "./handlers/page-reading.js";
 import { startTabEvents } from "./events/tabs.js";
 
 registerHandlers(tabHandlers);
 registerHandlers(capabilityHandlers);
+registerHandlers(pageReadingHandlers);
 
 startCapabilityBroadcasts(sendCapabilities);
 startTabEvents();
