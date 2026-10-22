@@ -794,6 +794,24 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   hello without capabilities reads as `tabs`). `sendRequest(…, timeoutSeconds:)` waits up to 30s and passes
   `params.timeoutSeconds` to the extension. Extension tests: `node --test chrome-extension/tests/` against
   `tests/fake-chrome.mjs`.
+  **Tab life (phase 04, `tabs` capability only)**: **tab sessions** ("save these tabs as thesis research", "save this
+  window", "restore thesis research", "what tab sessions do i have") keep URLs, titles, pinned state and group
+  titles/colours — never Chrome's ids — in `chrome-tab-sessions.json` (0600, 200 max, same name replaces; a dated
+  "Tabs Oct 22" when unnamed). Restoring opens each saved window as a new window through the extension's batched
+  `openTabs` (one request per section: pinned, each group, each run of loose tabs; ≤60 tabs a request, only the
+  window's first tab active); names match case/punctuation-insensitively and exactly, never fuzzily. **"Clean up old
+  tabs"** (`ChromeStaleTabFinder`: loose, unpinned, silent, background tabs unused ≥14 days by `lastAccessed`, chrome://
+  only "including chrome pages") saves them as a "Cleanup Oct 21" session first, then closes them. **"Triage my tabs"**
+  (`ChromeTabTriagePlanner`) is duplicates + stale + groups (the existing topic call, else by site, over the tabs that
+  stay open) on one card, re-checked against open tabs when it runs. The stale sweep, triage and a restore of 10+ tabs
+  always show a card (`ChromeTabLifeCards`), even under session auto-approve (`ChromeTabLifeToolNames.mustAlwaysAsk` in
+  `ToolCallSafety`); saving and listing don't ask. `ChromeTabLifeCommandRouter` runs first inside
+  `ChromeTabCommandRouter` ("clean up old tabs" would otherwise be "organize"); "reopen X" without "session" only matches
+  a saved name, and "open X" needs "tabs"/"session" too. Agent tools: `chrome_save_tab_session`,
+  `chrome_restore_tab_session`, `chrome_list_tab_sessions` (read), `chrome_close_stale_tabs` (input prepared before the
+  card). Settings → Agent → Chrome Tabs has a Tab sessions row (Restore / Rename / Delete, delete asks) and an off-by-
+  default switch that also files a saved session in the brain as a `.userAuthored` `source` page of links (brain on only;
+  sweeper copies never).
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1256,6 +1274,15 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `chrome-extension/lib/limits.js` | ~40 | `truncateText` / `capList` (20,000 chars, 500 items, `truncated`). |
 | `chrome-extension/handlers/tabs.js` | ~150 | Today's nine tab primitives (moved unchanged) and `describeTab`, the tab shape shared with events. |
 | `chrome-extension/handlers/capabilities.js` | ~20 | `getCapabilities`, `openPermissionsPage`. |
+| `chrome-extension/handlers/tab-life.js` | ~120 | `openTabs` (phase 04): a batch of URLs into the current, a named or a new window, grouped or pinned when asked, ≤60 per request, http(s)/chrome:// only, first tab active only when asked. |
+| `ChromeExtension/ChromeTabSession.swift` | ~450 | Pure tab sessions: saved shape (windows → sections → tabs), building from a `getTabs` snapshot, the 200-session list, codec, exact name matching, restore requests, list text. Tested by `Tests/ChromeExtTabLife`. |
+| `ChromeExtension/ChromeTabSessionStore.swift` | ~170 | `@MainActor` store over `chrome-tab-sessions.json` (0600; an unreadable file is moved aside, never overwritten), rename/delete, a lock-guarded name list for the router, the optional Brain page. |
+| `ChromeExtension/ChromeStaleTabFinder.swift` | ~75 | Pure stale-tab rules (`ChromeStaleTabRules`: 14 days default, 1–365, chrome:// opt-in). |
+| `ChromeExtension/ChromeTabTriagePlanner.swift` | ~160 | Pure triage plan: duplicates, then stale, then groups over what stays open; restricting to still-open tabs; the reply. |
+| `ChromeExtension/ChromeTabLifeCommand.swift` | ~280 | `ChromeTabLifeCommand` and its conservative router (save / restore / list / clean up old tabs / triage, ages like "older than 30 days"). |
+| `ChromeExtension/ChromeTabLifeCardText.swift` / `ChromeTabLifeCards.swift` | ~150/~130 | Pure card wording (headline, ≤8 rows, "and N more", footnote) and the `GlanceCard`s + `ChromeTabLifeToolNames` (compiled by the confirmation suites too). |
+| `ChromeExtension/ChromeTabLife.swift` | ~400 | `@MainActor` save / restore / stale sweep / triage through the bridge, approvals, and the four agent tools (`registerChromeTabLifeTools`). |
+| `ChromeExtension/ChromeTabSessionsRow.swift` | ~185 | The Tab sessions row in the Chrome Tabs card: list, Restore / Rename / Delete (asks), brain switch. |
 | `chrome-extension/events/tabs.js` | ~115 | `tab.created/updated/removed/activated`, `window.focused`; per-tab 250ms debounce, reported fields only, no incognito. |
 | `chrome-extension/options.html` / `options.js` | ~70/~90 | The permissions page: each optional capability, what it allows, Allow / Remove (`chrome.permissions.request` / `remove`). |
 | `chrome-extension/popup.html` / `popup.js` | ~50/~55 | Connection status, Try again, the granted-capability line and a Permissions… link. |
@@ -1496,6 +1523,7 @@ running):
 ./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
 ./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
 ./Tests/ChromeExtFoundation/run.sh       # Chrome extension frames: hello/ping/capabilities/event/reply parsing, payloads, timeout cap
+./Tests/ChromeExtTabLife/run.sh          # tab sessions (build, codec, cap, names, restore), stale rules, triage order, card text, router phrases
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver

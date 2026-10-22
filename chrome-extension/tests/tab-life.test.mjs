@@ -86,6 +86,11 @@ test("openTabs opens in the focused normal window, only the first tab active", a
   );
 });
 
+test("openTabs can leave every tab in the background", async () => {
+  await tabLifeHandlers.openTabs({ urls: ["https://a.example/", "https://b.example/"], activateFirstTab: false });
+  assert.deepEqual(createdTabCalls().map((properties) => properties.active), [false, false]);
+});
+
 test("openTabs uses a window Wisp named, and ignores one that isn't a normal window", async () => {
   const intoWindowOne = await tabLifeHandlers.openTabs({ urls: ["https://a.example/"], windowId: 1 });
   assert.equal(intoWindowOne.windowId, 1);

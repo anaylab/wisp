@@ -35,8 +35,10 @@ export const tabLifeHandlers = {
   // otherwise the focused normal window. Only the first tab is made active, so
   // restoring twenty tabs doesn't load twenty pages at once in front of the
   // user. With `groupTitle` or `groupColor` the opened tabs become one group;
-  // with `pinned` they are pinned (Chrome never groups a pinned tab).
-  async openTabs({ urls, windowMode = "current", windowId, groupTitle, groupColor, pinned } = {}) {
+  // with `pinned` they are pinned (Chrome never groups a pinned tab). Wisp
+  // passes `activateFirstTab: false` for a window's later sections, so a
+  // restored window ends on its first tab rather than its last section.
+  async openTabs({ urls, windowMode = "current", windowId, groupTitle, groupColor, pinned, activateFirstTab = true } = {}) {
     if (!Array.isArray(urls) || urls.length === 0) {
       throw new Error("urls must be a non-empty list of web addresses");
     }
@@ -77,7 +79,7 @@ export const tabLifeHandlers = {
       const createdTab = await chrome.tabs.create({
         windowId: targetWindowID,
         url,
-        active: isFirstOpenedTab,
+        active: isFirstOpenedTab && activateFirstTab !== false,
         pinned: shouldPin,
       });
       openedTabIDs.push(createdTab.id);

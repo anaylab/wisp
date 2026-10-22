@@ -80,6 +80,7 @@ enum ChromeTabLife {
         let groupTitle: String?
         let groupColor: String?
         let pinned: Bool
+        let activateFirstTab: Bool
     }
 
     private struct OpenTabsResult: Decodable {
@@ -132,7 +133,9 @@ enum ChromeTabLife {
                     windowId: opensNewWindow ? nil : existingWindowID,
                     groupTitle: openRequest.groupTitle,
                     groupColor: openRequest.groupColor,
-                    pinned: openRequest.pinned
+                    pinned: openRequest.pinned,
+                    // Only the window's first tab comes to the front.
+                    activateFirstTab: opensNewWindow
                 ),
                 resultType: OpenTabsResult.self,
                 timeoutSeconds: 20
