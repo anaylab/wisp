@@ -84,6 +84,7 @@ final class NotchWindowController {
     private var cardPresentationObserver: AnyCancellable?
     /// Drops the morning suggestions banner out of the notch when a briefing arrives.
     private var morningBriefingPresentationObserver: AnyCancellable?
+    private var downloadConciergePresentationObserver: AnyCancellable?
     /// Marks the "new" background results seen once the user has opened the
     /// full panel (where they are listed) and then closed it again.
     private var finishedWorkSeenObserver: AnyCancellable?
@@ -172,6 +173,10 @@ final class NotchWindowController {
             companionManager?.flashIsland(.success)
         }
         JobsEngine.shared.start()
+        // Finished Chrome downloads → an offer to file them (off until turned on in Settings).
+        DownloadConcierge.shared.start { [weak companionManager] islandState in
+            companionManager?.flashIsland(islandState)
+        }
         // Buddies' scheduled runs; each run is a background task started here.
         BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
             companionManager?.startBuddyRun(buddy, request: runRequest)
@@ -305,6 +310,23 @@ final class NotchWindowController {
                       !isNotchShowingAnswer,
                       !self.viewModel.isWorkspaceOpen else { return }
                 self.autoPresentMorningBriefing()
+            }
+
+        // A download offer drops its card on the same terms as the morning
+        // banner: only onto an idle notch with nothing else showing. Quiet mode
+        // never bumps the number, so a call is never interrupted.
+        downloadConciergePresentationObserver = DownloadConcierge.shared.$presentationSequenceNumber
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let isNotchShowingAnswer = !self.companionManager.currentReplyText
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || self.companionManager.resolvedGlanceCard != nil
+                guard self.companionManager.voiceState == .idle,
+                      !isNotchShowingAnswer,
+                      !self.viewModel.isWorkspaceOpen else { return }
+                self.autoPresentDownloadConciergeCard()
             }
 
         finishedWorkSeenObserver = viewModel.$isFullPanel
@@ -699,6 +721,20 @@ final class NotchWindowController {
     private func autoPresentMorningBriefing() {
         let morningBannerHoldSeconds: TimeInterval = 30
         presentationHoldUntil = Date().addingTimeInterval(morningBannerHoldSeconds)
+        hoverSuspendedUntil = .distantPast
+        viewModel.isFullPanel = false
+        if !viewModel.isExpanded {
+            viewModel.isExpanded = true
+            performHUDHaptic()
+        }
+        WispSoundPlayer.shared.play(.reply)
+    }
+
+    /// Opens the compact download card long enough to decide on; left alone it
+    /// tucks into the flank's ↓ badge, and a hover brings it back.
+    private func autoPresentDownloadConciergeCard() {
+        let downloadCardHoldSeconds: TimeInterval = 20
+        presentationHoldUntil = Date().addingTimeInterval(downloadCardHoldSeconds)
         hoverSuspendedUntil = .distantPast
         viewModel.isFullPanel = false
         if !viewModel.isExpanded {

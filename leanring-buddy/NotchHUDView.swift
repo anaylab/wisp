@@ -35,6 +35,7 @@ struct NotchHUDView: View {
     @ObservedObject private var jobsEngine = JobsEngine.shared
     @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
+    @ObservedObject private var downloadConcierge = DownloadConcierge.shared
     @ObservedObject private var screenWatcherStore = ScreenWatcherStore.shared
     /// The buddy whose automation or run is in flight shows its character in the
     /// left flank, so these are observed to redraw when one starts or finishes.
@@ -265,7 +266,9 @@ struct NotchHUDView: View {
     /// on an otherwise empty notch.
     @ViewBuilder
     private var compactDroppedContent: some View {
-        if !hasAnswer && hasJobsContentToDrop {
+        if !hasAnswer && downloadConcierge.hasNotchContent {
+            DownloadConciergeNotchCard()
+        } else if !hasAnswer && hasJobsContentToDrop {
             jobsDroppedContent
         } else if !hasAnswer && morningBriefing.hasPendingBriefing {
             morningBannerContent
@@ -340,6 +343,7 @@ struct NotchHUDView: View {
             || !finishedWorkInbox.unseenTaskIDs.isEmpty
             || morningBriefing.hasPendingBriefing
             || hasJobsContentToDrop
+            || downloadConcierge.hasNotchContent
             || !screenWatcherStore.activeWatchers.isEmpty
             || flankBuddyID != nil
     }
@@ -1046,6 +1050,8 @@ struct NotchHUDView: View {
                         .nativeTooltip(imminentEvent.title)
                 } else if !finishedWorkInbox.unseenTaskIDs.isEmpty {
                     flankUnseenResultsBadge(count: finishedWorkInbox.unseenTaskIDs.count)
+                } else if downloadConcierge.hasNotchContent {
+                    DownloadConciergeFlankBadge()
                 } else if !screenWatcherStore.activeWatchers.isEmpty {
                     flankScreenWatchIndicator(watcherCount: screenWatcherStore.activeWatchers.count)
                 } else if jobsEngine.hasChecklist {
@@ -1275,6 +1281,9 @@ struct NotchHUDView: View {
                 } else {
                     // Background results that finished since the user last looked.
                     finishedWorkSection
+
+                    // A finished download to file, or the Undo for one just filed.
+                    DownloadConciergeNotchCard()
 
                     // A Canvas change, then today's checklist; when a checklist
                     // exists it stands in for the generic suggestions below.

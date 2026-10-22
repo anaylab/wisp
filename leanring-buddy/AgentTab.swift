@@ -336,6 +336,7 @@ struct AgentTab: View {
                         }
                     }
                 }
+                DownloadConciergeSettingsRow()
                 chromePermissionsButton
             }
         }

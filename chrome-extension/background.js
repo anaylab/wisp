@@ -20,11 +20,15 @@ import { startCapabilityBroadcasts } from "./lib/capabilities.js";
 import { tabHandlers } from "./handlers/tabs.js";
 import { capabilityHandlers } from "./handlers/capabilities.js";
 import { startTabEvents } from "./events/tabs.js";
+import { downloadHandlers } from "./handlers/downloads.js";
+import { startDownloadEvents } from "./events/downloads.js";
 
 registerHandlers(tabHandlers);
 registerHandlers(capabilityHandlers);
+registerHandlers(downloadHandlers);
 
 startCapabilityBroadcasts(sendCapabilities);
 startTabEvents();
+startDownloadEvents();
 
 startBridge();

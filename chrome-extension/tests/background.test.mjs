@@ -19,7 +19,9 @@ test("background.js wires the bridge, handlers, capabilities and tab events", as
   // Listeners Chrome needs at wake-up are all in place.
   assert.equal(fakeChrome.tabs.onUpdated.listeners.length, 1);
   assert.equal(fakeChrome.windows.onFocusChanged.listeners.length, 1);
-  assert.equal(fakeChrome.permissions.onAdded.listeners.length, 1);
+  // One for the capability broadcast, one that attaches the download
+  // listeners when the user allows downloads.
+  assert.equal(fakeChrome.permissions.onAdded.listeners.length, 2);
   assert.equal(fakeChrome.alarms.onAlarm.listeners.length, 1);
 
   const socket = FakeWebSocket.instances[0];
@@ -46,6 +48,9 @@ async function checkWiring(fakeChrome, socket) {
   // Granting a permission reaches Wisp as a capabilities message.
   await fakeChrome.permissions.request({ permissions: ["downloads"] });
   assert.deepEqual(socket.sentMessages.at(-1), { type: "capabilities", capabilities: ["tabs", "downloads"] });
+
+  // Allowing downloads attaches the download listeners at once.
+  assert.equal(fakeChrome.downloads.onChanged.listeners.length, 1);
 
   // Tab events go out through the same socket.
   await fakeChrome.windows.onFocusChanged.dispatch(1);

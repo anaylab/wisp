@@ -794,6 +794,19 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   hello without capabilities reads as `tabs`). `sendRequest(…, timeoutSeconds:)` waits up to 30s and passes
   `params.timeoutSeconds` to the extension. Extension tests: `node --test chrome-extension/tests/` against
   `tests/fake-chrome.mjs`.
+  **Download concierge (phase 07, needs the `downloads` capability, off by default)**: the extension sends
+  `download.created`/`download.completed`/`download.failed` (absolute path, MIME, size, URLs, the source page and its
+  title when a tab still shows it, `dangerous`) and answers `getDownloads`/`showDownload`; it **never renames or moves
+  a file** — Wisp does, on disk. Its listeners attach at startup or the moment downloads are allowed (the API only
+  exists then). `DownloadConcierge` (switch + Edit rules… in the Chrome Tabs card) takes each `download.completed`,
+  plans it with the pure `DownloadFilingRules` (rules in `~/.wisp/download-rules.json`: extension/MIME/host/filename
+  words → folder + `{date}`/`{site}`/`{title}` template; no rule = same folder, page title for PDFs and images, else the
+  cleaned name; never changes the extension; collision-safe " 2"; refuses dangerous downloads, paths outside home,
+  `~/Library` and hidden folders, re-checked after symlinks) and drops a notch card: File / Just brain / Ignore, with
+  "Add to brain" and "Always for <rule>" chips. A rule marked `always` files without a card and reports with an Undo
+  kept in memory 10 minutes. Quiet mode holds the card back (a ↓ badge in the flank instead). "Add to brain" uses
+  `BrainIngestQueue.enqueue(fileURL:)` for types the brain reads. Agent tools `chrome_list_downloads` (read) and
+  `chrome_file_download` (from/to resolved before the card; on `ToolCallSafety.alwaysAskBareToolNames`).
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1259,8 +1272,14 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `chrome-extension/events/tabs.js` | ~115 | `tab.created/updated/removed/activated`, `window.focused`; per-tab 250ms debounce, reported fields only, no incognito. |
 | `chrome-extension/options.html` / `options.js` | ~70/~90 | The permissions page: each optional capability, what it allows, Allow / Remove (`chrome.permissions.request` / `remove`). |
 | `chrome-extension/popup.html` / `popup.js` | ~50/~55 | Connection status, Try again, the granted-capability line and a Permissions… link. |
-| `chrome-extension/tests/fake-chrome.mjs` | ~330 | In-memory `chrome.*` fake (tabs, tabGroups, windows, permissions, alarms, storage, runtime, scripting stub; `dispatch` on every event), `FakeWebSocket`, manual timers. |
-| `chrome-extension/tests/*.test.mjs` | ~715 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring. `chrome-extension/package.json` only tells Node the files are ES modules. |
+| `chrome-extension/tests/fake-chrome.mjs` | ~330 | In-memory `chrome.*` fake (tabs, tabGroups, windows, permissions, alarms, storage, runtime, scripting stub, downloads while granted; `dispatch` on every event), `FakeWebSocket`, manual timers. |
+| `ChromeExtension/DownloadFilingRules.swift` | ~690 | Pure download concierge rules: `ChromeDownloadItem` payload, `DownloadedFile`, `DownloadFilingRule`/`DownloadFilingRuleFile` (lenient load, problems, `settingAlways` that preserves the hand-written file), matcher, `DownloadNameSuggester` (page title for PDFs/images, cleaned names, templates, sanitising), `DownloadCollisionNaming`, `DownloadFilingSafety` (refusals), `DownloadFilingPlanner`. Tested by `Tests/ChromeExtDownloads`. |
+| `ChromeExtension/DownloadConcierge.swift` | ~450 | Subscribes to `download.completed`, offers (queue of 5), File / Just brain / Ignore, "always" rules, the one disk move (symlink-resolved checks, never overwrites), Undo for 10 minutes, quiet mode, the Settings switch and rules file. |
+| `ChromeExtension/DownloadConciergeViews.swift` | ~250 | The notch offer/report card, the flank ↓ badge, and the Chrome Tabs card's switch row. |
+| `ChromeExtension/DownloadAgentTools.swift` | ~240 | `chrome_list_downloads` and `chrome_file_download` (input preparer resolves from/to before the card). |
+| `chrome-extension/handlers/downloads.js` | ~115 | `getDownloads` (newest first or one id) / `showDownload`, `describeDownload` (capped fields, `dangerous`). No move/rename. |
+| `chrome-extension/events/downloads.js` | ~95 | `download.created/completed/failed` with the source page + title; attaches when downloads are allowed, never twice. |
+| `chrome-extension/tests/*.test.mjs` | ~925 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring, downloads. `chrome-extension/package.json` only tells Node the files are ES modules. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1496,6 +1515,7 @@ running):
 ./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
 ./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
 ./Tests/ChromeExtFoundation/run.sh       # Chrome extension frames: hello/ping/capabilities/event/reply parsing, payloads, timeout cap
+./Tests/ChromeExtDownloads/run.sh        # download concierge: rule matching, templates, suggested names, collisions, refusals
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
