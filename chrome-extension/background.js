@@ -27,6 +27,7 @@ import { downloadHandlers } from "./handlers/downloads.js";
 import { focusModeHandlers } from "./handlers/focus-mode.js";
 import { pointingHandlers } from "./handlers/pointing.js";
 import { siteHelperHandlers } from "./handlers/site-helpers.js";
+import { researchHandlers } from "./handlers/research.js";
 import { startTabEvents } from "./events/tabs.js";
 import { startNavigationEvents } from "./events/navigation.js";
 import { startDownloadEvents } from "./events/downloads.js";
@@ -44,6 +45,7 @@ registerHandlers(downloadHandlers);
 registerHandlers(focusModeHandlers);
 registerHandlers(pointingHandlers);
 registerHandlers(siteHelperHandlers);
+registerHandlers(researchHandlers);
 
 startCapabilityBroadcasts(sendCapabilities);
 startTabEvents();
