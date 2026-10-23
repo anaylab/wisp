@@ -4,8 +4,8 @@
 // injects into a page asks the same question before it does.
 //
 // Never: Chrome's own pages (chrome://, chrome-extension://, devtools://,
-// edge://, view-source:…), the Chrome Web Store, data:/blob:/javascript:
-// URLs, and file:// unless the user turned on "Allow access to file URLs" —
+// edge://, view-source:…), the Chrome Web Store (and Edge's add-on store),
+// data:/blob:/javascript: URLs, and file:// unless the user turned on "Allow access to file URLs" —
 // and even then only to read. Incognito tabs never reach the extension (the
 // manifest says "incognito": "not_allowed"); callers still check
 // `tab.incognito` as a second lock.
@@ -17,7 +17,23 @@ export const PAGE_ACCESS_READ_ONLY = "read";
 export const PAGE_ACCESS_BLANK = "blank";
 export const PAGE_ACCESS_REFUSED = "refused";
 
-const CHROME_WEB_STORE_HOSTS = new Set(["chrome.google.com", "chromewebstore.google.com"]);
+// The browsers' own extension stores, where Chrome (and Edge, for its
+// store) refuses extension scripts anyway. Listed so Wisp says why instead of
+// passing on the browser's error, in every Chromium browser it runs in.
+export function isExtensionStoreURL(pageURL) {
+  let parsedURL;
+  try {
+    parsedURL = new URL(pageURL);
+  } catch (error) {
+    return false;
+  }
+  if (parsedURL.protocol !== "http:" && parsedURL.protocol !== "https:") return false;
+  const hostname = parsedURL.hostname.toLowerCase();
+  if (hostname === "chromewebstore.google.com") return true;
+  if (hostname === "chrome.google.com") return parsedURL.pathname.startsWith("/webstore");
+  if (hostname === "microsoftedge.microsoft.com") return parsedURL.pathname.startsWith("/addons");
+  return false;
+}
 
 export function pageAccessForURL(pageURL, { isFileSchemeAccessAllowed = false } = {}) {
   if (typeof pageURL !== "string" || pageURL === "" || pageURL === "about:blank") {
@@ -30,11 +46,7 @@ export function pageAccessForURL(pageURL, { isFileSchemeAccessAllowed = false } 
     return PAGE_ACCESS_REFUSED;
   }
   if (parsedURL.protocol === "http:" || parsedURL.protocol === "https:") {
-    if (CHROME_WEB_STORE_HOSTS.has(parsedURL.hostname) &&
-        (parsedURL.hostname !== "chrome.google.com" || parsedURL.pathname.startsWith("/webstore"))) {
-      return PAGE_ACCESS_REFUSED;
-    }
-    return PAGE_ACCESS_ACT;
+    return isExtensionStoreURL(pageURL) ? PAGE_ACCESS_REFUSED : PAGE_ACCESS_ACT;
   }
   if (parsedURL.protocol === "file:") {
     return isFileSchemeAccessAllowed ? PAGE_ACCESS_READ_ONLY : PAGE_ACCESS_REFUSED;

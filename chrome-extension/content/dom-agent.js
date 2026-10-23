@@ -127,9 +127,12 @@
   function isSensitiveField(element) {
     const fieldType = (element.type || "").toLowerCase();
     if (fieldType === "password") return true;
-    const autocomplete = lowercaseAttribute(element, "autocomplete");
-    if (autocomplete.indexOf("cc-") === 0 || autocomplete.indexOf("password") >= 0) return true;
-    if (autocomplete.indexOf("one-time-code") >= 0) return true;
+    // Autocomplete is a list of tokens ("billing cc-number", "section-a
+    // current-password"), so each token is checked, not just the first.
+    const autocompleteTokens = lowercaseAttribute(element, "autocomplete").split(/\s+/).filter(Boolean);
+    for (const token of autocompleteTokens) {
+      if (token.indexOf("cc-") === 0 || token.indexOf("password") >= 0 || token === "one-time-code") return true;
+    }
     const describingText = (
       (element.name || "") + " " + (element.id || "") + " " + (element.placeholder || "") + " " +
       (attributeOf(element, "aria-label") || "")

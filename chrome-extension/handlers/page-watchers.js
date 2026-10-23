@@ -183,8 +183,29 @@ export function createPageWatcher({
 
   // MARK: - The page side
 
+  // Every script that runs in a watched tab re-checks the page first
+  // (contracts.md §6): a watched tab can be redirected or reloaded into a page
+  // Wisp mustn't read, and the sweep and navigation paths run without a
+  // request from Wisp in between.
+  async function isWatchablePage(tabID) {
+    let watchedTab;
+    try {
+      watchedTab = await chromeAPI().tabs.get(tabID);
+    } catch (error) {
+      return false;
+    }
+    if (!watchedTab || watchedTab.incognito) return false;
+    const watchedPageAccess = pageAccessForURL(watchedTab.url || watchedTab.pendingUrl || "", {
+      isFileSchemeAccessAllowed: await isFileSchemeAccessAllowed(),
+    });
+    return watchedPageAccess === PAGE_ACCESS_ACT || watchedPageAccess === PAGE_ACCESS_READ_ONLY;
+  }
+
   async function injectWatcher(watchRecord) {
     const chrome = chromeAPI();
+    if (!(await isWatchablePage(watchRecord.tabId))) {
+      throw new Error("wisp can only watch web pages");
+    }
     await chrome.scripting.executeScript({ target: { tabId: watchRecord.tabId }, files: [PAGE_WATCH_SCRIPT_FILE] });
     const injectionResults = await chrome.scripting.executeScript({
       target: { tabId: watchRecord.tabId },
@@ -206,6 +227,9 @@ export function createPageWatcher({
   }
 
   async function removeWatcherFromPage(watchRecord) {
+    // Nothing of Wisp's runs in a page it may not read, so there's nothing
+    // to take out of one either.
+    if (!(await isWatchablePage(watchRecord.tabId))) return;
     await runInPage(watchRecord.tabId, (watchId) => globalThis.wispPageWatch?.uninstall(watchId), [watchRecord.watchId]);
   }
 
@@ -487,6 +511,10 @@ export function createPageWatcher({
         await chrome.tabs.get(watchRecord.tabId);
       } catch (error) {
         await endWatch(watchRecord.watchId, PAGE_WATCH_ENDING_TAB_CLOSED);
+        continue;
+      }
+      if (!(await isWatchablePage(watchRecord.tabId))) {
+        await endWatch(watchRecord.watchId, PAGE_WATCH_ENDING_PAGE_UNAVAILABLE);
         continue;
       }
       const evaluationResult = await runInPage(

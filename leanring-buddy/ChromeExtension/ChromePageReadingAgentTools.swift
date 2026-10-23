@@ -84,7 +84,8 @@ extension AgentToolRegistry {
             }
             let pageText = try await ChromePageReader.readPage(tabID: tabID, maximumCharacters: characterBudget)
             guard !pageText.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return "that tab (\(pageText.title.prefix(80))) has no readable text — it may be an app, a video or an image. a screenshot would show more."
+                // No title here: it's page text, and this reply isn't fenced.
+                return "that tab has no readable text — it may be an app, a video or an image. a screenshot would show more."
             }
             return ChromePageTextPrompt.promptText(for: pageText, characterBudget: characterBudget)
         } catch {

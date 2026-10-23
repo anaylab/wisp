@@ -481,6 +481,26 @@ test("the sweep puts back a watcher the page lost", async () => {
   assert.equal(injectionCountAfter - injectionCountBefore, 1);
 });
 
+test("a watched tab that ends up on a page Wisp may not read isn't injected again (contracts §6)", async () => {
+  const fakeChrome = grantedPagesReadChrome();
+  const { watcher, sentEvents, storedWatches } = makeWatcher(fakeChrome);
+  const startedWatch = await watcher.handlers.startPageWatch({
+    tabId: 8,
+    condition: { kind: "textAppears", text: "in stock" },
+    reloadEveryMinutes: 5,
+  });
+  const ownTab = fakeChrome.state.tabs.find((tab) => tab.id === startedWatch.tabId);
+  ownTab.url = "chrome://settings";
+
+  const injectionCountBefore = fakeChrome.calls.filter(([apiName]) => apiName === "scripting.executeScript").length;
+  await watcher.handleNavigationCompleted({ tabId: startedWatch.tabId, frameId: 0, url: "chrome://settings" });
+  await watcher.sweepWatches();
+  const injectionCountAfter = fakeChrome.calls.filter(([apiName]) => apiName === "scripting.executeScript").length;
+  assert.equal(injectionCountAfter, injectionCountBefore);
+  assert.equal((await storedWatches()).watches[startedWatch.watchId], undefined, "the sweep ends it as unavailable");
+  assert.deepEqual(sentEvents.at(-1), ["watch.ended", { watchId: startedWatch.watchId, reason: "pageUnavailable" }]);
+});
+
 test("stopping a reloading watch closes its tab unless the user is looking at it", async () => {
   const fakeChrome = grantedPagesReadChrome();
   const { watcher, sentEvents } = makeWatcher(fakeChrome);

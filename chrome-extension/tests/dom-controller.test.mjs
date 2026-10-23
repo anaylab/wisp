@@ -88,6 +88,8 @@ test("page access: web pages act, local files only read, protected pages refused
   assert.equal(pageAccessForURL("https://chromewebstore.google.com/detail/x"), "refused");
   assert.equal(pageAccessForURL("https://chrome.google.com/webstore/detail/x"), "refused");
   assert.equal(pageAccessForURL("https://chrome.google.com/intl/en/chrome/"), "act");
+  assert.equal(pageAccessForURL("https://microsoftedge.microsoft.com/addons/detail/x"), "refused", "Edge's store, in Edge");
+  assert.equal(pageAccessForURL("https://microsoftedge.microsoft.com/insider"), "act");
   assert.equal(pageAccessForURL("file:///Users/me/notes.html"), "refused");
   assert.equal(pageAccessForURL("file:///Users/me/notes.html", { isFileSchemeAccessAllowed: true }), "read");
   assert.equal(pageAccessForURL("javascript:alert(1)"), "refused");

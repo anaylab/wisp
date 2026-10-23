@@ -131,6 +131,22 @@ test("a password field is listed as sensitive, never read, and typing into it is
   assert.deepEqual(passwordField.dispatchedEvents, []);
 });
 
+test("a card number is sensitive whichever autocomplete token names it", () => {
+  const fakeDocument = new FakeDocument();
+  const cardField = el("input", { attributes: { autocomplete: "billing cc-number", "aria-label": "Billing number" } });
+  cardField.storedValue = "4242424242424242";
+  const sectionPasswordField = el("input", { attributes: { autocomplete: "section-login current-password", "aria-label": "Login" } });
+  fakeDocument.body.append(cardField, sectionPasswordField);
+  const agent = loadAgent(fakeDocument);
+
+  const snapshot = agent.snapshot({});
+  const listedCard = snapshot.elements.find((element) => element.label === "Billing number");
+  assert.equal(listedCard.sensitive, true);
+  assert.equal(listedCard.value, undefined);
+  assert.equal(snapshot.elements.find((element) => element.label === "Login").sensitive, true);
+  assert.deepEqual(agent.typeText({ id: listedCard.id, text: "1111", pressEnter: false }), { status: "SENSITIVE" });
+});
+
 test("typing uses the native setter and dispatches input and change; Enter submits the form", () => {
   const fakeDocument = new FakeDocument();
   const submittedForms = [];

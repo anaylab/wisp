@@ -12,13 +12,13 @@
 
 import { computeCapabilities, CAPABILITY_PAGES_READ } from "../lib/capabilities.js";
 import { truncateText, capList, MAXIMUM_TEXT_FIELD_CHARACTERS } from "../lib/limits.js";
+import { isExtensionStoreURL } from "../lib/page-access.js";
 
 export const PAGE_READER_SCRIPT_FILE = "content/read-page.js";
 export const MISSING_PAGES_READ_ERROR = `missing capability ${CAPABILITY_PAGES_READ}`;
 
 // Chrome refuses scripting on the Web Store anyway; refusing first gives a
 // clear reason instead of Chrome's "cannot be scripted".
-const CHROME_WEB_STORE_PATTERNS = [/^https:\/\/chromewebstore\.google\.com\//i, /^https:\/\/chrome\.google\.com\/webstore/i];
 
 // Why a page can't be read, or null when it can. http(s) pages are readable;
 // file:// only when the user turned on "Allow access to file URLs" for the
@@ -33,8 +33,8 @@ export function forbiddenPageReason(pageURL, { isFileSchemeAccessAllowed = false
   }
   const protocol = parsedURL.protocol.toLowerCase();
   if (protocol === "http:" || protocol === "https:") {
-    if (CHROME_WEB_STORE_PATTERNS.some((pattern) => pattern.test(pageURL))) {
-      return "chrome doesn't let extensions read the chrome web store";
+    if (isExtensionStoreURL(pageURL)) {
+      return "the browser doesn't let extensions read its extension store";
     }
     return null;
   }

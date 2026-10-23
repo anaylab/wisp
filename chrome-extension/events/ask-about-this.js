@@ -25,6 +25,7 @@
 
 import { sendEvent as bridgeSendEvent, isConnectedToWisp as bridgeIsConnectedToWisp } from "../lib/bridge.js";
 import { truncateText } from "../lib/limits.js";
+import { pageAccessForURL, PAGE_ACCESS_ACT } from "../lib/page-access.js";
 
 export const ASK_ABOUT_PAGE_COMMAND = "ask-wisp-about-page";
 
@@ -87,6 +88,15 @@ export function contextMenuEventFor(clickInfo, tab) {
   if (!usableTab(tab) || !clickInfo) return null;
   const menuItemID = clickInfo.menuItemId;
   const pageURL = clickInfo.pageUrl ?? tab.url;
+  // Chrome's menu text is only passed on from an ordinary web page and
+  // outside a form field (contracts.md §6): a selection in a field may be a
+  // password, and a local file or protected page isn't read without the
+  // checks `getSelection` makes. Wisp reads the selection itself first, with
+  // those checks, so leaving the text out only loses the fallback.
+  const selectionTextFromMenu =
+    clickInfo.editable !== true && pageAccessForURL(clickInfo.frameUrl ?? pageURL) === PAGE_ACCESS_ACT
+      ? clickInfo.selectionText
+      : undefined;
   const frameFields = (payload) => {
     if (Number.isInteger(clickInfo.frameId)) payload.frameId = clickInfo.frameId;
     return payload;
@@ -94,13 +104,13 @@ export function contextMenuEventFor(clickInfo, tab) {
 
   const selectionEvent = (intent) => {
     const payload = frameFields(basePayload(tab, pageURL, intent, "contextMenu"));
-    putCappedText(payload, "selectionText", clickInfo.selectionText);
+    putCappedText(payload, "selectionText", selectionTextFromMenu);
     return { eventName: "user.askAboutSelection", data: payload };
   };
   const linkEvent = (intent) => {
     const payload = frameFields(basePayload(tab, pageURL, intent, "contextMenu"));
     putCappedText(payload, "linkUrl", clickInfo.linkUrl);
-    putCappedText(payload, "selectionText", clickInfo.selectionText);
+    putCappedText(payload, "selectionText", selectionTextFromMenu);
     return { eventName: "user.askAboutLink", data: payload };
   };
   const pageEvent = (intent) => ({

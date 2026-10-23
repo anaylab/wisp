@@ -242,7 +242,7 @@ test("page text is capped at the shared limit, or at a smaller requested one", a
 test("forbidden and incognito tabs are refused before anything is injected", async () => {
   grantPagesRead();
   await assert.rejects(() => pageReadingHandlers.getPageText({ tabId: 21 }), /doesn't read chrome: pages/);
-  await assert.rejects(() => pageReadingHandlers.getPageText({ tabId: 22 }), /chrome web store/);
+  await assert.rejects(() => pageReadingHandlers.getPageText({ tabId: 22 }), /extension store/);
   await assert.rejects(() => pageReadingHandlers.getPageText({ tabId: 23 }), /incognito/);
   await assert.rejects(() => pageReadingHandlers.getPageText({ tabId: 24 }), /allow access to file urls/);
   await assert.rejects(() => pageReadingHandlers.getPageText({ tabId: "20" }), /tabId must be a tab id/);
@@ -256,7 +256,7 @@ test("forbidden and incognito tabs are refused before anything is injected", asy
 test("forbiddenPageReason allows only web pages, and files when allowed", () => {
   assert.equal(forbiddenPageReason("https://example.com/a"), null);
   assert.equal(forbiddenPageReason("http://localhost:3000/"), null);
-  for (const forbiddenURL of ["chrome://extensions", "chrome-extension://abc/options.html", "devtools://devtools/bundled/inspector.html", "view-source:https://example.com", "about:blank", "data:text/html,hi", "https://chrome.google.com/webstore/detail/x", "not a url"]) {
+  for (const forbiddenURL of ["chrome://extensions", "chrome-extension://abc/options.html", "devtools://devtools/bundled/inspector.html", "view-source:https://example.com", "about:blank", "data:text/html,hi", "https://chrome.google.com/webstore/detail/x", "https://microsoftedge.microsoft.com/addons/detail/x", "not a url"]) {
     assert.notEqual(forbiddenPageReason(forbiddenURL), null, forbiddenURL);
   }
   assert.notEqual(forbiddenPageReason("file:///tmp/a.html"), null);

@@ -42,7 +42,7 @@ export function createFakeChrome({
   groups = [],
   grantedPermissions = [],
   grantedOrigins = [],
-  manifestVersion = "1.1.0",
+  manifestVersion = "2.0.0",
   // Permission names the fake Chrome doesn't know, so `contains` throws like
   // an older Chrome would.
   unknownPermissionNames = [],

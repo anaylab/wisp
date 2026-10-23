@@ -88,6 +88,31 @@ test("Add to Wisp brain picks the selection, else the link, else the page", () =
   assert.equal(page.data.intent, "addToBrain");
 });
 
+test("menu text from a form field or a protected page isn't passed on (contracts §6)", () => {
+  const selectionClick = (info) =>
+    contextMenuEventFor({ menuItemId: MENU_ITEM_IDS.askAboutSelection, selectionText: "hunter2", ...info }, pageTab);
+
+  const inField = selectionClick({ pageUrl: pageTab.url, editable: true });
+  assert.equal(inField.eventName, "user.askAboutSelection");
+  assert.equal("selectionText" in inField.data, false);
+
+  assert.equal("selectionText" in selectionClick({ pageUrl: "file:///Users/me/notes.html" }).data, false);
+  assert.equal("selectionText" in selectionClick({ pageUrl: "https://chromewebstore.google.com/detail/x" }).data, false);
+  assert.equal(
+    "selectionText" in selectionClick({ pageUrl: pageTab.url, frameUrl: "chrome-extension://abc/page.html" }).data,
+    false,
+    "the frame the selection is in is what counts"
+  );
+  assert.equal(selectionClick({ pageUrl: pageTab.url }).data.selectionText, "hunter2", "ordinary page text still goes");
+
+  const brainInField = contextMenuEventFor(
+    { menuItemId: MENU_ITEM_IDS.addToBrain, pageUrl: pageTab.url, editable: true, selectionText: "secret" },
+    pageTab
+  );
+  assert.equal(brainInField.eventName, "user.askAboutSelection", "still a selection, which Wisp reads with getSelection");
+  assert.equal("selectionText" in brainInField.data, false);
+});
+
 test("no tab, an incognito tab or someone else's menu item sends nothing", () => {
   assert.equal(contextMenuEventFor({ menuItemId: MENU_ITEM_IDS.askAboutPage }, undefined), null);
   assert.equal(contextMenuEventFor({ menuItemId: MENU_ITEM_IDS.askAboutPage }, { id: -1 }), null);
