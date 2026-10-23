@@ -69,3 +69,12 @@ final class ChromeSiteHelpers {
         ("", true)
     }
 }
+
+// The form helper (phase 12) is a `ChromeTabCommand` case that runs the
+// `fill_form` tool through the registry; stubbed too.
+@MainActor
+enum ChromeFormFill {
+    static func performSpokenFill() async -> (replyText: String, didSucceed: Bool) {
+        ("", true)
+    }
+}

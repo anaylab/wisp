@@ -458,6 +458,8 @@ nonisolated enum ChromeTabCommand: Equatable, Sendable {
     case focus(ChromeFocusCommand)
     /// Site helpers (phase 10): "add this to today" on a Canvas assignment, "what did i miss" in a call.
     case siteHelper(ChromeSiteHelperCommand)
+    /// Form helper (phase 12): "fill this form", "fill in my details".
+    case fillForm
 }
 
 @MainActor
@@ -488,6 +490,8 @@ enum ChromeTabOrganizer {
                 return await ChromeFocusSession.shared.perform(focusCommand)
             case .siteHelper(let siteHelperCommand):
                 return await ChromeSiteHelpers.shared.perform(siteHelperCommand, modelProvider: modelProvider)
+            case .fillForm:
+                return await ChromeFormFill.performSpokenFill()
             }
             return (replyText, true)
         } catch {

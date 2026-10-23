@@ -293,6 +293,9 @@ final class ToolConfirmationCoordinator: ObservableObject, ToolPermissionBroker 
     /// A question worth hearing for tools whose generic "i'd need to run …"
     /// would hide the one thing to check — for a message, who it goes to.
     private static func spokenQuestionOverride(forToolNamed toolName: String, toolInput: JSONValue) -> String? {
+        if ToolCallInspection.bareToolName(toolName) == FormFillToolNames.fillForm {
+            return "fill in what's on the card? i won't submit it."
+        }
         guard ToolCallInspection.bareToolName(toolName) == MessagingToolNames.sendIMessage,
               let recipientName = ToolCallInspection.stringValue(forAnyOf: ["to"], in: toolInput) else { return nil }
         return "send that to \(recipientName.lowercased())?"

@@ -90,6 +90,11 @@ enum ToolConfirmationCardBuilder {
         if ToolCallInspection.bareToolName(toolName) == JobsToolNames.applyStudyBlocks {
             return studyBlocksCard(toolInput: toolInput)
         }
+        // Filling a form: its values come from the user's own sources and the
+        // card lists every one (editable), plus what won't be filled.
+        if ToolCallInspection.bareToolName(toolName) == FormFillToolNames.fillForm {
+            return FormFillCards.confirmationCard(toolInput: toolInput)
+        }
         if let chromeTabLifeCard = ChromeTabLifeCards.confirmationCard(forBareToolName: ToolCallInspection.bareToolName(toolName), toolInput: toolInput) {
             return chromeTabLifeCard
         }

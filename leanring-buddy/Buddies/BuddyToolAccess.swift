@@ -89,7 +89,7 @@ enum BuddyToolGroup: String, CaseIterable, Identifiable {
     /// is in none (a connected server's tools are grouped by server instead).
     static func group(forToolNamed toolName: String) -> BuddyToolGroup? {
         switch toolName {
-        case "browser_task", "read_page", "click_element", "open_url":
+        case "browser_task", "read_page", "click_element", "open_url", "fill_form":
             return .browser
         case _ where toolName.hasPrefix("chrome_"):
             return .browser

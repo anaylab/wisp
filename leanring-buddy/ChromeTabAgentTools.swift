@@ -65,6 +65,12 @@ nonisolated enum ChromeTabCommandRouter {
             return .siteHelper(siteHelperCommand)
         }
 
+        // Form helper (phase 12): "fill this form" says no "tab" either. It
+        // runs the fill_form tool, so it still shows the card before typing.
+        if FormFillCommandParser.isFillFormRequest(transcript) {
+            return .fillForm
+        }
+
         let text = normalized(transcript)
         let words = text.split(separator: " ").map(String.init)
         guard !words.isEmpty, words.count <= maximumCommandWordCount else { return nil }
