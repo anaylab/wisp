@@ -126,7 +126,9 @@
     if (attributeOf(element, "aria-hidden") === "true") return false;
     const rect = element.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return false;
-    if (rect.right <= 0 || rect.bottom + (window.scrollY || 0) <= 0) return false;
+    // In page coordinates, so a field merely scrolled out of view still counts;
+    // only one placed off the page's own left or top edge is a trap.
+    if (rect.right + (window.scrollX || 0) <= 0 || rect.bottom + (window.scrollY || 0) <= 0) return false;
     const style = getComputedStyle(element);
     return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
   }
