@@ -27,6 +27,7 @@ import { focusModeHandlers } from "./handlers/focus-mode.js";
 import { startTabEvents } from "./events/tabs.js";
 import { startNavigationEvents } from "./events/navigation.js";
 import { startDownloadEvents } from "./events/downloads.js";
+import { startAskAboutThisEvents } from "./events/ask-about-this.js";
 
 registerHandlers(tabHandlers);
 registerHandlers(capabilityHandlers);
@@ -40,5 +41,6 @@ startCapabilityBroadcasts(sendCapabilities);
 startTabEvents();
 startNavigationEvents();
 startDownloadEvents();
+startAskAboutThisEvents();
 
 startBridge();
