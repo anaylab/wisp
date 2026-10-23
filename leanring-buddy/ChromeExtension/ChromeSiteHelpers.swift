@@ -170,8 +170,11 @@ final class ChromeSiteHelpers {
         method: String,
         parameters: Parameters,
         resultType: Result.Type,
-        timeoutSeconds: Double = ChromePageReader.toolReadTimeoutSeconds
+        timeoutSeconds: Double? = nil
     ) async throws -> Result {
+        // Defaulted here, not in the signature: default arguments are evaluated
+        // outside the main actor, where the reader's constant lives.
+        let timeoutSeconds = timeoutSeconds ?? ChromePageReader.toolReadTimeoutSeconds
         let bridge = ChromeExtensionBridge.shared
         guard bridge.isExtensionConnected else { throw ChromePageReader.ReaderError.extensionNotConnected }
         guard bridge.hasCapability(.pagesRead) else { throw ChromePageReader.ReaderError.pagesReadNotAllowed }
