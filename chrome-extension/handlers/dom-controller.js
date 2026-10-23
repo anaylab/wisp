@@ -37,6 +37,9 @@ export const WISP_GROUP_COLOR = "purple";
 // `AppleScriptBrowserController.defaultElementLimit` / `defaultTextCharacterLimit`.
 export const DEFAULT_ELEMENT_LIMIT = 25;
 export const DEFAULT_TEXT_CHARACTER_LIMIT = 1500;
+// The most elements a `findElements` query may rank (phase 05's pointing asks
+// for more than the default, since the target can be any control in view).
+export const MAXIMUM_FIND_ELEMENT_LIMIT = 300;
 
 // Cross-origin frames read per snapshot. Pages with dozens of ad frames would
 // otherwise cost a round trip each for nothing the user asked about.
@@ -471,7 +474,12 @@ export function createDomControllerHandlers({
         }
         return { tabId: tab.id, elements: [{ id: params.elementId, screenPoint }] };
       }
-      const snapshot = await takeSnapshot({ tabId: params.tabId });
+      // `elementLimit` widens the search past the snapshot's default 25
+      // (phase 05 points at things anywhere near the view, not just the first
+      // few controls); it is capped like any list.
+      const elementLimit = Number.isInteger(params.elementLimit)
+        ? Math.min(Math.max(params.elementLimit, 1), MAXIMUM_FIND_ELEMENT_LIMIT) : undefined;
+      const snapshot = await takeSnapshot({ tabId: params.tabId, elementLimit });
       return { tabId: snapshot.tabId, elements: rankElementsByQuery(snapshot.elements, params.query) };
     },
 
