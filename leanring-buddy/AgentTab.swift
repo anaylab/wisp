@@ -340,6 +340,7 @@ struct AgentTab: View {
                 chromePermissionsButton
                 ChromeTabSessionsRow()
                 ChromeFocusSettingsRow()
+                CanvasAddToTodaySettingsRow()
             }
         }
     }

@@ -58,3 +58,14 @@ final class ChromeFocusSession {
         ("", true)
     }
 }
+
+// Site helpers (phase 10) are one more `ChromeTabCommand` case handed to their
+// own coordinator, which reaches the bridge, Jobs and the model; stubbed too.
+@MainActor
+final class ChromeSiteHelpers {
+    static let shared = ChromeSiteHelpers()
+
+    func perform(_ command: ChromeSiteHelperCommand, modelProvider: any ModelProvider) async -> (replyText: String, didSucceed: Bool) {
+        ("", true)
+    }
+}

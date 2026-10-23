@@ -26,11 +26,13 @@ import { tabLifeHandlers } from "./handlers/tab-life.js";
 import { downloadHandlers } from "./handlers/downloads.js";
 import { focusModeHandlers } from "./handlers/focus-mode.js";
 import { pointingHandlers } from "./handlers/pointing.js";
+import { siteHelperHandlers } from "./handlers/site-helpers.js";
 import { startTabEvents } from "./events/tabs.js";
 import { startNavigationEvents } from "./events/navigation.js";
 import { startDownloadEvents } from "./events/downloads.js";
 import { startPointingEvents } from "./events/pointing.js";
 import { startAskAboutThisEvents } from "./events/ask-about-this.js";
+import { startSiteHelperEvents } from "./events/site-helpers.js";
 
 registerHandlers(tabHandlers);
 registerHandlers(capabilityHandlers);
@@ -41,6 +43,7 @@ registerHandlers(tabLifeHandlers);
 registerHandlers(downloadHandlers);
 registerHandlers(focusModeHandlers);
 registerHandlers(pointingHandlers);
+registerHandlers(siteHelperHandlers);
 
 startCapabilityBroadcasts(sendCapabilities);
 startTabEvents();
@@ -49,5 +52,6 @@ startPageWatcherEvents();
 startDownloadEvents();
 startPointingEvents();
 startAskAboutThisEvents();
+startSiteHelperEvents();
 
 startBridge();

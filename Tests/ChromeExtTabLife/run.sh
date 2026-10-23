@@ -29,6 +29,13 @@ swiftc -target arm64-apple-macos14.0 \
   leanring-buddy/ChromeExtension/ChromeTabTriagePlanner.swift \
   leanring-buddy/ChromeExtension/ChromeTabLifeCommand.swift \
   leanring-buddy/ChromeExtension/ChromeTabLifeCardText.swift \
-  leanring-buddy/ChromeExtension/ChromeFocusCommand.swift
+  leanring-buddy/ChromeExtension/ChromeFocusCommand.swift \
+  leanring-buddy/Jobs/CanvasModels.swift \
+  leanring-buddy/Jobs/ChecklistModels.swift \
+  leanring-buddy/Jobs/DayChecklistBuilder.swift \
+  leanring-buddy/ChromeExtension/CanvasPageMatching.swift \
+  leanring-buddy/ChromeExtension/ChromePageTextPrompt.swift \
+  leanring-buddy/ChromeExtension/MeetingCaptionsPrompt.swift \
+  leanring-buddy/ChromeExtension/ChromeSiteHelperRouting.swift
 
 "$BUILD_DIR/chrome-ext-tab-life"

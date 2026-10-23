@@ -58,6 +58,13 @@ nonisolated enum ChromeTabCommandRouter {
             return .focus(focusCommand)
         }
 
+        // Site helpers (phase 10): only while a Canvas assignment is showing or a call is open.
+        if let siteHelperCommand = ChromeSiteHelperCommandParser.command(
+            for: transcript, availability: ChromeSiteHelpers.availabilityForRouting
+        ) {
+            return .siteHelper(siteHelperCommand)
+        }
+
         let text = normalized(transcript)
         let words = text.split(separator: " ").map(String.init)
         guard !words.isEmpty, words.count <= maximumCommandWordCount else { return nil }

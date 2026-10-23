@@ -109,6 +109,10 @@ nonisolated struct JobsPersistedState: Codable, Equatable, Sendable {
     var approvedStudyBlocks: [StudyBlockProposal] = []
     /// Proposal ids already approved or dismissed, so they are never proposed again.
     var handledStudyBlockIDs: [String] = []
+    /// Canvas items the user added to today from the assignment page (phase 10), and
+    /// the `yyyy-MM-dd` they were added for. Optional so older state files still decode.
+    var canvasItemsAddedToToday: [CanvasItem]?
+    var canvasItemsAddedToTodayDayKey: String?
 }
 
 // MARK: - Engine
@@ -477,18 +481,24 @@ final class JobsEngine: ObservableObject {
 
     /// One confirmation card for the whole batch, then a write to "Wisp" only.
     func approvePendingStudyBlocks() async {
-        let proposalsToWrite = pendingStudyBlocks
-        guard !proposalsToWrite.isEmpty else { return }
+        await approveStudyBlocks(pendingStudyBlocks)
+    }
+
+    /// The same card and write for any proposals, e.g. "plan this" on one Canvas
+    /// assignment page. True only when the user allowed it and the write succeeded.
+    @discardableResult
+    func approveStudyBlocks(_ proposalsToWrite: [StudyBlockProposal]) async -> Bool {
+        guard !proposalsToWrite.isEmpty else { return false }
 
         guard await dependencies.studyBlockApprover.askToWriteStudyBlocks(proposalsToWrite) else {
             // Declined or timed out: they stay pending so the user can try again.
-            return
+            return false
         }
         do {
             _ = try await dependencies.calendarWriter.writeStudyBlocks(proposalsToWrite)
         } catch {
             lastActionProblemMessage = "Wisp couldn't add the study blocks to your calendar."
-            return
+            return false
         }
         lastActionProblemMessage = nil
 
@@ -505,6 +515,36 @@ final class JobsEngine: ObservableObject {
         if blockStartsToday, isDailyChecklistEnabled, !todayChecklist.isEmpty {
             await rebuildChecklistNow()
         }
+        return true
+    }
+
+    /// Study blocks for just one Canvas item ("plan this" on its assignment page).
+    /// Unlike the batch, a block the user dismissed before may be proposed again, since
+    /// they asked; one they already approved is not. Nothing is written until
+    /// `approveStudyBlocks` is called and the user allows it.
+    func proposeStudyBlocks(forCanvasItem canvasItem: CanvasItem) async -> [StudyBlockProposal] {
+        let now = dependencies.now()
+        let calendar = dependencies.calendar
+        let lookaheadEnd = calendar.date(
+            byAdding: .day,
+            value: studyBlockSettings.lookaheadDays + Self.studyBlockLookaheadPaddingDays,
+            to: now
+        ) ?? now.addingTimeInterval(8 * 24 * 3600)
+        var busyIntervals = (try? await dependencies.calendarWriter.busyIntervals(from: now, to: lookaheadEnd)) ?? []
+        busyIntervals.append(contentsOf: (persistedState.approvedStudyBlocks + pendingStudyBlocks).map {
+            BusyInterval(start: $0.start, end: $0.end)
+        })
+        var forcedSettings = studyBlockSettings
+        // Asked for by name, so the batch switch doesn't apply.
+        forcedSettings.isEnabled = true
+        return StudyBlockPlanner.propose(
+            items: [canvasItem],
+            busyIntervals: busyIntervals,
+            alreadyProposedOrCreatedIDs: Set(persistedState.approvedStudyBlocks.map(\.id)),
+            settings: forcedSettings,
+            now: now,
+            calendar: calendar
+        )
     }
 
     /// Remembers the ids so the same blocks are not proposed again tomorrow.
@@ -587,6 +627,9 @@ final class JobsEngine: ObservableObject {
             approvedStudyBlocks: persistedState.approvedStudyBlocks,
             previousChecklist: previousChecklist,
             completedRolledOverItemsToKeep: completedRolledOverItemsToKeep,
+            canvasItemsAddedToToday: persistedState.canvasItemsAddedToTodayDayKey == todayKey
+                ? (persistedState.canvasItemsAddedToToday ?? [])
+                : [],
             maximumItems: Self.maximumChecklistItems,
             now: now,
             calendar: calendar
@@ -607,6 +650,37 @@ final class JobsEngine: ObservableObject {
         persistedState.checklist = builtChecklist
         persistState()
         dependencies.userDefaults.set(todayKey, forKey: Self.lastBuiltDayKey)
+    }
+
+    enum AddToTodayOutcome: Equatable {
+        case added
+        case alreadyOnChecklist
+        case checklistTurnedOff
+        /// Today's list is full of things that rank ahead of it.
+        case checklistFull
+    }
+
+    /// "Add to today" from a Canvas assignment page (phase 10): the item joins today's
+    /// list through the ordinary builder, whatever day it is due, and stays for today.
+    func addCanvasItemToTodayChecklist(_ canvasItem: CanvasItem) async -> AddToTodayOutcome {
+        guard isDailyChecklistEnabled else { return .checklistTurnedOff }
+        let isAlreadyListed: () -> Bool = { [weak self] in
+            self?.todayChecklist.contains { DayChecklistBuilder.sourceKey(fromItemID: $0.id) == canvasItem.uid } ?? false
+        }
+        if isAlreadyListed() { return .alreadyOnChecklist }
+
+        let todayKey = DayChecklistBuilder.dayKey(for: dependencies.now(), calendar: dependencies.calendar)
+        var addedItems = persistedState.canvasItemsAddedToTodayDayKey == todayKey
+            ? (persistedState.canvasItemsAddedToToday ?? [])
+            : []
+        addedItems.removeAll { $0.uid == canvasItem.uid }
+        addedItems.append(canvasItem)
+        persistedState.canvasItemsAddedToToday = addedItems
+        persistedState.canvasItemsAddedToTodayDayKey = todayKey
+        persistState()
+
+        await rebuildChecklistNow()
+        return isAlreadyListed() ? .added : .checklistFull
     }
 
     /// Optimistic: the tick shows at once, Reminders is written, and a failed write

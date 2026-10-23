@@ -375,6 +375,39 @@ func runAllCases() async {
         engine.removeCanvasFeed()
         check(engine.syncState == .notConfigured && !world.hasFeed, "remove returns to notConfigured")
     }
+
+    // 9. From a Canvas assignment page (phase 10): add one item to today, plan just it.
+    do {
+        let world = FakeWorld(); world.items = [dueToday, dueInThreeDays]
+        let engine = makeEngine(world: world, clock: ClockBox(morningStart))
+        await engine.syncNow()
+        await engine.rebuildChecklistNow()
+        check(engine.todayChecklist.count == 1, "only today's item is listed before adding")
+        let addOutcome = await engine.addCanvasItemToTodayChecklist(dueInThreeDays)
+        check(addOutcome == .added && engine.todayChecklist.count == 2, "an item due later joins today's list")
+        check(engine.todayChecklist.contains { $0.title == "Lab report" && ($0.subtitle ?? "").contains("due Oct 23") },
+              "the added item says when it is due")
+        check(await engine.addCanvasItemToTodayChecklist(dueInThreeDays) == .alreadyOnChecklist, "adding twice says it is there")
+        await engine.rebuildChecklistNow()
+        check(engine.todayChecklist.count == 2, "a same-day rebuild keeps the added item")
+
+        world.approves = false
+        let pendingBefore = engine.pendingStudyBlocks
+        let proposals = await engine.proposeStudyBlocks(forCanvasItem: dueInThreeDays)
+        check(proposals.count == 1 && proposals.allSatisfy { $0.forItemUID == dueInThreeDays.uid }, "plan this proposes a block for that item only")
+        check(!proposals.contains { proposal in pendingBefore.contains { $0.start < proposal.end && proposal.start < $0.end } },
+              "a per-item block avoids the batch's pending blocks")
+        check(await engine.approveStudyBlocks(proposals) == false && world.studyWrites == 0, "a declined card writes nothing")
+        world.approves = true
+        check(await engine.approveStudyBlocks(proposals) && world.studyWrites == 1, "an approved card writes the block")
+        check(await engine.proposeStudyBlocks(forCanvasItem: dueInThreeDays).isEmpty, "an approved item isn't planned again")
+    }
+    do {
+        let world = FakeWorld(); world.items = [dueToday]
+        let engine = makeEngine(world: world, clock: ClockBox(morningStart))
+        engine.isDailyChecklistEnabled = false
+        check(await engine.addCanvasItemToTodayChecklist(dueInThreeDays) == .checklistTurnedOff, "the checklist switch is respected")
+    }
 }
 
 await runAllCases()

@@ -111,6 +111,19 @@ A watch (`publicWatch`): `watchId`, `tabId`, `windowId`, `url`, `title`, `label`
 | `listPageWatches()` | `{watches: […], recentlyEnded: [{watchId, reason, matchedText, endedAt, label}]}` (endings kept 1h) |
 | `watch.matched` | `{watchId, matchedText, tabId, url, title}` — the watch has ended |
 | `watch.ended` | `{watchId, reason}`, reason `timedOut` / `tabClosed` / `navigatedAway` / `pageUnavailable` |
+### Phase 10 site-helper payloads
+
+The two helper scripts are registered with `chrome.scripting.registerContentScripts` while `pages.read` is
+granted (no manifest `content_scripts`). The Canvas script matches `https://*/courses/*/assignments/*` and
+reads nothing until the page shows Canvas's own markup; Wisp only acts on `*.instructure.com` or the saved
+Canvas feed's host. The caption buffer lives in the meeting page only (30 minutes, never stored).
+
+| Event / method | `data` / result |
+|---|---|
+| `site.canvasAssignmentOpened` | `{tabId, windowId, url, title, dueAt}` (`dueAt` ISO 8601 or `""`; `url` added beyond the roadmap's `{tabId, title, dueAt}` so Wisp can check the host and assignment id) |
+| `site.meetingCaptionsAvailable` | `{tabId, windowId, url, title, site}` (`site` is `"meet"` or `"zoom"`) |
+| `getCanvasAssignmentDetails({tabId?})` | `{tabId, windowId, url, courseId, assignmentId, title, courseName, dueText, dueAt, pointsPossible, submissionTypes, rubric: [{criterion, points}], rubricTotal, description, truncated}` |
+| `getMeetingCaptions({tabId?, lastMinutes?})` | `{tabId, windowId, url, title, site, captionsFound, captionsVisible, entries: [{speaker, text, startedAt, endedAt}], requestedMinutes, bufferStartedAt, truncated}` (times in epoch ms; `captionsFound: false` means captions are off) |
 
 ## 2. Methods and events: names and owners
 
