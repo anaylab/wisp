@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   createBridge,
+  INSTANCE_ID_STORAGE_KEY,
   KEEP_ALIVE_INTERVAL_MILLISECONDS,
   RECONNECT_ALARM_NAME,
   WISP_BRIDGE_URL,
@@ -43,13 +44,47 @@ test("hello carries the version, browser name and capabilities", async () => {
   assert.equal(socket.url, WISP_BRIDGE_URL);
   await socket.simulateOpen();
 
+  const instanceId = fakeChrome.state.localStorage[INSTANCE_ID_STORAGE_KEY];
+  assert.match(instanceId, /^[0-9a-f-]{36}$/);
   assert.deepEqual(socket.sentMessages[0], {
     type: "hello",
-    extensionVersion: "1.1.0",
+    extensionVersion: fakeChrome.runtime.getManifest().version,
     browserName: "Chrome",
     capabilities: ["tabs", "downloads"],
+    instanceId,
   });
   assert.equal(fakeChrome.state.sessionStorage.isConnectedToWisp, true);
+});
+
+test("the instance id is made once per profile and reused on every hello", async () => {
+  const fakeChrome = createFakeChrome();
+  fakeChrome.state.localStorage[INSTANCE_ID_STORAGE_KEY] = "kept-id";
+  const { bridge } = makeBridge({ fakeChrome });
+  bridge.connectToWisp();
+  await FakeWebSocket.instances[0].simulateOpen();
+  assert.equal(FakeWebSocket.instances[0].sentMessages[0].instanceId, "kept-id");
+});
+
+test("the browser name comes from the browser's own brand", async () => {
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const helloBrowserName = async (navigatorValue) => {
+    Object.defineProperty(globalThis, "navigator", { value: navigatorValue, configurable: true });
+    const { bridge } = makeBridge();
+    bridge.connectToWisp();
+    await FakeWebSocket.instances[0].simulateOpen();
+    return FakeWebSocket.instances[0].sentMessages[0].browserName;
+  };
+  try {
+    const brands = (...names) => ({ userAgentData: { brands: names.map((brand) => ({ brand, version: "130" })) } });
+    assert.equal(await helloBrowserName(brands("Not)A;Brand", "Chromium", "Google Chrome")), "Google Chrome");
+    assert.equal(await helloBrowserName(brands("Microsoft Edge", "Chromium", "Not_A Brand")), "Microsoft Edge");
+    assert.equal(await helloBrowserName({ ...brands("Chromium", "Not A Brand"), brave: {} }), "Brave");
+    assert.equal(await helloBrowserName(brands("Not A Brand", "Chromium")), "Chromium");
+    assert.equal(await helloBrowserName({}), "Chrome");
+  } finally {
+    if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
+    else delete globalThis.navigator;
+  }
 });
 
 test("hello falls back to tabs when the capability check fails", async () => {

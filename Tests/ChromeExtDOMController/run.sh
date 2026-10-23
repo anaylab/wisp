@@ -25,6 +25,7 @@ swiftc -target arm64-apple-macos14.0 \
   leanring-buddy/BrowserController.swift \
   leanring-buddy/BrowserPageSnapshotDecoding.swift \
   leanring-buddy/ChromeExtension/BrowserControllerSelector.swift \
+  leanring-buddy/ChromeExtension/ChromiumBrowsers.swift \
   leanring-buddy/ChromeExtension/ExtensionBrowserReplies.swift
 
 "$BUILD_DIR/chrome-ext-dom-controller" "Tests/ChromeExtDOMController/snapshot-fixture.json"

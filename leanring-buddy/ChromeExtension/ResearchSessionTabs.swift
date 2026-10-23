@@ -55,6 +55,9 @@ extension ResearchSessionController {
     // MARK: - Following the tabs
 
     func trackResearchTab(_ tabID: Int, openedURLString: String) {
+        if openResearchTabs.isEmpty {
+            researchTabsBrowserID = ChromeExtensionBridge.shared.activeBrowserID
+        }
         openResearchTabs[tabID] = ResearchOpenTab(tabID: tabID, openedURLString: openedURLString)
         lastResearchActivityAt = Date()
         startIdleCheckIfNeeded()
@@ -66,6 +69,16 @@ extension ResearchSessionController {
             .filter { ["tab.activated", "tab.updated", "tab.removed"].contains($0.eventName) }
             .sink { [weak self] event in
                 MainActor.assumeIsolated { self?.handleTabEvent(event) }
+            }
+        // The tabs are held to their browser, so the bridge only moves on when
+        // that browser disconnected (quit, or the extension reloaded): its tab
+        // ids are gone, and must not be sent to the next browser.
+        activeBrowserSubscription = ChromeExtensionBridge.shared.$activeBrowserID
+            .sink { [weak self] newActiveBrowserID in
+                MainActor.assumeIsolated {
+                    guard let self, !self.openResearchTabs.isEmpty, newActiveBrowserID != self.researchTabsBrowserID else { return }
+                    self.openResearchTabs = [:]
+                }
             }
     }
 

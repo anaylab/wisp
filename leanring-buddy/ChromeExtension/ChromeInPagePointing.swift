@@ -70,10 +70,12 @@ final class ChromeInPagePointing {
     }
 
     func decision() -> ChromeInPagePointingDecision {
-        ChromeInPagePointingPolicy.decision(for: ChromeInPagePointingInputs(
-            frontmostApplication: .init(bundleIdentifier: Self.frontmostExternalApplication()?.bundleIdentifier),
+        let frontmostBundleIdentifier = Self.frontmostExternalApplication()?.bundleIdentifier
+        return ChromeInPagePointingPolicy.decision(for: ChromeInPagePointingInputs(
+            frontmostApplication: .init(bundleIdentifier: frontmostBundleIdentifier),
             isExtensionConnected: bridge.isExtensionConnected,
-            extensionCanReadPages: bridge.hasCapability(.pagesRead)
+            extensionCanReadPages: bridge.hasCapability(.pagesRead),
+            activeExtensionBrowserIsFrontmost: bridge.isActiveBrowser(bundleIdentifier: frontmostBundleIdentifier ?? "")
         ))
     }
 

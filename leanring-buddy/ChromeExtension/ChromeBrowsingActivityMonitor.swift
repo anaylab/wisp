@@ -171,7 +171,10 @@ final class ChromeBrowsingActivityMonitor {
         let showingTab = focusedWindowID
             .flatMap { activeTabIDByWindowID[$0] }
             .flatMap { tabsByID[$0] }
-        let isChromeFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier?.hasPrefix("com.google.Chrome") == true
+        // The browser the extension is connected in, whichever Chromium
+        // browser that is.
+        let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        let isChromeFrontmost = ChromeExtensionBridge.shared.isActiveBrowser(bundleIdentifier: frontmostBundleIdentifier)
         let secondsSinceLastInput = CGEventSource.secondsSinceLastEventType(
             .combinedSessionState,
             // kCGAnyInputEventType: any keyboard, mouse or trackpad event.

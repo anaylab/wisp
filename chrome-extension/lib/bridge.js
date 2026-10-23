@@ -29,6 +29,9 @@ export const KEEP_ALIVE_INTERVAL_MILLISECONDS = 20 * 1000;
 export const RECONNECT_ALARM_NAME = "wisp-reconnect";
 export const RECONNECT_ALARM_PERIOD_MINUTES = 0.5;
 
+// Where the per-profile id sent in `hello` is kept.
+export const INSTANCE_ID_STORAGE_KEY = "wispInstanceId";
+
 // WebSocket.OPEN / CONNECTING, spelled out so an injected fake needn't
 // carry the constants.
 const SOCKET_STATE_CONNECTING = 0;
@@ -75,12 +78,19 @@ export function createBridge({
       } catch (error) {
         capabilities = ["tabs"];
       }
+      let instanceId;
+      try {
+        instanceId = await installationIdentifier();
+      } catch (error) {
+        instanceId = undefined;
+      }
       if (wispSocket !== socket) return;
       sendToWisp({
         type: "hello",
         extensionVersion: extensionVersion(),
         browserName: browserName(),
         capabilities,
+        instanceId,
       });
       startKeepAlive();
       recordConnectionStatus(true);
@@ -144,10 +154,31 @@ export function createBridge({
     return chromeAPI.runtime.getManifest().version;
   }
 
+  // The browser's own brand ("Google Chrome", "Microsoft Edge", "Opera").
+  // Brave hides its brand but exposes `navigator.brave`. Arc and Vivaldi
+  // report only "Chromium", which is what they're called here; Wisp names
+  // them properly from the app that owns the socket, which the extension
+  // can't see.
   function browserName() {
-    const userAgentBrands = globalThis.navigator?.userAgentData?.brands ?? [];
+    if (globalThis.navigator?.brave) return "Brave";
+    const userAgentBrands = globalThis.navigator?.userAgentData?.brands;
+    if (!Array.isArray(userAgentBrands)) return "Chrome";
     const namedBrand = userAgentBrands.find((brand) => !/not.a.brand|chromium/i.test(brand.brand));
-    return namedBrand?.brand ?? "Chrome";
+    if (namedBrand) return namedBrand.brand;
+    return userAgentBrands.some((brand) => /chromium/i.test(brand.brand)) ? "Chromium" : "Chrome";
+  }
+
+  // A random id kept in this profile's local storage, so Wisp can tell two
+  // profiles of one browser apart (each runs its own copy of the extension).
+  // It identifies nothing outside this Mac and never leaves the loopback
+  // socket.
+  async function installationIdentifier() {
+    const storedItems = await chromeAPI.storage.local.get(INSTANCE_ID_STORAGE_KEY);
+    const storedIdentifier = storedItems?.[INSTANCE_ID_STORAGE_KEY];
+    if (typeof storedIdentifier === "string" && storedIdentifier) return storedIdentifier;
+    const newIdentifier = globalThis.crypto.randomUUID();
+    await chromeAPI.storage.local.set({ [INSTANCE_ID_STORAGE_KEY]: newIdentifier });
+    return newIdentifier;
   }
 
   // MARK: - Requests from Wisp

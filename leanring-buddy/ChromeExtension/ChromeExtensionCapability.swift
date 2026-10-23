@@ -41,9 +41,9 @@ nonisolated enum ChromeExtensionCapability: String, CaseIterable, Sendable, Coda
         case .tabs:
             return "See, group, mute and close tabs."
         case .pagesRead:
-            return "Read a page's text when you ask about it."
+            return "Read, point at and work in pages you ask about."
         case .downloads:
-            return "Notice finished downloads."
+            return "Offer to file finished downloads."
         }
     }
 

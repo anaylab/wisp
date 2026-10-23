@@ -74,7 +74,13 @@ final class ChromeFocusSession: ObservableObject {
         let studyBlockID: String?
     }
 
-    @Published private(set) var activeSession: ActiveSession?
+    /// While a session runs, the bridge keeps talking to the browser it
+    /// rearranged: the restore token lives in that browser.
+    @Published private(set) var activeSession: ActiveSession? {
+        didSet {
+            ChromeExtensionBridge.shared.setActiveBrowserHeld(activeSession != nil, by: "focus mode")
+        }
+    }
     /// The countdown in `WispTimerStore`; not persisted (timers don't survive a quit).
     @Published private(set) var activeTimerID: UUID?
     /// Study blocks the user turned focus on for with the checklist chip.

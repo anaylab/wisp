@@ -15,7 +15,9 @@
 import Foundation
 
 nonisolated enum ChromeExtensionIncomingMessage: Equatable {
-    case hello(extensionVersion: String, browserName: String, capabilities: Set<ChromeExtensionCapability>)
+    /// `instanceID` is the extension's per-profile id (2.0.0); older
+    /// extensions send none.
+    case hello(extensionVersion: String, browserName: String, capabilities: Set<ChromeExtensionCapability>, instanceID: String? = nil)
     case ping
     case capabilities(Set<ChromeExtensionCapability>)
     case event(ChromeExtensionEvent)
@@ -36,6 +38,9 @@ nonisolated enum ChromeExtensionIncomingMessage: Equatable {
     /// extension, and isn't worth parsing. Generous enough for a future
     /// screenshot reply (phase 03's `captureVisibleTab`).
     static let maximumFrameByteCount = 16 * 1024 * 1024
+
+    /// The extension's instance id is a UUID; anything longer is cut.
+    static let maximumInstanceIDLength = 64
 
     /// Event names are short `area.verb` strings; a long one isn't ours.
     static let maximumEventNameLength = 100
@@ -73,7 +78,8 @@ nonisolated enum ChromeExtensionIncomingMessage: Equatable {
             } else {
                 capabilities = [.tabs]
             }
-            return .hello(extensionVersion: extensionVersion, browserName: browserName, capabilities: capabilities)
+            let instanceID = (message["instanceId"] as? String).map { String($0.prefix(maximumInstanceIDLength)) }
+            return .hello(extensionVersion: extensionVersion, browserName: browserName, capabilities: capabilities, instanceID: instanceID)
 
         case "ping":
             return .ping

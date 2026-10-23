@@ -47,7 +47,18 @@ final class ResearchSessionController: ObservableObject {
     static let maximumKeptReports = 10
 
     /// Research tabs Wisp opened and still tracks (see the +Tabs extension).
-    @Published var openResearchTabs: [Int: ResearchOpenTab] = [:]
+    /// While there are any, the bridge keeps talking to the browser they're in:
+    /// their ids mean nothing in another browser.
+    @Published var openResearchTabs: [Int: ResearchOpenTab] = [:] {
+        didSet {
+            ChromeExtensionBridge.shared.setActiveBrowserHeld(!openResearchTabs.isEmpty, by: Self.researchTabsHolderName)
+        }
+    }
+    static let researchTabsHolderName = "research tabs"
+    static let researchRunHolderName = "research run"
+    /// The browser the tracked research tabs are in.
+    var researchTabsBrowserID: String?
+    var activeBrowserSubscription: AnyCancellable?
     var lastResearchActivityAt = Date()
     var wispFocusedTabAt: [Int: Date] = [:]
     var tabEventSubscription: AnyCancellable?
@@ -126,6 +137,9 @@ final class ResearchSessionController: ObservableObject {
         let bridge = ChromeExtensionBridge.shared
         let isLocalModel = !modelProvider.deployment.sendsDataOffThisMachine
         startTrackingTabsIfNeeded()
+        // Every request in a run carries tab ids from one browser.
+        bridge.setActiveBrowserHeld(true, by: Self.researchRunHolderName)
+        defer { bridge.setActiveBrowserHeld(false, by: Self.researchRunHolderName) }
 
         // 1. Search, in a background tab in the Wisp group.
         guard let searchURL = ResearchSearch.searchURL(for: request.searchQuery) else { throw ResearchError.searchShowedNoResults }

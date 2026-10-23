@@ -177,7 +177,7 @@ struct ChromeTabSessionsRow: View {
             defer { restoringSessionID = nil }
             do {
                 statusText = try await ChromeTabLife.restore(savedSession, asksBeforeBigRestore: false)
-                NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.activate()
+                ChromeExtensionBridge.shared.bringBrowserForward()
             } catch {
                 statusText = error.localizedDescription
             }

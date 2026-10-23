@@ -24,6 +24,7 @@ swiftc -target arm64-apple-macos14.0 \
   Tests/ChromeExtInPagePointing/main.swift \
   leanring-buddy/ChromeExtension/ChromeInPagePointingPolicy.swift \
   leanring-buddy/ChromeExtension/BrowserControllerSelector.swift \
+  leanring-buddy/ChromeExtension/ChromiumBrowsers.swift \
   leanring-buddy/GuidedWalkthrough.swift \
   leanring-buddy/FastPointing.swift \
   leanring-buddy/ScreenAnnotation.swift \

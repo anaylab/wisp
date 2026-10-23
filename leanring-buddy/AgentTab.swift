@@ -4,7 +4,8 @@
 //
 //  Settings → Agent: where the agent works (its folder), how much it asks
 //  before acting (session auto-approve), announcements, Apple Shortcuts and
-//  the Chrome Tabs extension. macOS permissions live in Settings → General.
+//  the browser extension (`BrowserSettingsCard`). macOS permissions live in
+//  Settings → General.
 //
 
 import AppKit
@@ -17,10 +18,6 @@ struct AgentTab: View {
     @ObservedObject private var shortcutsBridge = ShortcutsBridge.shared
     @ObservedObject private var announcementPreferences = AnnouncementPreferences.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
-    @ObservedObject private var chromeExtensionBridge = ChromeExtensionBridge.shared
-    /// Why the last "Choose what Wisp can do in Chrome…" click didn't open the
-    /// page, shown under the button until the next try.
-    @State private var chromePermissionsPageErrorText: String?
 
     var body: some View {
         ScrollView {
@@ -32,7 +29,7 @@ struct AgentTab: View {
                 approvalsCard
                 announcementsCard
                 appleShortcutsCard
-                chromeTabsCard
+                BrowserSettingsCard()
             }
             .padding(16)
         }
@@ -319,167 +316,5 @@ struct AgentTab: View {
         case .unavailable(let reason):
             return reason
         }
-    }
-
-    // MARK: - Chrome tabs
-
-    /// Whether the Wisp Tabs Chrome extension is connected, how to install
-    /// it when it isn't, and what the user has let it do.
-    private var chromeTabsCard: some View {
-        DashboardCard(title: "Chrome Tabs") {
-            VStack(alignment: .leading, spacing: 12) {
-                chromeTabsConnectionRow
-                if chromeExtensionBridge.isExtensionConnected {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(ChromeExtensionCapability.allCases, id: \.self) { capability in
-                            chromeCapabilityRow(capability)
-                        }
-                    }
-                }
-                DownloadConciergeSettingsRow()
-                chromePermissionsButton
-                ChromeTabSessionsRow()
-                ChromeFocusSettingsRow()
-                CanvasAddToTodaySettingsRow()
-            }
-        }
-    }
-
-    private var chromeTabsConnectionRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(chromeExtensionBridge.isExtensionConnected ? DS.Colors.success : DS.Colors.warning)
-                .frame(width: 7, height: 7)
-                .padding(.top, 5)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(chromeTabsStatusTitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DS.Colors.textPrimary)
-                Text(chromeTabsStatusDetail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(DS.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            if !chromeExtensionBridge.isExtensionConnected {
-                Button {
-                    openChromeExtensionsPage()
-                } label: {
-                    Text("Open Extensions")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(DS.Colors.textPrimary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                                .fill(DS.Colors.surface3)
-                        )
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-                .nativeTooltip("Open chrome://extensions to load the Wisp Tabs extension")
-            }
-        }
-    }
-
-    /// One capability: granted or not, and what it lets Wisp do.
-    private func chromeCapabilityRow(_ capability: ChromeExtensionCapability) -> some View {
-        let isGranted = chromeExtensionBridge.hasCapability(capability)
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: isGranted ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 11))
-                .foregroundStyle(isGranted ? DS.Colors.success : DS.Colors.textTertiary)
-            Text(capability.displayName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(DS.Colors.textPrimary)
-            Text(capability.whatItAllows)
-                .font(.system(size: 11))
-                .foregroundStyle(DS.Colors.textSecondary)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Text(isGranted ? "Allowed" : "Off")
-                .font(.system(size: 11))
-                .foregroundStyle(isGranted ? DS.Colors.success : DS.Colors.textTertiary)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// Chrome only shows a permission prompt after a click inside an
-    /// extension page, so Wisp can't grant anything: this asks the extension
-    /// to open its options page, where the Allow buttons are.
-    private var chromePermissionsButton: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button {
-                openChromePermissionsPage()
-            } label: {
-                Text("Choose what Wisp can do in Chrome…")
-            }
-            .buttonStyle(WispPillButtonStyle(isProminent: false))
-            .controlSize(.small)
-            .disabled(!chromeExtensionBridge.isExtensionConnected)
-            .pointerCursor()
-            .nativeTooltip("Opens the extension's permissions page in Chrome")
-            if let chromePermissionsPageErrorText {
-                Text(chromePermissionsPageErrorText)
-                    .font(.system(size: 11))
-                    foregroundStyle(DS.Colors.warningText)
-            }
-        }
-    }
-
-    private func openChromePermissionsPage() {
-        chromePermissionsPageErrorText = nil
-        Task { @MainActor in
-            do {
-                _ = try await chromeExtensionBridge.sendRequest(
-                    method: "openPermissionsPage",
-                    parameters: [String: String](),
-                    resultType: OpenPermissionsPageResult.self
-                )
-                // The page opens as a Chrome tab; bring Chrome forward so the
-                // user sees it rather than Wisp's window.
-                NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.activate()
-            } catch {
-                chromePermissionsPageErrorText = error.localizedDescription
-            }
-        }
-    }
-
-    private struct OpenPermissionsPageResult: Decodable {
-        let opened: Bool?
-    }
-
-    private var chromeTabsStatusTitle: String {
-        switch chromeExtensionBridge.connectionState {
-        case .notStarted, .waitingForExtension:
-            return "Extension not connected"
-        case .connected(_, let browserName):
-            return "Connected to \(browserName)"
-        case .failed:
-            return "Couldn't start the tab bridge"
-        }
-    }
-
-    private var chromeTabsStatusDetail: String {
-        switch chromeExtensionBridge.connectionState {
-        case .notStarted, .waitingForExtension:
-            return "In Chrome, turn on Developer mode in chrome://extensions, choose Load unpacked, and pick the chrome-extension folder in Wisp's source. It connects to Wisp on this Mac only (127.0.0.1)."
-        case .connected:
-            return "Say \"organize my tabs\" or \"close duplicate tabs\". Pinned tabs and your own groups stay put."
-        case .failed(let reason):
-            return reason
-        }
-    }
-
-    /// chrome:// pages have no URL handler of their own, so the address is
-    /// handed to Chrome directly.
-    private func openChromeExtensionsPage() {
-        guard let chromeApplicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome"),
-              let extensionsPageURL = URL(string: "chrome://extensions") else { return }
-        NSWorkspace.shared.open(
-            [extensionsPageURL],
-            withApplicationAt: chromeApplicationURL,
-            configuration: NSWorkspace.OpenConfiguration()
-        )
     }
 }

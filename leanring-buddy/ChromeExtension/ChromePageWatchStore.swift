@@ -39,7 +39,13 @@ final class ChromePageWatchStore: ObservableObject {
     static let maximumActiveWatchCount = 5
     static let requestTimeoutSeconds: Double = 15
 
-    @Published private(set) var activeWatches: [ActiveChromePageWatch] = []
+    /// While any watch runs, the bridge keeps talking to the browser it runs
+    /// in, so its `watch.matched` isn't dropped as another browser's event.
+    @Published private(set) var activeWatches: [ActiveChromePageWatch] = [] {
+        didSet {
+            ChromeExtensionBridge.shared.setActiveBrowserHeld(!activeWatches.isEmpty, by: "page watches")
+        }
+    }
 
     /// Called when a watch ends on its own (matched, timed out, tab closed…) —
     /// not when the user stops it. Set once by `CompanionManager`.

@@ -38,6 +38,13 @@ final class ExtensionBrowserController: BrowserController {
     /// Wisp's task tab, while it exists. Chrome tab ids last for the browser
     /// session only, so this is never persisted.
     private var dedicatedTabID: Int?
+    /// The browser the task tab lives in. A tab id means nothing in another
+    /// browser, so when the bridge has moved on to a different browser the
+    /// remembered tab is forgotten instead of reused.
+    private var dedicatedTabBrowserID: String?
+    /// The name this controller holds the bridge's active browser under while
+    /// a task drives its tab.
+    private static let activeBrowserHolderName = "browser task tab"
     /// True for the duration of a browser task. Outside one, every operation
     /// targets the tab in front of the user, as `read_page` expects.
     private var isDrivingDedicatedTab = false
@@ -101,19 +108,30 @@ final class ExtensionBrowserController: BrowserController {
         let usersPage = try? await readUsersFrontPage()
 
         dedicatedTabWasLost = false
-        if let existingTabID = dedicatedTabID, await regroupDedicatedTab(existingTabID, collapsed: false) {
-            // A follow-up task continues in the same tab, like a conversation
-            // continuing on the same page.
-        } else {
-            let openedTab = try await perform(
-                "openTab",
-                ["url": .string("about:blank"), "active": .bool(false), "inWispGroup": .bool(true)],
-                resultType: OpenedTabReply.self
-            )
-            guard openedTab.tabId >= 0 else {
-                throw BrowserControllerError.scriptFailed("Couldn't open a tab to work in.")
+        bridge.setActiveBrowserHeld(true, by: Self.activeBrowserHolderName)
+        if dedicatedTabBrowserID != bridge.activeBrowserID {
+            dedicatedTabID = nil
+        }
+        do {
+            if let existingTabID = dedicatedTabID, await regroupDedicatedTab(existingTabID, collapsed: false) {
+                // A follow-up task continues in the same tab, like a conversation
+                // continuing on the same page.
+            } else {
+                let openedTab = try await perform(
+                    "openTab",
+                    ["url": .string("about:blank"), "active": .bool(false), "inWispGroup": .bool(true)],
+                    resultType: OpenedTabReply.self
+                )
+                guard openedTab.tabId >= 0 else {
+                    throw BrowserControllerError.scriptFailed("Couldn't open a tab to work in.")
+                }
+                dedicatedTabID = openedTab.tabId
+                dedicatedTabBrowserID = bridge.activeBrowserID
             }
-            dedicatedTabID = openedTab.tabId
+        } catch {
+            // `BrowserAgent` doesn't end a session that failed to begin.
+            bridge.setActiveBrowserHeld(false, by: Self.activeBrowserHolderName)
+            throw error
         }
         isDrivingDedicatedTab = true
         return usersPage
@@ -124,13 +142,20 @@ final class ExtensionBrowserController: BrowserController {
         // group folds away unless the user is looking at the tab.
         isDrivingDedicatedTab = false
         dedicatedTabWasLost = false
+        // The browser stays held until the group is folded, so that last
+        // request can't reach a browser the user switched to meanwhile.
         if let dedicatedTabID {
-            Task { [weak self] in _ = await self?.regroupDedicatedTab(dedicatedTabID, collapsed: true) }
+            Task { [weak self] in
+                _ = await self?.regroupDedicatedTab(dedicatedTabID, collapsed: true)
+                self?.bridge.setActiveBrowserHeld(false, by: Self.activeBrowserHolderName)
+            }
+        } else {
+            bridge.setActiveBrowserHeld(false, by: Self.activeBrowserHolderName)
         }
     }
 
     func revealDedicatedTab() async {
-        guard let dedicatedTabID else { return }
+        guard let dedicatedTabID, dedicatedTabBrowserID == bridge.activeBrowserID else { return }
         _ = try? await perform("focusTab", ["tabId": .number(Double(dedicatedTabID))], resultType: JSONValue.self)
     }
 

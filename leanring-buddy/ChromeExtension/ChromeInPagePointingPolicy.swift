@@ -46,6 +46,10 @@ nonisolated struct ChromeInPagePointingInputs: Equatable, Sendable {
     let frontmostApplication: BrowserControllerSelectionInputs.FrontmostApplication
     let isExtensionConnected: Bool
     let extensionCanReadPages: Bool
+    /// Whether the browser in front is the one the bridge talks to. With two
+    /// browsers connected, drawing in the other one would mark a page the user
+    /// isn't looking at.
+    var activeExtensionBrowserIsFrontmost: Bool = true
 }
 
 nonisolated enum ChromeInPagePointingDecision: Equatable, Sendable {
@@ -84,6 +88,9 @@ nonisolated enum ChromeInPagePointingPolicy {
         }
         guard inputs.extensionCanReadPages else {
             return .useOverlay(reason: "the chrome extension can't read pages yet")
+        }
+        guard inputs.activeExtensionBrowserIsFrontmost else {
+            return .useOverlay(reason: "the extension Wisp is using is in another browser")
         }
         return .tryInPage
     }

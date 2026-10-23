@@ -14,6 +14,13 @@
 //  click_element call), so granting or removing the permission takes effect on
 //  the next one with nothing to restart.
 //
+//  With several Chromium browsers connected (phase 13), the extension path
+//  serves the bridge's *active* browser (`ChromiumBrowserRouting`). When the
+//  browser in front is a different one, Google Chrome without the extension
+//  goes to AppleScript, so the work happens where the user is looking; any
+//  other Chromium browser can't be driven by AppleScript, so the active
+//  browser's extension does the work in its own background tab.
+//
 //  Pure (Foundation only) so `Tests/ChromeExtDOMController` can compile it;
 //  `AgentToolRegistry.browserController(servingRequest:)` gathers the inputs.
 //
@@ -41,22 +48,23 @@ nonisolated struct BrowserControllerSelectionInputs: Equatable, Sendable {
             }
             if bundleIdentifier == "com.apple.Safari" || bundleIdentifier.hasPrefix("com.apple.SafariTechnologyPreview") {
                 self = .safari
-            } else if Self.chromiumBundleIdentifierPrefixes.contains(where: { bundleIdentifier.hasPrefix($0) }) {
+            } else if ChromiumBrowserCatalog.isChromiumBrowser(bundleIdentifier: bundleIdentifier) {
                 self = .chromiumBrowser
             } else {
                 self = .other
             }
         }
-
-        private static let chromiumBundleIdentifierPrefixes = [
-            "com.google.Chrome", "org.chromium.Chromium", "com.microsoft.edgemac",
-            "com.brave.Browser", "company.thebrowser.Browser", "com.vivaldi.Vivaldi",
-        ]
     }
 
     let isExtensionConnected: Bool
     let extensionCanReadPages: Bool
     let frontmostApplication: FrontmostApplication
+    /// Whether the browser in front is the one the bridge sends requests to.
+    /// Only read when a Chromium browser is in front; true keeps the
+    /// one-browser behaviour.
+    var activeExtensionBrowserIsFrontmost: Bool = true
+    /// Whether the browser in front is one AppleScript drives (Google Chrome).
+    var appleScriptCanDriveFrontmostBrowser: Bool = false
 }
 
 nonisolated struct BrowserControllerSelection: Equatable, Sendable {
@@ -77,6 +85,12 @@ nonisolated enum BrowserControllerSelector {
         // only reaches Chrome.
         if inputs.frontmostApplication == .safari {
             return BrowserControllerSelection(kind: .appleScript, reason: "safari is in front")
+        }
+        if inputs.frontmostApplication == .chromiumBrowser, !inputs.activeExtensionBrowserIsFrontmost {
+            if inputs.appleScriptCanDriveFrontmostBrowser {
+                return BrowserControllerSelection(kind: .appleScript, reason: "chrome is in front, and the extension is connected in another browser")
+            }
+            return BrowserControllerSelection(kind: .chromeExtension, reason: "the browser in front has no extension, so the extension's browser does it")
         }
         return BrowserControllerSelection(kind: .chromeExtension, reason: "the chrome extension is connected and can read pages")
     }

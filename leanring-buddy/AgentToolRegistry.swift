@@ -301,10 +301,13 @@ final class AgentToolRegistry: ObservableObject {
     /// which one served it.
     func browserController(servingRequest requestDescription: String) -> BrowserController {
         let chromeExtensionBridge = ChromeExtensionBridge.shared
+        let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let selection = BrowserControllerSelector.choose(BrowserControllerSelectionInputs(
             isExtensionConnected: chromeExtensionBridge.isExtensionConnected,
             extensionCanReadPages: chromeExtensionBridge.hasCapability(.pagesRead),
-            frontmostApplication: .init(bundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+            frontmostApplication: .init(bundleIdentifier: frontmostBundleIdentifier),
+            activeExtensionBrowserIsFrontmost: chromeExtensionBridge.isActiveBrowser(bundleIdentifier: frontmostBundleIdentifier ?? ""),
+            appleScriptCanDriveFrontmostBrowser: frontmostBundleIdentifier == ChromiumBrowserCatalog.googleChromeBundleIdentifier
         ))
         let servingName = selection.kind == .chromeExtension ? "the Chrome extension" : "AppleScript"
         print("🌐 Browser: \(requestDescription.prefix(60)) — served by \(servingName) (\(selection.reason))")

@@ -93,14 +93,12 @@ enum ChromePageReader {
         return bridge.isExtensionConnected && bridge.hasCapability(.pagesRead)
     }
 
-    /// Whether the connected extension lives in the browser with this bundle
-    /// identifier. Only Chrome today (phase 13 widens it to other Chromium
-    /// browsers): reading Edge's tab while the user looks at Chrome would
-    /// answer about the wrong page.
+    /// Whether the extension Wisp is talking to lives in the browser with this
+    /// bundle identifier. Reading Edge's tab while the user looks at Chrome
+    /// would answer about the wrong page, so with several browsers connected
+    /// only the active one counts (`ChromeExtensionBridge.isActiveBrowser`).
     static func isConnectedExtension(inBrowserWithBundleIdentifier bundleIdentifier: String) -> Bool {
-        guard bundleIdentifier.hasPrefix("com.google.Chrome"),
-              case .connected(_, let browserName) = ChromeExtensionBridge.shared.connectionState else { return false }
-        return browserName.localizedCaseInsensitiveContains("chrome")
+        ChromeExtensionBridge.shared.isActiveBrowser(bundleIdentifier: bundleIdentifier)
     }
 
     private static func requirePageReading() throws {
