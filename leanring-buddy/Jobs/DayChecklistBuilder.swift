@@ -42,6 +42,7 @@ nonisolated enum DayChecklistBuilder {
                       approvedStudyBlocks: [StudyBlockProposal],
                       previousChecklist: [ChecklistItem],
                       completedRolledOverItemsToKeep: [ChecklistItem] = [],
+                      canvasItemsAddedToToday: [CanvasItem] = [],
                       maximumItems: Int,
                       now: Date,
                       calendar: Calendar) -> [ChecklistItem] {
@@ -114,6 +115,32 @@ nonisolated enum DayChecklistBuilder {
                 subtitle: joinedSubtitle([canvasItem.courseCode,
                                           canvasItem.isAllDay ? "due today" : "due \(timeText(canvasItem.startDate, calendar: calendar))"]),
                 dueDate: canvasItem.startDate,
+                origin: .canvasDue,
+                rolloverCount: 0,
+                isCompleted: carriedCompletion != nil,
+                completionDate: carriedCompletion?.completionDate
+            ))
+        }
+
+        // 2b. Canvas items the user added to today themselves ("add to today" on the
+        // assignment page), whatever day they are due. Same id shape as a due-today item,
+        // so one that is also due today is listed once.
+        for addedItem in canvasItemsAddedToToday.sorted(by: { ($0.startDate, $0.uid) < ($1.startDate, $1.uid) }) {
+            guard !rolledOverSourceKeys.contains(addedItem.uid) else { continue }
+            let itemID = "canvasDue:\(addedItem.uid):\(compactDayText)"
+            guard !canvasDueItems.contains(where: { $0.id == itemID }) else { continue }
+            let carriedCompletion = previousItemsByID[itemID].flatMap { $0.isCompleted ? $0 : nil }
+            let dueText: String
+            if isOnThisDay(addedItem.startDate) {
+                dueText = addedItem.isAllDay ? "due today" : "due \(timeText(addedItem.startDate, calendar: calendar))"
+            } else {
+                dueText = "due \(dayText(addedItem.startDate, calendar: calendar))"
+            }
+            canvasDueItems.append(ChecklistItem(
+                id: itemID,
+                title: addedItem.title,
+                subtitle: joinedSubtitle([addedItem.courseCode, dueText]),
+                dueDate: addedItem.startDate,
                 origin: .canvasDue,
                 rolloverCount: 0,
                 isCompleted: carriedCompletion != nil,
@@ -272,6 +299,15 @@ nonisolated enum DayChecklistBuilder {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
+    }
+
+    /// "Oct 25", for an item added to today that is due another day.
+    private static func dayText(_ date: Date, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "MMM d"
         return formatter.string(from: date)
     }
 
