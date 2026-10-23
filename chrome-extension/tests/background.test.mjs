@@ -27,6 +27,10 @@ test("background.js wires the bridge, handlers, capabilities and tab events", as
   assert.equal(fakeChrome.webNavigation.onCompleted.listeners.length, 1);
   // The popup's Try again, and in-page pointing's clicks and dismissals.
   assert.equal(fakeChrome.runtime.onMessage.listeners.length, 2);
+  // "Ask Wisp about this": menus, the omnibox and ⌘⇧Y.
+  assert.equal(fakeChrome.contextMenus.onClicked.listeners.length, 1);
+  assert.equal(fakeChrome.omnibox.onInputEntered.listeners.length, 1);
+  assert.equal(fakeChrome.commands.onCommand.listeners.length, 1);
 
   const socket = FakeWebSocket.instances[0];
   try {

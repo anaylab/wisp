@@ -313,6 +313,10 @@ export function createFakeChrome({
     },
   };
 
+  // Phase 06's entry points: context menus, the omnibox, keyboard commands
+  // and the toolbar badge.
+  Object.assign(fakeChrome, createFakeEntryPointAPIs(state, calls));
+
   // Like Chrome, `chrome.downloads` only exists while the optional
   // `downloads` permission is granted. Its events persist across a grant,
   // remove and re-grant, so a test can check listeners aren't doubled.
@@ -351,6 +355,56 @@ function createFakeDownloadsAPI(state, calls) {
     },
     onCreated: createFakeEvent(),
     onChanged: createFakeEvent(),
+  };
+}
+
+// `chrome.contextMenus`, `chrome.omnibox`, `chrome.commands` and the badge
+// part of `chrome.action` (phase 06). Menu items land in `state.menuItems`;
+// a duplicate id throws like Chrome's.
+function createFakeEntryPointAPIs(state, calls) {
+  state.menuItems = [];
+  state.badgeText = "";
+  state.badgeBackgroundColor = null;
+  state.actionTitle = "";
+  state.omniboxDefaultSuggestion = null;
+  return {
+    contextMenus: {
+      create(createProperties) {
+        calls.push(["contextMenus.create", createProperties]);
+        if (state.menuItems.some((menuItem) => menuItem.id === createProperties.id)) {
+          throw new Error(`Cannot create item with duplicate id ${createProperties.id}`);
+        }
+        state.menuItems.push({ ...createProperties });
+        return createProperties.id;
+      },
+      async removeAll() {
+        calls.push(["contextMenus.removeAll"]);
+        state.menuItems = [];
+      },
+      onClicked: createFakeEvent(),
+    },
+    omnibox: {
+      setDefaultSuggestion(suggestion) {
+        state.omniboxDefaultSuggestion = { ...suggestion };
+      },
+      onInputEntered: createFakeEvent(),
+      onInputChanged: createFakeEvent(),
+    },
+    commands: {
+      onCommand: createFakeEvent(),
+    },
+    action: {
+      async setBadgeText({ text }) {
+        calls.push(["action.setBadgeText", text]);
+        state.badgeText = text;
+      },
+      async setBadgeBackgroundColor({ color }) {
+        state.badgeBackgroundColor = color;
+      },
+      async setTitle({ title }) {
+        state.actionTitle = title;
+      },
+    },
   };
 }
 

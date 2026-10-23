@@ -890,6 +890,23 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   mouse-down matcher; step 1 drawn from the model's coordinates moves into the page when found there. "Do it for me" clicks
   through `clickElement` with the same irreversible-word refusal. A `nav.completed` in the walkthrough's tab re-finds the
   current step at once. Dismissing a step's label ends the walkthrough.
+  **Ask Wisp about this (phase 06)**: right-click a selection / image / link / page → **Ask Wisp…** (plus **Add to Wisp brain**
+  for a page, link or selection), `w …` in the address bar, or ⌘⇧Y (`ask-wisp-about-page`). `events/ask-about-this.js` sends
+  `user.askAboutSelection/Image/Link/Page` and `user.omniboxQuestion` with ids and URLs only (the brain item sends the same
+  event with `intent: "addToBrain"`); while Wisp is away the toolbar badge shows "!" for 5s instead. `ChromeAskAboutThisRouter`
+  (started from `NotchWindowController.show()`) holds the chosen `ChromeAskAboutThisPart` — the DOM twin of Ask About a Part:
+  the composer opens with an "About: selected text ✕" chip (`ChromeAskAboutThisComposerChip`), the part rides every question
+  until a fresh composer, a spoken question or a screen region replaces it (`clearFocusedScreenRegion` clears it too), and the
+  turn (`chromeAskAboutThisTurnInput`, one hook beside the phase 02 page-text task) carries it fenced as page DATA, skipping the
+  screenshot unless the question is about looks or places (`ChromeAskAboutThisContext.questionAsksHowItLooks`). The selection is
+  read with `getSelection` when the menu is clicked (else Chrome's menu text; nothing readable, e.g. a Google Doc's canvas →
+  "i couldn't read that selection"); an image is **downloaded by Wisp** at send time (`ChromeAskImageDownloader`: https only,
+  ≤10 MB counted while reading, image types only, no cookies/cache, no redirect off https — a user-asked fetch of an address
+  Chrome already loaded) and sent as a downscaled JPEG (896px local / 1568px cloud), falling back to the screenshot; a link sends
+  its words (selection, or looked up in a `snapshotPage`) and address and fetches nothing behind it; a page sends its text
+  (≥25 words) or else the screenshot. An omnibox question runs at once (`submitTextComposerQuery`, Chrome keeps focus) and reads
+  the tab only when it is about the page (`ChromePageContentRequestClassifier`). Add to brain: selection text / page text
+  (`readPage`, else its URL is fetched) / the link's URL into `BrainIngestQueue`, reported in the notch.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1406,6 +1423,13 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `chrome-extension/tests/fake-highlight-page.mjs` / `highlight.test.mjs` / `pointing.test.mjs` | ~145/~235/~200 | The highlighter in a fake page (badges, reduced motion, following, dismissal, click matching) and the handlers/events against the fake Chrome. |
 | `ChromeExtension/ChromeInPagePointingPolicy.swift` | ~250 | Pure: whether to try the page, annotation → mark kind, label → target, Chrome-window containment, marker colour as CSS, `ChromeInPageElementMatcher` (page element for a target or step), and the walkthrough event rules (click completes step, navigation re-finds, may click for the user). Tested by `Tests/ChromeExtInPagePointing`. |
 | `ChromeExtension/ChromeInPagePointing.swift` | ~615 | The bridge calls and state (pointing marks with a 15s lifetime, the walkthrough's marked step and tab), the event handling, and the `CompanionManager` glue: `applyPointingAnnotationsPreferringChromePage`, the walkthrough's in-page find/mark/click/re-find, clearing. |
+| `chrome-extension/events/ask-about-this.js` | ~250 | Phase 06: the five context-menu items (made on install), omnibox `w …` and the `ask-wisp-about-page` command → `user.*` events (ids, URLs, Chrome's menu selection text, capped); "!" badge for 5s while Wisp isn't connected. |
+| `ChromeExtension/ChromeAskAboutThisRequest.swift` | ~145 | Pure: the `user.*` event names, `ChromeAskAboutThisEventPayload`, and `ChromeAskAboutThisRequestDecoder` (event → ask / omnibox / add-to-brain request, or nil). Tested by `Tests/ChromeExtAskAboutThis`. |
+| `ChromeExtension/ChromeAskAboutThisContext.swift` | ~300 | Pure: `ChromeAskAboutThisPart` (chip text) and the per-turn plan for each part — fenced prompt text and whether the screenshot goes (look/place words), selection fallback to menu text, link text from snapshot elements, when to read the page. |
+| `ChromeExtension/ChromeAskImageDownload.swift` | ~150 | Image download rules (https, no credentials, not cut off, 2xx `image/*`, 10 MB, https-only redirects) and the cookie-less ephemeral `URLSession` fetch. |
+| `ChromeExtension/ChromeAskAboutThisRouter.swift` | ~300 | `@MainActor` router over the events: opens the composer with the part, runs omnibox questions, adds to the brain, caches the downloaded image, JPEG downscaling, link-text lookup. |
+| `ChromeExtension/CompanionManager+ChromeAskAboutThis.swift` | ~135 | The turn hook (`chromeAskAboutThisTurnInput`: reads/downloads, plan, History step) and `presentChromeAskAboutThisReply` for notch lines. |
+| `ChromeExtension/ChromeAskAboutThisComposerChip.swift` | ~40 | The composer's "About: selected text ✕" chip, watching the router. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1646,6 +1670,7 @@ running):
 ./Tests/ChromeExtDownloads/run.sh        # download concierge: rule matching, templates, suggested names, collisions, refusals
 ./Tests/ChromeExtFocusMode/run.sh        # Chrome focus mode: planner keep/collapse/mute/move, study-block rule, "focus on X for N minutes" parsing
 ./Tests/ChromeExtInPagePointing/run.sh  # in-page pointing: when to draw in the page, target/step → page element, walkthrough click/navigation rules
+./Tests/ChromeExtAskAboutThis/run.sh     # Ask Wisp about this: user.* event decoding, image download rules, per-part turn context + screenshot choice
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
 ./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references

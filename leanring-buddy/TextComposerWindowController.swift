@@ -177,6 +177,8 @@ struct TextComposerView: View {
                 if isFocusedScreenRegionChipShown {
                     focusedRegionChip
                 }
+                // "About: selected text" etc. for a part of a Chrome page.
+                ChromeAskAboutThisComposerChip()
                 keyHint("return", meaning: "send")
                 keyHint("esc", meaning: "dismiss")
                 Spacer()
