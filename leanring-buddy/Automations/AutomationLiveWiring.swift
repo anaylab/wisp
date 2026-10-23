@@ -502,6 +502,31 @@ final class LiveAutomationDependencies: AutomationEngineDependencies {
         }
     }
 
+    // MARK: Chrome (phase 08)
+
+    var chromeBrowsingEventPublisher: AnyPublisher<AutomationChromeBrowsingEvent, Never> {
+        let tabOpenedEvents = ChromeBrowsingActivityMonitor.shared.siteOpenedPublisher
+            .map { AutomationChromeBrowsingEvent.tabOpened(host: $0) }
+        let pageWatchMatchedEvents = ChromePageWatchStore.shared.watchMatchedPublisher
+            .map { pageWatchMatch in
+                AutomationChromeBrowsingEvent.pageWatchMatched(
+                    watchDescription: pageWatchMatch.watch.condition.summaryText,
+                    tabTitle: pageWatchMatch.watch.tabDisplayName,
+                    matchedText: pageWatchMatch.matchedText
+                )
+            }
+        return tabOpenedEvents.merge(with: pageWatchMatchedEvents).eraseToAnyPublisher()
+    }
+
+    func chromeSiteVisit(siteHost: String, now: Date) -> AutomationChromeSiteVisit? {
+        guard let visit = ChromeBrowsingActivityMonitor.shared.currentVisit(toSite: siteHost, now: now) else { return nil }
+        return AutomationChromeSiteVisit(startedAt: visit.startedAt, minutesOnSite: visit.secondsOnSite / 60)
+    }
+
+    func startFollowingChromeTabs() {
+        ChromeBrowsingActivityMonitor.shared.start()
+    }
+
     /// `ScreenWatcherStore` has one end-of-watch callback, owned by `CompanionManager`. A watch
     /// that belongs to an automation is answered by the automation alone; every other watch still
     /// reaches the original handler.

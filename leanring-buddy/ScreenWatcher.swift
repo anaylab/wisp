@@ -32,6 +32,10 @@ nonisolated enum ScreenWatchCondition: Equatable, Sendable {
     /// The screen's text changes (a build log scrolling, a percentage
     /// climbing) and then stops changing — "finished" without a known keyword.
     case screenTextSettles
+    /// The number beside some text goes past a threshold: "the price drops
+    /// below $80". The first reading counts too — a price already under $80
+    /// is news the user wants at once, not a baseline.
+    case numberCrosses(ScreenWatchNumberThreshold)
 
     /// How the watch is described in the notch, History and replies:
     /// "“Succeeded” appears", "the screen stops changing".
@@ -43,6 +47,49 @@ nonisolated enum ScreenWatchCondition: Equatable, Sendable {
             return "“\(targetText)” goes away"
         case .screenTextSettles:
             return "the screen stops changing"
+        case .numberCrosses(let numberThreshold):
+            return numberThreshold.summaryText
+        }
+    }
+}
+
+/// "The price drops below $80": which number (the one beside `nearText`),
+/// which way, and how far.
+nonisolated struct ScreenWatchNumberThreshold: Equatable, Sendable {
+    enum Direction: String, Equatable, Sendable {
+        case below
+        case above
+    }
+
+    /// As the user said it, for the reply: "the price".
+    let subjectText: String
+    /// The words the number sits beside on screen: "price".
+    let nearText: String
+    let direction: Direction
+    let threshold: Double
+    /// As the user said it, for the reply: "$80".
+    let thresholdText: String
+
+    /// "the price drops below $80", "bitcoin goes above 100,000".
+    var summaryText: String {
+        switch direction {
+        case .below: return "\(subjectText) drops below \(thresholdText)"
+        case .above: return "\(subjectText) goes above \(thresholdText)"
+        }
+    }
+
+    /// What Wisp says when it happened: "the price is below $80 on screen
+    /// now: Price $79.99".
+    func reachedMessage(matchedLineText: String?, place: String) -> String {
+        let reachedText = "\(subjectText) is \(direction.rawValue) \(thresholdText) \(place) now"
+        guard let matchedLineText, !matchedLineText.isEmpty else { return "\(reachedText)." }
+        return "\(reachedText): \(matchedLineText)"
+    }
+
+    func isPastThreshold(_ value: Double) -> Bool {
+        switch direction {
+        case .below: return value < threshold
+        case .above: return value > threshold
         }
     }
 }
@@ -140,7 +187,15 @@ nonisolated struct ScreenWatchEvaluator: Sendable {
             return observeForTextDisappearing(targetText: targetText, screenLines: screenLines)
         case .screenTextSettles:
             return observeForScreenTextSettling(screenLines: screenLines)
+        case .numberCrosses(let numberThreshold):
+            return observeForNumberCrossing(numberThreshold: numberThreshold, screenLines: screenLines)
         }
+    }
+
+    private func observeForNumberCrossing(numberThreshold: ScreenWatchNumberThreshold, screenLines: [String]) -> ScreenWatchEvaluation {
+        guard let foundNumber = WatchedNumberParsing.number(nearText: numberThreshold.nearText, inLines: screenLines),
+              numberThreshold.isPastThreshold(foundNumber.value) else { return .stillWaiting }
+        return .conditionMet(matchedLineText: foundNumber.lineText)
     }
 
     private mutating func observeForTextAppearing(targetText: String, screenLines: [String]) -> ScreenWatchEvaluation {
@@ -285,11 +340,16 @@ nonisolated enum ScreenWatchRequestParser {
     /// "tell me when …", "let me know once …", "can you notify me as soon as …",
     /// optionally led by "watch this terminal and …". Captures the clause after
     /// "when".
-    private static let tellMeWhenPattern = #"^(?:(?:please|ok|okay|hey)[\s,]+)*(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:(?:watch|monitor|keep\s+an\s+eye\s+on)\s+(?:[^\s]+\s+){0,4}?[^\s]+\s+and\s+(?:then\s+)?)?(?:tell\s+me|let\s+me\s+know|notify\s+me|ping\s+me|alert\s+me|give\s+me\s+a\s+(?:shout|ping|heads\s+up))\s+(?:when|once|as\s+soon\s+as|the\s+moment)\s+(.+)$"#
+    private static let tellMeWhenPattern = #"^(?:(?:please|ok|okay|hey)[\s,]+)*(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:(?:watch|monitor|keep\s+an\s+eye\s+on|check|refresh|reload)\s+(?:[^\s]+\s+){0,4}?[^\s]+\s+and\s+(?:then\s+)?)?(?:tell\s+me|let\s+me\s+know|notify\s+me|ping\s+me|alert\s+me|give\s+me\s+a\s+(?:shout|ping|heads\s+up))\s+(?:when|once|as\s+soon\s+as|the\s+moment)\s+(.+)$"#
 
     /// The condition in "… when <clause>", or nil when the clause isn't one
     /// this recognises.
     static func condition(fromWhenClause whenClause: String) -> ScreenWatchCondition? {
+        // "the price drops below $80" — checked first: its threshold is a
+        // number, which none of the text shapes below would make sense of.
+        if let numberThreshold = numberThreshold(fromWhenClause: whenClause) {
+            return .numberCrosses(numberThreshold)
+        }
         // "it says Succeeded" — checked first, so "it says build finished"
         // watches for that text rather than for the screen to settle.
         if let sayingCaptures = captures(of: sayingPattern, in: whenClause),
@@ -368,6 +428,51 @@ nonisolated enum ScreenWatchRequestParser {
     private static func startsWithDeterminer(_ phrase: String) -> Bool {
         guard let firstWord = lowercasedWords(phrase).first else { return false }
         return determinerWords.contains(firstWord)
+    }
+
+    // MARK: Numbers
+
+    /// "<subject> drops below|goes above|is under|gets over <number>". The verb
+    /// is required, so "the number below 5" isn't read as a watch.
+    private static let numberCrossingPattern = #"^(.+?)(?:'s|\s+(?:is|gets|goes|drops|falls|dips|sinks|rises|climbs|jumps|moves))\s+(?:now\s+)?(?:down\s+|up\s+)?(below|under|less\s+than|lower\s+than|cheaper\s+than|above|over|more\s+than|higher\s+than|past)\s+(.+)$"#
+
+    /// The threshold: a number with an optional currency sign before it or a
+    /// unit after it, and nothing else ("$80", "80 dollars", "1,299.99", "5%").
+    private static let numberThresholdPattern = #"^(?:[$€£¥]\s*)?([-\u2212]?\d[\d.,'\u00a0 ]*)\s*(?:dollars?|bucks|euros?|pounds?|usd|eur|gbp|yen|%|percent|points|degrees)?$"#
+
+    /// A subject that names nothing on screen to read a number beside.
+    private static let pronounSubjectWords: Set<String> = ["it", "this", "that", "they", "them", "these", "those", "something", "anything"]
+
+    static let maximumNumberSubjectWordCount = 4
+
+    /// The number condition in a "… when <clause>", or nil.
+    static func numberThreshold(fromWhenClause whenClause: String) -> ScreenWatchNumberThreshold? {
+        guard let numberCaptures = captures(of: numberCrossingPattern, in: whenClause),
+              numberCaptures.count == 3 else { return nil }
+        let subjectText = numberCaptures[0]
+        let directionWord = numberCaptures[1].lowercased()
+        let thresholdText = numberCaptures[2].trimmingCharacters(in: CharacterSet(charactersIn: ".,!? ").union(.whitespaces))
+
+        guard let thresholdNumberText = firstCapture(of: numberThresholdPattern, in: thresholdText),
+              let threshold = WatchedNumberParsing.parseNumber(thresholdNumberText) else { return nil }
+
+        let subjectWords = lowercasedWords(subjectText)
+        guard !subjectWords.isEmpty, subjectWords.count <= maximumNumberSubjectWordCount else { return nil }
+        let personWords: Set<String> = ["i", "you", "we", "he", "she", "someone", "somebody", "mom", "dad", "mum", "wife", "husband"]
+        guard !subjectWords.contains(where: personWords.contains) else { return nil }
+        // "the price" → "price": the determiner isn't on the page.
+        let labelWords = subjectWords.drop(while: determinerWords.contains)
+        guard !labelWords.isEmpty, !labelWords.allSatisfy(pronounSubjectWords.contains) else { return nil }
+
+        let isBelow = ["below", "under"].contains(directionWord)
+            || directionWord.hasPrefix("less") || directionWord.hasPrefix("lower") || directionWord.hasPrefix("cheaper")
+        return ScreenWatchNumberThreshold(
+            subjectText: subjectText,
+            nearText: labelWords.joined(separator: " "),
+            direction: isBelow ? .below : .above,
+            threshold: threshold,
+            thresholdText: thresholdText
+        )
     }
 
     // MARK: "Watch for …"

@@ -97,6 +97,20 @@ Element ids are phase 03's (`e7`, `f12e3` in a cross-origin frame). `kind` is `r
 
 Phase 05 also gives phase 03's `findElements({query})` an optional `elementLimit` (1–300, default the snapshot's 25), so
 pointing can rank every control near the view.
+### Phase 08 page watch payloads
+
+A condition is one of `{kind:"textAppears", text}`, `{kind:"textDisappears", text}`, `{kind:"pageSettlesAfterChange"}` or
+`{kind:"numberCrosses", nearText?, selector?, direction:"below"|"above", threshold}` (at least one of `nearText`/`selector`).
+A watch (`publicWatch`): `watchId`, `tabId`, `windowId`, `url`, `title`, `label`, `condition`, `reloadEveryMinutes` (null or ≥5),
+`ownsTab` (a reloading watch's own background tab), `startedAt`, `expiresAt` (epoch ms, 24h).
+
+| Event / method | `data` / result |
+|---|---|
+| `startPageWatch({tabId?, condition, reloadEveryMinutes?, label?})` | the watch (the showing tab when no `tabId`; max 5 at once) |
+| `stopPageWatch({watchId} \| {all: true})` | `{stoppedCount}` (no `watch.ended` for these) |
+| `listPageWatches()` | `{watches: […], recentlyEnded: [{watchId, reason, matchedText, endedAt, label}]}` (endings kept 1h) |
+| `watch.matched` | `{watchId, matchedText, tabId, url, title}` — the watch has ended |
+| `watch.ended` | `{watchId, reason}`, reason `timedOut` / `tabClosed` / `navigatedAway` / `pageUnavailable` |
 
 ## 2. Methods and events: names and owners
 

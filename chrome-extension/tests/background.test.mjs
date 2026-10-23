@@ -22,15 +22,17 @@ test("background.js wires the bridge, handlers, capabilities and tab events", as
   // One for the capability broadcast, one that attaches the download
   // listeners when the user allows downloads.
   assert.equal(fakeChrome.permissions.onAdded.listeners.length, 2);
-  assert.equal(fakeChrome.alarms.onAlarm.listeners.length, 1);
+  // The bridge's reconnect alarm, and the page watchers' sweep and reloads.
+  assert.equal(fakeChrome.alarms.onAlarm.listeners.length, 2);
   assert.equal(fakeChrome.webNavigation.onCommitted.listeners.length, 1);
-  assert.equal(fakeChrome.webNavigation.onCompleted.listeners.length, 1);
   // The popup's Try again, and in-page pointing's clicks and dismissals.
   assert.equal(fakeChrome.runtime.onMessage.listeners.length, 2);
   // "Ask Wisp about this": menus, the omnibox and ⌘⇧Y.
   assert.equal(fakeChrome.contextMenus.onClicked.listeners.length, 1);
   assert.equal(fakeChrome.omnibox.onInputEntered.listeners.length, 1);
   assert.equal(fakeChrome.commands.onCommand.listeners.length, 1);
+  // nav.completed, and putting page watchers back after a page loads.
+  assert.equal(fakeChrome.webNavigation.onCompleted.listeners.length, 2);
 
   const socket = FakeWebSocket.instances[0];
   try {

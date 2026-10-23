@@ -304,6 +304,8 @@ final class ScreenWatcherStore: ObservableObject {
                 return "“\(targetText)” is gone from the screen."
             case .screenTextSettles:
                 return "your screen has stopped changing — looks like it's finished."
+            case .numberCrosses(let numberThreshold):
+                return numberThreshold.reachedMessage(matchedLineText: matchedLineText, place: "on screen")
             }
         case .timedOut:
             return "i stopped watching for \(endedWatcher.condition.summaryText) — it's been two hours."

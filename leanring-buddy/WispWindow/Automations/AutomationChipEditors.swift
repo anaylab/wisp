@@ -217,6 +217,26 @@ private struct AutomationEventEditor: View {
                     .foregroundStyle(WispColor.textTertiary)
             case .fileDropped(let folderPath):
                 AutomationFolderPathField(folderPath: folderPathBinding(currentPath: folderPath))
+            case .chromePageWatchMatched(let watchDescription):
+                TextField("Which watch (blank = any)", text: pageWatchDescriptionBinding(currentDescription: watchDescription))
+                    .textFieldStyle(.roundedBorder)
+                Text("Start a page watch in Chrome by saying “tell me when this tab says …”.")
+                    .font(WispFont.caption)
+                    .foregroundStyle(WispColor.textTertiary)
+            case .chromeTabOpened(let host):
+                TextField("Site, like youtube.com", text: chromeSiteBinding(currentSite: host, minutes: nil))
+                    .textFieldStyle(.roundedBorder)
+                chromeTabEventsCaption
+            case .chromeTimeOnSite(let host, let minutes):
+                TextField("Site, like reddit.com", text: chromeSiteBinding(currentSite: host, minutes: minutes))
+                    .textFieldStyle(.roundedBorder)
+                Stepper(
+                    minutes == 1 ? "1 minute in one visit" : "\(minutes) minutes in one visit",
+                    value: chromeMinutesBinding(currentSite: host, currentMinutes: minutes),
+                    in: AutomationEvent.chromeTimeOnSiteMinutesRange,
+                    step: minutes < 10 ? 1 : 5
+                )
+                chromeTabEventsCaption
             }
         }
     }
@@ -241,6 +261,33 @@ private struct AutomationEventEditor: View {
 
     private func folderPathBinding(currentPath: String) -> Binding<String> {
         Binding(get: { currentPath }, set: { event = .fileDropped(folderPath: $0) })
+    }
+
+    private var chromeTabEventsCaption: some View {
+        Text("Wisp follows your Chrome tabs through the Wisp Tabs extension, on this Mac. Time only counts while Chrome is in front and you're at the Mac.")
+            .font(WispFont.caption)
+            .foregroundStyle(WispColor.textTertiary)
+    }
+
+    private func pageWatchDescriptionBinding(currentDescription: String) -> Binding<String> {
+        Binding(get: { currentDescription }, set: { event = .chromePageWatchMatched(watchDescription: $0) })
+    }
+
+    /// The site as typed; it is matched as a known name ("youtube") or an address when the
+    /// automation runs.
+    private func chromeSiteBinding(currentSite: String, minutes: Int?) -> Binding<String> {
+        Binding(get: { currentSite }, set: { typedSite in
+            let cleanedSite = typedSite.lowercased().trimmingCharacters(in: .whitespaces)
+            if let minutes {
+                event = .chromeTimeOnSite(host: cleanedSite, minutes: minutes)
+            } else {
+                event = .chromeTabOpened(host: cleanedSite)
+            }
+        })
+    }
+
+    private func chromeMinutesBinding(currentSite: String, currentMinutes: Int) -> Binding<Int> {
+        Binding(get: { currentMinutes }, set: { event = .chromeTimeOnSite(host: currentSite, minutes: $0) })
     }
 }
 

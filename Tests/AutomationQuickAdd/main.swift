@@ -39,6 +39,11 @@ func opensDraft(_ text: String) -> Bool {
 check(opensDraft("every weekday at 8 tell me what's due today"), "weekday schedule opens a draft")
 check(opensDraft("remind me tomorrow at 6pm to submit the form"), "remind me with a time opens a draft")
 check(opensDraft("tell me when a new Canvas assignment shows up"), "event phrase opens a draft")
+// Phase 08: a one-off watch is a watch, not a standing automation.
+check(!opensDraft("tell me when this tab says Deployed"), "a one-off tab watch isn't a draft")
+check(!opensDraft("tell me when the price drops below $80"), "a price watch isn't a draft")
+check(opensDraft("if I'm on youtube for 1 minute, remind me to study"), "time on a site opens a draft")
+check(opensDraft("when I open reddit remind me to study"), "opening a site opens a draft")
 check(opensDraft("can you remind me tomorrow at 9 to call the dentist?"), "a request phrased as a question still opens a draft")
 
 // The draft carries the original words and is not silently ready when a field was guessed.

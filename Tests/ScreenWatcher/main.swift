@@ -190,5 +190,60 @@ do {
 check(ScreenWatchCondition.textAppears("Done").summaryText == "“Done” appears", "appears summary")
 check(ScreenWatchCondition.screenTextSettles.summaryText == "the screen stops changing", "settles summary")
 
+// MARK: Number watches ("the price drops below $80")
+
+func numberWatch(_ subjectText: String, _ nearText: String, _ direction: ScreenWatchNumberThreshold.Direction, _ threshold: Double, _ thresholdText: String) -> ScreenWatchRequest {
+    .startWatching(.numberCrosses(ScreenWatchNumberThreshold(
+        subjectText: subjectText, nearText: nearText, direction: direction, threshold: threshold, thresholdText: thresholdText
+    )))
+}
+
+expect("tell me when the price drops below $80", numberWatch("the price", "price", .below, 80, "$80"))
+expect("let me know when the price goes under 79.99 dollars", numberWatch("the price", "price", .below, 79.99, "79.99 dollars"))
+expect("notify me when bitcoin goes above 100,000", numberWatch("bitcoin", "bitcoin", .above, 100_000, "100,000"))
+expect("tell me when my balance is over €1.299,50", numberWatch("my balance", "balance", .above, 1299.5, "€1.299,50"))
+expect("tell me when the cpu usage drops below 20%", numberWatch("the cpu usage", "cpu usage", .below, 20, "20%"))
+expect("tell me when the price's less than $50", numberWatch("the price", "price", .below, 50, "$50"))
+// Declined: no label to read beside, no number, no verb, a person.
+expect("tell me when it drops below $80", nil)
+expect("tell me when the price drops below what it was", nil)
+expect("tell me when the number below 5 changes", nil)
+expect("tell me when my mom is over 5 minutes late", nil)
+expect("tell me when the meeting is over", nil)
+expect("let me know when the temperature is above 30 degrees outside", nil)
+
+// "check this page every N minutes and tell me when …" reaches the same clause.
+expect("check this page every 10 minutes and tell me when it says in stock", .startWatching(.textAppears("in stock")))
+
+// MARK: Numbers as written
+
+check(WatchedNumberParsing.parseNumber("$79.99") == 79.99, "dollars and cents")
+check(WatchedNumberParsing.parseNumber("$1,299.99") == 1299.99, "US thousands")
+check(WatchedNumberParsing.parseNumber("1.299,99 €") == 1299.99, "European thousands and decimal comma")
+check(WatchedNumberParsing.parseNumber("79,99 €") == 79.99, "decimal comma")
+check(WatchedNumberParsing.parseNumber("1,299") == 1299, "a lone group of three is thousands")
+check(WatchedNumberParsing.parseNumber("1 299 kr") == 1299, "space-grouped")
+check(WatchedNumberParsing.parseNumber("CHF 1'299.50") == 1299.5, "apostrophe-grouped")
+check(WatchedNumberParsing.parseNumber("0.125") == 0.125, "a leading zero is a decimal")
+check(WatchedNumberParsing.parseNumber("\u{2212}5") == -5, "unicode minus")
+check(WatchedNumberParsing.parseNumber("no number") == nil, "no number")
+check(WatchedNumberParsing.firstNumber(in: "Save 20 80 items")?.value == 20, "two numbers aren't one group")
+check(WatchedNumberParsing.number(nearText: "price", inLines: ["Rated 4.5 stars", "Price: $79.99"])?.value == 79.99, "after the label")
+check(WatchedNumberParsing.number(nearText: "price", inLines: ["Price", "$1,049.00"])?.value == 1049, "on the next line")
+check(WatchedNumberParsing.number(nearText: "price", inLines: ["Was $99, price now $89"])?.value == 89, "after the label on its line")
+check(WatchedNumberParsing.number(nearText: "price", inLines: ["All prices 10% off"]) == nil, "whole words only")
+
+// MARK: Evaluator — number crosses
+
+do {
+    let priceThreshold = ScreenWatchNumberThreshold(subjectText: "the price", nearText: "price", direction: .below, threshold: 80, thresholdText: "$80")
+    var evaluator = ScreenWatchEvaluator(condition: .numberCrosses(priceThreshold))
+    check(evaluator.observe(screenLines: ["Headphones", "Price $89.99"]) == .stillWaiting, "above the threshold waits")
+    check(evaluator.observe(screenLines: ["Headphones"]) == .stillWaiting, "no price on screen waits")
+    check(evaluator.observe(screenLines: ["Headphones", "Price $79.99"]) == .conditionMet(matchedLineText: "Price $79.99"), "below the threshold fires")
+    check(priceThreshold.summaryText == "the price drops below $80", "number summary")
+    check(priceThreshold.reachedMessage(matchedLineText: "Price $79.99", place: "on screen") == "the price is below $80 on screen now: Price $79.99", "reached message")
+}
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

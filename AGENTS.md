@@ -907,6 +907,29 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   (≥25 words) or else the screenshot. An omnibox question runs at once (`submitTextComposerQuery`, Chrome keeps focus) and reads
   the tab only when it is about the page (`ChromePageContentRequestClassifier`). Add to brain: selection text / page text
   (`readPage`, else its URL is fetched) / the link's URL into `BrainIngestQueue`, reported in the notch.
+  **Page watchers (phase 08, `pages.read`)**: "tell me when this tab says Deployed", "tell me when the price drops below $80",
+  "check this page every 10 minutes and tell me when it says in stock". `ScreenWatchRequestParser` recognises them (it gained a
+  `numberCrosses` condition, `WatchedNumberParsing` for "$1,299.99"/"1.299,99 €", and check/refresh/reload prefixes); the pure
+  `ChromePageWatchRouter` then picks a **tab watch** when the user's app is Chrome with the extension connected and `pages.read`,
+  and the words don't name the screen/terminal/window, else the screen watch as before (`CompanionManager.directWatchReply`).
+  The extension's `content/page-watch.js` runs a MutationObserver in the tab (≤1 evaluation a second, the screen watcher's rules,
+  `[data-wisp-ignore]` left out), `handlers/page-watchers.js` keeps watches in `chrome.storage.session` with their evaluator state
+  (re-injected on `nav.completed` and worker restart, so a reload continues a watch), max 5, 24h, a once-a-minute sweep alarm, and
+  ends one on tab closed / another site / unreadable page. Reloading watches open their own background tab in the Wisp group
+  (never the user's tab), reload it on an alarm (≥5 min) and leave it open after a match. Events `watch.matched` / `watch.ended`;
+  endings are also kept an hour in `listPageWatches().recentlyEnded`, which `ChromePageWatchStore` reads on every connect
+  (`ChromePageWatchReconciliation`: the extension is the truth; unknown watches are adopted). Endings mirror screen watches:
+  notification (silent in quiet mode), island flash, notch line when idle, spoken in voice mode; the notch live section lists
+  them (`ChromePageWatchRow`) with Stop. `watch_screen` gained `in_chrome_tab`/`chrome_tab`/`reload_every_minutes` and
+  `number_below`/`number_above` (one tool, so the local model's 6-tool budget isn't split); `stop_screen_watch` and "stop
+  watching" stop both kinds. Quick add yields to a recognised watch request (a one-off "tell me when …" is a watch; "whenever …"
+  stays an automation). **Browser automation triggers**: `AutomationEvent.chromePageWatchMatched(watchDescription:)`,
+  `.chromeTabOpened(host:)` (10-minute cooldown) and `.chromeTimeOnSite(host:minutes:)` (once per visit), with deterministic
+  draft phrases ("when I open youtube …", "if I'm on reddit for 30 minutes …", "when my page watch for X matches …").
+  `ChromeBrowsingActivityMonitor` (started only once such an automation exists) follows the tab events, the frontmost app and
+  idle time; the pure `ChromeTimeOnSiteAccumulator` counts a visit only while the site is the focused window's showing tab,
+  Chrome is in front and the user isn't idle (5 min without input, unless the tab plays sound) — pausing, not resetting; 15 min
+  away ends the visit. Event runs are unattended (`AutomationToolPolicy`); page text reaches the model only fenced as data.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1266,9 +1289,10 @@ Grouped by what they do. Line counts are approximate.
 | `ScreenTextSnapshot.swift` | ~360 | Pure, testable side of OCR pointing: recognised-line model, confidence filter, reading order, prompt caps, compact `t`-id rendering + plain text, line-id → region lookup, Vision→screenshot coordinate flip, and `ScreenTextRecognitionCache` (per-display, keyed on screenshot bytes). |
 | `ScreenTextRecognizer.swift` | ~265 | Runs Vision `RecognizeTextRequest` off the main actor for each capture, caches the tasks, and builds a turn's `ScreenTextSnapshot` within a wait budget. Also `CompanionManager.resolveScreenElementRegion` (the shared `a`/`t` id resolver). |
 | `ScreenTextReadingTool.swift` | ~60 | The read-only `read_screen_text` agent tool: captures the screen and returns its OCR text. |
-| `ScreenWatcher.swift` | ~480 | Pure side of screen watchers: `ScreenWatchCondition`, `ScreenWatchTextMatching` (whole-word normalised matching), `ScreenWatchEvaluator` (successive OCR readings → met / waiting) and `ScreenWatchRequestParser` ("tell me when …", "watch for …", "stop watching"). Tested by `Tests/ScreenWatcher`. |
+| `ScreenWatcher.swift` | ~560 | Pure side of screen watchers: `ScreenWatchCondition` (incl. `numberCrosses` / `ScreenWatchNumberThreshold`), `ScreenWatchTextMatching` (whole-word normalised matching), `ScreenWatchEvaluator` (successive OCR readings → met / waiting) and `ScreenWatchRequestParser` ("tell me when …", "watch for …", "stop watching"). Tested by `Tests/ScreenWatcher`. |
 | `ScreenWatcherStore.swift` | ~350 | Runs the watches: 3s polls of the watched display (own capture + direct OCR, skipped on identical pixels, menu bar dropped), 3-watch cap, 2h timeout, notification, `onWatcherEnded` → `CompanionManager`, and the ending wording. |
-| `ScreenWatchAgentTools.swift` | ~95 | `watch_screen` (condition + text) and `stop_screen_watch`, read-only, registered via `registerScreenWatchTools()`. |
+| `ScreenWatchAgentTools.swift` | ~210 | `watch_screen` (condition + text, number below/above, or `in_chrome_tab` for a Chrome page watch with optional reload) and `stop_screen_watch` (both kinds), read-only, registered via `registerScreenWatchTools()`. |
+| `WatchedNumberParsing.swift` | ~120 | Pure: numbers as written ("$1,299.99", "1.299,99 €", "1 299") and the number near a label in lines, for number watches. Mirrors content/page-watch.js. |
 | `FastPointing.swift` | ~540 | Pure side of fast pointing: `PointingRequestParser` (spoken "where is X" → target + role hint, conservative), `PointingTargetMatcher` (exact/tolerant word scoring, same-place merging, tie → every place, shortlist for the model, connector-word guard) and `PointingModelFallback` (text-only prompt + lenient reply → id). Tested by `Tests/FastPointing`. |
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 | `WorkedSolutionExport.swift` | ~140 | Pure: whether the drawings are worth saving (a note or circle), which display's to save, the default PNG name (date + time, no colons), the matching `.md` name and the Markdown text (date, question, numbered notes). Tested by `Tests/WorkedSolutionExport`. |
@@ -1430,6 +1454,14 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `ChromeExtension/ChromeAskAboutThisRouter.swift` | ~300 | `@MainActor` router over the events: opens the composer with the part, runs omnibox questions, adds to the brain, caches the downloaded image, JPEG downscaling, link-text lookup. |
 | `ChromeExtension/CompanionManager+ChromeAskAboutThis.swift` | ~135 | The turn hook (`chromeAskAboutThisTurnInput`: reads/downloads, plan, History step) and `presentChromeAskAboutThisReply` for notch lines. |
 | `ChromeExtension/ChromeAskAboutThisComposerChip.swift` | ~40 | The composer's "About: selected text ✕" chip, watching the router. |
+| `chrome-extension/content/page-watch.js` | ~420 | Phase 08 in-page watcher (`globalThis.wispPageWatch`): MutationObserver, ≤1 evaluation/s, text matching and number parsing mirroring Swift, the four conditions' evaluator, state reported to the worker. |
+| `chrome-extension/handlers/page-watchers.js` | ~480 | `startPageWatch` / `stopPageWatch` / `listPageWatches`, `watch.matched` / `watch.ended`: session-storage list with evaluator state, re-injection on load and worker start, reloading background tabs, sweep alarm (timeouts, missing watchers). |
+| `ChromeExtension/ChromePageWatch.swift` | ~330 | Pure: `ChromePageWatchRouter` (tab or screen, reload interval), wire condition, replies/events, `ActiveChromePageWatch`, endings, wording, `ChromePageWatchReconciliation`. Tested by `Tests/ChromeExtPageWatchers`. |
+| `ChromeExtension/ChromePageWatchStore.swift` | ~270 | Starts/stops page watches over the bridge, handles their events, reconciles on connect, notifications, `watchMatchedPublisher` for automations. |
+| `ChromeExtension/CompanionManager+ChromePageWatch.swift` | ~110 | `directWatchReply` (the spoken route, screen or tab, stop both) and page-watch endings in the notch. |
+| `ChromeExtension/ChromePageWatchRow.swift` | ~60 | A page watch's row in the notch's live section, with Stop. |
+| `ChromeExtension/ChromeBrowsingActivity.swift` | ~230 | Pure: `ChromeSiteMatching` (spoken site → host, subdomains, equivalents) and `ChromeTimeOnSiteAccumulator`. Tested by `Tests/ChromeExtPageWatchers`. |
+| `ChromeExtension/ChromeBrowsingActivityMonitor.swift` | ~190 | Tab events + frontmost app + idle → site-opened events and the time-on-site accumulator, for the Chrome automation triggers. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1671,6 +1703,7 @@ running):
 ./Tests/ChromeExtFocusMode/run.sh        # Chrome focus mode: planner keep/collapse/mute/move, study-block rule, "focus on X for N minutes" parsing
 ./Tests/ChromeExtInPagePointing/run.sh  # in-page pointing: when to draw in the page, target/step → page element, walkthrough click/navigation rules
 ./Tests/ChromeExtAskAboutThis/run.sh     # Ask Wisp about this: user.* event decoding, image download rules, per-part turn context + screenshot choice
+./Tests/ChromeExtPageWatchers/run.sh     # page watchers: tab-or-screen route, reload interval, number phrasing, wire shape, reconciliation, time on a site
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
 ./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references

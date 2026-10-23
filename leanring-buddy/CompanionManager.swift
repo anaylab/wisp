@@ -340,6 +340,7 @@ final class CompanionManager: ObservableObject {
         ScreenWatcherStore.shared.onWatcherEnded = { [weak self] endedWatcher, ending in
             self?.presentScreenWatchEnding(endedWatcher, ending: ending)
         }
+        configureChromePageWatchers()
         restoreRecentConversationHistory()
         connectMCPServersIfAgentModeEnabled()
         bindVoiceStateObservation()
@@ -3814,55 +3815,35 @@ extension CompanionManager {
         let taskID = AgentTaskRegistry.shared.beginTask(title: historyTitle ?? transcript)
         PerfMetricsRecorder.shared.abandonTurn()
 
-        let replyText: String
-        let didSucceed: Bool
-        switch screenWatchRequest {
-        case .startWatching(let condition):
-            switch ScreenWatcherStore.shared.startWatching(condition) {
-            case .started:
-                replyText = "okay — i'll watch your screen and tell you when \(condition.summaryText)."
-                didSucceed = true
-            case .alreadyWatching:
-                replyText = "i'm already watching for \(condition.summaryText)."
-                didSucceed = true
-            case .tooManyWatchers:
-                replyText = "i'm already watching \(ScreenWatcherStore.maximumActiveWatcherCount) things — say \"stop watching\" first."
-                didSucceed = false
-            }
-        case .stopAllWatching:
-            let stoppedWatcherCount = ScreenWatcherStore.shared.stopAllWatching()
-            switch stoppedWatcherCount {
-            case 0: replyText = "i wasn't watching anything."
-            case 1: replyText = "okay, i stopped watching."
-            default: replyText = "okay, i stopped all \(stoppedWatcherCount) watches."
-            }
-            didSucceed = true
-        }
-
-        AgentTaskRegistry.shared.appendStep(
-            AgentStepRecord(
-                kind: .tool(name: ScreenWatchToolNames.watchScreen),
-                summary: didSucceed ? "Screen watch — no model call" : "Screen watch: \(replyText)",
-                isError: !didSucceed
-            ),
-            to: taskID
-        )
-        AgentTaskRegistry.shared.finishTask(
-            taskID, status: didSucceed ? .succeeded : .failed(replyText), finalText: replyText
-        )
-        conversationTranscript.append(ConversationTranscript.Turn(messages: [
-            BuddyChatMessage(role: .user, text: transcript),
-            BuddyChatMessage(role: .assistant, text: replyText),
-        ]))
-        conversationTranscript.trimToRecentTurns(10)
-
-        currentReplyText = replyText
-        if !didSucceed { flashIsland(.error) }
-
         let isReplySpeechEnabled = VoiceOutputPreference.shared.isReplySpeechEnabled
         currentResponseTask = Task { [weak self] in
             guard let self else { return }
-            if isReplySpeechEnabled {
+            // The screen, or the Chrome tab the user is in (phase 08,
+            // CompanionManager+ChromePageWatch.swift); "stop watching" stops both.
+            let watchReply = await self.directWatchReply(for: screenWatchRequest, transcript: transcript)
+            let replyText = watchReply.replyText
+
+            AgentTaskRegistry.shared.appendStep(
+                AgentStepRecord(
+                    kind: .tool(name: ScreenWatchToolNames.watchScreen),
+                    summary: watchReply.historySummary,
+                    isError: !watchReply.didSucceed
+                ),
+                to: taskID
+            )
+            AgentTaskRegistry.shared.finishTask(
+                taskID, status: watchReply.didSucceed ? .succeeded : .failed(replyText), finalText: replyText
+            )
+            self.conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                BuddyChatMessage(role: .user, text: transcript),
+                BuddyChatMessage(role: .assistant, text: replyText),
+            ]))
+            self.conversationTranscript.trimToRecentTurns(10)
+
+            self.currentReplyText = replyText
+            if !watchReply.didSucceed { self.flashIsland(.error) }
+
+            if isReplySpeechEnabled, !Task.isCancelled {
                 self.voiceState = .responding
                 try? await self.ttsProvider.speakText(replyText)
             }

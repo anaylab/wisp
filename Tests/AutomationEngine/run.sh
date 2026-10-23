@@ -21,6 +21,7 @@ swiftc -target arm64-apple-macos26.0 \
   Tests/AutomationEngine/main.swift \
   Tests/AutomationDraft/StarterBuddyKindShim.swift \
   leanring-buddy/Automations/Automation.swift \
+  leanring-buddy/ChromeExtension/ChromeBrowsingActivity.swift \
   leanring-buddy/Automations/AutomationSchedule.swift \
   leanring-buddy/Automations/AutomationDraft.swift \
   leanring-buddy/Automations/AutomationTemplates.swift \

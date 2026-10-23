@@ -44,6 +44,9 @@ nonisolated enum AutomationQuickAddPlanner {
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard AutomationDraftParser.looksLikeAutomationRequest(trimmedTranscript) else { return .fallThrough }
         guard !isPlainQuestion(trimmedTranscript) else { return .fallThrough }
+        // "Tell me when it says Succeeded" / "tell me when this tab says Deployed" is a one-off
+        // watch (screen or Chrome tab), not a standing automation; "whenever it says …" still is.
+        guard ScreenWatchRequestParser.request(from: trimmedTranscript) == nil else { return .fallThrough }
 
         switch AutomationDraftParser.parse(trimmedTranscript, now: now, calendar: calendar, buddies: buddies) {
         case .draft(let completeDraft):

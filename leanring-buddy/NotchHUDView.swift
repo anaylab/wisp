@@ -37,6 +37,7 @@ struct NotchHUDView: View {
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
     @ObservedObject private var downloadConcierge = DownloadConcierge.shared
     @ObservedObject private var screenWatcherStore = ScreenWatcherStore.shared
+    @ObservedObject private var chromePageWatchStore = ChromePageWatchStore.shared
     /// The buddy whose automation or run is in flight shows its character in the
     /// left flank, so these are observed to redraw when one starts or finishes.
     @ObservedObject private var automationEngine = AutomationEngine.shared
@@ -345,6 +346,7 @@ struct NotchHUDView: View {
             || hasJobsContentToDrop
             || downloadConcierge.hasNotchContent
             || !screenWatcherStore.activeWatchers.isEmpty
+            || !chromePageWatchStore.activeWatches.isEmpty
             || flankBuddyID != nil
     }
 
@@ -474,7 +476,8 @@ struct NotchHUDView: View {
     private var liveActivitySection: some View {
         let imminentEvent = upcomingEventMonitor.imminentEvent
         let activeScreenWatchers = screenWatcherStore.activeWatchers
-        if isExecutingBrowserTask || !runningBackgroundTasks.isEmpty || imminentEvent != nil || !activeScreenWatchers.isEmpty {
+        let activeChromePageWatches = chromePageWatchStore.activeWatches
+        if isExecutingBrowserTask || !runningBackgroundTasks.isEmpty || imminentEvent != nil || !activeScreenWatchers.isEmpty || !activeChromePageWatches.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 if isExecutingBrowserTask {
                     executingTaskCard
@@ -484,6 +487,9 @@ struct NotchHUDView: View {
                 }
                 ForEach(activeScreenWatchers) { activeScreenWatcher in
                     screenWatcherRow(activeScreenWatcher)
+                }
+                ForEach(activeChromePageWatches) { activeChromePageWatch in
+                    ChromePageWatchRow(activeChromePageWatch: activeChromePageWatch)
                 }
                 if let imminentEvent {
                     imminentEventRow(imminentEvent)
@@ -1052,8 +1058,8 @@ struct NotchHUDView: View {
                     flankUnseenResultsBadge(count: finishedWorkInbox.unseenTaskIDs.count)
                 } else if downloadConcierge.hasNotchContent {
                     DownloadConciergeFlankBadge()
-                } else if !screenWatcherStore.activeWatchers.isEmpty {
-                    flankScreenWatchIndicator(watcherCount: screenWatcherStore.activeWatchers.count)
+                } else if !screenWatcherStore.activeWatchers.isEmpty || !chromePageWatchStore.activeWatches.isEmpty {
+                    flankScreenWatchIndicator(watcherCount: screenWatcherStore.activeWatchers.count + chromePageWatchStore.activeWatches.count)
                 } else if jobsEngine.hasChecklist {
                     flankChecklistRemainingCount(jobsEngine.todayChecklist.filter { !$0.isCompleted }.count)
                 } else if morningBriefing.hasPendingBriefing {
@@ -1153,6 +1159,9 @@ struct NotchHUDView: View {
         }
         if let firstScreenWatcher = screenWatcherStore.activeWatchers.first {
             return "Watching until \(firstScreenWatcher.condition.summaryText)"
+        }
+        if let firstChromePageWatch = chromePageWatchStore.activeWatches.first {
+            return "Watching a tab until \(firstChromePageWatch.condition.summaryText)"
         }
         if let latestDiff = jobsEngine.latestDiff {
             return CanvasDiffCardText.line(for: latestDiff)
