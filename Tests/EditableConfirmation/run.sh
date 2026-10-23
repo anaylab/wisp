@@ -33,6 +33,7 @@ swiftc -target arm64-apple-macos14.0 \
   leanring-buddy/BuddyChatTypes.swift \
   leanring-buddy/ToolMetadata.swift \
   leanring-buddy/ChromeExtension/ChromeTabLifeCards.swift \
+  leanring-buddy/ChromeExtension/ResearchCards.swift \
   leanring-buddy/ChromeExtension/ChromeTabLifeCardText.swift
 
 "$BUILD_DIR/editable-confirmation"

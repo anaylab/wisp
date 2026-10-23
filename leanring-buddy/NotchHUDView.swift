@@ -30,6 +30,7 @@ struct NotchHUDView: View {
     /// island's ambient state — `islandState` reads the registry, but a computed
     /// property can't tell SwiftUI that on its own.
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
+    @ObservedObject private var researchSession = ResearchSessionController.shared
     @ObservedObject private var upcomingEventMonitor = UpcomingEventMonitor.shared
     @ObservedObject private var morningBriefing = MorningBriefingController.shared
     @ObservedObject private var jobsEngine = JobsEngine.shared
@@ -1399,6 +1400,9 @@ struct NotchHUDView: View {
                     if isShowingMutedReplyNotice {
                         mutedReplyNotice
                     }
+                    if isShowingResearchReportLine {
+                        researchReportNotice
+                    }
                     replyActionRow
                 }
             }
@@ -1417,6 +1421,33 @@ struct NotchHUDView: View {
     private var isShowingMutedReplyNotice: Bool {
         companionManager.mutedReplyNoticeText != nil
             && companionManager.mutedReplyNoticeText == companionManager.currentReplyText
+    }
+
+    /// A research run's short answer is showing; the full report is on Chat.
+    private var isShowingResearchReportLine: Bool {
+        researchSession.notchLineForLatestReport != nil
+            && researchSession.notchLineForLatestReport == companionManager.currentReplyText
+    }
+
+    private var researchReportNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.magnifyingglass")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(WispColor.Island.textSecondary)
+            Text("Cited report with sources")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(WispColor.Island.textSecondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Button("Open report") {
+                companionManager.openLatestResearchReport()
+            }
+            .buttonStyle(WispIslandButtonStyle())
+            .font(.system(size: 11, weight: .medium))
+            .controlSize(.small)
+            .pointerCursor()
+            .accessibilityHint("Opens the research report on Wisp's Chat page")
+        }
     }
 
     private var mutedReplyNotice: some View {

@@ -77,6 +77,8 @@ final class AgentTurnRunner {
     /// still bounded, and the user can stop it at any time by talking.
     private static let longRunningToolTimeoutSeconds: [String: TimeInterval] = [
         "browser_task": 10 * 60,
+        // Searches, opens and reads up to 8 pages, then writes (phase 11).
+        ResearchToolNames.researchTopic: 10 * 60,
         // Waits for a peer buddy's whole run, plus the approval a model
         // boundary can require first.
         BuddyDelegationToolNames.askBuddy: ToolConfirmationCoordinator.confirmationTimeoutSeconds

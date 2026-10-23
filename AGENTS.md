@@ -949,6 +949,29 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   now honours a `[SAY:]` tag). Routed as `ChromeTabCommand.siteHelper` inside `ChromeTabCommandRouter`; tab state comes
   from tab events, reseeded from `getTabs` on connect (`ChromeSiteHelpers`). Tools `chrome_canvas_assignment`,
   `chrome_meeting_captions` (read).
+  **Research mode (phase 11, `pages.read`)**: "research the best budget mechanical keyboards", "do some research on how mrna vaccines work
+  for my bio essay and save it to my brain" (`ResearchRequestParser`, conservative; `BrowserCommandRouter` → `.research`, checked before the
+  tab router) or the `chrome_research_topic` tool (`.writing(.localMachine)`, 10-minute tool timeout). One background task ("Research · <topic>",
+  `BackgroundTaskLauncher.startWork`, so it shows in History and talking carries on): Google's results open in a background tab in the Wisp group
+  and the result links are read from its DOM snapshot (no search API; Chrome's real default engine would need the `search` permission), then
+  `ResearchSourcePicker` takes 5 (local model) or 8 (cloud) distinct pages (Google redirects unwrapped, search/video/social sites skipped, one per
+  site, deduped by host + path), `openTabs` opens them inactive beside it, and each is read with `getPageText` once settled (<80 words skipped).
+  Writing: local = one map call per page (≤3,500 chars, up to 3 findings each with a quote) then one reduce call over the *checked* findings,
+  naming a finding per claim; cloud = one combine call (≤6,000 chars a page). All text-only, no tools, through `ModelAccessGate` at background
+  priority, pages only in the user message's data fences (`ResearchPrompts`). `ResearchReportAssembler` keeps a claim only when its quote (≤25
+  words) is really in its page (`ResearchCitationVerifier`: folded case/whitespace/curly quotes/dashes, the page's own text comes back), drops the
+  rest (counted and said), numbers sources by first citation, builds each claim's `#:~:text=` address and drops summary sentences naming a web
+  address (the one unquoted part). The decision of which pages to open is code's alone, so a page saying "ignore previous instructions" can only be
+  quoted (`Tests/HostileProviderAttack` has the case). Reports live in `ResearchSessionController.reports` for the launch (History keeps the text)
+  and appear on the **Chat page** as entries (`ResearchReportView`: numbered claims with their quote, clickable `[n]` and source rows, Save to
+  Brain, Copy, Close research tabs); the notch shows the short answer with **Open report** while idle. A citation focuses the source's tab and
+  marks the quote in the page (`highlightTextFragments` → `content/quote-highlight.js`, whitespace-free folded matching that skips form fields,
+  scripts and `[data-wisp-ignore]`, bands in the phase 05 highlight look, Esc clears); not found → the tab goes to the text-fragment address; tab
+  closed → reopened at it. **Save to Brain** (or "…and save it to my brain") = `ResearchBrainPages`: a `topics/` page (summary + cited points
+  linking their sources) and a `sources/` page per source, applied `.external` (append/create only). **Closing**: "done" (only while research tabs
+  are open) / "close the research tabs" / the report's button close them; tabs the user used (activated not by Wisp, or navigated elsewhere) ask
+  first with a card (`chrome_close_research_tabs`, on `ToolCallSafety.alwaysAskBareToolNames`; Cancel keeps those); after 30 idle minutes the
+  untouched ones close and used ones are left alone.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1493,6 +1516,20 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `chrome-extension/content/meeting-captions.js` | ~400 | Meet/Zoom caption selectors in one table, the in-page 30-minute buffer (merge growing/revised/scrolled captions, minute segments, windowing), `readBuffer`. |
 | `chrome-extension/handlers/site-helpers.js` | ~215 | `getCanvasAssignmentDetails`, `getMeetingCaptions` (pages.read, refusals, injection on demand, caps). |
 | `chrome-extension/events/site-helpers.js` | ~135 | Registers/unregisters the two scripts with `pages.read`; turns their messages into `site.canvasAssignmentOpened` / `site.meetingCaptionsAvailable`. |
+| `chrome-extension/handlers/research.js` | ~95 | `highlightTextFragments({tabId, quotes, color?, scrollToFirst?})` → `{tabId, found, missing}` (quote indexes): `pages.read`, page-access and incognito refusals, injects the quote highlighter. |
+| `chrome-extension/content/quote-highlight.js` | ~270 | Phase 11, injected on demand (`globalThis.wispQuoteHighlighter`): finds quotes in the page's readable text nodes (whitespace removed, folded like the Swift verifier; never form fields, scripts, hidden or `[data-wisp-ignore]`), marks them in a closed shadow root that follows scrolling, scrolls the first into view, Esc clears. |
+| `chrome-extension/tests/research.test.mjs` / `tests/fixtures/research/*.html` | ~210 | Quote finding against a fixture page (inline elements, curly quotes, across paragraphs, ignored regions, fabricated quotes), drawing and the handler's refusals. |
+| `ChromeExtension/ResearchCitationVerifier.swift` | ~210 | Pure: `ResearchTextFolding`, `ResearchCitationVerifier` (quote ↔ source text, 3–25 words, returns the page's own text) and `ResearchTextFragmentURL` (`#:~:text=`, `start,end` past 8 words, strict escaping). Tested by `Tests/ChromeExtResearch`. |
+| `ChromeExtension/ResearchReport.swift` | ~245 | Pure: `ResearchSourceDocument`, `ResearchDraftClaim`, `ResearchReport` (+ plain text), notch line, `ResearchReportAssembler` (verify, drop, dedupe, renumber by first citation, fragment URLs, machine tags and web-address summary sentences stripped). |
+| `ChromeExtension/ResearchPlanning.swift` | ~285 | Pure: `ResearchRequestParser` ("research …", purpose kept out of the search box, "and save it to my brain"), `ResearchSessionCommandParser` ("done"), `ResearchBudget`, `ResearchSearch` (Google), `ResearchSourceKey` (host + path) and `ResearchSourcePicker`. |
+| `ChromeExtension/ResearchPrompts.swift` | ~255 | Pure: map / reduce / combine prompts with pages fenced as data, and the lenient SUMMARY / FINDING / CLAIM line grammar; findings checked before the reduce step. |
+| `ChromeExtension/ResearchBrainPages.swift` | ~90 | A report → Brain edit proposals (`topics/` + `sources/` pages), `.external` provenance. |
+| `ChromeExtension/ResearchCards.swift` | ~50 | `ResearchToolNames` and the "close research tabs you used" confirmation card (compiled by the confirmation suites too). |
+| `ChromeExtension/ResearchSession.swift` | ~385 | `@MainActor ResearchSessionController`: start checks, the background run (search → pick → open → read → write → check → keep/file/announce), `writeDraft` (static, model-only, driven by `Tests/HostileProviderAttack`), Save to Brain, History steps. |
+| `ChromeExtension/ResearchSessionTabs.swift` | ~270 | Research tabs: tab-event tracking (used by the user or not), `openCitation` (focus + in-page highlight, fragment fallback, reopen), closing with the card, the 30-minute idle close, the router's `perform`. |
+| `ChromeExtension/ResearchReportView.swift` | ~205 | The Chat page's report entry: claims, quotes, clickable citations and sources, Save to Brain / Copy / Close research tabs. |
+| `ChromeExtension/ResearchAgentTools.swift` | ~95 | `chrome_research_topic` (`registerResearchTools()`): starts the run and returns the report when it's done. |
+| `ChromeExtension/CompanionManager+Research.swift` | ~35 | Hooks the finished-run notch line and the notch's Open report (Chat page, scrolled to the report). |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1736,6 +1773,7 @@ running):
 ./Tests/ChromeExtAskAboutThis/run.sh     # Ask Wisp about this: user.* event decoding, image download rules, per-part turn context + screenshot choice
 ./Tests/ChromeExtPageWatchers/run.sh     # page watchers: tab-or-screen route, reload interval, number phrasing, wire shape, reconciliation, time on a site
 ./Tests/ChromeExtSiteHelpers/run.sh      # Canvas page matching/chip rule/added-to-today row, meeting caption phrases + fenced prompt, router + tab state
+./Tests/ChromeExtResearch/run.sh         # research mode: quote verification, fragment URLs, source picking/dedupe, phrases, map/reduce budgets, hostile page, brain pages
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
 ./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references

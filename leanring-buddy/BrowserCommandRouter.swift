@@ -59,11 +59,25 @@ enum BrowserCommandRouter {
         /// and closing duplicates need `chrome.tabGroups`, which AppleScript
         /// can't reach.
         case chromeTabs(ChromeTabCommand)
+        /// Research mode (phase 11): "research …" starts a background run in
+        /// the Wisp tab group; "done" closes its tabs.
+        case research(ResearchCommand)
     }
 
     static func route(_ transcript: String) -> Route? {
         let text = normalize(transcript)
         guard !text.isEmpty else { return nil }
+
+        // Before the tab router: "close the research tabs" names tabs too, but
+        // only research mode knows which ones.
+        if ResearchSessionCommandParser.isFinishCommand(
+            transcript, hasOpenResearchTabs: ResearchSessionController.shared.hasOpenResearchTabs
+        ) {
+            return .research(.finishSession)
+        }
+        if let researchRequest = ResearchRequestParser.request(from: transcript) {
+            return .research(.start(researchRequest))
+        }
 
         if let chromeTabCommand = ChromeTabCommandRouter.command(for: transcript) {
             return .chromeTabs(chromeTabCommand)

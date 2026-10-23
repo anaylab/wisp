@@ -139,6 +139,49 @@ enum BackgroundTaskLauncher {
         return taskID
     }
 
+    /// Starts background work that isn't an agent loop — research mode's
+    /// search → read → write pipeline, which decides every step itself and
+    /// calls the model only to read and write. It is listed, counted, stopped
+    /// and announced exactly like an agent task. `work` gets the task id (for
+    /// `AgentTaskRegistry.appendStep`) and returns the final text.
+    @discardableResult
+    static func startWork(
+        title: String,
+        runsOffThisMachine: Bool,
+        completionNotification: CompletionNotificationStyle? = .generic,
+        work: @escaping @MainActor (UUID) async throws -> String
+    ) -> UUID? {
+        guard canStartAnotherTask(runsOffThisMachine: runsOffThisMachine) else {
+            print("🌙 Background: refused \"\(title.prefix(40))\" — too many already running")
+            return nil
+        }
+        let taskID = AgentTaskRegistry.shared.beginTask(title: title, kind: .background)
+        if runsOffThisMachine { runningOffMachineTaskIDs.insert(taskID) }
+
+        let runningWork = Task { @MainActor in
+            defer { runningOffMachineTaskIDs.remove(taskID) }
+            do {
+                let finalText = try await work(taskID)
+                AgentTaskRegistry.shared.finishTask(taskID, status: .succeeded, finalText: finalText)
+                FinishedWorkInbox.shared.recordFinishedTask(taskID)
+                if let completionNotification {
+                    notifyCompletion(style: completionNotification, request: title, result: finalText, didSucceed: true)
+                }
+            } catch is CancellationError {
+                AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+            } catch {
+                AgentTaskRegistry.shared.finishTask(taskID, status: .failed(error.localizedDescription))
+                FinishedWorkInbox.shared.recordFinishedTask(taskID)
+                if let completionNotification {
+                    notifyCompletion(style: completionNotification, request: title, result: error.localizedDescription, didSucceed: false)
+                }
+            }
+        }
+        AgentTaskRegistry.shared.attachRunningTask(runningWork, to: taskID)
+        print("🌙 Background: started \"\(title.prefix(60))\"")
+        return taskID
+    }
+
     // MARK: - Notification
 
     /// Whose finish a notification announces.
