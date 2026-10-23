@@ -83,6 +83,10 @@ enum EditableConfirmationFields {
         // arguments; nothing in them is offered for editing.
         if ToolCallInspection.isComposioMetaTool(bareToolName: bareToolName) { return [] }
 
+        // A form fill's values are its `value_<id>` strings, one per proposed
+        // field; which fields, the tab and the page stay read-only.
+        if bareToolName == FormFillToolNames.fillForm { return FormFillCards.editableFields(toolInput: toolInput) }
+
         let candidateFields: [CandidateField]
         switch bareToolName {
         // Matched by bare name, as `ToolConfirmationCardBuilder` matches them.

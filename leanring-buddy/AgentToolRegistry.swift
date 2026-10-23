@@ -893,6 +893,7 @@ final class AgentToolRegistry: ObservableObject {
         registerChromeDownloadTools()
         registerChromeFocusTools()
         registerChromeSiteHelperTools()
+        registerChromeFormFillTools()
         registerMessagingTools()
         registerBrainTools()
         registerWindowManagementTools()

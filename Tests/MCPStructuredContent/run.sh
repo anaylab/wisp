@@ -40,6 +40,8 @@ SHARED_SOURCES=(
   leanring-buddy/MCPStreamableHTTPTransport.swift
   leanring-buddy/ChromeExtension/ChromeTabLifeCards.swift
   leanring-buddy/ChromeExtension/ChromeTabLifeCardText.swift
+  leanring-buddy/ChromeExtension/FormFillCards.swift
+  leanring-buddy/ChromeExtension/FormFillPlanner.swift
 )
 
 SWIFTC_FLAGS=(

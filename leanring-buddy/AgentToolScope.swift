@@ -136,7 +136,7 @@ enum AgentToolScope: String, CaseIterable {
         case .browser:
             return name == "browser_task" || name == "read_page"
                 || name == "click_element" || name == "open_url"
-                || name.hasPrefix("chrome_")
+                || name.hasPrefix("chrome_") || name == "fill_form"
         case .filesystem:
             return name.hasPrefix("filesystem__")
         case .coding:
