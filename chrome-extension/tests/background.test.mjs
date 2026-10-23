@@ -20,8 +20,9 @@ test("background.js wires the bridge, handlers, capabilities and tab events", as
   assert.equal(fakeChrome.tabs.onUpdated.listeners.length, 1);
   assert.equal(fakeChrome.windows.onFocusChanged.listeners.length, 1);
   // One for the capability broadcast, one that attaches the download
-  // listeners when the user allows downloads.
-  assert.equal(fakeChrome.permissions.onAdded.listeners.length, 2);
+  // listeners when the user allows downloads, one that registers the site
+  // helper scripts when the user allows reading pages.
+  assert.equal(fakeChrome.permissions.onAdded.listeners.length, 3);
   assert.equal(fakeChrome.alarms.onAlarm.listeners.length, 1);
   assert.equal(fakeChrome.webNavigation.onCommitted.listeners.length, 1);
   assert.equal(fakeChrome.webNavigation.onCompleted.listeners.length, 1);

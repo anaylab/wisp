@@ -24,9 +24,11 @@ import { pageReadingHandlers } from "./handlers/page-reading.js";
 import { tabLifeHandlers } from "./handlers/tab-life.js";
 import { downloadHandlers } from "./handlers/downloads.js";
 import { focusModeHandlers } from "./handlers/focus-mode.js";
+import { siteHelperHandlers } from "./handlers/site-helpers.js";
 import { startTabEvents } from "./events/tabs.js";
 import { startNavigationEvents } from "./events/navigation.js";
 import { startDownloadEvents } from "./events/downloads.js";
+import { startSiteHelperEvents } from "./events/site-helpers.js";
 
 registerHandlers(tabHandlers);
 registerHandlers(capabilityHandlers);
@@ -35,10 +37,12 @@ registerHandlers(pageReadingHandlers);
 registerHandlers(tabLifeHandlers);
 registerHandlers(downloadHandlers);
 registerHandlers(focusModeHandlers);
+registerHandlers(siteHelperHandlers);
 
 startCapabilityBroadcasts(sendCapabilities);
 startTabEvents();
 startNavigationEvents();
 startDownloadEvents();
+startSiteHelperEvents();
 
 startBridge();
