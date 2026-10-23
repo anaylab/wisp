@@ -949,6 +949,21 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   now honours a `[SAY:]` tag). Routed as `ChromeTabCommand.siteHelper` inside `ChromeTabCommandRouter`; tab state comes
   from tab events, reseeded from `getTabs` on connect (`ChromeSiteHelpers`). Tools `chrome_canvas_assignment`,
   `chrome_meeting_captions` (read).
+  **Form helper (phase 12, `pages.read`)**: "fill this form" / "fill in my details" (`FormFillCommandParser`, whole-utterance
+  phrases, routed as `ChromeTabCommand.fillForm`) and the agent tool `fill_form` (`.browser`, `.writing`, on
+  `ToolCallSafety.alwaysAskBareToolNames`, so it always shows its card). `describeForm` (`content/form-helper.js`, top frame, on
+  top of the DOM agent's `e` ids and setter) lists a form's fields — label, kind, autocomplete, required, options, whether
+  something is typed in — **never a value**; hidden, transparent, off-screen and `[data-wisp-ignore]` fields aren't listed.
+  Passwords, payment, government ids, one-time codes and security questions are refused by type, autocomplete and every
+  describing word ("Email (or your password)" is a password field) in the content script and again in Swift
+  (`FormFillRefusal`, the same patterns). Values come only from the Me card (read by `ChromeFormFill`, asks Contacts access once)
+  and the brain's me page facts + summary (memory.md with the brain off), via `FormProfile`; the model's arguments are ignored
+  beyond `tab_id`. Mapping is autocomplete tokens, then label words (`FormFieldKeyMatcher`), then — for leftovers only — one
+  text-only model call that sees labels (fenced as page data) and key names, never values (`FormFieldLabelMappingPrompt`).
+  The prepared input holds one top-level `value_<id>` per proposal, so the card's one edit rule makes exactly those editable
+  (`FormFillCards`); refused fields show as "Won't fill", unknown ones as "You'll fill", and the footer says Wisp won't submit.
+  `fillFormFields` types with `pressEnter: false`, picks select options by exact text/value, skips fields the user filled
+  meanwhile, and refuses a tab that moved to another page (`expectedUrl`). Nothing clicks, submits or presses a key.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1493,6 +1508,12 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `chrome-extension/content/meeting-captions.js` | ~400 | Meet/Zoom caption selectors in one table, the in-page 30-minute buffer (merge growing/revised/scrolled captions, minute segments, windowing), `readBuffer`. |
 | `chrome-extension/handlers/site-helpers.js` | ~215 | `getCanvasAssignmentDetails`, `getMeetingCaptions` (pages.read, refusals, injection on demand, caps). |
 | `chrome-extension/events/site-helpers.js` | ~135 | Registers/unregisters the two scripts with `pages.read`; turns their messages into `site.canvasAssignmentOpened` / `site.meetingCaptionsAvailable`. |
+| `chrome-extension/content/form-helper.js` | ~410 | Phase 12, injected after the DOM agent: `describeForm` (fields, never values; refusals; trap fields skipped; which form), `fillFields` (agent's `typeText` without Enter, exact select options, re-refuses, leaves user-typed fields). |
+| `chrome-extension/handlers/form-helper.js` | ~180 | `describeForm` / `fillFormFields`: page access, top frame only, request shape, refuses a tab that moved to another page. |
+| `chrome-extension/tests/form-helper.test.mjs` / `tests/fixtures/form.html` | ~365/~110 | Refusal list (adversarial labels), no values read, no Enter/click/submit, trap fields; the fixture is the manual-check page. |
+| `ChromeExtension/FormFillPlanner.swift` | ~850 | Pure: `FormFieldDescription`, `FormFillRefusal` (mirrors the content script), `FormProfile` from the Me card + me-page facts, `FormFieldKeyMatcher` (autocomplete, label words), `FormFillPlanner.plan`, `FormFieldLabelMappingPrompt` (labels only), `FormFillCommandParser`, `FormFillReplyText`. Tested by `Tests/ChromeExtFormHelper`. |
+| `ChromeExtension/FormFillCards.swift` | ~210 | Pure: `fill_form`'s name, prepared input (`value_<id>` per proposal), confirmation card and editable rows. Compiled by the confirmation suites. |
+| `ChromeExtension/ChromeFormFill.swift` | ~275 | `@MainActor`: reads the Me card and memory, describes the form, plans (model for leftovers), the input preparer, the fill and its reply, `registerChromeFormFillTools()`. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1736,6 +1757,7 @@ running):
 ./Tests/ChromeExtAskAboutThis/run.sh     # Ask Wisp about this: user.* event decoding, image download rules, per-part turn context + screenshot choice
 ./Tests/ChromeExtPageWatchers/run.sh     # page watchers: tab-or-screen route, reload interval, number phrasing, wire shape, reconciliation, time on a site
 ./Tests/ChromeExtSiteHelpers/run.sh      # Canvas page matching/chip rule/added-to-today row, meeting caption phrases + fenced prompt, router + tab state
+./Tests/ChromeExtFormHelper/run.sh       # form helper: refusals (adversarial labels), autocomplete/label mapping, profile, model prompt, card, edits win
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
 ./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references
