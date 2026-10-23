@@ -353,3 +353,23 @@ test("navigation: only web pages, and history errors read plainly", async () => 
   await assert.rejects(handlers.goBackInTab({ tabId: 1 }), /no page to go back to/);
   await assert.rejects(handlers.snapshotPage({ tabId: 99 }), /No tab with id/);
 });
+
+test("findElements can rank past the snapshot's default 25 elements when asked", async () => {
+  const fakeDocument = new FakeDocument({ url: "https://busy.example/", viewportHeight: 4000 });
+  for (let buttonIndex = 0; buttonIndex < 40; buttonIndex++) {
+    fakeDocument.body.append(el("button", {
+      text: buttonIndex === 35 ? "Settings" : `Item ${buttonIndex}`,
+      rect: { left: 10, top: 10 + buttonIndex * 30, width: 80, height: 20 },
+    }));
+  }
+  const { fakeChrome } = makeChromeWithPages({
+    tabs: [{ id: 1, windowId: 1, url: "https://busy.example/", active: true, status: "complete" }],
+    documentsByTarget: { "1:0": fakeDocument },
+  });
+  const handlers = handlersFor(fakeChrome);
+
+  const withinDefault = await handlers.findElements({ tabId: 1, query: "settings" });
+  assert.deepEqual(withinDefault.elements, []);
+  const widened = await handlers.findElements({ tabId: 1, query: "settings", elementLimit: 150 });
+  assert.deepEqual(widened.elements.map((element) => element.label), ["Settings"]);
+});

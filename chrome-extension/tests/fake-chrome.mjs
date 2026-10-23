@@ -272,6 +272,9 @@ export function createFakeChrome({
     },
 
     runtime: {
+      // The real extension's id (pinned by the manifest key), so a handler
+      // that checks a message's sender against it sees the same value.
+      id: "kpblnefdnmlodeagdnfodnbbdbkacnce",
       getManifest() {
         return { version: manifestVersion };
       },

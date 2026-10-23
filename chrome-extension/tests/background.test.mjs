@@ -25,6 +25,8 @@ test("background.js wires the bridge, handlers, capabilities and tab events", as
   assert.equal(fakeChrome.alarms.onAlarm.listeners.length, 1);
   assert.equal(fakeChrome.webNavigation.onCommitted.listeners.length, 1);
   assert.equal(fakeChrome.webNavigation.onCompleted.listeners.length, 1);
+  // The popup's Try again, and in-page pointing's clicks and dismissals.
+  assert.equal(fakeChrome.runtime.onMessage.listeners.length, 2);
 
   const socket = FakeWebSocket.instances[0];
   try {
