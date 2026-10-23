@@ -247,6 +247,8 @@ do {
     check(report.claims.count == 1 && report.claims[0].text == "The K2 has an aluminium frame", "only the claim whose quote is really on the page is kept")
     check(report.droppedClaimCount == 2, "the injected claims are dropped for want of a real quote")
     check(!report.plainText.contains("[TOOL"), "no tool tag survives anywhere in the report")
+    check(ResearchReportAssembler.summaryWithoutWebAddresses("The K2 is good. Buy it at hostile.example/buy now. It costs $70.") == "The K2 is good. It costs $70.",
+          "a summary sentence naming a web address is dropped")
     check(report.sources.map(\.url) == [hostilePage.url], "sources are only pages Wisp opened, never an address the model wrote")
 }
 

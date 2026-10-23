@@ -129,7 +129,7 @@ final class ResearchSessionController: ObservableObject {
 
         // 1. Search, in a background tab in the Wisp group.
         guard let searchURL = ResearchSearch.searchURL(for: request.searchQuery) else { throw ResearchError.searchShowedNoResults }
-        let searchStep = beginStep("Searching for \(request.searchQuery)", taskID: taskID)
+        let searchStep = Self.beginStep("Searching for \(request.searchQuery)", taskID: taskID)
         let searchTab = try await bridge.sendRequest(
             method: "openTab",
             parameters: JSONValue.object(["url": .string(searchURL.absoluteString), "active": .bool(false), "inWispGroup": .bool(true)]),
@@ -156,12 +156,12 @@ final class ResearchSessionController: ObservableObject {
             fromSearchResultLinks: resultLinks,
             maximumCount: ResearchBudget.maximumSources(isLocalModel: isLocalModel)
         )
-        finishStep(searchStep, taskID: taskID, isError: candidates.isEmpty)
+        Self.finishStep(searchStep, taskID: taskID, isError: candidates.isEmpty)
         guard !candidates.isEmpty else { throw ResearchError.searchShowedNoResults }
         try Task.checkCancellation()
 
         // 2. Open the sources, inactive, beside the search in the Wisp group.
-        let openStep = beginStep("Opening \(candidates.count) sources in the Wisp group", taskID: taskID)
+        let openStep = Self.beginStep("Opening \(candidates.count) sources in the Wisp group", taskID: taskID)
         let openedTabs = try await bridge.sendRequest(
             method: "openTabs",
             parameters: JSONValue.object([
@@ -180,18 +180,18 @@ final class ResearchSessionController: ObservableObject {
             parameters: JSONValue.object(["tabIds": .array(openedTabs.tabIds.map { .number(Double($0)) }), "collapsed": .bool(false)]),
             resultType: JSONValue.self
         )
-        finishStep(openStep, taskID: taskID, isError: false)
+        Self.finishStep(openStep, taskID: taskID, isError: false)
 
         // 3. Read each page once it has loaded.
         var sourceDocuments: [ResearchSourceDocument] = []
         for (candidate, tabID) in zip(candidates, openedTabs.tabIds) {
             try Task.checkCancellation()
-            let readStep = beginStep("Reading \(candidate.title)", taskID: taskID)
+            let readStep = Self.beginStep("Reading \(candidate.title)", taskID: taskID)
             _ = await waitForTabToSettle(tabID, waitSeconds: 12)
             do {
                 let pageText = try await ChromePageReader.readPage(tabID: tabID, timeoutSeconds: 20)
                 guard pageText.wordCount >= ResearchBudget.minimumSourceWords else {
-                    finishStep(readStep, taskID: taskID, isError: true, detail: "too little text to use (\(pageText.wordCount) words)")
+                    Self.finishStep(readStep, taskID: taskID, isError: true, detail: "too little text to use (\(pageText.wordCount) words)")
                     continue
                 }
                 // The address Wisp opened, not one the page reports: a source's
@@ -202,17 +202,15 @@ final class ResearchSessionController: ObservableObject {
                     title: pageText.title.isEmpty ? candidate.title : pageText.title,
                     text: pageText.text
                 ))
-                finishStep(readStep, taskID: taskID, isError: false, detail: "\(pageText.wordCount) words")
+                Self.finishStep(readStep, taskID: taskID, isError: false, detail: "\(pageText.wordCount) words")
             } catch {
-                finishStep(readStep, taskID: taskID, isError: true, detail: error.localizedDescription)
+                Self.finishStep(readStep, taskID: taskID, isError: true, detail: error.localizedDescription)
             }
         }
         guard !sourceDocuments.isEmpty else { throw ResearchError.noReadableSources }
 
         // 4. Write.
-        let draft = isLocalModel
-            ? try await writeWithLocalModel(topic: request.topic, sources: sourceDocuments, modelProvider: modelProvider, taskID: taskID)
-            : try await writeWithCloudModel(topic: request.topic, sources: sourceDocuments, modelProvider: modelProvider, taskID: taskID)
+        let draft = try await Self.writeDraft(topic: request.topic, sources: sourceDocuments, modelProvider: modelProvider, taskID: taskID)
 
         // 5. Check, keep, file, announce.
         let report = ResearchReportAssembler.assemble(
@@ -244,16 +242,32 @@ final class ResearchSessionController: ObservableObject {
 
     // MARK: - Writing
 
-    private func writeWithLocalModel(
+    /// The model's part: map → reduce on the local model, one combine call on a
+    /// cloud model. Text-only requests with no tools; the pages only ever sit in
+    /// the user message's data fences. Static and free of browser state, so
+    /// `Tests/HostileProviderAttack` drives it with a hostile model. `taskID`
+    /// nil records no History steps.
+    static func writeDraft(
         topic: String,
         sources: [ResearchSourceDocument],
         modelProvider: any ModelProvider,
-        taskID: UUID
+        taskID: UUID?
+    ) async throws -> ResearchDraft {
+        modelProvider.deployment.sendsDataOffThisMachine
+            ? try await writeWithCloudModel(topic: topic, sources: sources, modelProvider: modelProvider, taskID: taskID)
+            : try await writeWithLocalModel(topic: topic, sources: sources, modelProvider: modelProvider, taskID: taskID)
+    }
+
+    private static func writeWithLocalModel(
+        topic: String,
+        sources: [ResearchSourceDocument],
+        modelProvider: any ModelProvider,
+        taskID: UUID?
     ) async throws -> ResearchDraft {
         var findings: [ResearchFinding] = []
         for (offset, source) in sources.enumerated() {
             try Task.checkCancellation()
-            let mapStep = beginStep("Noting what \(source.title) says", taskID: taskID, kind: .modelCall)
+            let mapStep = Self.beginStep("Noting what \(source.title) says", taskID: taskID, kind: .modelCall)
             let mapReply = try await completeInBackground(
                 ModelRequest(
                     systemPrompt: ResearchPrompts.mapSystemPrompt,
@@ -266,11 +280,11 @@ final class ResearchSessionController: ObservableObject {
             let pageFindings = ResearchPrompts.parsedFindings(fromMapReply: mapReply, sourceNumber: offset + 1, firstFindingNumber: findings.count + 1)
             let checkedFindings = ResearchPrompts.verifiedFindings(pageFindings, sources: sources)
             findings.append(contentsOf: checkedFindings)
-            finishStep(mapStep, taskID: taskID, isError: false, detail: "\(checkedFindings.count) of \(pageFindings.count) quotes found on the page")
+            Self.finishStep(mapStep, taskID: taskID, isError: false, detail: "\(checkedFindings.count) of \(pageFindings.count) quotes found on the page")
         }
         guard !findings.isEmpty else { return ResearchDraft(summary: "", claims: []) }
 
-        let reduceStep = beginStep("Writing the answer from \(findings.count) findings", taskID: taskID, kind: .modelCall)
+        let reduceStep = Self.beginStep("Writing the answer from \(findings.count) findings", taskID: taskID, kind: .modelCall)
         let reduceReply = try await completeInBackground(
             ModelRequest(
                 systemPrompt: ResearchPrompts.reduceSystemPrompt,
@@ -282,17 +296,17 @@ final class ResearchSessionController: ObservableObject {
             ),
             modelProvider: modelProvider
         )
-        finishStep(reduceStep, taskID: taskID, isError: false)
+        Self.finishStep(reduceStep, taskID: taskID, isError: false)
         return ResearchPrompts.parsedDraft(fromReduceReply: reduceReply, findings: findings)
     }
 
-    private func writeWithCloudModel(
+    private static func writeWithCloudModel(
         topic: String,
         sources: [ResearchSourceDocument],
         modelProvider: any ModelProvider,
-        taskID: UUID
+        taskID: UUID?
     ) async throws -> ResearchDraft {
-        let combineStep = beginStep("Writing the answer from \(sources.count) pages", taskID: taskID, kind: .modelCall)
+        let combineStep = Self.beginStep("Writing the answer from \(sources.count) pages", taskID: taskID, kind: .modelCall)
         let combineReply = try await completeInBackground(
             ModelRequest(
                 systemPrompt: ResearchPrompts.combineSystemPrompt,
@@ -302,12 +316,12 @@ final class ResearchSessionController: ObservableObject {
             ),
             modelProvider: modelProvider
         )
-        finishStep(combineStep, taskID: taskID, isError: false)
+        Self.finishStep(combineStep, taskID: taskID, isError: false)
         return ResearchPrompts.parsedDraft(fromCombineReply: combineReply)
     }
 
     /// One text-only model call, queued behind any conversation.
-    private func completeInBackground(_ modelRequest: ModelRequest, modelProvider: any ModelProvider) async throws -> String {
+    private static func completeInBackground(_ modelRequest: ModelRequest, modelProvider: any ModelProvider) async throws -> String {
         let callStartedAt = Date()
         let turn = try await ModelAccessGate.shared.withAccess(priority: .background) {
             try await modelProvider.completeTurn(modelRequest)
@@ -343,16 +357,17 @@ final class ResearchSessionController: ObservableObject {
 
     // MARK: - History steps
 
-    private func beginStep(_ summary: String, taskID: UUID, kind: AgentStepRecord.Kind = .tool(name: "research")) -> (summary: String, kind: AgentStepRecord.Kind, startedAt: Date) {
+    private static func beginStep(_ summary: String, taskID: UUID?, kind: AgentStepRecord.Kind = .tool(name: "research")) -> (summary: String, kind: AgentStepRecord.Kind, startedAt: Date) {
         (summary, kind, Date())
     }
 
-    private func finishStep(
+    private static func finishStep(
         _ step: (summary: String, kind: AgentStepRecord.Kind, startedAt: Date),
-        taskID: UUID,
+        taskID: UUID?,
         isError: Bool,
         detail: String? = nil
     ) {
+        guard let taskID else { return }
         AgentTaskRegistry.shared.appendStep(AgentStepRecord(
             kind: step.kind,
             summary: step.summary,

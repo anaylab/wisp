@@ -181,7 +181,7 @@ nonisolated enum ResearchReportAssembler {
             )
         }
 
-        let cleanedSummary = cleanedModelText(summary)
+        let cleanedSummary = summaryWithoutWebAddresses(cleanedModelText(summary))
         return ResearchReport(
             id: id,
             topic: topic,
@@ -205,6 +205,17 @@ nonisolated enum ResearchReportAssembler {
         )
         let singleLine = withoutTags.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         return String(singleLine.prefix(400)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The summary is the one part no quote backs, so a sentence in it that
+    /// sends the user somewhere ("buy it at example.shop/deal") is dropped: a
+    /// page that talked the model into it can't put a link in Wisp's mouth.
+    /// Sources are listed separately, by Wisp.
+    static func summaryWithoutWebAddresses(_ summaryText: String) -> String {
+        let webAddressPattern = #"(?i)(https?://|www\.|\b[a-z0-9-]{2,}\.(com|org|net|io|co|shop|store|example|info|biz|xyz|app|dev|ru|cn|uk)\b)"#
+        let sentences = summaryText.components(separatedBy: ". ")
+        let keptSentences = sentences.filter { $0.range(of: webAddressPattern, options: .regularExpression) == nil }
+        return keptSentences.joined(separator: ". ").trimmingCharacters(in: .whitespaces)
     }
 
     private static func displayTitle(for document: ResearchSourceDocument) -> String {

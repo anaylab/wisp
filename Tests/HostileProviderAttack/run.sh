@@ -52,6 +52,7 @@ import Foundation
 enum BuddyDelegationToolNames { static let askBuddy = "ask_buddy" }
 enum BuddyDelegationPolicy { static let answerTimeoutSeconds: TimeInterval = 300 }
 enum ShortcutsBridge { static let runTimeoutSeconds: TimeInterval = 120 }
+enum ResearchToolNames { static let researchTopic = "chrome_research_topic" }
 STUB
 if swiftc -typecheck "${SWIFTFLAGS[@]}" \
      leanring-buddy/AgentTurnRunner.swift \

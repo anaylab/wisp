@@ -125,6 +125,12 @@ Canvas feed's host. The caption buffer lives in the meeting page only (30 minute
 | `getCanvasAssignmentDetails({tabId?})` | `{tabId, windowId, url, courseId, assignmentId, title, courseName, dueText, dueAt, pointsPossible, submissionTypes, rubric: [{criterion, points}], rubricTotal, description, truncated}` |
 | `getMeetingCaptions({tabId?, lastMinutes?})` | `{tabId, windowId, url, title, site, captionsFound, captionsVisible, entries: [{speaker, text, startedAt, endedAt}], requestedMinutes, bufferStartedAt, truncated}` (times in epoch ms; `captionsFound: false` means captions are off) |
 
+### Phase 11 research payloads
+
+| Method | Result |
+|---|---|
+| `highlightTextFragments({tabId, quotes:[text], color?, scrollToFirst?})` | `{tabId, found:[quote indexes], missing:[quote indexes]}` (≤8 quotes of ≤400 chars; `tabId` required; needs `pages.read`; marks replace earlier ones in that tab, Esc in the page clears them) |
+
 ## 2. Methods and events: names and owners
 
 Only the owning phase adds a name. Names are `camelCase` for methods and `area.verb` for events.
