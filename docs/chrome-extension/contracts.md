@@ -82,6 +82,21 @@ cut. `sourcePageUrl`/`pageTitle` are filled only in events (the page from a matc
 
 The extension never renames, moves or deletes a downloaded file.
 
+### Phase 08 page watch payloads
+
+A condition is one of `{kind:"textAppears", text}`, `{kind:"textDisappears", text}`, `{kind:"pageSettlesAfterChange"}` or
+`{kind:"numberCrosses", nearText?, selector?, direction:"below"|"above", threshold}` (at least one of `nearText`/`selector`).
+A watch (`publicWatch`): `watchId`, `tabId`, `windowId`, `url`, `title`, `label`, `condition`, `reloadEveryMinutes` (null or ≥5),
+`ownsTab` (a reloading watch's own background tab), `startedAt`, `expiresAt` (epoch ms, 24h).
+
+| Event / method | `data` / result |
+|---|---|
+| `startPageWatch({tabId?, condition, reloadEveryMinutes?, label?})` | the watch (the showing tab when no `tabId`; max 5 at once) |
+| `stopPageWatch({watchId} \| {all: true})` | `{stoppedCount}` (no `watch.ended` for these) |
+| `listPageWatches()` | `{watches: […], recentlyEnded: [{watchId, reason, matchedText, endedAt, label}]}` (endings kept 1h) |
+| `watch.matched` | `{watchId, matchedText, tabId, url, title}` — the watch has ended |
+| `watch.ended` | `{watchId, reason}`, reason `timedOut` / `tabClosed` / `navigatedAway` / `pageUnavailable` |
+
 ## 2. Methods and events: names and owners
 
 Only the owning phase adds a name. Names are `camelCase` for methods and `area.verb` for events.
