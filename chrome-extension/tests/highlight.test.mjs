@@ -233,3 +233,11 @@ test("a walkthrough step can ask not to be dismissed by Esc", () => {
   loaded.dispatchToWindow("keydown", { key: "Escape" });
   assert.equal(loaded.highlighter.state.marks.length, 0);
 });
+
+test("a badge at the viewport's edge moves inside the mark instead of being cut off", () => {
+  const { highlighter } = loadHighlighter(makePage().fakeDocument);
+  const badgeOffsetFor = (markFrame) => ({ ...highlighter.internals.badgeOffsetFor(markFrame) });
+  assert.deepEqual(badgeOffsetFor({ left: 200, top: 300 }), { left: -11, top: -11 });
+  assert.deepEqual(badgeOffsetFor({ left: -4, top: 300 }), { left: 6, top: -11 });
+  assert.deepEqual(badgeOffsetFor({ left: 200, top: 3 }), { left: -11, top: -1 });
+});

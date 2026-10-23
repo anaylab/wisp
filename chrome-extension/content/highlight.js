@@ -46,6 +46,8 @@
   const ELEMENT_ID_PATTERN = /^e\d{1,9}$/;
   // Breathing room between the element and the outline drawn around it.
   const OUTLINE_PADDING_PIXELS = 4;
+  const BADGE_OUTSET_PIXELS = 11;
+  const BADGE_EDGE_MARGIN_PIXELS = 2;
   // Used only if Wisp sent no colour (or one that isn't a plain colour).
   const FALLBACK_MARK_COLOR = "rgb(51, 128, 255)";
   // A colour Wisp sends: rgb(r, g, b) or #rrggbb. Anything else (a url(),
@@ -122,6 +124,16 @@
     };
   }
 
+  // The badge sits on the mark's top-left corner, half outside it, unless
+  // that would cut it off at the viewport's edge (a header flush with the top
+  // of the page): then it moves just inside. Offsets are from the mark.
+  function badgeOffsetFor(markFrame) {
+    return {
+      left: Math.max(BADGE_OUTSET_PIXELS * -1, BADGE_EDGE_MARGIN_PIXELS - markFrame.left),
+      top: Math.max(BADGE_OUTSET_PIXELS * -1, BADGE_EDGE_MARGIN_PIXELS - markFrame.top),
+    };
+  }
+
   function isOffScreen(elementRect, viewportWidth, viewportHeight) {
     return elementRect.bottom <= 0 || elementRect.top >= viewportHeight ||
       elementRect.right <= 0 || elementRect.left >= viewportWidth;
@@ -175,7 +187,7 @@
     .wisp-mark.box, .wisp-mark.step { border: 2.5px solid var(--wisp-mark-color); }
     .wisp-mark.highlight { background: var(--wisp-mark-color); opacity: 0.22; border-radius: 4px; }
     .wisp-badge {
-      position: absolute; left: -11px; top: -11px; min-width: 22px; height: 22px; padding: 0 5px;
+      position: absolute; min-width: 22px; height: 22px; padding: 0 5px;
       box-sizing: border-box; border-radius: 11px; background: var(--wisp-mark-color); color: white;
       font: 700 12px/22px -apple-system, BlinkMacSystemFont, sans-serif; text-align: center;
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
@@ -243,6 +255,11 @@
       mark.markElement.style.top = markFrame.top + "px";
       mark.markElement.style.width = markFrame.width + "px";
       mark.markElement.style.height = markFrame.height + "px";
+      if (mark.badgeElement) {
+        const badgeOffset = badgeOffsetFor(markFrame);
+        mark.badgeElement.style.left = badgeOffset.left + "px";
+        mark.badgeElement.style.top = badgeOffset.top + "px";
+      }
       if (mark.labelElement) {
         // Under the mark, or above it when the mark sits at the bottom edge.
         const labelTop = markFrame.top + markFrame.height + 6 + 24 > innerHeight
@@ -330,8 +347,9 @@
 
       const markElement = document.createElement("div");
       markElement.className = "wisp-mark " + kind + (kind === "ring" && !isReducedMotion ? " pulse" : "");
+      let badgeElement = null;
       if (badgeNumbers[itemIndex] !== null) {
-        const badgeElement = document.createElement("div");
+        badgeElement = document.createElement("div");
         badgeElement.className = "wisp-badge";
         badgeElement.textContent = String(badgeNumbers[itemIndex]);
         markElement.append(badgeElement);
@@ -354,7 +372,8 @@
       }
 
       highlighterState.marks.push({
-        elementId: item.elementId, element, kind, label, badgeNumber: badgeNumbers[itemIndex], markElement, labelElement,
+        elementId: item.elementId, element, kind, label, badgeNumber: badgeNumbers[itemIndex],
+        markElement, badgeElement, labelElement,
       });
       shownElementIDs.push(item.elementId);
     });
@@ -417,6 +436,6 @@
     clear,
     watchClicks,
     stopWatchingClicks,
-    internals: { badgeNumbersFor, watchedElementIDForClick, markFrameFor, isOffScreen, sanitizedColor, cleanLabel },
+    internals: { badgeNumbersFor, badgeOffsetFor, watchedElementIDForClick, markFrameFor, isOffScreen, sanitizedColor, cleanLabel },
   };
 })();

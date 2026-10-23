@@ -82,6 +82,22 @@ cut. `sourcePageUrl`/`pageTitle` are filled only in events (the page from a matc
 
 The extension never renames, moves or deletes a downloaded file.
 
+### Phase 05 pointing payloads
+
+Element ids are phase 03's (`e7`, `f12e3` in a cross-origin frame). `kind` is `ring` | `box` | `highlight` | `step`.
+
+| Event / method | `data` / result |
+|---|---|
+| `highlightElements({tabId?, items:[{elementId, kind, label?, stepNumber?}], color?, dismissOnEscape?})` | `{tabId, shown:[ids], missing:[ids]}` (replaces Wisp's earlier marks in that tab; `color` is `rgb(r, g, b)` or `#rrggbb`, anything else falls back; `dismissOnEscape` defaults to true) |
+| `clearHighlights({tabId?})` | `{cleared: true}` (no `tabId`: every tab Wisp drew in, plus the front one) |
+| `watchClicks({tabId?, elementIds})` | `{tabId, watching:[ids], missing:[ids]}` (replaces the tab's earlier watch) |
+| `stopWatchingClicks({tabId?})` | `{stopped: true}` |
+| `page.elementClicked` | `{tabId, elementId}`, only for a trusted (user) click inside a watched element |
+| `page.highlightDismissed` | `{tabId, reason: "escape" \| "label", elementIds, elementId?}` |
+
+Phase 05 also gives phase 03's `findElements({query})` an optional `elementLimit` (1–300, default the snapshot's 25), so
+pointing can rank every control near the view.
+
 ## 2. Methods and events: names and owners
 
 Only the owning phase adds a name. Names are `camelCase` for methods and `area.verb` for events.
