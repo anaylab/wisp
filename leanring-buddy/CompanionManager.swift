@@ -374,6 +374,7 @@ final class CompanionManager: ObservableObject {
         activeAnnotationsByDisplayFrame.removeAll()
         annotationScreenshotSizeByDisplayFrame.removeAll()
         visibleNoteLimit = nil
+        clearChromeInPageMarks()
     }
 
     func stop() {
@@ -1308,7 +1309,7 @@ final class CompanionManager: ObservableObject {
         guard !(textComposerWindowController?.isShowing ?? false),
               screenRegionPickerController == nil,
               !guidedWalkthrough.isActive,
-              !activeAnnotationsByDisplayFrame.isEmpty || focusedScreenRegion != nil else { return }
+              !activeAnnotationsByDisplayFrame.isEmpty || focusedScreenRegion != nil || hasChromeInPagePointingMarks else { return }
         focusedScreenRegion = nil
         focusedRegionHighlightID = nil
         clearScreenAnnotations()
@@ -2168,7 +2169,8 @@ final class CompanionManager: ObservableObject {
                         // A lone [STEP:] has no position and nothing to draw.
                         let placedAnnotations = annotationsToDraw.filter { !$0.isUnplacedWalkthroughStep }
                         if !placedAnnotations.isEmpty {
-                            applyAnnotations(placedAnnotations, from: screenCaptures)
+                            // In Chrome, marks naming a page element are drawn in the page.
+                            await applyPointingAnnotationsPreferringChromePage(placedAnnotations, from: screenCaptures)
                         }
                     }
                 }
@@ -2482,7 +2484,8 @@ final class CompanionManager: ObservableObject {
             }
 
             let markerLabel = Self.shortPointingLabel(for: chosenCandidates[0].text)
-            applyAnnotations(
+            // In Chrome, a target that is a page element is marked in the page.
+            await applyPointingAnnotationsPreferringChromePage(
                 chosenCandidates.map { chosenCandidate in
                     ScreenAnnotation(
                         style: .marker,

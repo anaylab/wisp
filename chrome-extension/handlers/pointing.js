@@ -3,7 +3,7 @@
 // The request handlers that draw Wisp's marks in a tab (content/highlight.js)
 // and watch for the real click on a walkthrough step:
 //
-//   highlightElements({tabId, items:[{elementId, kind, label, stepNumber}], color})
+//   highlightElements({tabId, items:[{elementId, kind, label, stepNumber}], color, dismissOnEscape})
 //       → {tabId, shown:[ids], missing:[ids]}
 //   clearHighlights({tabId?})                    → {cleared: true}
 //   watchClicks({tabId, elementIds})             → {tabId, watching:[ids], missing:[ids]}
@@ -187,7 +187,7 @@ export function createPointingHandlers({ chromeAPI = () => globalThis.chrome } =
 
   return {
     // Replaces whatever Wisp had drawn in this tab with these marks.
-    async highlightElements({ tabId, items, color } = {}) {
+    async highlightElements({ tabId, items, color, dismissOnEscape = true } = {}) {
       const tab = await resolveTargetTab(tabId);
       await requireMarkablePage(tab);
       const requestedItems = capList(Array.isArray(items) ? items : []).items;
@@ -199,6 +199,7 @@ export function createPointingHandlers({ chromeAPI = () => globalThis.chrome } =
         "show",
         (frameItems) => ({
           color,
+          dismissOnEscape: dismissOnEscape !== false,
           items: frameItems.map(({ elementId, kind, label, stepNumber }) => ({ elementId, kind, label, stepNumber })),
         }),
         "shown"

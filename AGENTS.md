@@ -875,6 +875,21 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   launch restores (never resumes) a session a quit interrupted, retrying pending tokens whenever the extension connects.
   It also starts focus when an opted-in approved study block (`JobsEngine.approvedStudyBlocks`) begins, once per block
   (`ChromeFocusStudyBlockPolicy`). Settings live in the Chrome Tabs card's Focus mode row (`ChromeFocusSettings`).
+  **In-page pointing (phase 05, `pages.read`)**: when Chrome is in front and the extension can read pages
+  (`ChromeInPagePointingPolicy`, pure), a fast-pointing target or a reply's `[POINT:]`/`[BOX:]`/`[HIGHLIGHT:]` whose label
+  names an element of the front tab, and whose screen point lies in Chrome's front window, is drawn **inside the page**
+  (`content/highlight.js`: closed shadow root, ring / box / band / numbered step badge, the user's marker colour, follows the
+  element through scroll/resize/zoom with `ResizeObserver` + capture-phase scroll + rAF, scrolls it into view once, no pulse
+  under reduced motion) instead of on the overlay; the element is found with `findElements` (`elementLimit` 150) and chosen
+  by fast pointing's own word scoring (`ChromeInPageElementMatcher`, ≤3 equal places, declines ties it can't mark). Anything
+  not found stays on the overlay, and outside Chrome nothing changes (`applyPointingAnnotationsPreferringChromePage`).
+  Plain marks clear after 15s, on Esc, a click on their label (`page.highlightDismissed`) or the next question
+  (`clearScreenAnnotations` → `clearHighlights`). **Guided walkthroughs in Chrome** look for each step in the page first
+  (`markCurrentGuidedStepInChromeIfPossible`, before the screen search each try), mark it as a numbered step that page Esc
+  doesn't dismiss, and finish it on the page's **trusted** click (`watchClicks` → `page.elementClicked`) instead of the global
+  mouse-down matcher; step 1 drawn from the model's coordinates moves into the page when found there. "Do it for me" clicks
+  through `clickElement` with the same irreversible-word refusal. A `nav.completed` in the walkthrough's tab re-finds the
+  current step at once. Dismissing a step's label ends the walkthrough.
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1385,6 +1400,12 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `ChromeExtension/ChromeFocusAgentTools.swift` | ~70 | The `chrome_focus_mode` agent tool (start/stop, topic, minutes). |
 | `ChromeExtension/ChromeFocusSettingsRow.swift` | ~75 | Focus mode's row in the Agent tab's Chrome Tabs card: status + Stop, site lists, Later-window switch. |
 | `chrome-extension/handlers/focus-mode.js` | ~290 | `applyFocusLayout` / `restoreFocusLayout`: collapse, mute, group as "Focus", move to a minimised Later window, prior state in `chrome.storage.session` under a restore token; restore tolerates closed/moved tabs and closed windows. Never closes a tab. |
+| `chrome-extension/content/highlight.js` | ~420 | Phase 05, injected on demand: Wisp's marks in a closed shadow root (ring/box/highlight/step badge, label, marker colour), following the element (ResizeObserver, scroll, rAF), scrolled into view once, reduced motion, Esc/label dismissal, trusted-click watching within a target's subtree; `window.__wispHighlighter`. |
+| `chrome-extension/handlers/pointing.js` | ~255 | `highlightElements` / `clearHighlights` / `watchClicks` / `stopWatchingClicks`: per-frame (`f12e3` ids) injection of the highlighter, page-access checks, clearing every frame Wisp drew in. |
+| `chrome-extension/events/pointing.js` | ~55 | `page.elementClicked` / `page.highlightDismissed` from the highlighter's runtime messages (own extension, never incognito), with tab and frame ids added. |
+| `chrome-extension/tests/fake-highlight-page.mjs` / `highlight.test.mjs` / `pointing.test.mjs` | ~145/~235/~200 | The highlighter in a fake page (badges, reduced motion, following, dismissal, click matching) and the handlers/events against the fake Chrome. |
+| `ChromeExtension/ChromeInPagePointingPolicy.swift` | ~250 | Pure: whether to try the page, annotation → mark kind, label → target, Chrome-window containment, marker colour as CSS, `ChromeInPageElementMatcher` (page element for a target or step), and the walkthrough event rules (click completes step, navigation re-finds, may click for the user). Tested by `Tests/ChromeExtInPagePointing`. |
+| `ChromeExtension/ChromeInPagePointing.swift` | ~615 | The bridge calls and state (pointing marks with a 15s lifetime, the walkthrough's marked step and tab), the event handling, and the `CompanionManager` glue: `applyPointingAnnotationsPreferringChromePage`, the walkthrough's in-page find/mark/click/re-find, clearing. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1624,6 +1645,7 @@ running):
 ./Tests/ChromeExtTabLife/run.sh          # tab sessions (build, codec, cap, names, restore), stale rules, triage order, card text, router phrases
 ./Tests/ChromeExtDownloads/run.sh        # download concierge: rule matching, templates, suggested names, collisions, refusals
 ./Tests/ChromeExtFocusMode/run.sh        # Chrome focus mode: planner keep/collapse/mute/move, study-block rule, "focus on X for N minutes" parsing
+./Tests/ChromeExtInPagePointing/run.sh  # in-page pointing: when to draw in the page, target/step → page element, walkthrough click/navigation rules
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
 ./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references

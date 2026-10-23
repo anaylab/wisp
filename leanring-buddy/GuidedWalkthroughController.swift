@@ -73,6 +73,8 @@ final class GuidedWalkthroughSession: ObservableObject {
     func updatePlan(_ updatedPlan: GuidedWalkthroughPlan) {
         plan = updatedPlan
         autoClickNote = nil
+        // A step marked inside a Chrome page goes with the step.
+        ChromeInPagePointing.shared.forgetWalkthroughStep()
     }
 
     func showAutoClickNote(_ note: String) {
@@ -89,6 +91,7 @@ final class GuidedWalkthroughSession: ObservableObject {
 
     /// Stops everything the walkthrough started and forgets the plan.
     func reset() {
+        ChromeInPagePointing.shared.endWalkthrough()
         targetSearchTask?.cancel()
         targetSearchTask = nil
         finishedDismissalTask?.cancel()
@@ -148,6 +151,7 @@ extension CompanionManager {
         } else {
             applyAnnotations([firstStepAnnotation], from: screenCaptures)
             guidedWalkthrough.currentTargetLocation = locationOfActiveAnnotation()
+            moveFirstGuidedStepIntoChromePageIfPossible(firstStepAnnotation: firstStepAnnotation, screenCaptures: screenCaptures)
         }
         startWatchingForGuidedWalkthroughClicks()
         print("🧭 Guided walkthrough: \(newPlan.steps.map(\.instruction).joined(separator: " → "))")
@@ -223,7 +227,7 @@ extension CompanionManager {
     /// tree plus OCR, matched deterministically like "where is X" — and boxes it.
     /// Retries for a while because the screen is usually still changing from the
     /// click that finished the step before.
-    private func findCurrentGuidedStepTarget() {
+    func findCurrentGuidedStepTarget() {
         guard let currentStep = guidedWalkthrough.plan?.currentStep,
               let currentStepIndex = guidedWalkthrough.plan?.currentStepIndex else { return }
 
@@ -248,6 +252,15 @@ extension CompanionManager {
                 guard !Task.isCancelled, let self else { return }
                 // The user moved on (Next, or a click) while this was waiting.
                 guard self.guidedWalkthrough.plan?.currentStep?.id == currentStepID else { return }
+
+                // In Chrome the step is looked for in the page first, where its
+                // mark follows the element and its real click finishes it.
+                if await self.markCurrentGuidedStepInChromeIfPossible(
+                    stepID: currentStepID,
+                    stepNumber: currentStepIndex + 1,
+                    instruction: currentStep.instruction
+                ) { return }
+                guard !Task.isCancelled else { return }
 
                 let accessibilityElementSnapshotTask = Task {
                     await AccessibilityElementSnapshotter.captureFrontmostApplicationSnapshot()
@@ -373,6 +386,7 @@ extension CompanionManager {
     /// reads as irreversible (Send, Delete, Pay…) is never clicked this way —
     /// the same vocabulary the confirmation floor uses — and Wisp says so.
     func performCurrentGuidedStepForUser() {
+        if performCurrentGuidedStepInChromeIfPossible() { return }
         guard guidedWalkthrough.currentTargetStatus == .located,
               let targetLocation = guidedWalkthrough.currentTargetLocation,
               let currentStep = guidedWalkthrough.plan?.currentStep else { return }

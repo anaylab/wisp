@@ -68,7 +68,7 @@ nonisolated enum ChromeInPagePointingPolicy {
     static let pointingMarkLifetimeSeconds: TimeInterval = 15
     /// How long Wisp waits for the extension before drawing on the overlay
     /// after all. A snapshot is ~50–200ms; a stuck page shouldn't hold the answer.
-    static let findTimeoutSeconds: TimeInterval = 1.5
+    static let findTimeoutSeconds: TimeInterval = 2
     /// Longest label shown beside an in-page mark.
     static let maximumLabelCharacters = 40
 

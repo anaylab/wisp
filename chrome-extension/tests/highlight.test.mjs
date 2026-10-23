@@ -219,3 +219,17 @@ test("injecting twice keeps the first highlighter and its marks", () => {
   assert.equal(loaded.highlighter.clear().cleared, true);
   assert.equal(loaded.highlighter.clear().cleared, false);
 });
+
+test("a walkthrough step can ask not to be dismissed by Esc", () => {
+  const page = makePage();
+  const loaded = loadHighlighter(page.fakeDocument);
+  loaded.highlighter.show({ dismissOnEscape: false, items: [{ elementId: "e1", kind: "step", stepNumber: 1, label: "Settings" }] });
+  loaded.dispatchToWindow("keydown", { key: "Escape" });
+  assert.equal(loaded.highlighter.state.marks.length, 1);
+  assert.equal(loaded.sentMessages.length, 0);
+
+  // The next ordinary mark is dismissable again.
+  loaded.highlighter.show({ items: [{ elementId: "e2", kind: "ring" }] });
+  loaded.dispatchToWindow("keydown", { key: "Escape" });
+  assert.equal(loaded.highlighter.state.marks.length, 0);
+});

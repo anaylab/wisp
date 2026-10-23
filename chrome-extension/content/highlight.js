@@ -62,6 +62,9 @@
     isFramePending: false,
     // Element ids whose real clicks Wisp is waiting for.
     watchedElementIDs: [],
+    // A walkthrough step isn't dismissed by Esc: the page may use Esc to
+    // close its own dialog, and Esc in Wisp doesn't end a walkthrough either.
+    dismissesOnEscape: true,
     areDocumentListenersInstalled: false,
   };
 
@@ -269,7 +272,8 @@
   }
 
   function handleKeyDown(event) {
-    if (event.key === "Escape" && highlighterState.marks.length > 0) dismissMarks("escape", null);
+    if (event.key !== "Escape" || !highlighterState.dismissesOnEscape) return;
+    if (highlighterState.marks.length > 0) dismissMarks("escape", null);
   }
 
   // Only clicks a person made count (`isTrusted`). Wisp's own "do it for me"
@@ -306,8 +310,9 @@
 
   // MARK: - Entry points
 
-  function show({ items = [], color } = {}) {
+  function show({ items = [], color, dismissOnEscape = true } = {}) {
     removeAllMarks();
+    highlighterState.dismissesOnEscape = dismissOnEscape !== false;
     const requestedItems = Array.isArray(items) ? items.slice(0, MAXIMUM_MARK_COUNT) : [];
     const badgeNumbers = badgeNumbersFor(requestedItems);
     const shownElementIDs = [];
