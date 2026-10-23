@@ -1,13 +1,53 @@
 # Wisp Tabs → Wisp in Chrome: implementation workspace
 
-Status: planned, nothing built. This folder is the hand-off for implementing the Chrome extension
-roadmap with Claude Code sessions, one session per phase.
+Status: **all 13 phases built** and merged into `feature/chrome-extension` (extension 2.0.0). Every suite
+passes; none of it has been tried by hand in a real browser yet. That's `manual-checklist.md`.
 
-- `README.md` (this file): the goal, the phase order, and the rules every session follows.
-- `contracts.md`: the shared protocol, file layout and permission model. Every phase builds against
-  it, so sessions running at the same time don't collide.
-- `prompts/NN-*.md`: one self-contained brief per phase. Paste a prompt into a new Claude Code session
-  (or start a session with it), working in a fresh worktree.
+- `README.md` (this file): the goal, what shipped, what didn't, the phase order, and the rules every
+  session followed.
+- `contracts.md`: the shared protocol, file layout, permission model and safety rules. Binding for any
+  further work.
+- `manual-checklist.md`: every hands-on check the phase briefs asked for, in one sitting's order.
+- `prompts/NN-*.md`: the brief each phase was built from.
+
+The user-facing description (install, permissions, everything you can say, privacy) is
+[`chrome-extension/README.md`](../../chrome-extension/README.md); the architecture is in `CLAUDE.md` →
+Architecture → Browser extension.
+
+## What shipped
+
+| Phase | PR | What it does |
+|---|---|---|
+| 01 foundation | anaylab/wisp#42 | ES-module service worker, request dispatcher, events, capabilities, optional permissions, options page, node test harness |
+| 02 page reading | anaylab/wisp#43 | `getPageText` / selection / outline; page text instead of a screenshot for content questions; `chrome_read_tab`; "add this page to my brain" |
+| 03 DOM controller | anaylab/wisp#47 | `ExtensionBrowserController`: browser tasks in a background tab in the Wisp group, cross-origin frames, one decoder for both controllers |
+| 04 tab life | anaylab/wisp#45 | Tab sessions (save/restore), "clean up old tabs", "triage my tabs" |
+| 05 in-page pointing | anaylab/wisp#48 | Marks drawn inside the page that follow the element; walkthrough steps finished by real clicks |
+| 06 ask about this | anaylab/wisp#49 | Context menu, omnibox `w`, ⌘⇧Y; the selected part rides the next questions |
+| 07 downloads | anaylab/wisp#46 | Download concierge: file / brain / ignore, rules, undo; the extension never touches files |
+| 08 page watchers | anaylab/wisp#50 | In-page watchers (text, numbers, settling), reloading watches, browser automation triggers |
+| 09 focus mode | anaylab/wisp#44 | Collapse/mute/group off-task tabs for a while, restore after; study-block auto-start |
+| 10 site helpers | anaylab/wisp#51 | Canvas assignment pages ↔ checklist; Meet/Zoom captions → "what did I miss" |
+| 11 research mode | anaylab/wisp#53 | Multi-tab research with verified quotes, text-fragment citations, Save to Brain |
+| 12 form helper | anaylab/wisp#52 | Fill forms from the Me card and me page, behind an editable card, never secrets, never submits |
+| 13 polish | (this phase) | Other Chromium browsers (a connection per browser profile, the active browser, route holds), one Browser settings card, a §6 audit with fixes, docs, 2.0.0 |
+
+## What didn't ship, and known gaps
+
+- **Nothing has been run by hand** in a real browser with the real Wisp. `manual-checklist.md` lists it all.
+- **Other browsers** are tested by rule and by one live check (finding the app behind a socket), not with Arc,
+  Brave, Vivaldi, Opera or Chrome Canary connected, nor two browsers at once.
+- **Two profiles of one browser** stay connected side by side, but Wisp can't tell which profile's window is in
+  front, so it keeps the one it was using (or the first).
+- **Only the active browser's events reach Wisp.** A download finished in a browser you aren't using isn't
+  offered; a page watch keeps its browser active until it ends, so its match isn't lost.
+- **AppleScript paths stay Chrome/Safari only**: plain tab commands ("new tab", "go back") and the fallback
+  controller don't drive Edge, Arc or Brave.
+- **The close-tabs card shows tab ids**, not titles, for the agent's `chrome_close_tabs` (it now always asks;
+  a titled card would need the input prepared before the card, as `chrome_close_stale_tabs` does).
+- The extension is still called **Wisp Tabs**, and its popup and options page still say "Chrome".
+- Ideas noted by phases but out of scope: per-site permissions instead of all sites, the browser's own search
+  engine for research (needs the `search` permission), titled cards for every tab-closing tool.
 
 ## Goal
 
@@ -55,7 +95,7 @@ the same shared file, keep that edit to a few lines so the merge stays trivial.
 - Each phase: `feature/chrome-ext-NN-short-name`, cut from the integration branch, PR back into it.
 - When the roadmap is done, `feature/chrome-extension` gets one PR into its base.
 
-## Rules every session follows
+## Rules every session followed
 
 1. Read `CLAUDE.md`, this README and `contracts.md` before writing code.
 2. **Never run `xcodebuild`** (it resets TCC permissions). Build with

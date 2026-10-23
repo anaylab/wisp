@@ -757,236 +757,133 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   the notch: "done — Safari left, Xcode right." + `flashIsland`. The agent gets `arrange_windows`
   (app + placement; `.writing(.localMachine)`, so it asks once and session auto-approve covers it; in
   the buddy **Screen** tool group).
-- **Chrome tab organizing** (the **Wisp Tabs** extension, `chrome-extension/` at the repo root,
-  loaded unpacked): AppleScript can't reach `chrome.tabGroups`, so a thin MV3 extension exposes tab
-  primitives (`getTabs`/`groupTabs`/`ungroupTabs`/`closeTabs`) and Wisp does all the deciding.
-  `ChromeExtensionBridge` listens on a WebSocket bound to **127.0.0.1:47823** (Network.framework;
-  `requiredInterfaceType = .loopback` still bound `*`, so it uses `requiredLocalEndpoint`) and
-  **rejects any handshake whose `Origin` isn't `chrome-extension://kpblnefdnmlodeagdnfodnbbdbkacnce`**.
-  That ID is pinned by the `key` in the manifest, and a web page can't forge `Origin`. The extension
-  dials in (a service worker can't listen), pings every 20s to stay alive, and an alarm retries every
-  30s. `ChromeTabOrganizer` plans per window and only touches **loose, unpinned tabs** (a tab joins an
-  existing group only when it has the exact same name, so re-running is incremental). It groups by site
-  (`ChromeSiteNamer`, deterministic) or by topic (one text-only model call listing tabs as 1…N, since
-  page titles are untrusted and the parsed reply can only name listed numbers; falls back to site). It
-  also closes duplicates (`ChromeDuplicateTabFinder`: keeps the showing tab, never closes pinned or
-  audible tabs). Plain commands ("organize my tabs", "group my tabs by site", "close duplicate tabs",
-  "ungroup my tabs") are recognised by `ChromeTabCommandRouter` inside `BrowserCommandRouter`
-  (`.chromeTabs`) and run without the model's tool choice, like tab commands and without agent mode. The
-  agent gets `chrome_list_tabs`/`chrome_organize_tabs`/`chrome_close_duplicate_tabs`/`chrome_close_tabs`/
-  `chrome_ungroup_tabs`/`chrome_focus_tab`/`chrome_pin_tabs`/`chrome_mute_tabs`/`chrome_move_tabs_to_new_window` (browser scope); plain commands also cover collapse/expand groups and mute/unmute tabs. The extension needs no new permissions for these (reload it to pick them up). Status and install help live in the Agent tab's Chrome Tabs card.
-  **Foundation (1.1.0, `docs/chrome-extension/`)**: the extension is the base for a 13-phase roadmap, and
-  `docs/chrome-extension/contracts.md` is binding for it. The service worker is an ES module: `background.js`
-  only wires `lib/bridge.js` (socket, keep-alive, reconnect alarm, request dispatcher over `registerHandlers`
-  maps, fire-and-forget `sendEvent`; nothing is queued while disconnected), `lib/capabilities.js`,
-  `lib/limits.js` (text ≤20,000 chars, lists ≤500, `truncated: true`), `handlers/*.js` and `events/*.js`. The
-  manifest is written in full for every phase (optional `scripting`/`downloads`/`<all_urls>`,
-  `"incognito": "not_allowed"`, omnibox `w`, an `ask-wisp-about-page` command). **Capabilities**
-  (`ChromeExtensionCapability`: `tabs` always, `pages.read` = scripting + `<all_urls>`, `downloads`) come in
-  `hello` and again as a `capabilities` message on every permission change; the bridge keeps them in
-  `grantedCapabilities` (cleared on disconnect). Wisp can't grant a permission (Chrome prompts only from a click
-  in an extension page), so the Chrome Tabs card lists each capability and its button calls
-  `openPermissionsPage`, which opens the extension's `options.html` with Allow/Remove buttons. **Events**
-  (`{"type":"event"}`: `tab.created`/`tab.updated` (status/url/title/audible, 250ms per-tab debounce)/
-  `tab.removed`/`tab.activated`/`window.focused`, never incognito) go out on `extensionEventPublisher` as
-  `ChromeExtensionEvent`s; subscribers filter by name and decode the payload themselves, and the bridge knows no
-  event by name. Frames are read by the pure `ChromeExtensionIncomingMessage.parse` (16 MB frame cap; a 1.0.0
-  hello without capabilities reads as `tabs`). `sendRequest(…, timeoutSeconds:)` waits up to 30s and passes
-  `params.timeoutSeconds` to the extension. Extension tests: `node --test chrome-extension/tests/` against
-  `tests/fake-chrome.mjs`.
-  **DOM controller (phase 03)**: `ExtensionBrowserController` is a second `BrowserController`, carried over the
-  bridge to `handlers/dom-controller.js` and the injected `content/dom-agent.js` (a port of the AppleScript snapshot
-  JS: same `e7` ids stamped as `data-wisp-id`, dialog → in view → below order, labels/roles/states, React-safe setter,
-  pointer-event sequence; state on `window.__wispAgent`, so re-injection is a no-op). Both controllers' snapshot JSON is
-  decoded by `BrowserPageSnapshotDecoding`, so the page text the planners, validator and prompts read is identical; a
-  shared fixture (`Tests/ChromeExtDOMController/snapshot-fixture.json`) is checked by both the node and Swift suites.
-  The `BrowserController` requirements are now `async` (the AppleScript controller's synchronous methods still satisfy
-  them; the extension awaits the socket instead of blocking the main actor). `BrowserControllerSelector` picks the
-  extension per task (and per `read_page`/`click_element`) when it is connected, has `pages.read` and Safari isn't in
-  front, otherwise AppleScript; `AgentToolRegistry.browserController(servingRequest:)` logs which one served it. With the
-  extension the task tab opens **in the background** inside a purple **Wisp** tab group (expanded while working,
-  collapsed when idle unless the user is looking at it), addressed by its real tab id; `tab.removed` for it (or a
-  "No tab with id" reply) means stop (`.dedicatedTabClosed`). Cross-origin frames (found with `webNavigation.getAllFrames`,
-  ≤8) are read too, ids prefixed `f<frameId>e<n>`. Settling is one `waitForSettled` request (load, then 400ms of DOM quiet,
-  ≤3s). Screen points for the cursor marker come from the element's client rect + `chrome.windows.get`, only while the
-  tab is showing; `captureVisibleTab` (the `look` fallback) refuses a background tab. `lib/page-access.js` refuses
-  chrome://, extension, devtools, Web Store, data:/javascript: pages and (unless allowed) file://, which is read-only;
-  `[data-wisp-ignore]` regions and one-time-code fields are never listed or typed into. Events `nav.committed` /
-  `nav.completed` (main frame only). Tab commands (new tab, back…) still go through AppleScript.
-  **Page reading (phase 02)**: with `pages.read`, `getPageText`/`getSelection`/`getPageOutline` inject
-  `content/read-page.js` (on demand, top frame) and return a page's main text (Readability-style, written from scratch:
-  `<main>`/a dominant `<article>` over the body, nav/aside/footer/hidden/cookie furniture dropped, headings as `#`, list
-  items as `- `, table rows as `a | b`), metadata and word count, capped at 20,000 chars. Form controls are never read and
-  `[data-wisp-ignore]` is skipped; chrome://, extension, devtools, Web Store and incognito pages are refused, `file://`
-  only with Chrome's file-access switch. A turn whose question is about the page's *content* (`ChromePageContentRequestClassifier`,
-  biased toward no; any look/place/control word keeps the screenshot) while Chrome is frontmost and the extension may
-  read pages sends that text instead of the screenshot (`CompanionManager.chromePageTextReplacingScreenshot`, run beside
-  the capture, ≤4s, ≥25 words else the screenshot stays). The text rides the per-turn context block (stripped from history
-  like `a`/`t` ids), fenced as page DATA and trimmed to 6k chars for the local model / 20k for cloud (`ChromePageTextPrompt`);
-  History gets a "Read the Chrome tab's text instead of a screenshot" step. Agent tools `chrome_read_tab` (tab by id, title
-  or address fragment, `ChromeTabReferenceResolver` never guesses) and `chrome_read_selection` (read-only). "Add this page
-  to my brain" in Chrome enqueues the tab's text (`BrainCommandTargetResolver.resolvePreferringChromeExtensionText` →
-  `BrainIngestQueue.enqueue(text:title:sourceWebPageURL:)`, URL kept as the source), falling back to fetching the URL. The
-  extraction tests need `npm install` in `chrome-extension/` (linkedom, dev-only; skipped with a reason without it).
-  **Tab life (phase 04, `tabs` capability only)**: **tab sessions** ("save these tabs as thesis research", "save this
-  window", "restore thesis research", "what tab sessions do i have") keep URLs, titles, pinned state and group
-  titles/colours — never Chrome's ids — in `chrome-tab-sessions.json` (0600, 200 max, same name replaces; a dated
-  "Tabs Oct 22" when unnamed). Restoring opens each saved window as a new window through the extension's batched
-  `openTabs` (one request per section: pinned, each group, each run of loose tabs; ≤60 tabs a request, only the
-  window's first tab active); names match case/punctuation-insensitively and exactly, never fuzzily. **"Clean up old
-  tabs"** (`ChromeStaleTabFinder`: loose, unpinned, silent, background tabs unused ≥14 days by `lastAccessed`, chrome://
-  only "including chrome pages") saves them as a "Cleanup Oct 21" session first, then closes them. **"Triage my tabs"**
-  (`ChromeTabTriagePlanner`) is duplicates + stale + groups (the existing topic call, else by site, over the tabs that
-  stay open) on one card, re-checked against open tabs when it runs. The stale sweep, triage and a restore of 10+ tabs
-  always show a card (`ChromeTabLifeCards`), even under session auto-approve (`ChromeTabLifeToolNames.mustAlwaysAsk` in
-  `ToolCallSafety`); saving and listing don't ask. `ChromeTabLifeCommandRouter` runs first inside
-  `ChromeTabCommandRouter` ("clean up old tabs" would otherwise be "organize"); "reopen X" without "session" only matches
-  a saved name, and "open X" needs "tabs"/"session" too. Agent tools: `chrome_save_tab_session`,
-  `chrome_restore_tab_session`, `chrome_list_tab_sessions` (read), `chrome_close_stale_tabs` (input prepared before the
-  card). Settings → Agent → Chrome Tabs has a Tab sessions row (Restore / Rename / Delete, delete asks) and an off-by-
-  default switch that also files a saved session in the brain as a `.userAuthored` `source` page of links (brain on only;
-  sweeper copies never).
-  **Download concierge (phase 07, needs the `downloads` capability, off by default)**: the extension sends
-  `download.created`/`download.completed`/`download.failed` (absolute path, MIME, size, URLs, the source page and its
-  title when a tab still shows it, `dangerous`) and answers `getDownloads`/`showDownload`; it **never renames or moves
-  a file** — Wisp does, on disk. Its listeners attach at startup or the moment downloads are allowed (the API only
-  exists then). `DownloadConcierge` (switch + Edit rules… in the Chrome Tabs card) takes each `download.completed`,
-  plans it with the pure `DownloadFilingRules` (rules in `~/.wisp/download-rules.json`: extension/MIME/host/filename
-  words → folder + `{date}`/`{site}`/`{title}` template; no rule = same folder, page title for PDFs and images, else the
-  cleaned name; never changes the extension; collision-safe " 2"; refuses dangerous downloads, paths outside home,
-  `~/Library` and hidden folders, re-checked after symlinks) and drops a notch card: File / Just brain / Ignore, with
-  "Add to brain" and "Always for <rule>" chips. A rule marked `always` files without a card and reports with an Undo
-  kept in memory 10 minutes. Quiet mode holds the card back (a ↓ badge in the flank instead). "Add to brain" uses
-  `BrainIngestQueue.enqueue(fileURL:)` for types the brain reads. Agent tools `chrome_list_downloads` (read) and
-  `chrome_file_download` (from/to resolved before the card; on `ToolCallSafety.alwaysAskBareToolNames`).
-  **Focus mode (phase 09, `tabs` only)**: "focus on my essay for 45 minutes" / "stop focus" (`ChromeFocusCommandParser`,
-  checked first in `ChromeTabCommandRouter` → `ChromeTabCommand.focus`; needs a length, a topic with "focus mode", or
-  "chrome"/"tabs" named — a bare "focus mode" is left to the model, it likely means macOS Focus), the `chrome_focus_mode`
-  tool (`.writing(.localMachine)`), `AutomationAction.startChromeFocus(topic:minutes:)` (no model, runs unattended,
-  never replaces a running session, Test run only previews), the "Focus block" draft card's **Also focus Chrome during
-  each block** switch (`Automation.focusesChromeDuringStudyBlocks`) and a **Focus** chip on study-block rows of the notch
-  checklist. `ChromeFocusPlanner` (pure) decides: on-task = allow-listed host or a shared content word with the topic;
-  distracting = the editable host list (YouTube, Reddit, X, Instagram, TikTok, Netflix); everything else is "unsure" and
-  stays put (only muted if audible). Off-task expanded groups collapse, loose on-task tabs group as "Focus", distracting
-  unpinned tabs optionally move to a minimised Later window (off by default). The extension's `applyFocusLayout` keeps
-  the prior state in `chrome.storage.session` under a restore token and `restoreFocusLayout` puts it back, skipping tabs
-  closed or moved meanwhile. **Nothing is ever closed.** `ChromeFocusSession` runs one session at a time with a
-  `WispTimerStore` countdown (notch timer card; its Cancel = stop), persists only token/topic/end date, and on the next
-  launch restores (never resumes) a session a quit interrupted, retrying pending tokens whenever the extension connects.
-  It also starts focus when an opted-in approved study block (`JobsEngine.approvedStudyBlocks`) begins, once per block
-  (`ChromeFocusStudyBlockPolicy`). Settings live in the Chrome Tabs card's Focus mode row (`ChromeFocusSettings`).
-  **In-page pointing (phase 05, `pages.read`)**: when Chrome is in front and the extension can read pages
-  (`ChromeInPagePointingPolicy`, pure), a fast-pointing target or a reply's `[POINT:]`/`[BOX:]`/`[HIGHLIGHT:]` whose label
-  names an element of the front tab, and whose screen point lies in Chrome's front window, is drawn **inside the page**
-  (`content/highlight.js`: closed shadow root, ring / box / band / numbered step badge, the user's marker colour, follows the
-  element through scroll/resize/zoom with `ResizeObserver` + capture-phase scroll + rAF, scrolls it into view once, no pulse
-  under reduced motion) instead of on the overlay; the element is found with `findElements` (`elementLimit` 150) and chosen
-  by fast pointing's own word scoring (`ChromeInPageElementMatcher`, ≤3 equal places, declines ties it can't mark). Anything
-  not found stays on the overlay, and outside Chrome nothing changes (`applyPointingAnnotationsPreferringChromePage`).
-  Plain marks clear after 15s, on Esc, a click on their label (`page.highlightDismissed`) or the next question
-  (`clearScreenAnnotations` → `clearHighlights`). **Guided walkthroughs in Chrome** look for each step in the page first
-  (`markCurrentGuidedStepInChromeIfPossible`, before the screen search each try), mark it as a numbered step that page Esc
-  doesn't dismiss, and finish it on the page's **trusted** click (`watchClicks` → `page.elementClicked`) instead of the global
-  mouse-down matcher; step 1 drawn from the model's coordinates moves into the page when found there. "Do it for me" clicks
-  through `clickElement` with the same irreversible-word refusal. A `nav.completed` in the walkthrough's tab re-finds the
-  current step at once. Dismissing a step's label ends the walkthrough.
-  **Ask Wisp about this (phase 06)**: right-click a selection / image / link / page → **Ask Wisp…** (plus **Add to Wisp brain**
-  for a page, link or selection), `w …` in the address bar, or ⌘⇧Y (`ask-wisp-about-page`). `events/ask-about-this.js` sends
-  `user.askAboutSelection/Image/Link/Page` and `user.omniboxQuestion` with ids and URLs only (the brain item sends the same
-  event with `intent: "addToBrain"`); while Wisp is away the toolbar badge shows "!" for 5s instead. `ChromeAskAboutThisRouter`
-  (started from `NotchWindowController.show()`) holds the chosen `ChromeAskAboutThisPart` — the DOM twin of Ask About a Part:
-  the composer opens with an "About: selected text ✕" chip (`ChromeAskAboutThisComposerChip`), the part rides every question
-  until a fresh composer, a spoken question or a screen region replaces it (`clearFocusedScreenRegion` clears it too), and the
-  turn (`chromeAskAboutThisTurnInput`, one hook beside the phase 02 page-text task) carries it fenced as page DATA, skipping the
-  screenshot unless the question is about looks or places (`ChromeAskAboutThisContext.questionAsksHowItLooks`). The selection is
-  read with `getSelection` when the menu is clicked (else Chrome's menu text; nothing readable, e.g. a Google Doc's canvas →
-  "i couldn't read that selection"); an image is **downloaded by Wisp** at send time (`ChromeAskImageDownloader`: https only,
-  ≤10 MB counted while reading, image types only, no cookies/cache, no redirect off https — a user-asked fetch of an address
-  Chrome already loaded) and sent as a downscaled JPEG (896px local / 1568px cloud), falling back to the screenshot; a link sends
-  its words (selection, or looked up in a `snapshotPage`) and address and fetches nothing behind it; a page sends its text
-  (≥25 words) or else the screenshot. An omnibox question runs at once (`submitTextComposerQuery`, Chrome keeps focus) and reads
-  the tab only when it is about the page (`ChromePageContentRequestClassifier`). Add to brain: selection text / page text
-  (`readPage`, else its URL is fetched) / the link's URL into `BrainIngestQueue`, reported in the notch.
-  **Page watchers (phase 08, `pages.read`)**: "tell me when this tab says Deployed", "tell me when the price drops below $80",
-  "check this page every 10 minutes and tell me when it says in stock". `ScreenWatchRequestParser` recognises them (it gained a
-  `numberCrosses` condition, `WatchedNumberParsing` for "$1,299.99"/"1.299,99 €", and check/refresh/reload prefixes); the pure
-  `ChromePageWatchRouter` then picks a **tab watch** when the user's app is Chrome with the extension connected and `pages.read`,
-  and the words don't name the screen/terminal/window, else the screen watch as before (`CompanionManager.directWatchReply`).
-  The extension's `content/page-watch.js` runs a MutationObserver in the tab (≤1 evaluation a second, the screen watcher's rules,
-  `[data-wisp-ignore]` left out), `handlers/page-watchers.js` keeps watches in `chrome.storage.session` with their evaluator state
-  (re-injected on `nav.completed` and worker restart, so a reload continues a watch), max 5, 24h, a once-a-minute sweep alarm, and
-  ends one on tab closed / another site / unreadable page. Reloading watches open their own background tab in the Wisp group
-  (never the user's tab), reload it on an alarm (≥5 min) and leave it open after a match. Events `watch.matched` / `watch.ended`;
-  endings are also kept an hour in `listPageWatches().recentlyEnded`, which `ChromePageWatchStore` reads on every connect
-  (`ChromePageWatchReconciliation`: the extension is the truth; unknown watches are adopted). Endings mirror screen watches:
-  notification (silent in quiet mode), island flash, notch line when idle, spoken in voice mode; the notch live section lists
-  them (`ChromePageWatchRow`) with Stop. `watch_screen` gained `in_chrome_tab`/`chrome_tab`/`reload_every_minutes` and
-  `number_below`/`number_above` (one tool, so the local model's 6-tool budget isn't split); `stop_screen_watch` and "stop
-  watching" stop both kinds. Quick add yields to a recognised watch request (a one-off "tell me when …" is a watch; "whenever …"
-  stays an automation). **Browser automation triggers**: `AutomationEvent.chromePageWatchMatched(watchDescription:)`,
-  `.chromeTabOpened(host:)` (10-minute cooldown) and `.chromeTimeOnSite(host:minutes:)` (once per visit), with deterministic
-  draft phrases ("when I open youtube …", "if I'm on reddit for 30 minutes …", "when my page watch for X matches …").
-  `ChromeBrowsingActivityMonitor` (started only once such an automation exists) follows the tab events, the frontmost app and
-  idle time; the pure `ChromeTimeOnSiteAccumulator` counts a visit only while the site is the focused window's showing tab,
-  Chrome is in front and the user isn't idle (5 min without input, unless the tab plays sound) — pausing, not resetting; 15 min
-  away ends the visit. Event runs are unattended (`AutomationToolPolicy`); page text reaches the model only fenced as data.
-  **Site helpers (phase 10, `pages.read`)**: two content scripts registered with `chrome.scripting.registerContentScripts`
-  once reading pages is allowed (no manifest change). **Canvas** (`content/canvas-assignment.js`, matches any https
-  `/courses/*/assignments/*` but reads nothing unless the page has Canvas's markup): title, due date, points, rubric,
-  description. Wisp trusts only `*.instructure.com` or the saved feed's **host** (read from the Keychain, held in memory,
-  nothing else derived from the URL). `CanvasAssignmentChecklistMatcher` matches the page to the feed by UID
-  (`/assignments/1234` = `event-assignment-1234`), else title + due date, and to today's checklist / Wisp calendar / study
-  blocks. "is this on my checklist", "add this to today" (`JobsEngine.addCanvasItemToTodayChecklist`, through
-  `DayChecklistBuilder`'s `canvasItemsAddedToToday`, for today only) and "plan this" (`JobsEngine.proposeStudyBlocks(forCanvasItem:)`
-  + `approveStudyBlocks`, the same always-ask card) route only while a trusted assignment is the showing Chrome tab and
-  Chrome is in front. A newly opened, unlisted, not-past-due assignment drops a one-line **Add to today?** chip once
-  (`CanvasPageHelper`, switch in the Chrome Tabs card, default on, never during a call). **Meeting captions**
-  (`content/meeting-captions.js`, Meet calls and Zoom `/wc/`): with captions on, the page keeps a 30-minute rolling buffer
-  in its own memory (no audio, never stored, gone with the tab; selectors in one table, fails soft with "turn them on
-  with C"). "What did I miss" / "summarize the meeting so far" / "the last 5 minutes" (`MeetingCaptionsRequestParser`,
-  only while a call tab is open) → `getMeetingCaptions` → one text-only model turn with the captions fenced as data
-  (newest kept within the 6k/20k budget) → the notch, its `[SAY:]` line spoken in voice mode (`runDirectBrowserRoute`
-  now honours a `[SAY:]` tag). Routed as `ChromeTabCommand.siteHelper` inside `ChromeTabCommandRouter`; tab state comes
-  from tab events, reseeded from `getTabs` on connect (`ChromeSiteHelpers`). Tools `chrome_canvas_assignment`,
-  `chrome_meeting_captions` (read).
-  **Research mode (phase 11, `pages.read`)**: "research the best budget mechanical keyboards", "do some research on how mrna vaccines work
-  for my bio essay and save it to my brain" (`ResearchRequestParser`, conservative; `BrowserCommandRouter` → `.research`, checked before the
-  tab router) or the `chrome_research_topic` tool (`.writing(.localMachine)`, 10-minute tool timeout). One background task ("Research · <topic>",
-  `BackgroundTaskLauncher.startWork`, so it shows in History and talking carries on): Google's results open in a background tab in the Wisp group
-  and the result links are read from its DOM snapshot (no search API; Chrome's real default engine would need the `search` permission), then
-  `ResearchSourcePicker` takes 5 (local model) or 8 (cloud) distinct pages (Google redirects unwrapped, search/video/social sites skipped, one per
-  site, deduped by host + path), `openTabs` opens them inactive beside it, and each is read with `getPageText` once settled (<80 words skipped).
-  Writing: local = one map call per page (≤3,500 chars, up to 3 findings each with a quote) then one reduce call over the *checked* findings,
-  naming a finding per claim; cloud = one combine call (≤6,000 chars a page). All text-only, no tools, through `ModelAccessGate` at background
-  priority, pages only in the user message's data fences (`ResearchPrompts`). `ResearchReportAssembler` keeps a claim only when its quote (≤25
-  words) is really in its page (`ResearchCitationVerifier`: folded case/whitespace/curly quotes/dashes, the page's own text comes back), drops the
-  rest (counted and said), numbers sources by first citation, builds each claim's `#:~:text=` address and drops summary sentences naming a web
-  address (the one unquoted part). The decision of which pages to open is code's alone, so a page saying "ignore previous instructions" can only be
-  quoted (`Tests/HostileProviderAttack` has the case). Reports live in `ResearchSessionController.reports` for the launch (History keeps the text)
-  and appear on the **Chat page** as entries (`ResearchReportView`: numbered claims with their quote, clickable `[n]` and source rows, Save to
-  Brain, Copy, Close research tabs); the notch shows the short answer with **Open report** while idle. A citation focuses the source's tab and
-  marks the quote in the page (`highlightTextFragments` → `content/quote-highlight.js`, whitespace-free folded matching that skips form fields,
-  scripts and `[data-wisp-ignore]`, bands in the phase 05 highlight look, Esc clears); not found → the tab goes to the text-fragment address; tab
-  closed → reopened at it. **Save to Brain** (or "…and save it to my brain") = `ResearchBrainPages`: a `topics/` page (summary + cited points
-  linking their sources) and a `sources/` page per source, applied `.external` (append/create only). **Closing**: "done" (only while research tabs
-  are open) / "close the research tabs" / the report's button close them; tabs the user used (activated not by Wisp, or navigated elsewhere) ask
-  first with a card (`chrome_close_research_tabs`, on `ToolCallSafety.alwaysAskBareToolNames`; Cancel keeps those); after 30 idle minutes the
-  untouched ones close and used ones are left alone.
-  **Form helper (phase 12, `pages.read`)**: "fill this form" / "fill in my details" (`FormFillCommandParser`, whole-utterance
-  phrases, routed as `ChromeTabCommand.fillForm`) and the agent tool `fill_form` (`.browser`, `.writing`, on
-  `ToolCallSafety.alwaysAskBareToolNames`, so it always shows its card). `describeForm` (`content/form-helper.js`, top frame, on
-  top of the DOM agent's `e` ids and setter) lists a form's fields — label, kind, autocomplete, required, options, whether
-  something is typed in — **never a value**; hidden, transparent, off-screen and `[data-wisp-ignore]` fields aren't listed.
-  Passwords, payment, government ids, one-time codes and security questions are refused by type, autocomplete and every
-  describing word ("Email (or your password)" is a password field) in the content script and again in Swift
-  (`FormFillRefusal`, the same patterns). Values come only from the Me card (read by `ChromeFormFill`, asks Contacts access once)
-  and the brain's me page facts + summary (memory.md with the brain off), via `FormProfile`; the model's arguments are ignored
-  beyond `tab_id`. Mapping is autocomplete tokens, then label words (`FormFieldKeyMatcher`), then — for leftovers only — one
-  text-only model call that sees labels (fenced as page data) and key names, never values (`FormFieldLabelMappingPrompt`).
-  The prepared input holds one top-level `value_<id>` per proposal, so the card's one edit rule makes exactly those editable
-  (`FormFillCards`); refused fields show as "Won't fill", unknown ones as "You'll fill", and the footer says Wisp won't submit.
-  `fillFormFields` types with `pressEnter: false`, picks select options by exact text/value, skips fields the user filled
-  meanwhile, and refuses a tab that moved to another page (`expectedUrl`). Nothing clicks, submits or presses a key.
+- **Browser extension** (the **Wisp Tabs** extension, `chrome-extension/` at the repo root, 2.0.0, loaded unpacked in Chrome,
+  Arc, Brave, Edge, Vivaldi or a Chrome channel): Wisp's main way into the browser. AppleScript can't reach tab groups,
+  background tabs or cross-origin frames, so a thin MV3 extension carries out requests and reports events, and **Wisp
+  decides everything**. Nothing leaves the Mac because of it; each power past tabs is a permission the user grants in
+  the browser. `docs/chrome-extension/` holds the 13-phase roadmap, `contracts.md` (binding: wire protocol, method/event
+  names, permissions, safety) and `manual-checklist.md` (the hands-on checks no session could run).
+  - **Connection.** `ChromeExtensionBridge` listens on a WebSocket bound to **127.0.0.1:47823** (Network.framework;
+    `requiredInterfaceType = .loopback` still bound `*`, so it uses `requiredLocalEndpoint`) and **rejects any handshake
+    whose `Origin` isn't `chrome-extension://kpblnefdnmlodeagdnfodnbbdbkacnce`**, an ID pinned by the manifest's `key`
+    (a web page can't forge `Origin`). The extension dials in (a service worker can't listen), sends `hello` (version,
+    brand name, capabilities, a per-profile `instanceId`), pings every 20s to stay alive and retries on a 30s alarm.
+    Requests are `{id, method, params}` → `{id, result|error}`, 10s by default or `sendRequest(…, timeoutSeconds:)` up to
+    30s (passed on as `params.timeoutSeconds`); events are fire-and-forget `{"type":"event"}` frames published on
+    `extensionEventPublisher` as `ChromeExtensionEvent`s, which subscribers filter by name (the bridge knows no event
+    by name). Frames are read by the pure `ChromeExtensionIncomingMessage.parse` (16 MB cap; a hello without
+    capabilities reads as `tabs`). The service worker is an ES module: `background.js` only wires `lib/bridge.js`
+    (socket, keep-alive, dispatcher over `registerHandlers` maps — a method registered twice throws — and `sendEvent`;
+    nothing is queued while disconnected), `lib/capabilities.js`, `lib/limits.js` (text ≤20,000 chars, lists ≤500,
+    `truncated: true`), `lib/page-access.js`, `handlers/*.js`, `events/*.js` and on-demand `content/*.js`.
+  - **Several browsers (phase 13).** Each browser profile gets its own connection, named by the app that owns the
+    socket: `ChromeExtensionPeerProcess` finds the peer port's process with libproc and walks up to the regular app,
+    because Chrome Canary says "Google Chrome" and Arc/Vivaldi report only "Chromium"; the brand (`navigator.brave`, else
+    the `userAgentData` brand) stands in when that fails. The key is bundle id + `instanceId`
+    (`ChromiumBrowserCatalog.browserID`), so two profiles don't evict each other, and a newer socket with the same key
+    replaces the old one (a restarted service worker). Requests go to one **active browser**
+    (`ChromiumBrowserRouting`): while work Wisp started there holds it (`setActiveBrowserHeld(_:by:)` — the task tab, a
+    research run and its tabs, focus mode, page watches), it stays, since a tab id from one browser names a different tab
+    in another; otherwise the browser in front (`FrontmostAppTracker`'s last external app), else the current one, else
+    Google Chrome, else the earliest. Only the active browser's events are published, and `connectionState` /
+    `grantedCapabilities` describe it; a switch passes through `.waitingForExtension`, so features that re-read the
+    extension on connect re-read the new browser. "This tab" checks use `isActiveBrowser(bundleIdentifier:)`
+    (`ChromePageReader.isConnectedExtension`), so a page in Edge is never answered from Chrome. Selection
+    (`BrowserControllerSelector`): the extension when connected with `pages.read` and either its browser or a
+    non-browser is in front; AppleScript for Safari, or for Google Chrome in front when the extension is in another
+    browser; a Chromium browser without the extension is served by the active browser's extension.
+  - **Capabilities and settings.** `ChromeExtensionCapability`: `tabs` (always), `pages.read` (`scripting` +
+    `<all_urls>`), `downloads`, sent in `hello` and again on every permission change. Wisp can't grant one (the browser
+    prompts only after a click in an extension page), so Settings → Agent → **Browser** (`BrowserSettingsCard`) lists each
+    connected browser with **Allow…** per missing capability (`openPermissionsPage` to that browser, which opens
+    `options.html`), then the Tab sessions, download concierge, Canvas "Add to today?" and Focus mode rows, and a "What
+    Wisp can do in your browser" list. A feature missing its capability says so in plain words, or falls back to
+    AppleScript.
+  - **Safety (contracts §6).** Page-derived strings reach a model only inside the `<<< >>>` DATA fence
+    (`ChromePageTextPrompt.dataFenceNote`, defused), never in a system prompt — page text, selections, captions, form
+    labels, tab titles in `chrome_list_tabs` and topic grouping, download names. Content scripts never read password,
+    `cc-*`, `one-time-code`, `current/new-password` fields (each autocomplete token is checked) or `[data-wisp-ignore]`;
+    `lib/page-access.js` refuses browser pages, extension stores (Chrome Web Store, Edge Add-ons), data:/javascript:
+    and, unless allowed, file:// (then read-only), and every injection re-checks it (page watchers re-check before each
+    re-injection and end a watch whose tab lands on a refused page). Incognito never reaches the extension
+    (`"incognito": "not_allowed"`, and handlers check `tab.incognito` too). Context-menu selection text is forwarded
+    only from ordinary pages outside form fields. Closing tabs, the stale sweep, triage, big restores, filing a
+    download, filling a form and closing used research tabs always show a card, even under session auto-approve
+    (`ToolCallSafety.alwaysAskBareToolNames`, `ChromeTabLifeToolNames.mustAlwaysAsk`); clicks go through
+    `BrowserActionSafety` as before. Unattended runs get only tools that never prompt (`AutomationToolPolicy`). No
+    `eval`, remote code or `debugger`.
+  - **Tabs (`tabs`).** *Organizing*: `ChromeTabOrganizer` plans per window and only touches **loose, unpinned tabs** (a
+    tab joins an existing group only by exact name, so re-running is incremental), by site (`ChromeSiteNamer`) or topic
+    (one text-only model call over numbered, fenced titles; the reply can only name listed numbers; falls back to
+    site), and closes duplicates (`ChromeDuplicateTabFinder`: keeps the showing tab, never pinned or audible).
+    `ChromeTabCommandRouter` (inside `BrowserCommandRouter`, `.chromeTabs`, no agent mode needed) runs plain commands
+    without the model's tool choice, checking focus, tab life, site helpers and form fill first. Tools:
+    `chrome_list_tabs`/`organize`/`close_duplicate`/`close`/`ungroup`/`focus_tab`/`pin`/`mute`/`move_tabs_to_new_window`.
+    *Tab life (phase 04)*: **tab sessions** ("save these tabs as thesis research", "restore thesis research") keep URLs,
+    titles, pinned state and group titles/colours — never ids — in `chrome-tab-sessions.json` (0600, 200 max, same name
+    replaces; names match exactly, never fuzzily); restoring opens each window through batched `openTabs` (≤60 a
+    request). **"Clean up old tabs"** (`ChromeStaleTabFinder`: loose, unpinned, silent, background, unused ≥14 days)
+    saves them as a session first, then closes them; **"triage my tabs"** (`ChromeTabTriagePlanner`) is duplicates +
+    stale + groups on one card, re-checked when it runs. A brain switch can file saved sessions as `.userAuthored`
+    pages of links. *Focus mode (phase 09)*: "focus on my essay for 45 minutes" / "stop focus" (`ChromeFocusCommandParser`;
+    a bare "focus mode" is left to the model), `chrome_focus_mode`, `AutomationAction.startChromeFocus` and opted-in
+    study blocks (`ChromeFocusStudyBlockPolicy`). `ChromeFocusPlanner` keeps on-task tabs (allow-list or a shared topic
+    word), collapses off-task groups, groups loose on-task tabs as "Focus", mutes audible distractions and optionally
+    moves distracting tabs to a minimised Later window; `applyFocusLayout` keeps the prior state under a restore token
+    in `chrome.storage.session` and `restoreFocusLayout` puts it back. **Nothing is ever closed.** One session at a time,
+    a `WispTimerStore` countdown, restored (never resumed) after a quit.
+  - **Pages (`pages.read`).** *Reading (02)*: `getPageText`/`getSelection`/`getPageOutline` inject
+    `content/read-page.js` (main text Readability-style, headings `#`, lists `- `, rows `a | b`, 20k cap). A question
+    about the page's *content* (`ChromePageContentRequestClassifier`, biased toward no) while the active browser is in
+    front sends that text instead of the screenshot (`chromePageTextReplacingScreenshot`, ≤4s, ≥25 words), on the
+    per-turn context block (stripped from history like `a`/`t` ids), 6k chars local / 20k cloud. Tools `chrome_read_tab`
+    (`ChromeTabReferenceResolver` never guesses) and `chrome_read_selection`; "add this page to my brain" enqueues the
+    tab's text. *DOM controller (03)*: `ExtensionBrowserController` is a second `BrowserController` over
+    `handlers/dom-controller.js` + `content/dom-agent.js` (a port of the AppleScript snapshot JS: `e7` ids as
+    `data-wisp-id`, dialog → in view → below, React-safe setter, pointer events; `f<frameId>e<n>` for ≤8 cross-origin
+    frames). Snapshot JSON from both controllers goes through `BrowserPageSnapshotDecoding` (a fixture checked by node
+    and Swift). The task tab opens **in the background** in a purple **Wisp** group, addressed by its real id;
+    `tab.removed` means stop. Settling is one `waitForSettled`; `captureVisibleTab` refuses a background tab. Tab
+    commands (new tab, back…) still use AppleScript. *In-page pointing (05)*: with the active browser in front
+    (`ChromeInPagePointingPolicy`), a fast-pointing target or a `[POINT:]`/`[BOX:]`/`[HIGHLIGHT:]` whose label names an
+    element of the front tab is drawn **inside the page** (`content/highlight.js`, closed shadow root, follows the
+    element, marker colour) instead of on the overlay, chosen by fast pointing's word scoring
+    (`ChromeInPageElementMatcher`); marks clear after 15s, on Esc, a label click or the next question. Guided
+    walkthroughs mark each step in the page and finish it on the page's trusted click (`watchClicks`); "Do it for me"
+    uses `clickElement` with the irreversible-word refusal. *Ask Wisp about this (06)*: right-click → **Ask Wisp…** /
+    **Add to Wisp brain**, `w …` in the address bar, ⌘⇧Y. `ChromeAskAboutThisRouter` holds the chosen part (the DOM twin
+    of Ask About a Part: an "About: selected text ✕" chip, riding every question until replaced), read with
+    `getSelection`, an image downloaded by Wisp (`ChromeAskImageDownloader`: https, ≤10 MB, no cookies), a link's words
+    and address, or the page's text, all fenced; the screenshot goes only when the question is about looks or places.
+    *Page watchers (08)*: "tell me when this tab says Deployed", "…the price drops below $80", "check this page every 10
+    minutes…" — `ScreenWatchRequestParser` (with `numberCrosses`, `WatchedNumberParsing`) then `ChromePageWatchRouter`
+    picks a tab watch when the active browser is in front with `pages.read`. `content/page-watch.js` runs a throttled
+    MutationObserver (the screen watcher's rules); `handlers/page-watchers.js` keeps ≤5 watches for ≤24h in
+    `chrome.storage.session` with their state, re-injects on load, and gives reloading watches their own background tab;
+    `ChromePageWatchStore` reconciles on connect (the extension is the truth). Endings mirror screen watches. Browser
+    automation triggers: `chromePageWatchMatched`, `chromeTabOpened(host:)` (10-minute cooldown) and
+    `chromeTimeOnSite(host:minutes:)` (`ChromeTimeOnSiteAccumulator`: the focused window's showing tab, browser in front,
+    user not idle). *Site helpers (10)*: scripts registered with `registerContentScripts` once pages may be read.
+    **Canvas** assignment pages (trusted only on `*.instructure.com` or the saved feed's host): "is this on my
+    checklist", "add this to today", "plan this" (the always-ask study-block card), and a one-time **Add to today?**
+    chip. **Meet/Zoom captions**: a 30-minute in-page buffer (no audio, never stored) behind "what did I miss" — one
+    text-only turn with the captions fenced. *Research mode (11)*: "research …" or `chrome_research_topic` runs one
+    background task: Google results in a Wisp-group tab, `ResearchSourcePicker` (5 local / 8 cloud distinct pages, code
+    decides which), `openTabs`, `getPageText`, then map/reduce (local) or one combine call (cloud), all fenced and
+    text-only. `ResearchReportAssembler` keeps a claim only when its quote is really in its page
+    (`ResearchCitationVerifier`); reports appear on the Chat page with citations that highlight the quote in the page
+    (`highlightTextFragments`); Save to Brain writes `.external` pages; used research tabs close only after a card.
+    *Form helper (12)*: "fill this form" / `fill_form` (always asks). `describeForm` lists fields, **never values**,
+    refusing passwords, payment, government ids, one-time codes and security questions by type, autocomplete and every
+    describing word (again in Swift, `FormFillRefusal`). Values come only from the Me card and the brain's me page
+    (`FormProfile`); unmapped labels go to one fenced, labels-only model call. The card makes each proposed value
+    editable; `fillFormFields` never presses Enter, clicks or submits.
+  - **Downloads (`downloads`, phase 07, off by default).** The extension reports `download.created/completed/failed` and
+    answers `getDownloads`/`showDownload`; it **never renames or moves a file**. `DownloadConcierge` plans each finished
+    download with `DownloadFilingRules` (`~/.wisp/download-rules.json`; page title for PDFs and images; never changes the
+    extension; collision-safe; refuses dangerous files, paths outside home, `~/Library` and hidden folders, re-checked
+    after symlinks) and drops a notch card (File / Just brain / Ignore, "Always for <rule>"); an `always` rule files
+    without a card and keeps Undo 10 minutes. Tools `chrome_list_downloads` and `chrome_file_download` (always asks).
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1287,21 +1184,21 @@ Grouped by what they do. Line counts are approximate.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `leanring_buddyApp.swift` | ~105 | Menu bar app entry point. `@NSApplicationDelegateAdaptor` with `CompanionAppDelegate`, which creates `MenuBarPanelManager` and starts `CompanionManager`. |
-| `CompanionManager.swift` | ~3150 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
-| `BuddyDictationManager.swift` | ~940 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
-| `GlobalPushToTalkShortcutMonitor.swift` | ~270 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
+| `CompanionManager.swift` | ~4480 | Central state machine and integration hub. Owns dictation, shortcut monitoring, screen capture, the chat client, TTS, overlays, annotations, agent mode and tool confirmations. `runSkill(named:)` is the notch's one-click launcher. Also exposes the Dynamic Island projection: the computed `islandState` (`WispIslandState`, derived from `voiceState` + `pendingToolConfirmation` + reply/card presence) and `flashIsland(_:)` / `islandFlash` for transient success/error moments. |
+| `BuddyDictationManager.swift` | ~1110 | Push-to-talk voice pipeline: mic capture via `AVAudioEngine`, permission checks, transcript finalisation, live audio levels for the waveform. |
+| `GlobalPushToTalkShortcutMonitor.swift` | ~350 | System-wide shortcuts via a listen-only `CGEvent` tap: the hold chord plus an additive bare-modifier double-tap recogniser (hands-free dictation). |
 | `ShortcutBindingStore.swift` | ~210 | Data-driven source of truth for shortcuts: hold chord, hands-free enable + modifier, and the letters for Ask About a Part (`AskAboutPartKey`) and Save Worked Solution. Persists to UserDefaults, resets to defaults, and pushes live values to the tap's statics. |
 | `TextComposerWindowController.swift` | ~230 | The tap-to-type text composer: a keyable floating panel (activates the app for typing, Return to send, Esc to dismiss) whose typed question runs through the normal screenshot turn. |
 | `DictationSettingsStore.swift` | ~110 | Source of truth for dictation language + custom dictionary. Persists to UserDefaults; read by `BuddyDictationManager` when starting a session. |
 | `DictationTab.swift` | ~200 | Settings → Dictation: language picker (Automatic + on-device locales) and a removable-chip custom dictionary editor. |
 | `CursorAppearanceStore.swift` | ~90 | Source of truth for the cursor/annotation colour (blue/red/yellow/green). Observed by the overlay, annotation layer, and brand glyphs so a change applies live. |
 | `AgentSettingsStore.swift` | ~80 | Source of truth for the agent working folder. Persists to UserDefaults; the resolved path is readable off the main actor for the tool registry. |
-| `AgentTab.swift` | ~480 | Settings → Agent: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), announcements, an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`) and the Chrome Tabs card (connection, one row per `ChromeExtensionCapability`, "Choose what Wisp can do in Chrome…"). Permissions moved to Settings → General. |
+| `AgentTab.swift` | ~320 | Settings → Agent: agent folder (folder picker + reset), session auto-approve toggle (its subtitle names what still asks — the `ToolCallSafety` floor), announcements, an Apple Shortcuts card (availability, shortcut count, Refresh via `ShortcutsBridge`) and the `BrowserSettingsCard`. Permissions moved to Settings → General. |
 | `BuddyChatTypes.swift` | ~685 | Shared value types: `JSONValue`, `BuddyContentBlock`, `BuddyChatMessage`/`BuddyChatTurn`, `BuddyToolDefinition`, `ConversationTranscript`, and the `AgentTaskRecord`/`AgentStepRecord` history records. |
 | `AppBundleConfiguration.swift` | ~30 | Reads Info.plist string keys (`VoiceTranscriptionProvider`, `VoiceTTSProvider`, `AgentModeEnabled`, `OllamaModel`, …) from the built bundle. |
 | `DictatedTextInserter.swift` | ~135 | Dictate mode's text insertion into the focused field: Accessibility selected-text for native fields, clipboard + synthesised ⌘V for web content and apps where AX does nothing. |
 | `ScreenshotReuseCache.swift` | ~125 | Resends the previous screenshot's exact bytes when the screen hasn't perceptibly changed, so Ollama's image cache hits instead of re-encoding. |
-| `CompanionScreenCaptureUtility.swift` | ~150 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. Starts OCR (`ScreenTextRecognizer`) on each captured frame. |
+| `CompanionScreenCaptureUtility.swift` | ~240 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. Starts OCR (`ScreenTextRecognizer`) on each captured frame. |
 
 ### Local model stack
 | File | Lines | Purpose |
@@ -1311,7 +1208,7 @@ Grouped by what they do. Line counts are approximate.
 | `OllamaProvider.swift` | ~294 | Presents `LocalOllamaAPI` as a `ModelProvider`; owns the `[TOOL:...]` text convention that fakes tool calls for the local model. |
 | `AnthropicProvider.swift` | ~680 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, adaptive thinking + `effort` (Opus/Sonnet 5.5), signed thinking and web blocks kept as `.providerReplay` and resent verbatim within a tool loop (`drop_block` for stale ones), prompt caching (system breakpoint + automatic), server-side `web_search`/`web_fetch` on tool-bearing turns (resumes `pause_turn`), `fallbacks: "default"` for refusals, no sampling params on models that reject them. |
 | `AnthropicModelSettings.swift` | ~140 | Claude's settings (UserDefaults): `AnthropicModelChoice` (Opus 5.5 default / Sonnet 5.5 / Haiku 4.5, with each model's API differences as data), `AnthropicEffortLevel` (low default), and the web-access switch. Edited in Settings → Model, read by `ModelProviderFactory`. |
-| `ClaudeSubscriptionProvider.swift` | ~430 | Claude over the user's own `claude` CLI (subscription, no key): per-turn stream-json process with all CLI tools off, inline screenshot, `[TOOL:]` text tags, failure-text → `BuddyChatError`, plus `ClaudeSubscriptionStatus` (`claude auth status`). Tested by `Tests/AgentRuntimeIntegration` (live round trip with `WISP_LIVE_CLAUDE=1`). |
+| `ClaudeSubscriptionProvider.swift` | ~520 | Claude over the user's own `claude` CLI (subscription, no key): per-turn stream-json process with all CLI tools off, inline screenshot, `[TOOL:]` text tags, failure-text → `BuddyChatError`, plus `ClaudeSubscriptionStatus` (`claude auth status`). Tested by `Tests/AgentRuntimeIntegration` (live round trip with `WISP_LIVE_CLAUDE=1`). |
 | `OpenAIProvider.swift` | ~435 | GPT as a bring-your-own-key `ModelProvider` over Chat Completions: tool results become separate `role:"tool"` messages. |
 | `GeminiProvider.swift` | ~415 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. |
 | `ModelProviderFactory.swift` | ~75 | Builds the `ModelProvider` for the current `BuddyChatProviderSelection`, reading a cloud provider's key from `ProviderKeychainStore`. Used by CompanionManager's turn path. |
@@ -1337,10 +1234,10 @@ Grouped by what they do. Line counts are approximate.
 ### Overlay and annotation
 | File | Lines | Purpose |
 |------|-------|---------|
-| `OverlayWindow.swift` | ~315 | Full-screen transparent overlay (one per screen, a non-activating `NSPanel`): hosts the tool-confirmation card, the command-mode badge, and the annotation layer (markers, boxes, arrows, highlights) via `OverlayContentView`. Draws nothing while idle. Also owns `ignoresMouseEvents` toggling, key focus only for an editable confirmation card (`setAllowsKeyboardFocus`), and the shared `Triangle` glyph. |
-| `CommandModeIndicator.swift` | ~135 | The push-to-talk gesture badge: `PushToTalkCommandMode` (Talk / Dictate / Type / Hands-free, with label, icon, destination) and `CommandModeIndicator`, the glass capsule the overlay shows under the notch to name the fired gesture. |
+| `OverlayWindow.swift` | ~380 | Full-screen transparent overlay (one per screen, a non-activating `NSPanel`): hosts the tool-confirmation card, the command-mode badge, and the annotation layer (markers, boxes, arrows, highlights) via `OverlayContentView`. Draws nothing while idle. Also owns `ignoresMouseEvents` toggling, key focus only for an editable confirmation card (`setAllowsKeyboardFocus`), and the shared `Triangle` glyph. |
+| `CommandModeIndicator.swift` | ~200 | The push-to-talk gesture badge: `PushToTalkCommandMode` (Talk / Dictate / Type / Hands-free, with label, icon, destination) and `CommandModeIndicator`, the glass capsule the overlay shows under the notch to name the fired gesture. |
 | `ScreenListeningGlow.swift` | ~100 | Ambient "Wisp is listening" cue: a breathing lavender (AI-activity accent) glow around every screen's edges, drawn by the overlay only while `voiceState == .listening`. Honours Reduce Motion (steady glow). |
-| `ScreenAnnotation.swift` | ~315 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. Also the id form (`[BOX:a12:label]`…) via an optional Accessibility-region resolver. |
+| `ScreenAnnotation.swift` | ~460 | Parses `[BOX:...]` / `[HIGHLIGHT:...]` / arrow tags. Corner format, lenient about separators. Also the id form (`[BOX:a12:label]`…) via an optional Accessibility-region resolver. |
 | `AccessibilityElementSnapshot.swift` | ~305 | Pure, testable side of AX pointing: the snapshot/entry model, compact prompt rendering, role-name mapping, and `AccessibilityElementGeometry` (AX frame → screenshot-pixel region + screen number). |
 | `AccessibilityElementSnapshotter.swift` | ~380 | The bounded AX tree walk of the frontmost app (menu bar + focused window, breadth-first, pruned, time/count/depth-capped, off the main actor). |
 | `ScreenTextSnapshot.swift` | ~360 | Pure, testable side of OCR pointing: recognised-line model, confidence filter, reading order, prompt caps, compact `t`-id rendering + plain text, line-id → region lookup, Vision→screenshot coordinate flip, and `ScreenTextRecognitionCache` (per-display, keyed on screenshot bytes). |
@@ -1351,23 +1248,21 @@ Grouped by what they do. Line counts are approximate.
 | `ScreenWatchAgentTools.swift` | ~210 | `watch_screen` (condition + text, number below/above, or `in_chrome_tab` for a Chrome page watch with optional reload) and `stop_screen_watch` (both kinds), read-only, registered via `registerScreenWatchTools()`. |
 | `WatchedNumberParsing.swift` | ~120 | Pure: numbers as written ("$1,299.99", "1.299,99 €", "1 299") and the number near a label in lines, for number watches. Mirrors content/page-watch.js. |
 | `FastPointing.swift` | ~540 | Pure side of fast pointing: `PointingRequestParser` (spoken "where is X" → target + role hint, conservative), `PointingTargetMatcher` (exact/tolerant word scoring, same-place merging, tie → every place, shortlist for the model, connector-word guard) and `PointingModelFallback` (text-only prompt + lenient reply → id). Tested by `Tests/FastPointing`. |
-| `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
+| `ScreenAnnotationLayer.swift` | ~320 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 | `WorkedSolutionExport.swift` | ~140 | Pure: whether the drawings are worth saving (a note or circle), which display's to save, the default PNG name (date + time, no colons), the matching `.md` name and the Markdown text (date, question, numbered notes). Tested by `Tests/WorkedSolutionExport`. |
 | `CompanionManager+WorkedSolutionExport.swift` | ~150 | Glue for Save Worked Solution: native-resolution capture of one display, `ImageRenderer` composite of `ScreenAnnotationLayer(isForExport:)`, `NSSavePanel`, PNG + Markdown write, notch confirmation. No test suite (needs screen capture and UI). |
 | `ScreenRegionFocus.swift` | ~90 | Pure: `FocusedScreenRegion` (the part of the screen the user chose — clamped, ≥24pt a side, AppKit bottom-left → screenshot top-left pixels, ScreenCaptureKit source rect) and its per-turn prompt text. Tested by `Tests/ScreenRegionFocus`. |
-| `PartSelectionRequest.swift` | ~230 | Pure: `PartSelectionRequestParser` (spoken "ask about the third answer" / "explain option C" / "what does the second line mean" / quoted text → `PartSelectionTarget` + residual question; conservative, rejects "third quarter" and "step 2 of …"), `PartSelectionTarget`/`PartSelectionNoun`/`PartSelectionPosition`. Tested by `Tests/PartSelection`. |
+| `PartSelectionRequest.swift` | ~280 | Pure: `PartSelectionRequestParser` (spoken "ask about the third answer" / "explain option C" / "what does the second line mean" / quoted text → `PartSelectionTarget` + residual question; conservative, rejects "third quarter" and "step 2 of …"), `PartSelectionTarget`/`PartSelectionNoun`/`PartSelectionPosition`. Tested by `Tests/PartSelection`. |
 | `PartSelectionResolver.swift` | ~380 | Pure: `PartSelectionResolver.resolve(target, in: ocrEntries)` → one screenshot-pixel region or `.notFound`/`.ambiguous`: list-marker detection, column/row list building, ordinals/labels, item region (marker + same-row text + wrapped lines), on-screen text matching. |
 | `ScreenRegionPicker.swift` | ~155 | The drag-to-select overlay behind "Ask About a Part…": a dimmed key panel on the pointer's screen, Esc/stray click cancels. |
-| `AnnotationClickTarget.swift` | ~210 | Pure: which annotations are clickable, a note's measured size (cached), hit-testing, pointer → overlay coordinates, clicked rect → focused region, and `AnnotationNoteLayout` (nudges overlapping notes apart). |
+| `AnnotationClickTarget.swift` | ~280 | Pure: which annotations are clickable, a note's measured size (cached), hit-testing, pointer → overlay coordinates, clicked rect → focused region, and `AnnotationNoteLayout` (nudges overlapping notes apart). |
 | `AnnotationClickRouter.swift` | ~140 | Mouse-moved/scroll monitors (running only while something is drawn or selected) that flip the overlay to take the mouse over a clickable note, consume the click, and drop annotations when other content scrolls. |
 
 ### Agent, tools and MCP
 | File | Lines | Purpose |
 |------|-------|---------|
-| `AgentTurnRunner.swift` | ~425 | The agent loop: max 4 iterations for the local model, 10 for a cloud model (`maximumIterationsForCloudModels` — acting in an app takes find/read/act/check), screenshot on iteration 0 only, per-tool timeouts. |
+| `AgentTurnRunner.swift` | ~510 | The agent loop: max 4 iterations for the local model, 10 for a cloud model (`maximumIterationsForCloudModels` — acting in an app takes find/read/act/check), screenshot on iteration 0 only, per-tool timeouts. |
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
-| `ChromeExtensionBridge.swift` | ~410 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts (or `timeoutSeconds:`, ≤30s), `connectionState`, `grantedCapabilities` and `extensionEventPublisher`. |
-| `ChromeTabOrganizer.swift` | ~600 | Tab organizing: `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per-window plans, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered prompt + strict reply parsing), `ChromeTabCommand`, and `ChromeTabOrganizer` (runs a plan through the bridge). |
 | `MessageCommandParser.swift` | ~210 | Pure parsing of spoken message commands ("text X saying Y", "send X a text …", "tell X that Y", unseparated "text X Y" → longest-first splits). Conservative; declines pronouns and noun uses ("text size"). |
 | `ContactsDirectory.swift` | ~440 | `ContactRecord`/`ContactHandle` (preferred handle: mobile → phone → email), the pure `ContactMatcher` (ranked tiers, ambiguity, relation words via the Me card), `DirectMessagingHandleParser`, and `ContactsDirectory` (CNContactStore access + off-main fetch). |
 | `MessagesSender.swift` | ~175 | `MessageRecipientResolver` (candidates → one person + handle, or a reason, or "not a message command") and `MessagesAppSender` (AppleScript handler call to Messages with Apple Event parameters; iMessage then SMS; -1743 → Automation hint). |
@@ -1377,7 +1272,6 @@ Grouped by what they do. Line counts are approximate.
 | `MediaPlayback.swift` | ~210 | Music control: `MediaPlayback.perform` (play/pause/next/previous in Apple Music or Spotify over AppleScript; a query searches the Music library, Spotify only opens its search), `MediaPlaybackPhraseParser` (whole-utterance phrases routed by `FastCommandRouter`, no model) and the `control_music` agent tool (`.writing(.localMachine)`). |
 | `MessageSendConfirmationView.swift` | ~305 | The Siri-style confirmation panel `ToolConfirmationView` shows for `send_imessage` (recipient, an editable message bubble, Cancel / Send); same consent flow underneath. |
 | `MessagingAgentTools.swift` | ~150 | `send_imessage` (input prepared before consent) and read-only `find_contact`. |
-| `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~300 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the (async) `BrowserController` protocol. |
 | `BrowserPageSnapshotDecoding.swift` | ~75 | The one decoder from snapshot JSON to `BrowserPageSnapshot` (dialog/scroll lines, lenient fields), shared by the AppleScript and extension controllers. |
 | `AppleScriptBrowserController.swift` | ~1075 | The `BrowserController` for Chrome/Safari: injected JS via AppleScript (one round trip per op, `data-wisp-id` stamping), tab commands, and the dedicated-tab session (`runInTargetTab`). |
@@ -1388,13 +1282,13 @@ Grouped by what they do. Line counts are approximate.
 | `BrowserPlanCache.swift` | ~180 | Caches plans by intent (`wikipedia.search` + query), keeping deterministic and model-written plans apart. |
 | `BrowserAgentLoop.swift` | ~720 | Long-horizon browser agent for cloud providers: observe→act loop (cap 30), line-grammar actions incl. batched form fills, stuck detection, untrusted-page prompt rules. Also `BrowserActionSafety` (which clicks/sends need the always-ask confirmation). |
 | `BrowserStepLoop.swift` | ~430 | Tier-2 browser control: a bounded per-step observe→act loop (cap 5, DOM-only, one action per model call) that runs only after a tier-1 plan fails. Defines `BrowserCursorGuide`, which marks each element with a pulsing ring before it acts. |
-| `AgentToolRegistry.swift` | ~710 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. `register(_:preparingInputWith:)` takes an optional `ToolInputPreparer` that turns the model's arguments into the concrete ones *before* the approval (the card then describes what will really run) or ends the call with a reason. |
+| `AgentToolRegistry.swift` | ~980 | Built-in tools (read-only, plus the confirmation-gated `remember`/`forget` memory tools and `create_reminder` write) + `register`/`unregister`. `requiresConfirmation` defaults to true for unknown names. `definitions(forRequest:)` delegates to `AgentToolRouter`. `register(_:preparingInputWith:)` takes an optional `ToolInputPreparer` that turns the model's arguments into the concrete ones *before* the approval (the card then describes what will really run) or ends the call with a reason. |
 | `AgentToolScope.swift` | ~130 | Deterministic built-in scope vocabulary (browser/filesystem/coding/memory/messaging/general) + `alwaysAvailableToolNames` + the per-turn budgets (`maximumExposedTools` = 6 local, `maximumExposedToolsForCloudModels` = 16). Used by the router as a relevance bonus. |
 | `AgentToolRouter.swift` | ~150 | Per-turn tool selection: ranks every registered tool by lexical relevance to the request (name words weighted over description), scope membership (or a caller's `boostedToolNames`, e.g. `run_shortcut` when the request names a shortcut) adds a bonus, returns the top few within budget. Deterministic, model-free. |
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~445 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. `MCPStartupTimeoutPolicy` gives a package runner's `initialize` a long first-run budget. `callToolReturningContent` keeps a result's text blocks and `structuredContent` apart; `callTool` returns the text only. |
 | `MCPToolResultRendering.swift` | ~290 | Pure: an MCP result → the model's text. Element lists (token + role) as one line each under a scalar-field header, other structured content as sorted compact JSON, 4000/5000-char caps, duplicate-JSON text dropped; no `structuredContent` → unchanged. Tested by `Tests/MCPStructuredContent`. |
-| `CuaDriverSupport.swift` | ~215 | cua-driver specifics: `CuaDriverToolNames` (server-namespace match, read-only allow-list, `mustAlwaysAsk`, which tools skip the card, model-facing descriptions, misaddressed-call refusal), `CuaDriverToolRouting` (when a request is about operating a native app, so its tools are offered) and `CuaDriverElementCache` (token → role/label/app from the last 4 element lists, fed by `MCPManager`, read by the confirmation card). |
+| `CuaDriverSupport.swift` | ~360 | cua-driver specifics: `CuaDriverToolNames` (server-namespace match, read-only allow-list, `mustAlwaysAsk`, which tools skip the card, model-facing descriptions, misaddressed-call refusal), `CuaDriverToolRouting` (when a request is about operating a native app, so its tools are offered) and `CuaDriverElementCache` (token → role/label/app from the last 4 element lists, fed by `MCPManager`, read by the confirmation card). |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
 | `MCPStdioTransport.swift` | ~300 | Stdio transport: child process over stdin/stdout as NDJSON (pipes read via `readabilityHandler`, framed by the pure `NewlineDelimitedLineBuffer`), login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
 | `MCPStreamableHTTPTransport.swift` | ~230 | Remote transport: JSON-RPC over MCP Streamable HTTP (one POST per message; parses JSON + SSE replies; `Mcp-Session-Id`, auth headers). |
@@ -1407,7 +1301,7 @@ Grouped by what they do. Line counts are approximate.
 | `ComposioConnectionsStore.swift` | ~280 | Per-app Composio state for the Marketplace list: calls the connect server's `COMPOSIO_MANAGE_CONNECTIONS` (`list`/`add`/`remove`) over its own `MCPServerConnection` with the saved key; Connect opens the sign-in link in the browser and polls until the account is active (also re-checks when Wisp becomes active); Reconnect clears the stale account. Curated 20 apps (`ComposioApp.curated`) + any typed name. |
 | `ComposioAppsView.swift` | ~290 | The app list UI: logos from `logos.composio.dev/api/<slug>` (SVG via `NSImage`, cached, initial fallback), Connected/Available sections, search, per-row Connect/Reconnect/Disconnect. |
 | `ComposioAccountStore.swift` | ~110 | Composio marketplace state: `connect(apiKey:)` validates the key then installs one remote server (`composio-connect`) over the Phase 1 transport; `disconnect()` removes it. Off-machine/opt-in. |
-| `MCPManager.swift` | ~400 | Reads `~/.wisp/mcp.json`, connects servers concurrently (Connecting… → Installing… for slow package runners; stale connects from an overlapping reload discard themselves), namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. `MCPConnectionFailureMessage` appends the server's last stderr line to a failure. |
+| `MCPManager.swift` | ~490 | Reads `~/.wisp/mcp.json`, connects servers concurrently (Connecting… → Installing… for slow package runners; stale connects from an overlapping reload discard themselves), namespaces tools `server__tool`, registers all allowed tools (no registration cap — the per-turn router selects), injects the Composio Keychain key at connect time, `reload()`. `MCPConnectionFailureMessage` appends the server's last stderr line to a failure. |
 | `ClaudeCodeWorker.swift` | ~215 | Runs the `claude` CLI as a background worker for the `delegate_coding_task` tool (parses its event stream into progress + result). Off-machine, only when that tool is called. |
 | `SkillManager.swift` | ~120 | Reads `~/.wisp/skills/*.md`, parses `name`/`description` frontmatter, serves full bodies on demand via `load_skill`. |
 | `RoutineStore.swift` | ~270 | Routines: user-fired saved instructions (`WispRoutine`: name, instruction, symbol, optional chord+digit shortcut, suggested app bundle ids, pinned-in-notch). Persists to `~/Library/Application Support/Wisp/routines.json`; seeds 4 starters when the file is absent. `notchSuggestions(forAppBundleIdentifier:)` powers the notch's app-aware section. Distinct from skills (model-loaded reference). |
@@ -1421,7 +1315,7 @@ Grouped by what they do. Line counts are approximate.
 | `ShortcutsBridge.swift` | ~455 | Apple Shortcuts via `/usr/bin/shortcuts`: `ShortcutsListParser` (`list --show-identifiers` → name + UUID), `ShortcutsCommandLine` (argument arrays; name after `--`), `ShortcutsProcessRunner` (off-main `Process`, both pipes drained, timeout + cancellation terminate), `ShortcutRunResultFormatter` (capped text for the model), and the `ShortcutsBridge` ObservableObject (5-min cached list, availability, `runShortcut(named:textInput:)` with exact-name resolution and temp-file I/O). |
 | `ShortcutsAgentTools.swift` | ~280 | `ShortcutNameMatcher` (request → matching shortcut names; exact-name resolution), `ShortcutsToolRouting` (boost hints + per-turn `run_shortcut` description naming ≤3 matches; the `list_shortcuts`/`run_shortcut` definitions), and `AgentToolRegistry.registerShortcutsTools()`. |
 | `ConversationHistoryStore.swift` | ~420 | Persists the last 20 transcript turns to `~/Library/Application Support/Wisp/conversation.json` (Codable `Persisted*` shapes, images dropped, debounced + flushed on quit) and hands back the ≤6h-old ones to resume on launch. `ConversationHistoryCodec` holds the pure encode/decode/merge/resume policy. |
-| `MemoryStore.swift` | ~330 | `~/.wisp/memory.md` user memory: `MemoryFileFormat` (pure bullet parse/append/remove), `MemoryIndex` (the ≤800-char system-prompt block, newest facts first), and the `MemoryStore` ObservableObject behind the `remember`/`forget` tools and the Memory tab. |
+| `MemoryStore.swift` | ~450 | `~/.wisp/memory.md` user memory: `MemoryFileFormat` (pure bullet parse/append/remove), `MemoryIndex` (the ≤800-char system-prompt block, newest facts first), and the `MemoryStore` ObservableObject behind the `remember`/`forget` tools and the Memory tab. |
 | `ToolConfirmationCoordinator.swift` | ~530 | Permission requests with a 45s timeout and spoken-affirmative parsing. `requestApproval(toolName:toolInput:)` applies the `ToolCallSafety` floor under session auto-approve and attaches the `ToolConfirmationCardBuilder` card to `PendingConfirmation.confirmationCard`. `requestApprovalAllowingEdits` also offers the call's editable fields and returns a `ToolApprovalOutcome` (decision + edits); holds the typed edits and the movable expiry (`updateEditedText`, `extendTimeoutForEditing`). Defines `ToolPermissionBroker` and `ToolApprovalOutcome`. |
 | `ToolConfirmationView.swift` | ~285 | The confirmation card on the island's surface (`wispNotchIslandSurface` + warning rim + `WispMark`): a plain-words headline (not the lowercase spoken question), the optional confirmation card (`GlanceCardView`, minus the rows its editable fields replace), the editable fields, the exact call (with edits) folded into one line, island-style Cancel / Allow→ (Cmd-Return, accessibility-labelled), "or just say yes". Presented via the existing overlay plumbing, positioned under the notch; calls `flashIsland(.success/.error)` on allow/deny. |
 | `EditableConfirmationFields.swift` | ~250 | Pure rule for inline-editable confirmation fields: which top-level string arguments a call offers (by tool name or card shape), `applyingEdits` (ignores any non-editable key, blank or unchanged edits), the tool-result note telling the model what the user changed, and hiding the card rows the fields replace. Tested by `Tests/EditableConfirmation`. |
@@ -1430,127 +1324,149 @@ Grouped by what they do. Line counts are approximate.
 | `ToolMetadata.swift` | ~100 | What a tool does (read-only, destructive, external side effect, data source) as data; whether it needs confirmation is computed from it. |
 | `ToolCallSafety.swift` | ~185 | The destructive-action floor under session auto-approve: `mustAskEvenWithSessionAutoApprove(toolName:toolInput:agentWorkingDirectoryPath:)`. Word vocabularies (always-irreversible verbs, noun-ish words that count only without a reading verb), command execution, calendar invites, writes outside the agent folder, Composio meta-tool rules, `alwaysAskBareToolNames` (`run_shortcut`), and every non-read cua-driver tool (`CuaDriverToolNames.mustAlwaysAsk`). |
 | `ToolConfirmationCardBuilder.swift` | ~790 | Builds the confirmation panel's `GlanceCard` from a call: Run Shortcut (by name) / cua-driver action (element resolved via `CuaDriverElementCache`) / email / message / post / event / file write / deletion / other-irreversible / Composio batch; nil for reads and unknown shapes. Truncates bodies (180 chars) and field values (80). Exposes the shape it chose (`ConfirmationCardShape`) and its key vocabularies for the editable fields. |
-| `BackgroundTaskLauncher.swift` | ~127 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
+| `BackgroundTaskLauncher.swift` | ~240 | Tasks that outlive the conversation, max 2 concurrent, notify on completion. |
 | `AgentTaskRegistry.swift` | ~165 | Task and step records backing History → Timeline. Loads saved history on launch and saves it (debounced) on every change. |
 | `AgentTaskHistoryStore.swift` | ~110 | Persists the task records to `~/Library/Application Support/Wisp/task-history.json` (0600): 30-day retention, still-running tasks come back as `.interrupted`, sync flush on quit. |
 
-### Chrome extension
-The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side of it. `ChromeExtensionBridge.swift`,
-`ChromeTabOrganizer.swift` and `ChromeTabAgentTools.swift` are listed under Agent, tools and MCP. Roadmap and contracts:
-`docs/chrome-extension/`.
+### Browser extension
+The Wisp Tabs extension (`chrome-extension/`, loaded unpacked in Chrome or another Chromium browser) and Wisp's side of it,
+described under Architecture → Browser extension. Roadmap, contracts and the hands-on checklist: `docs/chrome-extension/`.
+
+**Connection, browsers and settings**
 
 | File | Lines | Purpose |
 |------|-------|---------|
+| `ChromeExtensionBridge.swift` | ~650 | Loopback-only WebSocket server (127.0.0.1:47823): Origin-pinned handshake, one connection per browser profile named by the app owning the socket, the active browser (requests, events, `connectionState`, `grantedCapabilities`), route holds, JSON request/response with 10s timeouts (or `timeoutSeconds:`, ≤30s), `extensionEventPublisher`. |
+| `ChromeExtension/ChromiumBrowsers.swift` | ~190 | Pure: `ChromiumBrowserCatalog` (bundle ids, names, the per-profile browser key, what a hello brand vouches for) and `ChromiumBrowserRouting` (held → frontmost → current → Chrome → earliest). Tested by `Tests/ChromeExtBrowsers`. |
+| `ChromeExtension/ChromeExtensionPeerProcess.swift` | ~140 | libproc: the regular app that owns the far end of a loopback socket (descendants of regular apps only, off the main actor). Tested live by `Tests/ChromeExtBrowsers`. |
 | `ChromeExtension/ChromeExtensionCapability.swift` | ~55 | Pure: `tabs` / `pages.read` / `downloads` (wire names, display copy, reading a wire list, unknown names ignored). |
-| `ChromeExtension/ChromeExtensionEvent.swift` | ~50 | Pure: `ChromeExtensionEvent` (name, raw payload JSON, time, `decodePayload(as:)`) and `ChromeExtensionTabEventPayload` (the tab events' shape). |
-| `ChromeExtension/ChromeExtensionIncomingMessage.swift` | ~140 | Pure frame parser: hello / ping / capabilities / event / reply, or nil (malformed, missing fields, unknown type, >16 MB). Also `ChromeExtensionRequestTimeout` (10s default, 30s cap). Tested by `Tests/ChromeExtFoundation`. |
-| `chrome-extension/manifest.json` | ~50 | MV3, module service worker, required + optional permissions (contracts §3), the `key` that pins the extension ID, options page, omnibox `w`, `ask-wisp-about-page` command. |
-| `chrome-extension/background.js` | ~30 | Wiring only: registers handler maps, starts capability broadcasts, tab events and the bridge. |
-| `chrome-extension/lib/bridge.js` | ~260 | `createBridge` (injectable WebSocket/chrome/timers): connect + hello with capabilities, 20s ping, 30s reconnect alarm, request dispatcher, `sendEvent`, `sendCapabilities`; shared-instance exports for the worker. |
-| `chrome-extension/lib/capabilities.js` | ~55 | `computeCapabilities` from `chrome.permissions.contains`, the permission sets behind each capability, re-broadcast on `onAdded`/`onRemoved`. |
+| `ChromeExtension/ChromeExtensionEvent.swift` | ~50 | Pure: `ChromeExtensionEvent` (name, raw payload JSON, time, `decodePayload(as:)`) and `ChromeExtensionTabEventPayload`. |
+| `ChromeExtension/ChromeExtensionIncomingMessage.swift` | ~150 | Pure frame parser: hello (with `instanceId`) / ping / capabilities / event / reply, or nil (malformed, unknown type, >16 MB). Also `ChromeExtensionRequestTimeout`. Tested by `Tests/ChromeExtFoundation`. |
+| `ChromeExtension/BrowserSettingsCard.swift` | ~240 | Settings → Agent → Browser: each connected browser with Allow… per missing capability, the feature rows below, and "What Wisp can do in your browser" (`BrowserCommandExamples`). |
+| `chrome-extension/manifest.json` | ~50 | MV3 2.0.0, module service worker, required + optional permissions (contracts §3), the `key` that pins the extension ID, options page, omnibox `w`, `ask-wisp-about-page` command, `"incognito": "not_allowed"`. |
+| `chrome-extension/background.js` | ~60 | Wiring only: registers every handler map, starts the event modules and the bridge. |
+| `chrome-extension/lib/bridge.js` | ~290 | `createBridge` (injectable WebSocket/chrome/timers): connect + hello (version, brand name, capabilities, per-profile `instanceId`), 20s ping, 30s reconnect alarm, request dispatcher, `sendEvent`, `sendCapabilities`. |
+| `chrome-extension/lib/capabilities.js` | ~55 | `computeCapabilities` from `chrome.permissions.contains`, re-broadcast on `onAdded`/`onRemoved`. |
 | `chrome-extension/lib/limits.js` | ~40 | `truncateText` / `capList` (20,000 chars, 500 items, `truncated`). |
-| `chrome-extension/handlers/tabs.js` | ~150 | Today's nine tab primitives (moved unchanged) and `describeTab`, the tab shape shared with events. |
+| `chrome-extension/lib/page-access.js` | ~65 | Pure: which URLs may be acted on, only read (file:// with access), are blank, or refused (browser pages, extension stores, data:/javascript:) — contracts §6. |
 | `chrome-extension/handlers/capabilities.js` | ~20 | `getCapabilities`, `openPermissionsPage`. |
-| `chrome-extension/handlers/dom-controller.js` | ~570 | Phase 03 methods: `openTab`, `navigateTab`, `goBack/ForwardInTab`, `snapshotPage` (top frame + ≤8 cross-origin frames, one element budget), `findElements` (ranked by query, or one id placed on screen), `click/typeInto/hoverElement`, `pressKey`, `scrollPage`, `selectOption`, `waitForSettled`, `captureVisibleTab`, `getOrCreateWispGroup`. Injects `content/dom-agent.js` on demand; page-access checks before any injection. |
-| `chrome-extension/content/dom-agent.js` | ~530 | The in-page agent (classic script, `window.__wispAgent`): snapshot, click, type, hover, key, scroll, select, quietness, element geometry — a port of the AppleScript snapshot JS with predicate-based candidate finding. |
-| `chrome-extension/events/navigation.js` | ~35 | `nav.committed` / `nav.completed` from `webNavigation`, main frame only. |
-| `chrome-extension/lib/page-access.js` | ~55 | Pure: which URLs may be acted on, only read (file:// with access), are blank, or refused (contracts §6). |
-| `chrome-extension/tests/fake-dom.mjs` | ~310 | Tiny fake DOM + a `vm` loader that runs the real `content/dom-agent.js`, and a stand-in for executeScript's `func` form. |
-| `ChromeExtension/ExtensionBrowserController.swift` | ~450 | `BrowserController` over the extension: background task tab in the Wisp group, tab-removed → stop, snapshot via `BrowserPageSnapshotDecoding`, one-request settling, screen points, 896px `captureVisibleTab` screenshot. |
-| `ChromeExtension/ExtensionBrowserReplies.swift` | ~110 | Pure: action statuses → `BrowserControllerError` (AppleScript wording), element-id guard, missing-tab detection, top-left → AppKit point, settle timeouts. Tested by `Tests/ChromeExtDOMController`. |
-| `ChromeExtension/BrowserControllerSelector.swift` | ~85 | Pure: extension vs AppleScript per task (connected + `pages.read` + not Safari in front), with a reason for the log. Tested by `Tests/ChromeExtDOMController`. |
-| `chrome-extension/handlers/tab-life.js` | ~120 | `openTabs` (phase 04): a batch of URLs into the current, a named or a new window, grouped or pinned when asked, ≤60 per request, http(s)/chrome:// only, first tab active only when asked. |
-| `ChromeExtension/ChromeTabSession.swift` | ~450 | Pure tab sessions: saved shape (windows → sections → tabs), building from a `getTabs` snapshot, the 200-session list, codec, exact name matching, restore requests, list text. Tested by `Tests/ChromeExtTabLife`. |
-| `ChromeExtension/ChromeTabSessionStore.swift` | ~170 | `@MainActor` store over `chrome-tab-sessions.json` (0600; an unreadable file is moved aside, never overwritten), rename/delete, a lock-guarded name list for the router, the optional Brain page. |
-| `ChromeExtension/ChromeStaleTabFinder.swift` | ~75 | Pure stale-tab rules (`ChromeStaleTabRules`: 14 days default, 1–365, chrome:// opt-in). |
-| `ChromeExtension/ChromeTabTriagePlanner.swift` | ~160 | Pure triage plan: duplicates, then stale, then groups over what stays open; restricting to still-open tabs; the reply. |
-| `ChromeExtension/ChromeTabLifeCommand.swift` | ~280 | `ChromeTabLifeCommand` and its conservative router (save / restore / list / clean up old tabs / triage, ages like "older than 30 days"). |
-| `ChromeExtension/ChromeTabLifeCardText.swift` / `ChromeTabLifeCards.swift` | ~150/~130 | Pure card wording (headline, ≤8 rows, "and N more", footnote) and the `GlanceCard`s + `ChromeTabLifeToolNames` (compiled by the confirmation suites too). |
-| `ChromeExtension/ChromeTabLife.swift` | ~400 | `@MainActor` save / restore / stale sweep / triage through the bridge, approvals, and the four agent tools (`registerChromeTabLifeTools`). |
-| `ChromeExtension/ChromeTabSessionsRow.swift` | ~185 | The Tab sessions row in the Chrome Tabs card: list, Restore / Rename / Delete (asks), brain switch. |
-| `chrome-extension/events/tabs.js` | ~115 | `tab.created/updated/removed/activated`, `window.focused`; per-tab 250ms debounce, reported fields only, no incognito. |
-| `chrome-extension/options.html` / `options.js` | ~70/~90 | The permissions page: each optional capability, what it allows, Allow / Remove (`chrome.permissions.request` / `remove`). |
+| `chrome-extension/options.html` / `options.js` | ~70/~90 | The permissions page: each optional capability, what it allows, Allow / Remove. |
 | `chrome-extension/popup.html` / `popup.js` | ~50/~55 | Connection status, Try again, the granted-capability line and a Permissions… link. |
-| `chrome-extension/content/read-page.js` | ~530 | Injected on demand (phase 02): defines `wispPageReader` — `readPageText` (main-content choice, furniture/hidden/secret skips, heading/list/table-row lines, title/canonical/lang/description/published date, word count, 20k cap), `readSelection` (selection + ~300 chars of context, nothing from ignored regions or secret fields), `readPageOutline`. |
-| `chrome-extension/handlers/page-reading.js` | ~190 | `getPageText` / `getSelection` / `getPageOutline`: `pages.read` check ("missing capability pages.read"), tab choice (given id, else the last-focused window's showing tab), `forbiddenPageReason` (http(s) only, file:// with Chrome's switch, never incognito or the Web Store), injection and caps. |
-| `chrome-extension/tests/page-reading.test.mjs` / `tests/fixtures/*.html` | ~300 | Extraction against fixture pages (article, docs with sidebar, password field, over-cap page) via linkedom, plus the handlers against the fake `chrome`. |
-| `ChromeExtension/ChromePageTextPrompt.swift` | ~190 | Pure: `ChromePageText`/`ChromePageSelection`/`ChromePageOutline` (the replies), per-model budgets (6k local / 20k cloud), the `<<< >>>` page-DATA fence (defused), paragraph/sentence-aware trimming. Tested by `Tests/ChromeExtPageReading`. |
-| `ChromeExtension/ChromePageContentRequestClassifier.swift` | ~120 | Pure: is the question about what the page says (summarize, price, explain this article) rather than how it looks? Biased toward no. |
-| `ChromeExtension/ChromeTabReferenceResolver.swift` | ~120 | Pure: a `tab` argument (id, title or address fragment, or nothing) → one open tab, `.ambiguous` candidates or `.notFound`. |
-| `ChromeExtension/ChromePageReader.swift` | ~150 | `readPage`/`readSelection`/`readOutline` over the bridge, the `pages.read` check, and errors in Wisp's voice (how to allow reading pages). |
-| `ChromeExtension/ChromePageReadingAgentTools.swift` | ~130 | `chrome_read_tab` and `chrome_read_selection` (`registerChromePageReadingTools()`). |
-| `ChromeExtension/CompanionManager+ChromePageReading.swift` | ~80 | `chromePageTextReplacingScreenshot`: the turn path's page-text-instead-of-screenshot decision, History step and perf note. |
-| `ChromeExtension/BrainChromePageTarget.swift` | ~55 | `BrainCommandTargetResolver.resolvePreferringChromeExtensionText`: "add this page to my brain" reads the Chrome tab's text, else falls back to the URL. |
-| `chrome-extension/tests/fake-chrome.mjs` | ~330 | In-memory `chrome.*` fake (tabs, tabGroups, windows, permissions, alarms, storage, runtime, scripting stub; `dispatch` on every event), `FakeWebSocket`, manual timers. |
-| `chrome-extension/tests/*.test.mjs` | ~1370 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring, the DOM agent (ids, dialog order, sensitive fields, select, settle, shared snapshot fixture), the DOM controller handlers (frames, Wisp group, page access, settling, capture) and navigation events. `chrome-extension/package.json` only tells Node the files are ES modules. |
-| `chrome-extension/tests/fake-chrome.mjs` | ~330 | In-memory `chrome.*` fake (tabs, tabGroups, windows, permissions, alarms, storage, runtime, scripting stub, downloads while granted; `dispatch` on every event), `FakeWebSocket`, manual timers. |
-| `ChromeExtension/DownloadFilingRules.swift` | ~690 | Pure download concierge rules: `ChromeDownloadItem` payload, `DownloadedFile`, `DownloadFilingRule`/`DownloadFilingRuleFile` (lenient load, problems, `settingAlways` that preserves the hand-written file), matcher, `DownloadNameSuggester` (page title for PDFs/images, cleaned names, templates, sanitising), `DownloadCollisionNaming`, `DownloadFilingSafety` (refusals), `DownloadFilingPlanner`. Tested by `Tests/ChromeExtDownloads`. |
-| `ChromeExtension/DownloadConcierge.swift` | ~450 | Subscribes to `download.completed`, offers (queue of 5), File / Just brain / Ignore, "always" rules, the one disk move (symlink-resolved checks, never overwrites), Undo for 10 minutes, quiet mode, the Settings switch and rules file. |
-| `ChromeExtension/DownloadConciergeViews.swift` | ~250 | The notch offer/report card, the flank ↓ badge, and the Chrome Tabs card's switch row. |
-| `ChromeExtension/DownloadAgentTools.swift` | ~240 | `chrome_list_downloads` and `chrome_file_download` (input preparer resolves from/to before the card). |
-| `chrome-extension/handlers/downloads.js` | ~115 | `getDownloads` (newest first or one id) / `showDownload`, `describeDownload` (capped fields, `dangerous`). No move/rename. |
-| `chrome-extension/events/downloads.js` | ~95 | `download.created/completed/failed` with the source page + title; attaches when downloads are allowed, never twice. |
-| `chrome-extension/tests/*.test.mjs` | ~925 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring, downloads. `chrome-extension/package.json` only tells Node the files are ES modules. |
-| `chrome-extension/tests/*.test.mjs` | ~715 | `node --test chrome-extension/tests/`: bridge/dispatcher, tab primitives, events + debounce, capabilities, limits, background wiring. `chrome-extension/package.json` only tells Node the files are ES modules. |
-| `ChromeExtension/ChromeFocusPlanner.swift` | ~240 | Pure focus-mode decisions: keep / collapse / mute / Focus-group / move from a `ChromeTabsSnapshot`, topic words, allow-list and distraction hosts; host matching and list parsing; reply wording; `ChromeFocusStudyBlockPolicy` (which approved study block starts focus, its topic and length). Tested by `Tests/ChromeExtFocusMode`. |
-| `ChromeExtension/ChromeFocusCommand.swift` | ~185 | Pure `ChromeFocusCommandParser`: spoken "focus on X for N minutes" / "stop focus" → `ChromeFocusCommand`, conservative (questions, screen things, bare "focus mode" fall through). Also used by the automation "say it" parser. |
-| `ChromeExtension/ChromeFocusSession.swift` | ~470 | `ChromeFocusSettings` (distracting / always-keep sites, Later-window switch) and `ChromeFocusSession`: start/stop, timer via `WispTimerStore`, restore on end / card Cancel / next launch, pending-token retries on connect, study-block auto-start, Test-run preview; `CompanionManager.presentChromeFocusUpdate` (notch card + line). |
-| `ChromeExtension/ChromeFocusAgentTools.swift` | ~70 | The `chrome_focus_mode` agent tool (start/stop, topic, minutes). |
-| `ChromeExtension/ChromeFocusSettingsRow.swift` | ~75 | Focus mode's row in the Agent tab's Chrome Tabs card: status + Stop, site lists, Later-window switch. |
-| `chrome-extension/handlers/focus-mode.js` | ~290 | `applyFocusLayout` / `restoreFocusLayout`: collapse, mute, group as "Focus", move to a minimised Later window, prior state in `chrome.storage.session` under a restore token; restore tolerates closed/moved tabs and closed windows. Never closes a tab. |
-| `chrome-extension/content/highlight.js` | ~420 | Phase 05, injected on demand: Wisp's marks in a closed shadow root (ring/box/highlight/step badge, label, marker colour), following the element (ResizeObserver, scroll, rAF), scrolled into view once, reduced motion, Esc/label dismissal, trusted-click watching within a target's subtree; `window.__wispHighlighter`. |
-| `chrome-extension/handlers/pointing.js` | ~255 | `highlightElements` / `clearHighlights` / `watchClicks` / `stopWatchingClicks`: per-frame (`f12e3` ids) injection of the highlighter, page-access checks, clearing every frame Wisp drew in. |
-| `chrome-extension/events/pointing.js` | ~55 | `page.elementClicked` / `page.highlightDismissed` from the highlighter's runtime messages (own extension, never incognito), with tab and frame ids added. |
-| `chrome-extension/tests/fake-highlight-page.mjs` / `highlight.test.mjs` / `pointing.test.mjs` | ~145/~235/~200 | The highlighter in a fake page (badges, reduced motion, following, dismissal, click matching) and the handlers/events against the fake Chrome. |
-| `ChromeExtension/ChromeInPagePointingPolicy.swift` | ~250 | Pure: whether to try the page, annotation → mark kind, label → target, Chrome-window containment, marker colour as CSS, `ChromeInPageElementMatcher` (page element for a target or step), and the walkthrough event rules (click completes step, navigation re-finds, may click for the user). Tested by `Tests/ChromeExtInPagePointing`. |
-| `ChromeExtension/ChromeInPagePointing.swift` | ~615 | The bridge calls and state (pointing marks with a 15s lifetime, the walkthrough's marked step and tab), the event handling, and the `CompanionManager` glue: `applyPointingAnnotationsPreferringChromePage`, the walkthrough's in-page find/mark/click/re-find, clearing. |
-| `chrome-extension/events/ask-about-this.js` | ~250 | Phase 06: the five context-menu items (made on install), omnibox `w …` and the `ask-wisp-about-page` command → `user.*` events (ids, URLs, Chrome's menu selection text, capped); "!" badge for 5s while Wisp isn't connected. |
-| `ChromeExtension/ChromeAskAboutThisRequest.swift` | ~145 | Pure: the `user.*` event names, `ChromeAskAboutThisEventPayload`, and `ChromeAskAboutThisRequestDecoder` (event → ask / omnibox / add-to-brain request, or nil). Tested by `Tests/ChromeExtAskAboutThis`. |
-| `ChromeExtension/ChromeAskAboutThisContext.swift` | ~300 | Pure: `ChromeAskAboutThisPart` (chip text) and the per-turn plan for each part — fenced prompt text and whether the screenshot goes (look/place words), selection fallback to menu text, link text from snapshot elements, when to read the page. |
-| `ChromeExtension/ChromeAskImageDownload.swift` | ~150 | Image download rules (https, no credentials, not cut off, 2xx `image/*`, 10 MB, https-only redirects) and the cookie-less ephemeral `URLSession` fetch. |
-| `ChromeExtension/ChromeAskAboutThisRouter.swift` | ~300 | `@MainActor` router over the events: opens the composer with the part, runs omnibox questions, adds to the brain, caches the downloaded image, JPEG downscaling, link-text lookup. |
-| `ChromeExtension/CompanionManager+ChromeAskAboutThis.swift` | ~135 | The turn hook (`chromeAskAboutThisTurnInput`: reads/downloads, plan, History step) and `presentChromeAskAboutThisReply` for notch lines. |
-| `ChromeExtension/ChromeAskAboutThisComposerChip.swift` | ~40 | The composer's "About: selected text ✕" chip, watching the router. |
-| `chrome-extension/content/page-watch.js` | ~420 | Phase 08 in-page watcher (`globalThis.wispPageWatch`): MutationObserver, ≤1 evaluation/s, text matching and number parsing mirroring Swift, the four conditions' evaluator, state reported to the worker. |
-| `chrome-extension/handlers/page-watchers.js` | ~480 | `startPageWatch` / `stopPageWatch` / `listPageWatches`, `watch.matched` / `watch.ended`: session-storage list with evaluator state, re-injection on load and worker start, reloading background tabs, sweep alarm (timeouts, missing watchers). |
-| `ChromeExtension/ChromePageWatch.swift` | ~330 | Pure: `ChromePageWatchRouter` (tab or screen, reload interval), wire condition, replies/events, `ActiveChromePageWatch`, endings, wording, `ChromePageWatchReconciliation`. Tested by `Tests/ChromeExtPageWatchers`. |
-| `ChromeExtension/ChromePageWatchStore.swift` | ~270 | Starts/stops page watches over the bridge, handles their events, reconciles on connect, notifications, `watchMatchedPublisher` for automations. |
-| `ChromeExtension/CompanionManager+ChromePageWatch.swift` | ~110 | `directWatchReply` (the spoken route, screen or tab, stop both) and page-watch endings in the notch. |
+
+**Tabs: organizing, tab life, focus mode**
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `ChromeTabOrganizer.swift` | ~710 | `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per window, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered, fenced titles + strict reply parsing), `ChromeTabCommand` and `ChromeTabOrganizer.perform`. |
+| `ChromeTabAgentTools.swift` | ~420 | `ChromeTabCommandRouter` (focus, tab life, site helpers and form fill checked first, then plain tab commands) and the nine tab tools; `chrome_list_tabs` returns its list inside the data fence. |
+| `chrome-extension/handlers/tabs.js` | ~150 | The nine tab primitives and `describeTab`, the tab shape shared with events. |
+| `chrome-extension/events/tabs.js` | ~120 | `tab.created/updated/removed/activated`, `window.focused`; per-tab 250ms debounce, no incognito. |
+| `chrome-extension/handlers/tab-life.js` | ~120 | `openTabs`: a batch of URLs into the current, a named or a new window, grouped or pinned, ≤60 per request, http(s)/chrome:// only. |
+| `ChromeExtension/ChromeTabSession.swift` | ~450 | Pure tab sessions: saved shape (windows → sections → tabs), building from `getTabs`, the 200-session list, codec, exact name matching, restore requests, list text. Tested by `Tests/ChromeExtTabLife`. |
+| `ChromeExtension/ChromeTabSessionStore.swift` | ~170 | `@MainActor` store over `chrome-tab-sessions.json` (0600; an unreadable file is moved aside), rename/delete, a lock-guarded name list for the router, the optional Brain page. |
+| `ChromeExtension/ChromeStaleTabFinder.swift` | ~80 | Pure stale-tab rules (14 days default, 1–365, chrome:// opt-in). |
+| `ChromeExtension/ChromeTabTriagePlanner.swift` | ~160 | Pure triage plan: duplicates, then stale, then groups over what stays open; re-checked against open tabs; the reply. |
+| `ChromeExtension/ChromeTabLifeCommand.swift` | ~280 | `ChromeTabLifeCommand` and its conservative router (save / restore / list / clean up old tabs / triage). |
+| `ChromeExtension/ChromeTabLifeCardText.swift` / `ChromeTabLifeCards.swift` | ~150/~130 | Pure card wording and the `GlanceCard`s + `ChromeTabLifeToolNames` (compiled by the confirmation suites too). |
+| `ChromeExtension/ChromeTabLife.swift` | ~400 | `@MainActor` save / restore / stale sweep / triage through the bridge, approvals, and the four agent tools. |
+| `ChromeExtension/ChromeTabSessionsRow.swift` | ~190 | The Browser card's Tab sessions row: Restore / Rename / Delete (asks), brain switch. |
+| `ChromeExtension/ChromeFocusPlanner.swift` | ~250 | Pure focus-mode decisions (keep / collapse / mute / Focus group / move), host lists, reply wording, `ChromeFocusStudyBlockPolicy`. Tested by `Tests/ChromeExtFocusMode`. |
+| `ChromeExtension/ChromeFocusCommand.swift` | ~190 | Pure `ChromeFocusCommandParser` ("focus on X for N minutes" / "stop focus"); also used by the automation "say it" parser. |
+| `ChromeExtension/ChromeFocusSession.swift` | ~490 | `ChromeFocusSettings` and `ChromeFocusSession`: start/stop, timer, restore on end / Cancel / next launch, pending-token retries, study-block auto-start, holds the active browser while on. |
+| `ChromeExtension/ChromeFocusAgentTools.swift` | ~70 | The `chrome_focus_mode` agent tool. |
+| `ChromeExtension/ChromeFocusSettingsRow.swift` | ~70 | The Browser card's Focus mode row: status + Stop, site lists, Later-window switch. |
+| `chrome-extension/handlers/focus-mode.js` | ~290 | `applyFocusLayout` / `restoreFocusLayout`: collapse, mute, group as "Focus", move to a minimised Later window, prior state under a restore token. Never closes a tab. |
+
+**Pages: reading, the DOM controller, pointing, ask about this**
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `chrome-extension/handlers/page-reading.js` | ~190 | `getPageText` / `getSelection` / `getPageOutline`: `pages.read` check, tab choice, `forbiddenPageReason`, injection and caps. |
+| `chrome-extension/content/read-page.js` | ~530 | `wispPageReader`: main-text choice (furniture/hidden/secret skips, heading/list/table-row lines, metadata, word count, 20k cap), selection with context, outline. |
+| `ChromeExtension/ChromePageTextPrompt.swift` | ~190 | Pure: the page replies, per-model budgets (6k local / 20k cloud), the `<<< >>>` page-DATA fence (defused) and trimming. Tested by `Tests/ChromeExtPageReading`. |
+| `ChromeExtension/ChromePageContentRequestClassifier.swift` | ~110 | Pure: is the question about what the page says rather than how it looks? Biased toward no. |
+| `ChromeExtension/ChromeTabReferenceResolver.swift` | ~110 | Pure: a `tab` argument (id, title or address fragment, or nothing) → one tab, `.ambiguous` or `.notFound`. |
+| `ChromeExtension/ChromePageReader.swift` | ~130 | `readPage`/`readSelection`/`readOutline` over the bridge, the `pages.read` check, errors in Wisp's voice, and whether the browser in front is the active one. |
+| `ChromeExtension/ChromePageReadingAgentTools.swift` | ~120 | `chrome_read_tab` and `chrome_read_selection`. |
+| `ChromeExtension/CompanionManager+ChromePageReading.swift` | ~70 | `chromePageTextReplacingScreenshot`: page text instead of the screenshot, History step, perf note. |
+| `ChromeExtension/BrainChromePageTarget.swift` | ~50 | "Add this page to my brain" reads the tab's text, else falls back to the URL. |
+| `chrome-extension/handlers/dom-controller.js` | ~580 | `openTab`, `navigateTab`, back/forward, `snapshotPage` (top frame + ≤8 cross-origin frames), `findElements`, click/type/hover/key/scroll/select, `waitForSettled`, `captureVisibleTab`, `getOrCreateWispGroup`; page-access checks before any injection. |
+| `chrome-extension/content/dom-agent.js` | ~530 | The in-page agent (`window.__wispAgent`): snapshot, actions, quietness, geometry; sensitive fields listed but never read or typed into. |
+| `chrome-extension/events/navigation.js` | ~35 | `nav.committed` / `nav.completed`, main frame only. |
+| `ChromeExtension/ExtensionBrowserController.swift` | ~480 | `BrowserController` over the extension: background task tab in the Wisp group (forgotten when the active browser changes, held while a task runs), tab-removed → stop, one-request settling, screen points, 896px screenshot. |
+| `ChromeExtension/ExtensionBrowserReplies.swift` | ~110 | Pure: action statuses → `BrowserControllerError`, element-id guard, missing-tab detection, points, settle timeouts. Tested by `Tests/ChromeExtDOMController`. |
+| `ChromeExtension/BrowserControllerSelector.swift` | ~95 | Pure: extension vs AppleScript per task (connected, `pages.read`, Safari in front, the active browser in front or Chrome drivable by AppleScript), with a reason. Tested by `Tests/ChromeExtDOMController` and `Tests/ChromeExtBrowsers`. |
+| `chrome-extension/content/highlight.js` | ~440 | Wisp's in-page marks in a closed shadow root (ring/box/highlight/step badge), following the element, Esc/label dismissal, trusted-click watching. |
+| `chrome-extension/handlers/pointing.js` | ~260 | `highlightElements` / `clearHighlights` / `watchClicks` / `stopWatchingClicks`, per-frame injection with page-access checks. |
+| `chrome-extension/events/pointing.js` | ~55 | `page.elementClicked` / `page.highlightDismissed` from the highlighter (own extension, never incognito). |
+| `ChromeExtension/ChromeInPagePointingPolicy.swift` | ~260 | Pure: whether to try the page (the active browser in front), mark kinds, targets, window containment, colour, `ChromeInPageElementMatcher`, walkthrough event rules. Tested by `Tests/ChromeExtInPagePointing`. |
+| `ChromeExtension/ChromeInPagePointing.swift` | ~620 | Bridge calls and state for pointing marks and walkthrough steps, event handling, the `CompanionManager` glue. |
+| `chrome-extension/events/ask-about-this.js` | ~260 | The five context-menu items, omnibox `w …`, ⌘⇧Y → `user.*` events (ids, URLs, menu selection text only from ordinary pages outside form fields); "!" badge while Wisp is away. |
+| `ChromeExtension/ChromeAskAboutThisRequest.swift` | ~140 | Pure: the `user.*` event names and payload, and the decoder (ask / omnibox / add to brain). Tested by `Tests/ChromeExtAskAboutThis`. |
+| `ChromeExtension/ChromeAskAboutThisContext.swift` | ~310 | Pure: `ChromeAskAboutThisPart` and each part's per-turn plan (fenced prompt text, screenshot or not, fallbacks). |
+| `ChromeExtension/ChromeAskImageDownload.swift` | ~140 | Image download rules (https, 2xx `image/*`, 10 MB, https-only redirects) and the cookie-less fetch. |
+| `ChromeExtension/ChromeAskAboutThisRouter.swift` | ~300 | `@MainActor` router over the events: composer with the part, omnibox questions, add to brain, image cache, link text. |
+| `ChromeExtension/CompanionManager+ChromeAskAboutThis.swift` | ~130 | The turn hook (`chromeAskAboutThisTurnInput`) and notch replies. |
+| `ChromeExtension/ChromeAskAboutThisComposerChip.swift` | ~40 | The composer's "About: selected text ✕" chip. |
+
+**Watching, site helpers, research, forms, downloads**
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `chrome-extension/content/page-watch.js` | ~450 | `wispPageWatch`: MutationObserver, ≤1 evaluation/s, text and number matching mirroring Swift, the four conditions. |
+| `chrome-extension/handlers/page-watchers.js` | ~610 | `startPageWatch` / `stopPageWatch` / `listPageWatches`, `watch.matched` / `watch.ended`: session-storage watches, re-injection (each one re-checks the page), reloading background tabs, the sweep. |
+| `ChromeExtension/ChromePageWatch.swift` | ~400 | Pure: `ChromePageWatchRouter` (tab or screen), wire condition, events, endings, wording, reconciliation. Tested by `Tests/ChromeExtPageWatchers`. |
+| `ChromeExtension/ChromePageWatchStore.swift` | ~310 | Starts/stops watches, handles their events, reconciles on connect, notifications, `watchMatchedPublisher`; holds the active browser while any runs. |
+| `ChromeExtension/CompanionManager+ChromePageWatch.swift` | ~100 | `directWatchReply` (screen or tab, stop both) and page-watch endings in the notch. |
 | `ChromeExtension/ChromePageWatchRow.swift` | ~60 | A page watch's row in the notch's live section, with Stop. |
-| `ChromeExtension/ChromeBrowsingActivity.swift` | ~230 | Pure: `ChromeSiteMatching` (spoken site → host, subdomains, equivalents) and `ChromeTimeOnSiteAccumulator`. Tested by `Tests/ChromeExtPageWatchers`. |
-| `ChromeExtension/ChromeBrowsingActivityMonitor.swift` | ~190 | Tab events + frontmost app + idle → site-opened events and the time-on-site accumulator, for the Chrome automation triggers. |
-| `ChromeExtension/CanvasPageMatching.swift` | ~455 | Pure Canvas side of phase 10: `CanvasAssignmentDetails`/opened payload, `CanvasAssignmentPageMatcher` (trusted hosts, address → ids, feed UID), `CanvasAssignmentChecklistMatcher` (feed / checklist / study-block status, item to add or plan), `CanvasAddToTodayChipPolicy`, reply text, the fenced `CanvasAssignmentPrompt`. Tested by `Tests/ChromeExtSiteHelpers`. |
-| `ChromeExtension/CanvasPageHelper.swift` | ~260 | `@MainActor`: status / add to today / plan this through `JobsEngine`, the "Add to today?" offer (once per assignment, switch), the feed host cached from the Keychain. |
-| `ChromeExtension/CanvasAddToTodayViews.swift` | ~90 | The notch's "Add to today?" chip and its switch row in the Chrome Tabs card. |
-| `ChromeExtension/MeetingCaptionsPrompt.swift` | ~305 | Pure: `MeetingCaptions` payloads, call addresses, `MeetingCaptionsRequestParser` ("what did i miss", "the last 5 minutes"), newest-first transcript lines, the fenced prompt and fail-soft replies. Tested by `Tests/ChromeExtSiteHelpers`. |
-| `ChromeExtension/MeetingCaptionsHelper.swift` | ~75 | `getMeetingCaptions` + one text-only model turn for the catch-up. |
-| `ChromeExtension/ChromeSiteHelperRouting.swift` | ~200 | Pure: `ChromeSiteHelperCommand`, its conservative phrase parser, `ChromeSiteHelperTabState` (showing tab, Canvas/call tabs from tab events). |
-| `ChromeExtension/ChromeSiteHelpers.swift` | ~200 | `@MainActor` hub: follows tab and site events, reseeds from `getTabs`, the lock-guarded availability the router reads, `perform`, request errors in Wisp's voice. |
-| `ChromeExtension/ChromeSiteHelperAgentTools.swift` | ~115 | `chrome_canvas_assignment` and `chrome_meeting_captions` (read). |
-| `chrome-extension/content/canvas-assignment.js` | ~295 | Reads a Canvas assignment page (selector table, due-date parsing, form fields and `[data-wisp-ignore]` skipped); announces `wisp.site.canvasAssignmentOpened` when registered. |
-| `chrome-extension/content/meeting-captions.js` | ~400 | Meet/Zoom caption selectors in one table, the in-page 30-minute buffer (merge growing/revised/scrolled captions, minute segments, windowing), `readBuffer`. |
-| `chrome-extension/handlers/site-helpers.js` | ~215 | `getCanvasAssignmentDetails`, `getMeetingCaptions` (pages.read, refusals, injection on demand, caps). |
-| `chrome-extension/events/site-helpers.js` | ~135 | Registers/unregisters the two scripts with `pages.read`; turns their messages into `site.canvasAssignmentOpened` / `site.meetingCaptionsAvailable`. |
-| `chrome-extension/handlers/research.js` | ~95 | `highlightTextFragments({tabId, quotes, color?, scrollToFirst?})` → `{tabId, found, missing}` (quote indexes): `pages.read`, page-access and incognito refusals, injects the quote highlighter. |
-| `chrome-extension/content/quote-highlight.js` | ~270 | Phase 11, injected on demand (`globalThis.wispQuoteHighlighter`): finds quotes in the page's readable text nodes (whitespace removed, folded like the Swift verifier; never form fields, scripts, hidden or `[data-wisp-ignore]`), marks them in a closed shadow root that follows scrolling, scrolls the first into view, Esc clears. |
-| `chrome-extension/tests/research.test.mjs` / `tests/fixtures/research/*.html` | ~210 | Quote finding against a fixture page (inline elements, curly quotes, across paragraphs, ignored regions, fabricated quotes), drawing and the handler's refusals. |
-| `ChromeExtension/ResearchCitationVerifier.swift` | ~210 | Pure: `ResearchTextFolding`, `ResearchCitationVerifier` (quote ↔ source text, 3–25 words, returns the page's own text) and `ResearchTextFragmentURL` (`#:~:text=`, `start,end` past 8 words, strict escaping). Tested by `Tests/ChromeExtResearch`. |
-| `ChromeExtension/ResearchReport.swift` | ~245 | Pure: `ResearchSourceDocument`, `ResearchDraftClaim`, `ResearchReport` (+ plain text), notch line, `ResearchReportAssembler` (verify, drop, dedupe, renumber by first citation, fragment URLs, machine tags and web-address summary sentences stripped). |
-| `ChromeExtension/ResearchPlanning.swift` | ~285 | Pure: `ResearchRequestParser` ("research …", purpose kept out of the search box, "and save it to my brain"), `ResearchSessionCommandParser` ("done"), `ResearchBudget`, `ResearchSearch` (Google), `ResearchSourceKey` (host + path) and `ResearchSourcePicker`. |
-| `ChromeExtension/ResearchPrompts.swift` | ~255 | Pure: map / reduce / combine prompts with pages fenced as data, and the lenient SUMMARY / FINDING / CLAIM line grammar; findings checked before the reduce step. |
-| `ChromeExtension/ResearchBrainPages.swift` | ~90 | A report → Brain edit proposals (`topics/` + `sources/` pages), `.external` provenance. |
-| `ChromeExtension/ResearchCards.swift` | ~50 | `ResearchToolNames` and the "close research tabs you used" confirmation card (compiled by the confirmation suites too). |
-| `ChromeExtension/ResearchSession.swift` | ~385 | `@MainActor ResearchSessionController`: start checks, the background run (search → pick → open → read → write → check → keep/file/announce), `writeDraft` (static, model-only, driven by `Tests/HostileProviderAttack`), Save to Brain, History steps. |
-| `ChromeExtension/ResearchSessionTabs.swift` | ~270 | Research tabs: tab-event tracking (used by the user or not), `openCitation` (focus + in-page highlight, fragment fallback, reopen), closing with the card, the 30-minute idle close, the router's `perform`. |
-| `ChromeExtension/ResearchReportView.swift` | ~205 | The Chat page's report entry: claims, quotes, clickable citations and sources, Save to Brain / Copy / Close research tabs. |
-| `ChromeExtension/ResearchAgentTools.swift` | ~95 | `chrome_research_topic` (`registerResearchTools()`): starts the run and returns the report when it's done. |
-| `ChromeExtension/CompanionManager+Research.swift` | ~35 | Hooks the finished-run notch line and the notch's Open report (Chat page, scrolled to the report). |
-| `chrome-extension/content/form-helper.js` | ~410 | Phase 12, injected after the DOM agent: `describeForm` (fields, never values; refusals; trap fields skipped; which form), `fillFields` (agent's `typeText` without Enter, exact select options, re-refuses, leaves user-typed fields). |
-| `chrome-extension/handlers/form-helper.js` | ~180 | `describeForm` / `fillFormFields`: page access, top frame only, request shape, refuses a tab that moved to another page. |
-| `chrome-extension/tests/form-helper.test.mjs` / `tests/fixtures/form.html` | ~365/~110 | Refusal list (adversarial labels), no values read, no Enter/click/submit, trap fields; the fixture is the manual-check page. |
-| `ChromeExtension/FormFillPlanner.swift` | ~850 | Pure: `FormFieldDescription`, `FormFillRefusal` (mirrors the content script), `FormProfile` from the Me card + me-page facts, `FormFieldKeyMatcher` (autocomplete, label words), `FormFillPlanner.plan`, `FormFieldLabelMappingPrompt` (labels only), `FormFillCommandParser`, `FormFillReplyText`. Tested by `Tests/ChromeExtFormHelper`. |
-| `ChromeExtension/FormFillCards.swift` | ~210 | Pure: `fill_form`'s name, prepared input (`value_<id>` per proposal), confirmation card and editable rows. Compiled by the confirmation suites. |
-| `ChromeExtension/ChromeFormFill.swift` | ~275 | `@MainActor`: reads the Me card and memory, describes the form, plans (model for leftovers), the input preparer, the fill and its reply, `registerChromeFormFillTools()`. |
+| `ChromeExtension/ChromeBrowsingActivity.swift` | ~200 | Pure: `ChromeSiteMatching` and `ChromeTimeOnSiteAccumulator`. Tested by `Tests/ChromeExtPageWatchers`. |
+| `ChromeExtension/ChromeBrowsingActivityMonitor.swift` | ~190 | Tab events + frontmost app + idle → site-opened events and time on a site, for the browser automation triggers. |
+| `chrome-extension/content/canvas-assignment.js` | ~300 | Reads a Canvas assignment page (selector table, due dates; form fields and `[data-wisp-ignore]` skipped). |
+| `chrome-extension/content/meeting-captions.js` | ~400 | Meet/Zoom caption selectors and the in-page 30-minute buffer. |
+| `chrome-extension/handlers/site-helpers.js` | ~220 | `getCanvasAssignmentDetails`, `getMeetingCaptions` (`pages.read`, refusals, caps). |
+| `chrome-extension/events/site-helpers.js` | ~140 | Registers/unregisters the two scripts with `pages.read`; `site.canvasAssignmentOpened` / `site.meetingCaptionsAvailable`. |
+| `ChromeExtension/CanvasPageMatching.swift` | ~450 | Pure Canvas helper: trusted hosts, page ↔ feed ↔ checklist matching, the chip rule, replies, the fenced prompt. Tested by `Tests/ChromeExtSiteHelpers`. |
+| `ChromeExtension/CanvasPageHelper.swift` | ~260 | `@MainActor`: status / add to today / plan this through `JobsEngine`, the "Add to today?" offer. |
+| `ChromeExtension/CanvasAddToTodayViews.swift` | ~90 | The notch's "Add to today?" chip and its Browser-card switch row. |
+| `ChromeExtension/MeetingCaptionsPrompt.swift` | ~300 | Pure: caption payloads, call addresses, "what did i miss" phrases, the fenced prompt, fail-soft replies. Tested by `Tests/ChromeExtSiteHelpers`. |
+| `ChromeExtension/MeetingCaptionsHelper.swift` | ~75 | `getMeetingCaptions` + one text-only model turn. |
+| `ChromeExtension/ChromeSiteHelperRouting.swift` | ~200 | Pure: `ChromeSiteHelperCommand`, its phrase parser, the tab state from events. |
+| `ChromeExtension/ChromeSiteHelpers.swift` | ~200 | `@MainActor` hub: tab and site events, reseeds from `getTabs`, the availability the router reads, `perform`. |
+| `ChromeExtension/ChromeSiteHelperAgentTools.swift` | ~110 | `chrome_canvas_assignment` and `chrome_meeting_captions` (read). |
+| `chrome-extension/handlers/research.js` | ~95 | `highlightTextFragments`: `pages.read`, page-access and incognito refusals, injects the quote highlighter. |
+| `chrome-extension/content/quote-highlight.js` | ~300 | Finds quotes in the page's readable text (never form fields, scripts or `[data-wisp-ignore]`) and marks them. |
+| `ChromeExtension/ResearchCitationVerifier.swift` | ~190 | Pure: text folding, quote ↔ source verification, `#:~:text=` addresses. Tested by `Tests/ChromeExtResearch`. |
+| `ChromeExtension/ResearchReport.swift` | ~230 | Pure: sources, draft claims, `ResearchReport`, `ResearchReportAssembler` (verify, drop, renumber, strip). |
+| `ChromeExtension/ResearchPlanning.swift` | ~260 | Pure: request and "done" parsers, budgets, the Google search address, source keys and picker. |
+| `ChromeExtension/ResearchPrompts.swift` | ~240 | Pure: map / reduce / combine prompts with pages fenced as data, and the line grammar. |
+| `ChromeExtension/ResearchBrainPages.swift` | ~90 | A report → `topics/` + `sources/` Brain proposals, `.external`. |
+| `ChromeExtension/ResearchCards.swift` | ~45 | `ResearchToolNames` and the "close research tabs you used" card (compiled by the confirmation suites too). |
+| `ChromeExtension/ResearchSession.swift` | ~410 | `@MainActor ResearchSessionController`: the background run, `writeDraft` (driven by `Tests/HostileProviderAttack`), Save to Brain, History steps; holds the active browser during a run and while its tabs are open. |
+| `ChromeExtension/ResearchSessionTabs.swift` | ~270 | Research tabs: tracking (dropped if their browser goes away), citations, closing with the card, the 30-minute idle close. |
+| `ChromeExtension/ResearchReportView.swift` | ~180 | The Chat page's report entry. |
+| `ChromeExtension/ResearchAgentTools.swift` | ~85 | `chrome_research_topic`. |
+| `ChromeExtension/CompanionManager+Research.swift` | ~35 | The finished-run notch line and Open report. |
+| `chrome-extension/content/form-helper.js` | ~410 | `describeForm` (fields, never values; refusals; trap fields skipped) and `fillFields` (no Enter, exact options, re-refuses, leaves user-typed fields). |
+| `chrome-extension/handlers/form-helper.js` | ~180 | `describeForm` / `fillFormFields`: page access, top frame only, refuses a tab that moved to another page. |
+| `ChromeExtension/FormFillPlanner.swift` | ~850 | Pure: field descriptions, `FormFillRefusal`, `FormProfile`, `FormFieldKeyMatcher`, the plan, the labels-only prompt, phrases, replies. Tested by `Tests/ChromeExtFormHelper`. |
+| `ChromeExtension/FormFillCards.swift` | ~210 | Pure: `fill_form`'s prepared input, card and editable rows (compiled by the confirmation suites). |
+| `ChromeExtension/ChromeFormFill.swift` | ~270 | `@MainActor`: Me card + memory, describe, plan, input preparer, fill, reply, `registerChromeFormFillTools()`. |
+| `chrome-extension/handlers/downloads.js` | ~110 | `getDownloads` / `showDownload`, `describeDownload`. Never moves or renames. |
+| `chrome-extension/events/downloads.js` | ~95 | `download.created/completed/failed` with the source page; attaches when downloads are allowed. |
+| `ChromeExtension/DownloadFilingRules.swift` | ~700 | Pure concierge rules: payload, rule file, matcher, suggested names, collisions, refusals, planner. Tested by `Tests/ChromeExtDownloads`. |
+| `ChromeExtension/DownloadConcierge.swift` | ~450 | Offers, File / Just brain / Ignore, "always" rules, the one disk move, Undo, quiet mode, the switch and rules file. |
+| `ChromeExtension/DownloadConciergeViews.swift` | ~250 | The notch card, the flank ↓ badge, the Browser card's switch row. |
+| `ChromeExtension/DownloadAgentTools.swift` | ~250 | `chrome_list_downloads` (fenced list) and `chrome_file_download` (resolved before the card). |
+
+**Extension tests** (`node --test chrome-extension/tests/`; run `npm install` in `chrome-extension/` first for linkedom)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `chrome-extension/tests/fake-chrome.mjs` | ~500 | In-memory `chrome.*` (tabs, groups, windows, permissions, alarms, storage, runtime, scripting stub, downloads while granted, entry points), `FakeWebSocket`, manual timers. |
+| `chrome-extension/tests/fake-dom.mjs` / `fake-highlight-page.mjs` / `snapshot-fixture-page.mjs` | ~310/~140/~30 | Tiny fake DOMs that run the real content scripts in a `vm`, and the page behind the shared snapshot fixture. |
+| `chrome-extension/tests/*.test.mjs` | ~4610 | One file per module: bridge, background wiring (listener counts), tabs, events, capabilities, limits, DOM agent and controller, navigation, page reading, tab life, downloads, focus mode, highlight and pointing, ask about this, page watchers, site helpers, research, form helper. |
+| `chrome-extension/tests/fixtures/` | — | Fixture pages for page reading, research and the form helper (`form.html` is also the manual-check page). |
+| `chrome-extension/package.json` | ~10 | Marks the files as ES modules for Node; linkedom as a dev dependency. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1561,7 +1477,7 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `Brain/BrainStore.swift` | ~650 | The vault: layout + seeding, page load/resolve/backlinks, `apply` (versioned, one change record, optional deletions), hand edits, undo, index.md/log.md, raw sources, Finder/Obsidian opening. |
 | `Brain/BrainSchema.swift / BrainPreferences.swift` | ~50/~65 | Default SCHEMA.md + the edit-proposal prompt rules; the brain's UserDefaults switches (activity off by default). |
 | `Brain/BrainAboutMe.swift / BrainMemoryMigration.swift` | ~155/~145 | me-page facts → system-prompt block, remember/forget edits; one-time memory.md → me.md migration. |
-| `Brain/BrainAgentTools.swift / BrainCommandRouter.swift` | ~350/~240 | `search_brain`/`read_brain_page`/`add_to_brain`/`ingest_into_brain`; deterministic "add this to my brain" parsing + front-tab/Finder target resolution. |
+| `Brain/BrainAgentTools.swift / BrainCommandRouter.swift` | ~350/~300 | `search_brain`/`read_brain_page`/`add_to_brain`/`ingest_into_brain`; deterministic "add this to my brain" parsing + front-tab/Finder target resolution. |
 | `Brain/BrainKnowledgeExtractor.swift` | ~350 | Source text → edit proposals: per-chunk model calls with relevant page titles, one stricter retry, source-page summary call. |
 | `Brain/BrainIngestQueue.swift / BrainIngestJob.swift` | ~615/~140 | Serial persisted ingest queue (raw copies, trust mapping, History rows, one drain notification) and the job type + codec. |
 | `Brain/BrainTextExtractor.swift / BrainTextChunker.swift` | ~685/~215 | md/txt/PDF/HTML/RTF/DOCX extraction, HTML→text, user-requested web fetch; heading/paragraph chunking with even sampling. |
@@ -1578,10 +1494,10 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 ### Jobs (Canvas calendar + daily checklist)
 | File | Lines | Purpose |
 |------|-------|---------|
-| `Jobs/JobsEngine.swift` | ~480 | `@MainActor JobsEngine` (published sync state, diff, pending study blocks, today's checklist, access states) plus `JobsToolNames` and the injectable protocols (`JobsFeedProviding`, `JobsCalendarWriting`, `JobsReminderWriting`, `JobsStudyBlockApproving`, `JobsChangeAnnouncing`). Launch sync, then a 60s clock: sync at most hourly (15-minute floor even for Sync now), checklist rebuilt once per morning (5am-5pm). Snapshot saved only after every write succeeded; empty diff is silent. State in `jobs-engine-state.json` (0600). Tested by `Tests/JobsEngine`. |
+| `Jobs/JobsEngine.swift` | ~770 | `@MainActor JobsEngine` (published sync state, diff, pending study blocks, today's checklist, access states) plus `JobsToolNames` and the injectable protocols (`JobsFeedProviding`, `JobsCalendarWriting`, `JobsReminderWriting`, `JobsStudyBlockApproving`, `JobsChangeAnnouncing`). Launch sync, then a 60s clock: sync at most hourly (15-minute floor even for Sync now), checklist rebuilt once per morning (5am-5pm). Snapshot saved only after every write succeeded; empty diff is silent. State in `jobs-engine-state.json` (0600). Tested by `Tests/JobsEngine`. |
 | `Jobs/JobsEngineLiveDependencies.swift` | ~130 | The real adapters (feed store, Keychain, the two EventKit actors, `ToolConfirmationCoordinator` approval, notification + island flash, quiet-mode aware) and `JobsEngine.shared`. `NotchWindowController.show()` sets the flash hook and calls `JobsEngine.shared.start()`. |
-| `Jobs/Canvas*.swift`, `Jobs/StudyBlockPlanner.swift` | ~800 | Pure Canvas core: models, ICS parser, snapshot diff, study-block planner, URL validator, Keychain store and feed store. Tested by `Tests/CanvasSync`. |
-| `Jobs/ChecklistModels.swift`, `Jobs/DayChecklistBuilder.swift` | ~550 | Checklist model, the pure builder (rollover, cap, dedupe) and `JobsEventKitPlanning` (write plans). Tested by `Tests/DayChecklist`. |
+| `Jobs/Canvas*.swift`, `Jobs/StudyBlockPlanner.swift` | ~920 | Pure Canvas core: models, ICS parser, snapshot diff, study-block planner, URL validator, Keychain store and feed store. Tested by `Tests/CanvasSync`. |
+| `Jobs/ChecklistModels.swift`, `Jobs/DayChecklistBuilder.swift` | ~610 | Checklist model, the pure builder (rollover, cap, dedupe) and `JobsEventKitPlanning` (write plans). Tested by `Tests/DayChecklist`. |
 | `Jobs/WispCalendarWriter.swift`, `Jobs/WispTodayReminders.swift` | ~470 | Thin EventKit actors for the "Wisp" calendar and the "Wisp Today" list. |
 
 ### Automations, quick add, first run
@@ -1592,7 +1508,7 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `Automations/AutomationDraft.swift` / `AutomationDraftParser.swift` | ~250/~745 | Draft card model and the deterministic "say it" parser (+ model-assist prompt/reply that only fills the card). Tested by `Tests/AutomationDraft`. |
 | `Automations/AutomationTemplates.swift` | ~155 | The eight gallery templates, as data. |
 | `Automations/AutomationStore.swift` / `AutomationRunRecord.swift` | ~300/~255 | Persistence of automations and run history (0600, 30-day retention), default-buddy assignment. |
-| `Automations/AutomationEngine.swift` | ~1000 | Clock, run rules, `AutomationToolPolicy`, unattended-safe runs, history to "Needs you". Tested by `Tests/AutomationEngine`. |
+| `Automations/AutomationEngine.swift` | ~1220 | Clock, run rules, `AutomationToolPolicy`, unattended-safe runs, history to "Needs you". Tested by `Tests/AutomationEngine`. |
 | `Automations/AutomationLiveWiring.swift` | ~515 | Real adapters (model via `startAutomationRun`, EventKit, notifications, notch, JobsEngine, watchers). |
 | `Automations/AutomationMigration.swift` / `AutomationMigrationRunner.swift` | ~170/~125 | Pure plan and one-time runner from Routines, buddy jobs and Jobs. Tested by `Tests/AutomationMigration`. |
 | `WispWindow/Automations/*.swift` | ~3000 | `AutomationsHubView` (say-it box, list, gallery; embedded in Buddies), `AutomationDraftCardView`, chip editors, run history, next-runs tile, template gallery, `BuddyAutomationsSection`, `SaveAsAutomationButton`, display text/support. |
@@ -1602,7 +1518,7 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 ### Themes and buddy personality
 | File | Lines | Purpose |
 |------|-------|---------|
-| `DesignSystem/WispTheme.swift` | ~265 | Pure `WispTheme` definitions (six themes; the only place theme hex lives). |
+| `DesignSystem/WispTheme.swift` | ~380 | Pure `WispTheme` definitions (six themes; the only place theme hex lives). |
 | `DesignSystem/WispThemeStore.swift` | ~150 | Chosen theme, island-tint and Playful switches, thread-safe cache for dynamic colours, `.wispThemeDidChange`. |
 | `DesignSystem/WispThemeContrast.swift` | ~170 | Pure contrast-ratio checks per theme, light and dark. Tested by `Tests/WispTheme`. |
 | `Components/WispThemeBackdrop.swift` / `WispThemePicker.swift` | ~165/~120 | The window's blurred-gradient backdrop and the swatch picker. |
@@ -1615,14 +1531,14 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | File | Lines | Purpose |
 |------|-------|---------|
 | `VoiceOutputPreference.swift` | ~50 | Source of truth for voice/silent mode (reply speech on/off). Persists; defaults on. |
-| `WispSoundPlayer.swift` | ~120 | The Dynamic Island's interaction sound cues (listening / thinking / reply / success / error), played as built-in macOS system sounds at low volume. `WispSoundPreference` is the UserDefaults-backed on/off gate (default on), toggled from the notch header's bell button. Separate from reply speech (`VoiceOutputPreference`). |
+| `WispSoundPlayer.swift` | ~230 | The Dynamic Island's interaction sound cues (listening / thinking / reply / success / error), played as built-in macOS system sounds at low volume. `WispSoundPreference` is the UserDefaults-backed on/off gate (default on), toggled from the notch header's bell button. Separate from reply speech (`VoiceOutputPreference`). |
 | `SpokenLineParser.swift` | ~90 | Parses/strips the `[SAY: …]` tag — the model's per-reply "speak this" line. |
 | `GlanceCard.swift` | ~655 | `[CARD:…]` parser + intent model (`GlanceCardRequest`/`ResolvedGlanceCard`, incl. `RemindersCardRequest`/`TimerCardRequest`) and the generic block card. |
 | `FastCommandRouter.swift` | ~520 | Model-free handling of rigid commands (mute/volume, open an app, and "set a timer for …" via `TimerCommandParser`, whose `Outcome.glanceCardRequest` CompanionManager resolves like a `[CARD:]` tag). Biased toward not matching. |
 | `GlanceCardView.swift` | ~180 | Renderer for the generic block card (header/list/keyValue/stats). |
 | `GlanceCardDataPreference.swift` | ~40 | The single gate for **network** card data (weather, sources). Default on. |
 | `WeatherSnapshot.swift` / `WeatherDataProvider.swift` / `WeatherCardView.swift` | ~330/~200/~260 | Weather kind: Open-Meteo fetch → snapshot → Apple-Weather-style card. |
-| `CalendarSnapshot.swift` / `CalendarDataProvider.swift` / `CalendarCardView.swift` | ~50/~110/~160 | Calendar kind: EventKit on-device read → next events card. Needs Calendar permission. |
+| `CalendarSnapshot.swift` / `CalendarDataProvider.swift` / `CalendarCardView.swift` | ~50/~220/~160 | Calendar kind: EventKit on-device read → next events card. Needs Calendar permission. |
 | `NowPlayingDataProvider.swift` / `NowPlayingCardView.swift` | ~150/~110 | Now-playing kind: AppleScript to Music/Spotify (best-effort, on-device). Needs Automation permission. |
 | `PlacesSnapshot.swift` / `PlacesDataProvider.swift` / `PlacesCardView.swift` | ~85/~230/~250 | `places` kind: CoreLocation one-shot (`WispLocationProvider`, in the provider file) + MapKit `MKLocalSearch` → a Maps-style nearby-results card whose rows open in Apple Maps. Network-gated by `GlanceCardDataPreference`; requests Location permission on first use. |
 | `RemindersSnapshot.swift` / `RemindersDataProvider.swift` / `RemindersCardView.swift` | ~210/~215/~240 | `reminders` kind: EventKit on-device read → incomplete-reminders card (rows open Reminders.app). The snapshot file also holds the pure `RemindersSelection` (overdue/today/all filtering + ordering) and `ReminderDueDateParser` (ISO 8601 variants for `create_reminder`); the provider also saves reminders for the confirmation-gated `create_reminder` tool. Needs Reminders permission (`NSRemindersFullAccessUsageDescription`). |
@@ -1643,30 +1559,30 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `Jobs/JobsEngine.swift` / `JobsEngineLiveDependencies.swift` | ~690/~135 | The orchestrator (launch + hourly sync, diff, study-block approval, checklist rebuild, published state for the window and notch) and its live EventKit/network wiring. |
 | `WispWindow/JobsTab.swift` | ~515 | Canvas page (inside Buddies): Canvas setup flow, sync status, change cards, study-block approval, settings. |
 | `WispWindow/WispAdvancedFeaturesPreference.swift` | ~35 | Persisted Advanced features switch (`isEnabledNow` for non-UI code); hides delegation, per-buddy models, sharing and four sections, never buddies. |
-| `DynamicIsland/DailyChecklistView.swift` / `CanvasDiffCardView.swift` | ~130/~100 | The notch's tickable checklist and Canvas change card. |
+| `DynamicIsland/DailyChecklistView.swift` / `CanvasDiffCardView.swift` | ~230/~100 | The notch's tickable checklist and Canvas change card. |
 
 ### Wisp window, notch and UI
 | File | Lines | Purpose |
 |------|-------|---------|
-| `WispWindow/WispNavigation.swift` | ~175 | `WispSection` (sidebar destinations, grouped use/manage) + `WispPage` (every page and its section), `WispWindowRouter` (shared selection, last page per section) and `WispWindowNavigator.open(_:)`. Also the `.wispDismissPanel` / `.wispCloseNotchWorkspace` notification names. |
-| `WispWindow/WispWindowController.swift` | ~125 | The Wisp window: `NSWindow` + `NSHostingController` with title/toolbar bridging, unified toolbar, frame autosave, full-screen capable. `WispWindowActivation` raises `.regular` while a titled window is open and drops back to `.accessory` after. |
-| `WispWindow/WispWindowView.swift` | ~330 | The shell: the top bar of section tabs (dot badges: running tasks on History, working buddies on Buddies, ingest on Brain, a missing permission on Settings), the page strip, the page switch, and the status pill (mark + state + model, collapsing to the mark when narrow). |
+| `WispWindow/WispNavigation.swift` | ~290 | `WispSection` (sidebar destinations, grouped use/manage) + `WispPage` (every page and its section), `WispWindowRouter` (shared selection, last page per section) and `WispWindowNavigator.open(_:)`. Also the `.wispDismissPanel` / `.wispCloseNotchWorkspace` notification names. |
+| `WispWindow/WispWindowController.swift` | ~180 | The Wisp window: `NSWindow` + `NSHostingController` with title/toolbar bridging, unified toolbar, frame autosave, full-screen capable. `WispWindowActivation` raises `.regular` while a titled window is open and drops back to `.accessory` after. |
+| `WispWindow/WispWindowView.swift` | ~210 | The shell: the top bar of section tabs (dot badges: running tasks on History, working buddies on Buddies, ingest on Brain, a missing permission on Settings), the page strip, the page switch, and the status pill (mark + state + model, collapsing to the mark when narrow). |
 | `Components/WispSegmented.swift` | ~50 | The window's segmented control (quiet track, raised sliding thumb); replaces the system segmented picker in settings pages. |
 | `WispWindow/WispAppearancePreference.swift` | ~55 | Window appearance: System / Light / Dark, applied to the Wisp `NSWindow` only. |
 | `Components/WispPill.swift` | ~140 | `WispBevel` (raised surface) and `WispPillButtonStyle` (the window's one button style). |
 | `WispWindow/ChatPage.swift` | ~440 | Chat: the last 6 hours of interactive exchanges as a thread (running turns show the live browser step + Stop, answers have Copy), a follow-up box (`askTypedQuestion`; capture excludes Wisp's own windows), and a side column of running and recently finished tasks. Opened by the notch's expand button via `openConversationWindow()`. |
 | `WispWindow/BuddiesPage.swift` | ~150 | Buddies: a list of buddies + the selected one's `BuddyDetailView` or `NewBuddyForm`; a single invitation when there are none. |
-| `WispWindow/GeneralSettingsPage.swift` | ~330 | Settings → General: `PermissionsChecklist` (mic / accessibility / screen recording / screen content with Grant buttons — also shown on Today until granted), `ActiveStackCard` (model + residency, speech, voice, agent mode, local-only assurance), island surface, speak replies, sound cues and `VoiceUpgradeHint`. `SettingRow` is the shared title/detail/control row. |
-| `WispWindow/ModelSettingsPage.swift` | ~465 | Settings → Model (`PerformanceTab`: provider choice + API key, system readouts, timings) and the shared `DashboardCard` (native grouped card) and `DashboardEmptyState` (`ContentUnavailableView`). |
+| `WispWindow/GeneralSettingsPage.swift` | ~380 | Settings → General: `PermissionsChecklist` (mic / accessibility / screen recording / screen content with Grant buttons — also shown on Today until granted), `ActiveStackCard` (model + residency, speech, voice, agent mode, local-only assurance), island surface, speak replies, sound cues and `VoiceUpgradeHint`. `SettingRow` is the shared title/detail/control row. |
+| `WispWindow/ModelSettingsPage.swift` | ~590 | Settings → Model (`PerformanceTab`: provider choice + API key, system readouts, timings) and the shared `DashboardCard` (native grouped card) and `DashboardEmptyState` (`ContentUnavailableView`). |
 | `HistoryTab.swift` | ~480 | The History **Timeline** page (`WispPage.timeline`): search (title/answer/steps), filters (All · Answers · Browser · Tools · Needs attention), day-grouped list, and a detail pane — answer, failure reason, "What Wisp did" steps, and actions: Stop, Copy answer, Ask again (closes the Wisp window first) and **Save as routine** (creates a `WispRoutine` and hands it to the Routines editor via `RoutineStore.routineIDToOpenInEditor`). Routine, skill and dictation runs are titled with `AgentTaskRecord.routineRunTitlePrefix`/`skillRunTitlePrefix`/`dictationTitlePrefix` (set via `sendTranscriptToClaudeWithScreenshot(transcript:historyTitle:)`), and `isUsersOwnQuestion` hides re-ask/save for them. |
-| `HomeTab.swift` | ~1345 | The Wisp window's **Today** page as a bento grid of `WispBentoTile`s: a hero (greeting, the `WispMark` moving with `islandState` + live transcript/browser step, a signature-gradient wash that drifts only while Wisp is active, the ask bar — typed question via `CompanionManager.askTypedQuestion`, or `/` to filter and run routines — and a voice/silent toggle); a Today tile (answers / buddy runs / brain changes today + 12-hour activity bars, opens History); "Needs you" alerts with fixes (Ollama/Chatterbox unreachable — localhost checks every 30s, only for services in use — pending confirmation, a failed/interrupted task in the last 2h); Running now (live rim, per-task Stop); Buddies (avatars bob while working, unread dot; rows open that buddy via `WispWindowRouter.buddyIDToOpen`, + opens the new-buddy form); Up next (Calendar, requests access only from its Connect button); Brain; Routines (hover turns the icon into play); Recent answers (Copy on hover). Two columns when wide, one when narrow. Anything it runs closes the Wisp window first so the screenshot shows the user's work. |
+| `HomeTab.swift` | ~1560 | The Wisp window's **Today** page as a bento grid of `WispBentoTile`s: a hero (greeting, the `WispMark` moving with `islandState` + live transcript/browser step, a signature-gradient wash that drifts only while Wisp is active, the ask bar — typed question via `CompanionManager.askTypedQuestion`, or `/` to filter and run routines — and a voice/silent toggle); a Today tile (answers / buddy runs / brain changes today + 12-hour activity bars, opens History); "Needs you" alerts with fixes (Ollama/Chatterbox unreachable — localhost checks every 30s, only for services in use — pending confirmation, a failed/interrupted task in the last 2h); Running now (live rim, per-task Stop); Buddies (avatars bob while working, unread dot; rows open that buddy via `WispWindowRouter.buddyIDToOpen`, + opens the new-buddy form); Up next (Calendar, requests access only from its Connect button); Brain; Routines (hover turns the icon into play); Recent answers (Copy on hover). Two columns when wide, one when narrow. Anything it runs closes the Wisp window first so the screenshot shows the user's work. |
 | `DashboardToolsTab.swift` | ~253 | Tools & Servers tab: MCP status, per-server stderr, registered tools. |
 | `MarketplaceTab.swift` | ~700 | Connections → Marketplace: browse/search/filter the curated registry, install (config-field sheet for keys), enable/disable, remove, per-tool toggles, the model tool-budget meter, and a Composio cloud-toolkits section (key entry + toolkit list + off-machine label). Reads `InstalledMCPServerStore` + `MCPManager` + `ComposioAccountStore`. |
-| `ShortcutsTab.swift` | ~250 | Settings → Shortcuts: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
+| `ShortcutsTab.swift` | ~320 | Settings → Shortcuts: view/rebind the hold chord and hands-free double-tap, toggle hands-free, reset to defaults. Reads/writes `ShortcutBindingStore`. |
 | `ActiveStackReadout.swift` | ~130 | "What's running": configured model/STT/TTS names from Info.plist (Parakeet/Kokoro rows show the download/load state and the Apple engine standing in until ready) plus Ollama residency, for the Wisp window's status pill and Settings → General's What's running card. Also labels perf timings and "Asking …" steps. |
 | `MenuBarMenuController.swift` | ~180 | The menu bar item: the ribbon template icon and a native `NSMenu` rebuilt on open (status line, talk hint, Finish Setup… when a permission is missing, Ask Wisp…, Ask About a Part…, Save Worked Solution… (enabled only with a note or circle on screen), Open Wisp, Chat, Buddies, Pause Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit); dims the icon while paused. |
-| `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
-| `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
+| `NotchWindowController.swift` | ~860 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
+| `NotchHUDView.swift` | ~1780 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchFileDrop.swift` | ~75 | Drop a file on the notch to add it to the brain: `NotchFileDropView` (a transparent `hitTest`-nil sibling above the hosting view; wrapping it, registering it, or SwiftUI `.onDrop` all failed to receive drags) and `NotchFileDragDetector` (drag-pasteboard change count + held button, so window drags never misfire). `NotchWindowController.updateFileDragState` opens the island under a file drag (brain on only) and `addDroppedFilesToBrain` enqueues supported files on `BrainIngestQueue`, showing the result via `viewModel.fileDropFeedback`. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `DesignSystem.swift` | ~480 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
@@ -1685,7 +1601,7 @@ names forward here.
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `DesignSystem/WispColors.swift` | ~235 | The palette: raw brand hexes (`WispColor.Brand.*` — sage/lavender/moss/ink/cloud/bone), **adaptive** semantic tokens (`.background`/`.textPrimary`/`.accent`/… resolve light/dark via a dynamic `NSColor`), a fixed **on-glass** set (`OnGlass.*`) for always-dark surfaces, and adaptive glass tints. `adaptive(light:dark:)` is the helper. |
+| `DesignSystem/WispColors.swift` | ~350 | The palette: raw brand hexes (`WispColor.Brand.*` — sage/lavender/moss/ink/cloud/bone), **adaptive** semantic tokens (`.background`/`.textPrimary`/`.accent`/… resolve light/dark via a dynamic `NSColor`), a fixed **on-glass** set (`OnGlass.*`) for always-dark surfaces, and adaptive glass tints. `adaptive(light:dark:)` is the helper. |
 | `DesignSystem/WispTypography.swift` | ~60 | `WispFont` scale (SF Pro/rounded + SF Mono) and the lowercase `wisp` wordmark. |
 | `DesignSystem/WispMetrics.swift` | ~50 | `WispSpacing` + `WispRadius` scales (softer/rounder; hero input = 22). |
 | `DesignSystem/WispShadows.swift` | ~35 | `WispShadow` (`.ambient`/`.floating`/`.island`) + `wispShadow(_:)`. Soft, low-opacity only. |
@@ -1703,21 +1619,21 @@ names forward here.
 | `Buddies/BuddyMemory.swift` | ~170 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete). |
 | `Buddies/BuddyModelChoice.swift` | ~75 | `BuddyModelChoice` (provider + optional Claude model, `allChoices`) and `BackgroundTaskCapacityPolicy` (local vs cloud concurrency). |
 | `Buddies/BuddyDelegation.swift` | ~230 | `ask_buddy`: `BuddyDelegationPolicy` (pure: peer resolution, when to ask, the boundary note), `BuddyDelegationService` (approval, start, wait, outcome; injectable) and the run-only tool. |
-| `Buddies/BuddyToolAccess.swift` | ~200 | `BuddyToolGroup`, `BuddyToolAccess` (the allow-list) and the pure `BuddyToolAccessPolicy` (`isPermitted`, server discovery, summaries). |
+| `Buddies/BuddyToolAccess.swift` | ~290 | `BuddyToolGroup`, `BuddyToolAccess` (the allow-list) and the pure `BuddyToolAccessPolicy` (`isPermitted`, server discovery, summaries). |
 | `Buddies/BuddyRunToolkit.swift` | ~120 | `BuddyRunToolPolicy` (tools a cloud buddy may not use) and `BuddyRunToolkitBuilder` (per-buddy memory tools + exclusions). |
 | `AgentRunToolkit.swift` | ~35 | Per-run tool changes for `AgentTurnRunner`: names to hide/refuse and run-only tools. |
 | `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
-| `Buddies/BuddyStore.swift` | ~580 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
+| `Buddies/BuddyStore.swift` | ~780 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
 | `Buddies/BuddyListPolicy.swift` | ~105 | Pure buddy-list rules (Rakazo-style): unread (a succeeded/failed run finishing after the last read, or marked by hand), ordering (pinned → latest activity → newest), copy names, which task ids make up the visible thread (stored exchanges, not just runs History still holds), starter jobs, and `BuddyAnswerFormatting` (inline markdown for answers). Tested by `Tests/BuddyThread`. |
-| `Buddies/BuddyCharacter.swift` | ~290 | The cloud character (Canvas, clock-driven): breathing, blink, pointer-following eyes, squish, moods, working ring, ground shadow; `Liveliness` cost dial. |
+| `Buddies/BuddyCharacter.swift` | ~470 | The cloud character (Canvas, clock-driven): breathing, blink, pointer-following eyes, squish, moods, working ring, ground shadow; `Liveliness` cost dial. |
 | `Buddies/BuddyMood.swift` | ~55 | `BuddyMood` + pure `BuddyMoodPolicy` (run state/time → mood). |
 | `Buddies/BuddySpecialty.swift` | ~170 | Specialty templates: colour, tool groups, persona line, starter jobs. |
-| `Buddies/BuddyFiles.swift` | ~290 | `BuddyAttachment`, pure `BuddyAttachmentPolicy` (prompt text, caps, name resolution) and the per-buddy `BuddyFileLibrary`. |
+| `Buddies/BuddyFiles.swift` | ~240 | `BuddyAttachment`, pure `BuddyAttachmentPolicy` (prompt text, caps, name resolution) and the per-buddy `BuddyFileLibrary`. |
 | `WispWindow/Buddies/BuddyToolsView.swift` | ~330 | What a buddy may use: Everything/Choose, app rows with logos + switches, Wisp's abilities, and the Add-app connect sheet. |
-| `WispWindow/Buddies/*.swift` | ~1500 | The messenger: `BuddyRailView`, `BuddyChatView`, `BuddyInspectorView`, `BuddyCreationView`, `BuddyHubComponents` (pill/icon buttons, chips, typing dots, ambient backdrop, drop overlay, formatting). |
+| `WispWindow/Buddies/*.swift` | ~1920 | The messenger: `BuddyRailView`, `BuddyChatView`, `BuddyInspectorView`, `BuddyCreationView`, `BuddyHubComponents` (pill/icon buttons, chips, typing dots, ambient backdrop, drop overlay, formatting). |
 | `Buddies/BuddyAvatar.swift` | ~85 | `BuddyAppearance` (the 8 calm colours + tonal gradient) and `BuddyAvatar` (compact `BuddyCharacter`: still at rest, lively while working). |
 | `Buddies/BuddyViews.swift` | ~1285 | `BuddyScheduleEditor`, model/tool editors, `BuddyStatusText` and `BuddyActionsMenuItems` (shared by the window list's right-click menu and the page's ⋯ menu), `BuddyDetailView` (the whole stored thread, editable job, inline clear/delete confirmation since the notch panel can't host sheets; marks the buddy read while open) and `NewBuddyForm` (with starter jobs). |
-| `DynamicIsland/MorningBriefing.swift` | ~255 | The morning notch: `MorningSuggestion`, the pure `MorningSuggestionBuilder` and `MorningBriefingSchedule` (once a day, daytime, user present), and `MorningBriefingController` (1-min check, pending suggestions, `presentationSequenceNumber` the notch drops the banner on, `perform`). |
+| `DynamicIsland/MorningBriefing.swift` | ~320 | The morning notch: `MorningSuggestion`, the pure `MorningSuggestionBuilder` and `MorningBriefingSchedule` (once a day, daytime, user present), and `MorningBriefingController` (1-min check, pending suggestions, `presentationSequenceNumber` the notch drops the banner on, `perform`). |
 | `DynamicIsland/QuietModeMonitor.swift` | ~280 | Quiet mode: `QuietModeDetection` (CoreAudio processes capturing input, CoreMediaIO camera running, system-listener filter) and the polling `QuietModeMonitor` publishing `activeQuietReason`. |
 | `DynamicIsland/FinishedWorkInbox.swift` | ~55 | Unseen finished background task ids behind the notch's "N new" badge and NEW section (in-memory, cap 5). |
 | `DynamicIsland/AnnouncementPreferences.swift` | ~50 | UserDefaults switches for morning suggestions and quiet-on-calls (both default on). |
@@ -1782,23 +1698,20 @@ running):
 ./Tests/AutomationEngine/run.sh          # engine with fakes: unattended tool policy, approvals, privacy, test runs
 ./Tests/AutomationMigration/run.sh       # routines/buddy jobs/Jobs -> automations, incremental
 ./Tests/AutomationQuickAdd/run.sh        # quick add: automation vs ordinary question
-./Tests/CanvasSync/run.sh                # Canvas ICS parsing, diff, study-block planner
-./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
-./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
-./Tests/ChromeExtFoundation/run.sh       # Chrome extension frames: hello/ping/capabilities/event/reply parsing, payloads, timeout cap
+./Tests/ChromeExtFoundation/run.sh       # browser extension frames: hello (instanceId)/ping/capabilities/event/reply parsing, payloads, timeout cap
+./Tests/ChromeExtBrowsers/run.sh         # other Chromium browsers: names, per-profile keys, active-browser routing, controller/pointing choice, live socket owner
 ./Tests/ChromeExtDOMController/run.sh    # extension vs AppleScript selection, snapshot decoding (shared fixture), action replies
+./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references
 ./Tests/ChromeExtTabLife/run.sh          # tab sessions (build, codec, cap, names, restore), stale rules, triage order, card text, router phrases
 ./Tests/ChromeExtDownloads/run.sh        # download concierge: rule matching, templates, suggested names, collisions, refusals
-./Tests/ChromeExtFocusMode/run.sh        # Chrome focus mode: planner keep/collapse/mute/move, study-block rule, "focus on X for N minutes" parsing
-./Tests/ChromeExtInPagePointing/run.sh  # in-page pointing: when to draw in the page, target/step → page element, walkthrough click/navigation rules
+./Tests/ChromeExtFocusMode/run.sh        # focus mode: planner keep/collapse/mute/move, study-block rule, "focus on X for N minutes" parsing
+./Tests/ChromeExtInPagePointing/run.sh   # in-page pointing: when to draw in the page, target/step → page element, walkthrough click/navigation rules
 ./Tests/ChromeExtAskAboutThis/run.sh     # Ask Wisp about this: user.* event decoding, image download rules, per-part turn context + screenshot choice
 ./Tests/ChromeExtPageWatchers/run.sh     # page watchers: tab-or-screen route, reload interval, number phrasing, wire shape, reconciliation, time on a site
 ./Tests/ChromeExtSiteHelpers/run.sh      # Canvas page matching/chip rule/added-to-today row, meeting caption phrases + fenced prompt, router + tab state
 ./Tests/ChromeExtResearch/run.sh         # research mode: quote verification, fragment URLs, source picking/dedupe, phrases, map/reduce budgets, hostile page, brain pages
 ./Tests/ChromeExtFormHelper/run.sh       # form helper: refusals (adversarial labels), autocomplete/label mapping, profile, model prompt, card, edits win
-node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
-node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
-./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references
+node --test chrome-extension/tests/      # extension JS, one file per module (npm install in chrome-extension/ first, for linkedom)
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
 ```
