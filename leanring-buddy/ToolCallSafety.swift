@@ -67,7 +67,7 @@ enum ToolCallSafety {
     /// matching (though "run" + "shortcut" would also catch it).
     // "chrome_file_download" (`ChromeDownloadToolNames.fileDownload`, spelled out so the standalone
     // suites needn't compile the download tools): renaming or moving a download always asks.
-    static let alwaysAskBareToolNames: Set<String> = ["run_shortcut", BuddyDelegationToolNames.askBuddy, JobsToolNames.applyStudyBlocks, "chrome_file_download"]
+    static let alwaysAskBareToolNames: Set<String> = ["run_shortcut", BuddyDelegationToolNames.askBuddy, JobsToolNames.applyStudyBlocks, "chrome_file_download", ResearchToolNames.closeResearchTabs]
 
     /// Verbs that write to the file system. Deletion is already in
     /// `alwaysIrreversibleWords`, so these are the recoverable-inside-the-agent-

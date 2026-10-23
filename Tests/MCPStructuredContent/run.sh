@@ -39,6 +39,7 @@ SHARED_SOURCES=(
   leanring-buddy/MCPStdioTransport.swift
   leanring-buddy/MCPStreamableHTTPTransport.swift
   leanring-buddy/ChromeExtension/ChromeTabLifeCards.swift
+  leanring-buddy/ChromeExtension/ResearchCards.swift
   leanring-buddy/ChromeExtension/ChromeTabLifeCardText.swift
 )
 

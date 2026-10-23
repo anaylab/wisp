@@ -22,6 +22,7 @@ struct ChatPage: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject var taskRegistry: AgentTaskRegistry
     @ObservedObject private var bindingStore = ShortcutBindingStore.shared
+    @ObservedObject private var researchSession = ResearchSessionController.shared
 
     @State private var followUpText = ""
     @FocusState private var isFollowUpFieldFocused: Bool
@@ -59,23 +60,58 @@ struct ChatPage: View {
         return Array(recentExchanges.prefix(maximumThreadExchanges).reversed())
     }
 
+    /// One item in the thread: an exchange, or a research report (phase 11),
+    /// which finishes in the background and has no question bubble of its own.
+    private enum ThreadEntry: Identifiable {
+        case exchange(AgentTaskRecord)
+        case research(ResearchReport)
+
+        var id: UUID {
+            switch self {
+            case .exchange(let record): return record.id
+            case .research(let report): return report.id
+            }
+        }
+
+        var date: Date {
+            switch self {
+            case .exchange(let record): return record.startedAt
+            case .research(let report): return report.createdAt
+            }
+        }
+    }
+
+    /// Exchanges and research reports in the lookback window, oldest first.
+    private var threadEntries: [ThreadEntry] {
+        let oldestShownDate = Date().addingTimeInterval(-threadLookbackSeconds)
+        let recentReports = researchSession.reports.filter { $0.createdAt >= oldestShownDate }
+        return (threadRecords.map(ThreadEntry.exchange) + recentReports.map(ThreadEntry.research))
+            .sorted { $0.date < $1.date }
+    }
+
     /// Changes whenever the newest exchange grows or settles, so the thread
     /// scrolls to follow it.
     private var threadScrollSignature: String {
-        guard let newestRecord = threadRecords.last else { return "" }
-        return "\(newestRecord.id)|\(newestRecord.status.displayName)|\(newestRecord.finalText?.count ?? 0)|\(companionManager.browserActivityText)"
+        guard let newestRecord = threadRecords.last else { return "\(researchSession.reports.count)" }
+        return "\(researchSession.reports.count)|\(newestRecord.id)|\(newestRecord.status.displayName)|\(newestRecord.finalText?.count ?? 0)|\(companionManager.browserActivityText)"
     }
 
     private var threadColumn: some View {
         VStack(spacing: 0) {
-            if threadRecords.isEmpty {
+            if threadEntries.isEmpty {
                 emptyThread
             } else {
                 ScrollViewReader { scrollProxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(threadRecords) { record in
-                                exchangeView(record)
+                            ForEach(threadEntries) { threadEntry in
+                                switch threadEntry {
+                                case .exchange(let record):
+                                    exchangeView(record)
+                                case .research(let report):
+                                    ResearchReportView(report: report)
+                                        .id(report.id)
+                                }
                             }
                             Color.clear
                                 .frame(height: 1)
@@ -87,7 +123,19 @@ struct ChatPage: View {
                         .frame(maxWidth: .infinity)
                     }
                     .onAppear {
-                        scrollProxy.scrollTo(threadBottomAnchorID, anchor: .bottom)
+                        if let reportIDToReveal = researchSession.reportIDToReveal {
+                            scrollProxy.scrollTo(reportIDToReveal, anchor: .top)
+                            researchSession.reportIDToReveal = nil
+                        } else {
+                            scrollProxy.scrollTo(threadBottomAnchorID, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: researchSession.reportIDToReveal) { _, reportIDToReveal in
+                        guard let reportIDToReveal else { return }
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            scrollProxy.scrollTo(reportIDToReveal, anchor: .top)
+                        }
+                        researchSession.reportIDToReveal = nil
                     }
                     .onChange(of: threadScrollSignature) { _, _ in
                         withAnimation(.easeOut(duration: 0.2)) {

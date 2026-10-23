@@ -341,6 +341,7 @@ final class CompanionManager: ObservableObject {
             self?.presentScreenWatchEnding(endedWatcher, ending: ending)
         }
         configureChromePageWatchers()
+        configureResearchMode()
         restoreRecentConversationHistory()
         connectMCPServersIfAgentModeEnabled()
         bindVoiceStateObservation()
@@ -1734,7 +1735,8 @@ final class CompanionManager: ObservableObject {
             let isTabCommand: Bool
             switch browserRoute {
             case .tabCommand, .chromeTabs: isTabCommand = true
-            case .browserTask: isTabCommand = false
+            // Research reads pages and runs the model, like a web task.
+            case .browserTask, .research: isTabCommand = false
             }
             if isTabCommand || Self.isAgentModeEnabled {
                 runDirectBrowserRoute(browserRoute, transcript: transcript)
@@ -4276,6 +4278,11 @@ extension CompanionManager {
             case .chromeTabs(let chromeTabCommand):
                 (replyText, didSucceed) = await ChromeTabOrganizer.perform(
                     chromeTabCommand, modelProvider: self.selectedModelProvider
+                )
+
+            case .research(let researchCommand):
+                (replyText, didSucceed) = await ResearchSessionController.shared.perform(
+                    researchCommand, modelProvider: self.selectedModelProvider
                 )
             }
 
