@@ -876,6 +876,7 @@ final class CompanionManager: ObservableObject {
             // chosen for an earlier typed one.
             focusedScreenRegion = nil
             focusedRegionHighlightID = nil
+            ChromeAskAboutThisRouter.shared.clearFocusedPagePart()
 
             WispAnalytics.trackPushToTalkStarted()
             PerfMetricsRecorder.shared.beginPhase(.transcription)
@@ -1059,7 +1060,7 @@ final class CompanionManager: ObservableObject {
 
     /// Opens the floating text composer. Created lazily so the window only exists
     /// once the user actually taps to type.
-    private func openTextComposer(keepingFocusedScreenRegion: Bool = false) {
+    func openTextComposer(keepingFocusedScreenRegion: Bool = false) {
         // A fresh question is about the whole screen; only a follow-up or a
         // just-made selection keeps talking about the chosen part.
         if !keepingFocusedScreenRegion {
@@ -1173,6 +1174,9 @@ final class CompanionManager: ObservableObject {
 
     /// Forgets the selected part, so the next question is about the whole screen.
     func clearFocusedScreenRegion() {
+        // A part of a Chrome page chosen with "Ask Wisp about this" is
+        // forgotten the same way.
+        ChromeAskAboutThisRouter.shared.clearFocusedPagePart()
         guard focusedScreenRegion != nil else { return }
         focusedScreenRegion = nil
         clearScreenAnnotations()
@@ -1359,7 +1363,7 @@ final class CompanionManager: ObservableObject {
 
     /// Runs a typed question through the same pipeline as a spoken one: the answer
     /// is spoken and, when it helps, pointed at on screen.
-    private func submitTextComposerQuery(_ typedQuery: String) {
+    func submitTextComposerQuery(_ typedQuery: String) {
         let trimmedQuery = typedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return }
 
@@ -1804,7 +1808,23 @@ final class CompanionManager: ObservableObject {
                 // by the Wisp Tabs extension, instead of the screenshot (see
                 // CompanionManager+ChromePageReading.swift). Started now so it
                 // runs beside the capture; nil keeps the screenshot.
+                // "Ask Wisp about this" in Chrome: the selection, image, link or
+                // page the user chose rides the turn as exact data and decides
+                // whether the screenshot goes too (see
+                // CompanionManager+ChromeAskAboutThis.swift). Nil when no page
+                // part is the subject; it then takes the place of the page-text
+                // path below.
+                let chromeAskAboutThisTask: Task<ChromeAskAboutThisTurnInput?, Never>? =
+                    ChromeAskAboutThisRouter.shared.focusedPagePart == nil ? nil : Task {
+                        await self.chromeAskAboutThisTurnInput(
+                            for: transcript,
+                            isLocalModel: self.isSelectedModelProviderLocal,
+                            questionRefersToScreen: shouldAttachScreenshot,
+                            taskID: taskID
+                        )
+                    }
                 let chromePageTextTask: Task<String?, Never>? = shouldAttachScreenshot && focusedScreenRegion == nil
+                    && chromeAskAboutThisTask == nil
                     ? Task {
                         await self.chromePageTextReplacingScreenshot(
                             for: transcript,
@@ -1835,8 +1855,10 @@ final class CompanionManager: ObservableObject {
 
                 let accessibilityElementSnapshot = await accessibilityElementSnapshotTask?.value
                 let chromePageTextPromptText = await chromePageTextTask?.value
+                let chromeAskAboutThisInput = await chromeAskAboutThisTask?.value
                 // From here on, whether a screenshot really goes with the turn.
-                let isAttachingScreenshot = shouldAttachScreenshot && chromePageTextPromptText == nil
+                let isAttachingScreenshot = chromeAskAboutThisInput?.attachesScreenshot
+                    ?? (shouldAttachScreenshot && chromePageTextPromptText == nil)
                 // On-device OCR of the same screenshots, started when they were
                 // captured, so the model can quote the screen's text and point
                 // at a line by id ([POINT:t7:label]). Waits at most ~400ms for
@@ -1895,7 +1917,8 @@ final class CompanionManager: ObservableObject {
                 }
 
                 let perTurnContextText = [
-                    chromePageTextPromptText ?? "", accessibilityElementPromptText, focusedRegionPromptText, brainPromptContextText,
+                    chromeAskAboutThisInput?.promptText ?? "", chromePageTextPromptText ?? "",
+                    accessibilityElementPromptText, focusedRegionPromptText, brainPromptContextText,
                 ]
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n\n")
@@ -1916,6 +1939,7 @@ final class CompanionManager: ObservableObject {
                     return (data: capture.imageData, label: capture.label + dimensionInfo)
                 } : []
                 let labeledImagesIncludingCloseUp = labeledImages + (focusedRegionCloseUpImage.map { [$0] } ?? [])
+                    + (chromeAskAboutThisInput?.images ?? [])
 
                 // Prior exchanges, projected down to what this request should
                 // carry: the questions and the answers, without the tool

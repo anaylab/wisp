@@ -186,6 +186,8 @@ final class NotchWindowController {
             companionManager?.flashIsland(didSucceed ? .success : .error)
         }
         ChromeFocusSession.shared.start()
+        // "Ask Wisp about this" from Chrome's right-click menu, its address bar ("w …") and ⌘⇧Y.
+        ChromeAskAboutThisRouter.shared.start(companionManager: companionManager)
         // Buddies' scheduled runs; each run is a background task started here.
         BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
             companionManager?.startBuddyRun(buddy, request: runRequest)
