@@ -47,8 +47,10 @@ final class ChromeInPagePointing {
     /// looking again at once.
     private(set) var walkthroughTabID: Int?
 
-    init(bridge: ChromeExtensionBridge = .shared) {
-        self.bridge = bridge
+    // The bridge is read inside the (main-actor) body rather than as a default
+    // argument, which is evaluated outside the actor.
+    init() {
+        self.bridge = ChromeExtensionBridge.shared
     }
 
     // MARK: - Availability
