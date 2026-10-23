@@ -36,6 +36,7 @@ struct NotchHUDView: View {
     @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
     @ObservedObject private var quietModeMonitor = QuietModeMonitor.shared
     @ObservedObject private var downloadConcierge = DownloadConcierge.shared
+    @ObservedObject private var canvasPageHelper = CanvasPageHelper.shared
     @ObservedObject private var screenWatcherStore = ScreenWatcherStore.shared
     /// The buddy whose automation or run is in flight shows its character in the
     /// left flank, so these are observed to redraw when one starts or finishes.
@@ -268,6 +269,8 @@ struct NotchHUDView: View {
     private var compactDroppedContent: some View {
         if !hasAnswer && downloadConcierge.hasNotchContent {
             DownloadConciergeNotchCard()
+        } else if !hasAnswer && canvasPageHelper.hasNotchContent {
+            CanvasAddToTodayNotchChip()
         } else if !hasAnswer && hasJobsContentToDrop {
             jobsDroppedContent
         } else if !hasAnswer && morningBriefing.hasPendingBriefing {
@@ -344,6 +347,7 @@ struct NotchHUDView: View {
             || morningBriefing.hasPendingBriefing
             || hasJobsContentToDrop
             || downloadConcierge.hasNotchContent
+            || canvasPageHelper.hasNotchContent
             || !screenWatcherStore.activeWatchers.isEmpty
             || flankBuddyID != nil
     }
@@ -1284,6 +1288,9 @@ struct NotchHUDView: View {
 
                     // A finished download to file, or the Undo for one just filed.
                     DownloadConciergeNotchCard()
+
+                    // "Add to today?" for a Canvas assignment just opened in Chrome.
+                    CanvasAddToTodayNotchChip()
 
                     // A Canvas change, then today's checklist; when a checklist
                     // exists it stands in for the generic suggestions below.

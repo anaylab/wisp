@@ -875,6 +875,25 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   launch restores (never resumes) a session a quit interrupted, retrying pending tokens whenever the extension connects.
   It also starts focus when an opted-in approved study block (`JobsEngine.approvedStudyBlocks`) begins, once per block
   (`ChromeFocusStudyBlockPolicy`). Settings live in the Chrome Tabs card's Focus mode row (`ChromeFocusSettings`).
+  **Site helpers (phase 10, `pages.read`)**: two content scripts registered with `chrome.scripting.registerContentScripts`
+  once reading pages is allowed (no manifest change). **Canvas** (`content/canvas-assignment.js`, matches any https
+  `/courses/*/assignments/*` but reads nothing unless the page has Canvas's markup): title, due date, points, rubric,
+  description. Wisp trusts only `*.instructure.com` or the saved feed's **host** (read from the Keychain, held in memory,
+  nothing else derived from the URL). `CanvasAssignmentChecklistMatcher` matches the page to the feed by UID
+  (`/assignments/1234` = `event-assignment-1234`), else title + due date, and to today's checklist / Wisp calendar / study
+  blocks. "is this on my checklist", "add this to today" (`JobsEngine.addCanvasItemToTodayChecklist`, through
+  `DayChecklistBuilder`'s `canvasItemsAddedToToday`, for today only) and "plan this" (`JobsEngine.proposeStudyBlocks(forCanvasItem:)`
+  + `approveStudyBlocks`, the same always-ask card) route only while a trusted assignment is the showing Chrome tab and
+  Chrome is in front. A newly opened, unlisted, not-past-due assignment drops a one-line **Add to today?** chip once
+  (`CanvasPageHelper`, switch in the Chrome Tabs card, default on, never during a call). **Meeting captions**
+  (`content/meeting-captions.js`, Meet calls and Zoom `/wc/`): with captions on, the page keeps a 30-minute rolling buffer
+  in its own memory (no audio, never stored, gone with the tab; selectors in one table, fails soft with "turn them on
+  with C"). "What did I miss" / "summarize the meeting so far" / "the last 5 minutes" (`MeetingCaptionsRequestParser`,
+  only while a call tab is open) → `getMeetingCaptions` → one text-only model turn with the captions fenced as data
+  (newest kept within the 6k/20k budget) → the notch, its `[SAY:]` line spoken in voice mode (`runDirectBrowserRoute`
+  now honours a `[SAY:]` tag). Routed as `ChromeTabCommand.siteHelper` inside `ChromeTabCommandRouter`; tab state comes
+  from tab events, reseeded from `getTabs` on connect (`ChromeSiteHelpers`). Tools `chrome_canvas_assignment`,
+  `chrome_meeting_captions` (read).
 - **MCP**: hand-rolled JSON-RPC 2.0. Config at `~/.wisp/mcp.json` in Claude Desktop's
   format. The byte transport is abstracted behind `MCPTransport`
   (`MCPTransport.swift`): `MCPServerConnection` owns only JSON-RPC framing + the handshake,
@@ -1385,6 +1404,18 @@ The Wisp Tabs extension (`chrome-extension/`, loaded unpacked) and Wisp's side o
 | `ChromeExtension/ChromeFocusAgentTools.swift` | ~70 | The `chrome_focus_mode` agent tool (start/stop, topic, minutes). |
 | `ChromeExtension/ChromeFocusSettingsRow.swift` | ~75 | Focus mode's row in the Agent tab's Chrome Tabs card: status + Stop, site lists, Later-window switch. |
 | `chrome-extension/handlers/focus-mode.js` | ~290 | `applyFocusLayout` / `restoreFocusLayout`: collapse, mute, group as "Focus", move to a minimised Later window, prior state in `chrome.storage.session` under a restore token; restore tolerates closed/moved tabs and closed windows. Never closes a tab. |
+| `ChromeExtension/CanvasPageMatching.swift` | ~455 | Pure Canvas side of phase 10: `CanvasAssignmentDetails`/opened payload, `CanvasAssignmentPageMatcher` (trusted hosts, address → ids, feed UID), `CanvasAssignmentChecklistMatcher` (feed / checklist / study-block status, item to add or plan), `CanvasAddToTodayChipPolicy`, reply text, the fenced `CanvasAssignmentPrompt`. Tested by `Tests/ChromeExtSiteHelpers`. |
+| `ChromeExtension/CanvasPageHelper.swift` | ~260 | `@MainActor`: status / add to today / plan this through `JobsEngine`, the "Add to today?" offer (once per assignment, switch), the feed host cached from the Keychain. |
+| `ChromeExtension/CanvasAddToTodayViews.swift` | ~90 | The notch's "Add to today?" chip and its switch row in the Chrome Tabs card. |
+| `ChromeExtension/MeetingCaptionsPrompt.swift` | ~305 | Pure: `MeetingCaptions` payloads, call addresses, `MeetingCaptionsRequestParser` ("what did i miss", "the last 5 minutes"), newest-first transcript lines, the fenced prompt and fail-soft replies. Tested by `Tests/ChromeExtSiteHelpers`. |
+| `ChromeExtension/MeetingCaptionsHelper.swift` | ~75 | `getMeetingCaptions` + one text-only model turn for the catch-up. |
+| `ChromeExtension/ChromeSiteHelperRouting.swift` | ~200 | Pure: `ChromeSiteHelperCommand`, its conservative phrase parser, `ChromeSiteHelperTabState` (showing tab, Canvas/call tabs from tab events). |
+| `ChromeExtension/ChromeSiteHelpers.swift` | ~200 | `@MainActor` hub: follows tab and site events, reseeds from `getTabs`, the lock-guarded availability the router reads, `perform`, request errors in Wisp's voice. |
+| `ChromeExtension/ChromeSiteHelperAgentTools.swift` | ~115 | `chrome_canvas_assignment` and `chrome_meeting_captions` (read). |
+| `chrome-extension/content/canvas-assignment.js` | ~295 | Reads a Canvas assignment page (selector table, due-date parsing, form fields and `[data-wisp-ignore]` skipped); announces `wisp.site.canvasAssignmentOpened` when registered. |
+| `chrome-extension/content/meeting-captions.js` | ~400 | Meet/Zoom caption selectors in one table, the in-page 30-minute buffer (merge growing/revised/scrolled captions, minute segments, windowing), `readBuffer`. |
+| `chrome-extension/handlers/site-helpers.js` | ~215 | `getCanvasAssignmentDetails`, `getMeetingCaptions` (pages.read, refusals, injection on demand, caps). |
+| `chrome-extension/events/site-helpers.js` | ~135 | Registers/unregisters the two scripts with `pages.read`; turns their messages into `site.canvasAssignmentOpened` / `site.meetingCaptionsAvailable`. |
 
 ### Brain
 | File | Lines | Purpose |
@@ -1624,6 +1655,7 @@ running):
 ./Tests/ChromeExtTabLife/run.sh          # tab sessions (build, codec, cap, names, restore), stale rules, triage order, card text, router phrases
 ./Tests/ChromeExtDownloads/run.sh        # download concierge: rule matching, templates, suggested names, collisions, refusals
 ./Tests/ChromeExtFocusMode/run.sh        # Chrome focus mode: planner keep/collapse/mute/move, study-block rule, "focus on X for N minutes" parsing
+./Tests/ChromeExtSiteHelpers/run.sh      # Canvas page matching/chip rule/added-to-today row, meeting caption phrases + fenced prompt, router + tab state
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits
 node --test chrome-extension/tests/      # Chrome extension JS: dispatcher, tab primitives, events, capabilities, limits, page reading (npm install in chrome-extension/ first)
 ./Tests/ChromeExtPageReading/run.sh      # page text fencing/trimming, content-vs-look classifier, tab references

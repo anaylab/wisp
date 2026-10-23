@@ -85,6 +85,7 @@ final class NotchWindowController {
     /// Drops the morning suggestions banner out of the notch when a briefing arrives.
     private var morningBriefingPresentationObserver: AnyCancellable?
     private var downloadConciergePresentationObserver: AnyCancellable?
+    private var canvasOfferPresentationObserver: AnyCancellable?
     /// Marks the "new" background results seen once the user has opened the
     /// full panel (where they are listed) and then closed it again.
     private var finishedWorkSeenObserver: AnyCancellable?
@@ -186,6 +187,8 @@ final class NotchWindowController {
             companionManager?.flashIsland(didSucceed ? .success : .error)
         }
         ChromeFocusSession.shared.start()
+        // Site helpers: Canvas assignment pages and meeting captions in Chrome.
+        ChromeSiteHelpers.shared.start()
         // Buddies' scheduled runs; each run is a background task started here.
         BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
             companionManager?.startBuddyRun(buddy, request: runRequest)
@@ -325,6 +328,21 @@ final class NotchWindowController {
         // banner: only onto an idle notch with nothing else showing. Quiet mode
         // never bumps the number, so a call is never interrupted.
         downloadConciergePresentationObserver = DownloadConcierge.shared.$presentationSequenceNumber
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let isNotchShowingAnswer = !self.companionManager.currentReplyText
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || self.companionManager.resolvedGlanceCard != nil
+                guard self.companionManager.voiceState == .idle,
+                      !isNotchShowingAnswer,
+                      !self.viewModel.isWorkspaceOpen else { return }
+                self.autoPresentDownloadConciergeCard()
+            }
+
+        // The Canvas "Add to today?" chip drops the same compact card, on the same terms.
+        canvasOfferPresentationObserver = CanvasPageHelper.shared.$offerPresentationSequenceNumber
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] _ in

@@ -4275,11 +4275,15 @@ extension CompanionManager {
                 AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
                 return
             }
+            // A model-written reply (a meeting catch-up) may carry a [SAY:] line:
+            // shown without the tag, and that line is what voice mode speaks.
+            let parsedReply = SpokenLineParser.parse(replyText)
+            let displayedReplyText = parsedReply.displayText
 
             AgentTaskRegistry.shared.appendStep(
                 AgentStepRecord(
                     kind: .tool(name: "browser"),
-                    summary: didSucceed ? "Handled in the browser — no tool choice needed" : "Browser: \(replyText)",
+                    summary: didSucceed ? "Handled in the browser — no tool choice needed" : "Browser: \(displayedReplyText)",
                     startedAt: startedAt,
                     durationSeconds: Date().timeIntervalSince(startedAt),
                     isError: !didSucceed
@@ -4287,23 +4291,23 @@ extension CompanionManager {
                 to: taskID
             )
             AgentTaskRegistry.shared.finishTask(
-                taskID, status: didSucceed ? .succeeded : .failed(replyText), finalText: replyText
+                taskID, status: didSucceed ? .succeeded : .failed(displayedReplyText), finalText: displayedReplyText
             )
 
             self.conversationTranscript.append(ConversationTranscript.Turn(messages: [
                 BuddyChatMessage(role: .user, text: transcript),
-                BuddyChatMessage(role: .assistant, text: replyText),
+                BuddyChatMessage(role: .assistant, text: displayedReplyText),
             ]))
             self.conversationTranscript.trimToRecentTurns(10)
 
-            self.currentReplyText = replyText
+            self.currentReplyText = displayedReplyText
             self.flashIsland(didSucceed ? .success : .error)
 
             // Speak it in voice mode, but only when it is short enough to
             // listen to; a long answer is already on screen in the notch.
             if isReplySpeechEnabled {
                 self.voiceState = .responding
-                let lineToSpeak = replyText.count <= 220 ? replyText : "done — it's in the notch."
+                let lineToSpeak = parsedReply.spokenLine ?? (displayedReplyText.count <= 220 ? displayedReplyText : "done — it's in the notch.")
                 try? await self.ttsProvider.speakText(lineToSpeak)
             }
             if !Task.isCancelled {

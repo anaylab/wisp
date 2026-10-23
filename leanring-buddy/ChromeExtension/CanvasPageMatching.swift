@@ -381,6 +381,8 @@ nonisolated enum CanvasAssignmentReplyText {
             return "i can't plan \(quotedTitle(title)) — the page doesn't show a due date i can read."
         case .pastDue:
             return "\(quotedTitle(title)) is already past due, so there's nothing to plan."
+        case .tooFarAhead(let lookaheadDays):
+            return "\(quotedTitle(title)) is due more than \(lookaheadDays) days out — i plan study blocks up to \(lookaheadDays) days ahead. ask again closer to it."
         }
     }
 
@@ -391,6 +393,7 @@ nonisolated enum CanvasAssignmentReplyText {
         case noFreeTime
         case noDueDate
         case pastDue
+        case tooFarAhead(lookaheadDays: Int)
     }
 
     static func notCanvasPageReply() -> String {
