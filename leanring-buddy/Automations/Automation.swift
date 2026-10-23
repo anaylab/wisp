@@ -201,8 +201,19 @@ nonisolated enum AutomationEvent: Codable, Equatable, Sendable {
     case screenTextAppears(text: String)
     /// A polled folder; files added since the last look.
     case fileDropped(folderPath: String)
+    /// Phase 08. A Chrome page watch the user started ("tell me when this tab says Deployed")
+    /// matched. An empty description matches any page watch; otherwise the watch's wording
+    /// must contain it ("deployed").
+    case chromePageWatchMatched(watchDescription: String)
+    /// Phase 08. A Chrome tab arrived on a site ("when I open youtube"). `host` is the site's
+    /// host without "www." ("youtube.com"); subdomains count.
+    case chromeTabOpened(host: String)
+    /// Phase 08. The user has been on a site for `minutes` in one visit, Chrome in front and
+    /// the Mac not idle ("if I'm on reddit for 30 minutes"). Once per visit.
+    case chromeTimeOnSite(host: String, minutes: Int)
 
     static let meetingMinutesRange = 1...120
+    static let chromeTimeOnSiteMinutesRange = 1...480
 
     func validationProblems() -> [String] {
         switch self {
@@ -217,6 +228,16 @@ nonisolated enum AutomationEvent: Codable, Equatable, Sendable {
         case .fileDropped(let folderPath):
             return folderPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? ["Pick a folder to watch."] : []
+        case .chromePageWatchMatched:
+            return []
+        case .chromeTabOpened(let host):
+            return host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? ["Say which site."] : []
+        case .chromeTimeOnSite(let host, let minutes):
+            var problems: [String] = []
+            if host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { problems.append("Say which site.") }
+            if !Self.chromeTimeOnSiteMinutesRange.contains(minutes) { problems.append("Time on a site must be 1 to 480 minutes.") }
+            return problems
         }
     }
 }

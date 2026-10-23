@@ -24,6 +24,10 @@ swiftc -target arm64-apple-macos26.0 \
   leanring-buddy/Automations/AutomationDraft.swift \
   leanring-buddy/Automations/AutomationDraftParser.swift \
   leanring-buddy/Automations/AutomationTemplates.swift \
-  leanring-buddy/QuickAdd/AutomationQuickAddPlanner.swift
+  leanring-buddy/QuickAdd/AutomationQuickAddPlanner.swift \
+  leanring-buddy/ChromeExtension/ChromeBrowsingActivity.swift \
+  leanring-buddy/ScreenWatcher.swift \
+  leanring-buddy/WatchedNumberParsing.swift \
+  leanring-buddy/ChromeExtension/ChromeFocusCommand.swift
 
 "$BUILD_DIR/automation-quick-add"

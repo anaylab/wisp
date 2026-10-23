@@ -82,6 +82,7 @@ nonisolated enum AutomationDraftParser {
 
         if hasRecurrence { return true }
         if matches(meetingBeforePattern, in: trimmedText) { return true }
+        if detectChromeEvent(in: trimmedText) != nil { return true }
         if matches(eventPhrasePattern, in: trimmedText) { return true }
         if matches(remindMeWithTimePattern, in: trimmedText) || matches(remindMeWithTimeBeforePattern, in: trimmedText) {
             return true
@@ -246,6 +247,12 @@ nonisolated enum AutomationDraftParser {
     private static let screenTextConditionWordPattern = regex(#"\b(?:when|once|until|as soon as)\b"#)
 
     private static func detectEvent(in originalText: String, lowercasedText: String) -> DetectedEvent? {
+        // Chrome (phase 08): "when I open youtube", "if I'm on reddit for 30 minutes", "when my
+        // page watch matches". Checked first: none of the shapes below can mean these.
+        if let chromeEvent = detectChromeEvent(in: originalText) {
+            return chromeEvent
+        }
+
         // Meeting: "10 minutes before every meeting ..."
         if let meetingMatch = firstMatch(meetingBeforePattern, in: originalText) {
             var minutesBefore = 10
@@ -308,6 +315,82 @@ nonisolated enum AutomationDraftParser {
             }
         }
         return nil
+    }
+
+    // MARK: - Trigger: Chrome (phase 08)
+
+    /// A site as said: one word or address, or one of the two-word names ("hacker news").
+    private static let chromeSitePattern = #"([a-z0-9][a-z0-9.\-]*(?:\s+(?:news|tube|tok))?)"#
+    private static let chromeAmountPattern = #"(\d{1,3}|an?|one|two|three|five|ten|fifteen|twenty|thirty|forty|forty[\s-]five|sixty|half\s+an?)"#
+    private static let chromeUnitPattern = #"(minutes?|mins?|hours?|hrs?)"#
+
+    /// "when I open youtube", "whenever I go to reddit.com", "every time I start watching youtube".
+    private static let chromeTabOpenedPattern = regex(
+        #"\b(?:when(?:ever)?|if|once|each\s+time|every\s+time)\s+i\s+(?:open|opened|go\s+(?:on|to)|visit|start\s+(?:watching|browsing|scrolling))\s+(?:up\s+)?(?:on\s+)?"# + chromeSitePattern + #"\b(?!\s+(?:for|over|more\s+than)\s+\d)"#
+    )
+    /// "if I'm on reddit for 30 minutes", "when I've been on youtube for an hour",
+    /// "once I'm scrolling instagram for more than 20 mins".
+    private static let chromeTimeOnSiteWhilePattern = regex(
+        #"\b(?:if|when(?:ever)?|once)\s+i(?:'m|\s+am|\s+have\s+been|'ve\s+been|\s+stay|\s+spend\s+time|'m\s+scrolling|\s+am\s+scrolling|'m\s+watching|\s+am\s+watching)\s+(?:on\s+)?"# + chromeSitePattern + #"\s+(?:for\s+)?(?:more\s+than\s+|over\s+|longer\s+than\s+)?"# + chromeAmountPattern + #"\s*"# + chromeUnitPattern + #"\b"#
+    )
+    /// "if I spend more than 30 minutes on reddit", "after 20 minutes on youtube".
+    private static let chromeTimeOnSiteSpendPattern = regex(
+        #"\b(?:(?:if|when(?:ever)?|once)\s+i\s+spend\s+|after\s+)(?:more\s+than\s+|over\s+)?"# + chromeAmountPattern + #"\s*"# + chromeUnitPattern + #"\s+on\s+"# + chromeSitePattern + #"\b"#
+    )
+    /// "when my page watch matches", "when the chrome page watch for Deployed fires".
+    private static let chromePageWatchPattern = regex(
+        #"\b(?:when(?:ever)?|if|once)\s+(?:a|my|the|any)\s+(?:chrome\s+)?(?:page|tab)\s+watch(?:\s+for\s+["“']?(.+?)["”']?)?\s+(?:matches|fires|goes\s+off|triggers|is\s+met|hits)\b"#
+    )
+
+    /// The Chrome events, or nil. A site that isn't a known name or an address ("when I open
+    /// my notes") is not a Chrome event.
+    private static func detectChromeEvent(in originalText: String) -> DetectedEvent? {
+        if let pageWatchMatch = firstMatch(chromePageWatchPattern, in: originalText) {
+            let watchDescription = capturedText(pageWatchMatch, group: 1, in: originalText).map(cleanedWatchedText) ?? ""
+            return DetectedEvent(
+                event: .chromePageWatchMatched(watchDescription: watchDescription),
+                defaultInstruction: "A page watch I started in Chrome just matched. Tell me in one line what the page showed."
+            )
+        }
+
+        let timeOnSiteMatch = firstMatch(chromeTimeOnSiteWhilePattern, in: originalText).map { ($0, siteGroup: 1, amountGroup: 2, unitGroup: 3) }
+            ?? firstMatch(chromeTimeOnSiteSpendPattern, in: originalText).map { ($0, siteGroup: 3, amountGroup: 1, unitGroup: 2) }
+        if let (match, siteGroup, amountGroup, unitGroup) = timeOnSiteMatch,
+           let siteHost = capturedText(match, group: siteGroup, in: originalText).flatMap(chromeSiteHost),
+           let amountText = capturedText(match, group: amountGroup, in: originalText)?.lowercased(),
+           let unitText = capturedText(match, group: unitGroup, in: originalText)?.lowercased() {
+            let amount = amountText.hasPrefix("half") ? 30 : (Int(amountText) ?? chromeNumberWords[amountText] ?? 0)
+            let minutes = unitText.hasPrefix("h") && !amountText.hasPrefix("half") ? amount * 60 : amount
+            guard AutomationEvent.chromeTimeOnSiteMinutesRange.contains(minutes) else { return nil }
+            let siteName = ChromeSiteMatching.displayName(forSiteHost: siteHost)
+            return DetectedEvent(
+                event: .chromeTimeOnSite(host: siteHost, minutes: minutes),
+                defaultInstruction: "I've been on \(siteName) for \(minutes) minutes. Reply with one short line nudging me to take a break."
+            )
+        }
+
+        if let openedMatch = firstMatch(chromeTabOpenedPattern, in: originalText),
+           let siteHost = capturedText(openedMatch, group: 1, in: originalText).flatMap(chromeSiteHost) {
+            let siteName = ChromeSiteMatching.displayName(forSiteHost: siteHost)
+            return DetectedEvent(
+                event: .chromeTabOpened(host: siteHost),
+                defaultInstruction: "I just opened \(siteName). Reply with one short line."
+            )
+        }
+        return nil
+    }
+
+    private static let chromeNumberWords: [String: Int] = [
+        "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20,
+        "thirty": 30, "forty": 40, "forty five": 45, "forty-five": 45, "sixty": 60,
+    ]
+
+    /// "youtube" → "youtube.com"; "you tube" too. Two-word captures fall back to their first word
+    /// ("youtube news" isn't a site, "youtube" is).
+    private static func chromeSiteHost(_ capturedSite: String) -> String? {
+        if let siteHost = ChromeSiteMatching.siteHost(fromSpokenName: capturedSite) { return siteHost }
+        guard let firstWord = capturedSite.split(separator: " ").first, firstWord.count < capturedSite.count else { return nil }
+        return ChromeSiteMatching.siteHost(fromSpokenName: String(firstWord))
     }
 
     private static func cleanedWatchedText(_ rawText: String) -> String {
@@ -408,6 +491,11 @@ nonisolated enum AutomationDraftParser {
         regex(#"\bat\s+\d{1,2}(?![\d:])"#),
         regex(#"\bat\s+(?:noon|midnight)\b"#),
         regex(#"\b(?:tomorrow|tonight)(?:\s+(?:morning|afternoon|evening))?\b"#),
+        // Chrome triggers (phase 08): the trigger clause isn't part of what to do.
+        chromePageWatchPattern,
+        chromeTimeOnSiteWhilePattern,
+        chromeTimeOnSiteSpendPattern,
+        chromeTabOpenedPattern,
     ]
 
     private static func detectAction(

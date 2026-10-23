@@ -83,6 +83,7 @@ nonisolated enum AutomationRecurrenceKind: CaseIterable, Hashable {
 
 nonisolated enum AutomationEventKind: CaseIterable, Hashable {
     case newCanvasItem, meetingStarting, screenTextAppears, fileDropped
+    case chromePageWatchMatched, chromeTabOpened, chromeTimeOnSite
 
     var title: String {
         switch self {
@@ -90,6 +91,9 @@ nonisolated enum AutomationEventKind: CaseIterable, Hashable {
         case .meetingStarting: return "A meeting is about to start"
         case .screenTextAppears: return "Some text shows on screen"
         case .fileDropped: return "A file lands in a folder"
+        case .chromePageWatchMatched: return "A Chrome page watch matches"
+        case .chromeTabOpened: return "I open a site in Chrome"
+        case .chromeTimeOnSite: return "I spend a while on a site"
         }
     }
 
@@ -99,6 +103,9 @@ nonisolated enum AutomationEventKind: CaseIterable, Hashable {
         case .meetingStarting: self = .meetingStarting
         case .screenTextAppears: self = .screenTextAppears
         case .fileDropped: self = .fileDropped
+        case .chromePageWatchMatched: self = .chromePageWatchMatched
+        case .chromeTabOpened: self = .chromeTabOpened
+        case .chromeTimeOnSite: self = .chromeTimeOnSite
         }
     }
 
@@ -108,6 +115,9 @@ nonisolated enum AutomationEventKind: CaseIterable, Hashable {
         case .meetingStarting: return .meetingStarting(minutesBefore: 10)
         case .screenTextAppears: return .screenTextAppears(text: "")
         case .fileDropped: return .fileDropped(folderPath: "")
+        case .chromePageWatchMatched: return .chromePageWatchMatched(watchDescription: "")
+        case .chromeTabOpened: return .chromeTabOpened(host: "")
+        case .chromeTimeOnSite: return .chromeTimeOnSite(host: "", minutes: 30)
         }
     }
 }

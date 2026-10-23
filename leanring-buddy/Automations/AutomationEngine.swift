@@ -183,6 +183,21 @@ nonisolated struct AutomationMeetingInfo: Equatable, Sendable {
     let start: Date
 }
 
+/// Phase 08: what the Chrome extension's tab events and page watches report to the engine.
+nonisolated enum AutomationChromeBrowsingEvent: Equatable, Sendable {
+    /// A tab arrived on this host (without "www.").
+    case tabOpened(host: String)
+    /// A page watch the user started matched. `watchDescription` is its wording ("“Deployed”
+    /// appears"); `matchedText` came from the page, so it only ever reaches a model fenced as data.
+    case pageWatchMatched(watchDescription: String, tabTitle: String, matchedText: String?)
+}
+
+/// Phase 08: the user's current visit to a site.
+nonisolated struct AutomationChromeSiteVisit: Equatable, Sendable {
+    let startedAt: Date
+    let minutesOnSite: Double
+}
+
 nonisolated struct AutomationTestResult: Equatable, Sendable {
     /// What the notch card would say.
     let previewText: String
@@ -249,6 +264,20 @@ protocol AutomationEngineDependencies: AnyObject {
     func startScreenWatch(forText text: String, onMet: @escaping @MainActor () -> Void) -> (() -> Void)?
     /// File names in a folder, nil if it cannot be read.
     func fileNames(inFolderPath folderPath: String) -> [String]?
+
+    // Chrome browsing (phase 08). The defaults below mean "no Chrome": nothing ever fires.
+    /// Tabs arriving on sites and page watches matching, from the Wisp Tabs extension.
+    var chromeBrowsingEventPublisher: AnyPublisher<AutomationChromeBrowsingEvent, Never> { get }
+    /// The user's current visit to a site, or nil when they haven't been on it lately.
+    func chromeSiteVisit(siteHost: String, now: Date) -> AutomationChromeSiteVisit?
+    /// Starts following Chrome's tabs, once an automation needs it. Idempotent.
+    func startFollowingChromeTabs()
+}
+
+extension AutomationEngineDependencies {
+    var chromeBrowsingEventPublisher: AnyPublisher<AutomationChromeBrowsingEvent, Never> { Empty().eraseToAnyPublisher() }
+    func chromeSiteVisit(siteHost: String, now: Date) -> AutomationChromeSiteVisit? { nil }
+    func startFollowingChromeTabs() {}
 }
 
 /// Stands in until the live adapters are configured (and in previews): nothing can run.
@@ -304,6 +333,9 @@ final class AutomationEngine: ObservableObject {
     /// A slot this recent is "on time"; older means the Mac was asleep or Wisp was closed.
     static let onTimeWindowSeconds: TimeInterval = 90
     static let dismissedAttentionDefaultsKey = "wisp.automations.dismissedAttentionRecordIDs"
+    /// "When I open youtube": after a run, opening the site again within this long doesn't run
+    /// it again — a morning of YouTube tabs is one reminder, not twenty.
+    static let chromeTabOpenedCooldownSeconds: TimeInterval = 10 * 60
 
     /// Next scheduled run of each enabled, scheduled automation, soonest first, max 8. Includes
     /// the two JobsEngine-driven automations.
@@ -334,6 +366,9 @@ final class AutomationEngine: ObservableObject {
     private var firedMeetingKeysByAutomationID: [UUID: Set<String>] = [:]
     private var seenFileNamesByAutomationID: [UUID: Set<String>] = [:]
     private var screenWatchCancelsByAutomationID: [UUID: (watchedText: String, cancel: () -> Void)] = [:]
+    private var lastChromeTabOpenedRunAtByAutomationID: [UUID: Date] = [:]
+    /// Time-on-site automations fire once per visit; the visit is known by when it started.
+    private var firedChromeVisitStartByAutomationID: [UUID: Date] = [:]
     private var dismissedAttentionRecordIDs: Set<UUID>
 
     init(
@@ -373,6 +408,9 @@ final class AutomationEngine: ObservableObject {
         dependencies.newCanvasItemTitlesPublisher
             .sink { [weak self] titles in Task { @MainActor [weak self] in self?.handleNewCanvasItems(titles) } }
             .store(in: &subscriptions)
+        dependencies.chromeBrowsingEventPublisher
+            .sink { [weak self] browsingEvent in Task { @MainActor [weak self] in self?.handleChromeBrowsingEvent(browsingEvent) } }
+            .store(in: &subscriptions)
 
         let timer = Timer(timeInterval: Self.clockIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.clockTick() }
@@ -400,6 +438,7 @@ final class AutomationEngine: ObservableObject {
         Task { @MainActor [weak self] in await self?.pollMeetingTriggers() }
         pollFolderTriggers()
         reconcileScreenWatches()
+        pollChromeTimeOnSiteTriggers()
         recomputeDerivedState()
     }
 
@@ -1038,6 +1077,92 @@ final class AutomationEngine: ObservableObject {
         screenWatchCancelsByAutomationID[automationID] = nil
         guard let automation = store.automation(withID: automationID) else { return }
         startEventRun(for: automation, eventContext: "The text \"\(watchedText)\" appeared on my screen.")
+    }
+
+    // MARK: - Chrome (phase 08)
+
+    /// A stored site ("youtube", "youtube.com", "www.reddit.com") as the host it means.
+    static func resolvedChromeSiteHost(_ storedSite: String) -> String {
+        let trimmedSite = storedSite.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ChromeSiteMatching.siteHost(fromSpokenName: trimmedSite) ?? ChromeSiteMatching.hostWithoutWWW(trimmedSite)
+    }
+
+    /// Whether any enabled automation needs to follow Chrome's tabs.
+    private var hasEnabledChromeTabAutomation: Bool {
+        store.automations.contains { automation in
+            guard automation.isEnabled, case .event(let event) = automation.trigger else { return false }
+            switch event {
+            case .chromeTabOpened, .chromeTimeOnSite: return true
+            default: return false
+            }
+        }
+    }
+
+    private func handleChromeBrowsingEvent(_ browsingEvent: AutomationChromeBrowsingEvent) {
+        let now = dependencies.currentDate
+        switch browsingEvent {
+        case .tabOpened(let openedHost):
+            for automation in store.automations where automation.isEnabled {
+                guard case .event(.chromeTabOpened(let storedSite)) = automation.trigger else { continue }
+                let siteHost = Self.resolvedChromeSiteHost(storedSite)
+                guard ChromeSiteMatching.host(openedHost, isOnSite: siteHost) else { continue }
+                if let lastRunAt = lastChromeTabOpenedRunAtByAutomationID[automation.id],
+                   now.timeIntervalSince(lastRunAt) < Self.chromeTabOpenedCooldownSeconds { continue }
+                guard !runningAutomationIDs.contains(automation.id) else { continue }
+                lastChromeTabOpenedRunAtByAutomationID[automation.id] = now
+                startEventRun(
+                    for: automation,
+                    eventContext: "I just opened \(ChromeSiteMatching.displayName(forSiteHost: siteHost)) (\(openedHost)) in Chrome."
+                )
+            }
+        case .pageWatchMatched(let watchDescription, let tabTitle, let matchedText):
+            for automation in store.automations where automation.isEnabled {
+                guard case .event(.chromePageWatchMatched(let wantedDescription)) = automation.trigger,
+                      Self.pageWatch(described: watchDescription, matches: wantedDescription) else { continue }
+                var eventContext = "A Chrome page watch matched: \(watchDescription), on the tab \(tabTitle)."
+                if let matchedText, !matchedText.isEmpty {
+                    eventContext += "\nThe page showed: \(matchedText)"
+                }
+                startEventRun(for: automation, eventContext: eventContext)
+            }
+        }
+    }
+
+    /// Whether a page watch's wording matches what an automation asked for: blank matches any,
+    /// otherwise every word of it must be in the watch's wording ("deployed" in "“Deployed” appears").
+    static func pageWatch(described watchDescription: String, matches wantedDescription: String) -> Bool {
+        let wantedWords = Self.normalizedWords(wantedDescription)
+        guard !wantedWords.isEmpty else { return true }
+        let describedWords = Set(Self.normalizedWords(watchDescription))
+        return wantedWords.allSatisfy(describedWords.contains)
+    }
+
+    private static func normalizedWords(_ text: String) -> [String] {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+    }
+
+    /// Time-on-site automations, checked on the clock: once the current visit reaches the
+    /// minutes asked for, run once for that visit.
+    private func pollChromeTimeOnSiteTriggers() {
+        guard hasEnabledChromeTabAutomation else { return }
+        dependencies.startFollowingChromeTabs()
+        let now = dependencies.currentDate
+        for automation in store.automations where automation.isEnabled {
+            guard case .event(.chromeTimeOnSite(let storedSite, let minutes)) = automation.trigger else { continue }
+            let siteHost = Self.resolvedChromeSiteHost(storedSite)
+            guard let visit = dependencies.chromeSiteVisit(siteHost: siteHost, now: now),
+                  visit.minutesOnSite >= Double(minutes),
+                  firedChromeVisitStartByAutomationID[automation.id] != visit.startedAt,
+                  !runningAutomationIDs.contains(automation.id) else { continue }
+            firedChromeVisitStartByAutomationID[automation.id] = visit.startedAt
+            let minutesText = minutes == 1 ? "1 minute" : "\(minutes) minutes"
+            startEventRun(
+                for: automation,
+                eventContext: "I've been on \(ChromeSiteMatching.displayName(forSiteHost: siteHost)) in Chrome for \(minutesText)."
+            )
+        }
     }
 
     // MARK: - Derived state

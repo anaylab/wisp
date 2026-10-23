@@ -348,6 +348,49 @@ do {
     check(AutomationDraftParser.applyModelReply("{\"name\":\"X\",\"action\":\"delete everything\"}", to: partial)?.action == partial.action, "extra keys are ignored")
 }
 
+// MARK: - Chrome triggers (phase 08)
+
+func instructionOf(_ draft: AutomationDraft?) -> String {
+    if case .askBuddy(let instruction)? = draft?.action { return instruction }
+    return ""
+}
+
+do {
+    let result = parse("If I'm on youtube for 1 minute, remind me to study")
+    check({ if case .draft = result { return true } else { return false } }(), "youtube for 1 minute is a complete draft (got \(result))")
+    let draft = draftOf(result)
+    check(draft?.trigger == .event(.chromeTimeOnSite(host: "youtube.com", minutes: 1)), "youtube for 1 minute: time on site (got \(String(describing: draft?.trigger)))")
+    check(instructionOf(draft) == "Reply with one short line reminding me to study.", "youtube for 1 minute: the reminder is the instruction (got \(instructionOf(draft)))")
+    check(draft?.source == AutomationSource.nothing, "youtube for 1 minute: reads nothing")
+}
+
+do {
+    let draft = draftOf(parse("if I'm on reddit for 30 minutes tell me to take a break"))
+    check(draft?.trigger == .event(.chromeTimeOnSite(host: "reddit.com", minutes: 30)), "reddit for 30 minutes")
+    check(draftOf(parse("if I spend more than an hour on twitter, tell me to stop"))?.trigger == .event(.chromeTimeOnSite(host: "x.com", minutes: 60)), "an hour on twitter")
+    check(draftOf(parse("when I've been on instagram for half an hour remind me to go outside"))?.trigger == .event(.chromeTimeOnSite(host: "instagram.com", minutes: 30)), "half an hour on instagram")
+}
+
+do {
+    let draft = draftOf(parse("when I open youtube remind me to study first"))
+    check(draft?.trigger == .event(.chromeTabOpened(host: "youtube.com")), "when I open youtube (got \(String(describing: draft?.trigger)))")
+    check(instructionOf(draft).contains("study first"), "when I open youtube: the instruction is what to do")
+    check(draftOf(parse("whenever I go to news.ycombinator.com tell me to get back to work"))?.trigger == .event(.chromeTabOpened(host: "news.ycombinator.com")), "an address as the site")
+    check(draftOf(parse("every time I open hacker news, remind me what I'm working on"))?.trigger == .event(.chromeTabOpened(host: "news.ycombinator.com")), "a two-word site name")
+}
+
+do {
+    let draft = draftOf(parse("when my page watch for Deployed matches, tell me what changed"))
+    check(draft?.trigger == .event(.chromePageWatchMatched(watchDescription: "Deployed")), "page watch for Deployed (got \(String(describing: draft?.trigger)))")
+    check(draftOf(parse("when a chrome page watch fires, put it in my buddy thread"))?.trigger == .event(.chromePageWatchMatched(watchDescription: "")), "any page watch")
+}
+
+// Not Chrome: no known site, or not about a site at all.
+check(draftOf(parse("when I open my laptop remind me to stretch"))?.trigger != .event(.chromeTabOpened(host: "my")), "my laptop isn't a site")
+check(!AutomationDraftParser.looksLikeAutomationRequest("when I open the fridge"), "the fridge isn't an automation")
+check(!AutomationDraftParser.looksLikeAutomationRequest("I'm on youtube right now"), "a statement isn't an automation")
+check(AutomationEvent.chromeTimeOnSite(host: "reddit.com", minutes: 30).validationProblems().isEmpty, "a time-on-site trigger is valid")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 if failureCount > 0 {
     print("\(failureCount) FAILED")

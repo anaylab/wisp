@@ -36,7 +36,23 @@ nonisolated enum AutomationDisplayText {
         case .fileDropped(let folderPath):
             let folderName = (folderPath as NSString).lastPathComponent
             return folderName.isEmpty ? "When a file lands in a folder" : "When a file lands in \(folderName)"
+        case .chromePageWatchMatched(let watchDescription):
+            let trimmedDescription = watchDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedDescription.isEmpty
+                ? "When a Chrome page watch matches"
+                : "When the Chrome page watch for “\(trimmedDescription)” matches"
+        case .chromeTabOpened(let host):
+            return "When you open \(chromeSiteDisplayName(host)) in Chrome"
+        case .chromeTimeOnSite(let host, let minutes):
+            return "After \(minutes == 1 ? "1 minute" : "\(minutes) minutes") on \(chromeSiteDisplayName(host)) in Chrome"
         }
+    }
+
+    /// "youtube" or "youtube.com" → "YouTube"; blank → "a site".
+    private static func chromeSiteDisplayName(_ storedSite: String) -> String {
+        let trimmedSite = storedSite.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSite.isEmpty else { return "a site" }
+        return ChromeSiteMatching.displayName(forSiteHost: ChromeSiteMatching.siteHost(fromSpokenName: trimmedSite) ?? trimmedSite)
     }
 
     // MARK: - Source
