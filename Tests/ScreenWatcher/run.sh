@@ -20,6 +20,7 @@ swiftc -target arm64-apple-macos14.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/screen-watcher" \
   Tests/ScreenWatcher/main.swift \
-  leanring-buddy/ScreenWatcher.swift
+  leanring-buddy/ScreenWatcher.swift \
+  leanring-buddy/WatchedNumberParsing.swift
 
 "$BUILD_DIR/screen-watcher"
