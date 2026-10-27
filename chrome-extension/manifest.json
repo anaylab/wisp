@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Wisp Tabs",
+  "version": "1.0.0",
+  "description": "Lets Wisp, your on-device Mac companion, organize your Chrome tabs. Talks only to Wisp on this Mac (127.0.0.1).",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8Kwa0/QZ77v7y1mD2ut7denOdFTJaidUNluNZSRg6K+6H2YyrCWMXzHsKhs0CXv39ljPuaBsOvyWw7ayWl78eO7CwOjkZfP2MVzvjzWbk5HgVotiyWeNmVdgemoq8gl9sBgWrNTZC4gtJqfr6qi/4u+54qZukaglaYkIBeDNRMjpsBuGAf4FfHw3iHjnfEREj2qt+wzAnT3HC+JzpBVMoJzTtcL+W6QdZCK7msFVAMq9LPwca63J77UOQxcMcbp/U3K9T411KrXLot8uhHLypIMj+lncUg1lVkTclKuHJC9B887KXq5yK/wyB8MBMbyHWjOR806n2ilcgAlswPI1YQIDAQAB",
+  "permissions": ["tabs", "tabGroups", "alarms", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Wisp Tabs",
+    "default_popup": "popup.html"
+  }
+}

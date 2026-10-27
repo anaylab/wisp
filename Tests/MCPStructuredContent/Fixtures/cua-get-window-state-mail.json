@@ -1,0 +1,244 @@
+{
+ "content": [
+  {
+   "data": "iVBORw0KGgo=",
+   "mimeType": "image/png",
+   "type": "image"
+  },
+  {
+   "text": "window_id=777 pid=4242 size=200x126 elements=8\n\n- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpBut",
+   "type": "text"
+  }
+ ],
+ "structuredContent": {
+  "_note": "Prefer `elements` \u2014 `tree_markdown` will continue to work but new fields will only be added to the structured side. Issue #22865: use `max_elements` / `max_depth` to bound the AX walk on apps with very large trees.",
+  "app_name": "Mail",
+  "capture_id": "capture_50d692293e3f4a1cb12b03e7ba92116f_0000000000000000",
+  "element_count": 8,
+  "elements": [
+   {
+    "actions": [
+     "AXRaise"
+    ],
+    "depth": 0,
+    "element_index": 0,
+    "element_token": "s1a2b3c4d:0",
+    "enabled": true,
+    "frame": {
+     "h": 24.0,
+     "w": 24.0,
+     "x": 10.0,
+     "y": 45.0
+    },
+    "label": "New Message",
+    "role": "AXWindow",
+    "screenshot_frame": {
+     "h": 3,
+     "w": 3,
+     "x": 1,
+     "y": 2
+    },
+    "selected": false
+   },
+   {
+    "actions": [
+     "AXPress"
+    ],
+    "depth": 1,
+    "element_index": 1,
+    "element_token": "s1a2b3c4d:1",
+    "enabled": true,
+    "frame": {
+     "h": 24.0,
+     "w": 24.0,
+     "x": 10.0,
+     "y": 45.0
+    },
+    "label": "Send",
+    "parent_index": 0,
+    "role": "AXButton",
+    "screenshot_frame": {
+     "h": 3,
+     "w": 3,
+     "x": 1,
+     "y": 2
+    },
+    "selected": false
+   },
+   {
+    "actions": [
+     "AXConfirm"
+    ],
+    "depth": 1,
+    "element_index": 2,
+    "element_token": "s1a2b3c4d:2",
+    "enabled": true,
+    "frame": {
+     "h": 24.0,
+     "w": 24.0,
+     "x": 10.0,
+     "y": 45.0
+    },
+    "label": "To:",
+    "parent_index": 0,
+    "role": "AXTextField",
+    "screenshot_frame": {
+     "h": 3,
+     "w": 3,
+     "x": 1,
+     "y": 2
+    },
+    "selected": false,
+    "value": "sam@example.com"
+   },
+   {
+    "actions": [
+     "AXConfirm"
+    ],
+    "depth": 1,
+    "element_index": 3,
+    "element_token": "s1a2b3c4d:3",
+    "enabled": true,
+    "frame": {
+     "h": 24.0,
+     "w": 24.0,
+     "x": 10.0,
+     "y": 45.0
+    },
+    "label": "Subject:",
+    "parent_index": 0,
+    "role": "AXTextField",
+    "screenshot_frame": {
+     "h": 3,
+     "w": 3,
+     "x": 1,
+     "y": 2
+    },
+    "selected": false,
+    "value": "Lunch on Friday"
+   },
+   {
+    "actions": [],
+    "depth": 1,
+    "element_index": 4,
+    "element_token": "s1a2b3c4d:4",
+    "enabled": true,
+    "frame": {
+     "h": 24.0,
+     "w": 24.0,
+     "x": 10.0,
+     "y": 45.0
+    },
+    "label": "Message body",
+    "parent_index": 0,
+    "role": "AXTextArea",
+    "screenshot_frame": {
+     "h": 3,
+     "w": 3,
+     "x": 1,
+     "y": 2
+    },
+    "selected": false,
+    "value": "Hi Sam,\nAre we still on for lunch?"
+   },
+   {
+    "actions": [
+     "AXPress"
+    ],
+    "depth": 1,
+    "element_index": 5,
+    "element_token": "s1a2b3c4d:5",
+    "enabled": true,
+    "frame": {
+     "h": 24.0,
+     "w": 24.0,
+     "x": 10.0,
+     "y": 45.0
+    },
+    "label": "Delete Draft",
+    "parent_index": 0,
+    "role": "AXButton",
+    "screenshot_frame": {
+     "h": 3,
+     "w": 3,
+     "x": 1,
+     "y": 2
+    },
+    "selected": false
+   },
+   {
+    "actions": [
+     "AXPress",
+     "AXShowMenu"
+    ],
+    "depth": 1,
+    "element_index": 6,
+    "element_token": "s1a2b3c4d:6",
+    "enabled": false,
+    "frame": {
+     "h": 24.0,
+     "w": 24.0,
+     "x": 10.0,
+     "y": 45.0
+    },
+    "label": "From",
+    "parent_index": 0,
+    "role": "AXPopUpButton",
+    "screenshot_frame": {
+     "h": 3,
+     "w": 3,
+     "x": 1,
+     "y": 2
+    },
+    "selected": false
+   },
+   {
+    "actions": [],
+    "depth": 1,
+    "element_index": 7,
+    "element_token": "s1a2b3c4d:7",
+    "enabled": true,
+    "frame": {
+     "h": 24.0,
+     "w": 24.0,
+     "x": 10.0,
+     "y": 45.0
+    },
+    "parent_index": 0,
+    "role": "AXGroup",
+    "screenshot_frame": {
+     "h": 3,
+     "w": 3,
+     "x": 1,
+     "y": 2
+    },
+    "selected": false
+   }
+  ],
+  "elements_complete": false,
+  "nodes_pending": 22,
+  "nodes_visited": 150,
+  "pid": 4242,
+  "returned_element_count": 8,
+  "screenshot_frame_valid": true,
+  "screenshot_height": 126,
+  "screenshot_mime_type": "image/png",
+  "screenshot_scale": 2.0,
+  "screenshot_width": 200,
+  "snapshot_id": "s00000001",
+  "timeout_ms": 1000,
+  "total_element_count": 8,
+  "tree_markdown": "- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"- [0] AXWindow \"New Message\"\n- [1] AXButton \"Send\"\n- [2] AXTextField \"To:\"\n- [3] AXTextField \"Subject:\"\n- [4] AXTextArea \"Message body\"\n- [5] AXButton \"Delete Draft\"\n- [6] AXPopUpButton \"From\"\n- [7] AXGroup \"\"",
+  "truncated": false,
+  "truncation_reason": "node_budget",
+  "walk_elapsed_ms": 46,
+  "window_bounds": {
+   "height": 949.0,
+   "width": 1512.0,
+   "x": 0.0,
+   "y": 33.0
+  },
+  "window_id": 777,
+  "window_title": "New Message"
+ }
+}

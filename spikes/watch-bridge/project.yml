@@ -1,0 +1,21 @@
+name: WatchSpike
+options:
+  bundleIdPrefix: com.wisp.spike
+targets:
+  WatchSpike:
+    type: application
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources: [WatchSpike]
+    info:
+      path: WatchSpike/Info.plist
+      properties:
+        WKApplication: true
+        WKWatchOnly: true
+        NSLocalNetworkUsageDescription: Spike test of reaching Wisp on your Mac.
+        NSBonjourServices: ["_wispwatch._tcp"]
+    settings:
+      GENERATE_INFOPLIST_FILE: NO
+      PRODUCT_BUNDLE_IDENTIFIER: com.wisp.spike.watch
+      CODE_SIGN_STYLE: Automatic
+      DEVELOPMENT_TEAM: W2H2SA2F98

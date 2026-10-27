@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>LSUIElement</key>
+	<true/>
+	<key>VoiceTranscriptionProvider</key>
+	<string>fluidaudio</string>
+	<key>VoiceTTSProvider</key>
+	<string>fluid</string>
+	<key>ChatterboxTTSServerURL</key>
+	<string>http://localhost:8004</string>
+	<key>ChatProvider</key>
+	<string>ollama</string>
+	<key>CodeProjectDirectory</key>
+	<string>~/Downloads/clicky</string>
+	<key>AgentModeEnabled</key>
+	<string>true</string>
+	<key>OllamaModel</key>
+	<string>qwen2.5vl:3b</string>
+	<key>OllamaBaseURL</key>
+	<string>http://localhost:11434</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Wisp listens while you hold the hotkey so you can talk to it. Your voice is transcribed on this Mac and never leaves it.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Wisp looks at your screen to answer questions about what you are seeing. Screenshots are read by a model running on this Mac and are never uploaded.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Wisp turns your speech into text using on-device recognition. Nothing you say is sent anywhere.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Wisp reads your upcoming events on this Mac to show them in the notch, and, if you set up a Canvas job, adds your Canvas due dates and study blocks you approve to a calendar called Wisp. Your calendar is read on-device. The Wisp calendar is kept on this Mac when possible; if your Mac has no on-device calendar account, it is created in your default calendar account (such as iCloud or Google), so those items sync to that provider.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Wisp reads your upcoming events on this Mac to show them in the notch, and, if you set up a Canvas job, adds your Canvas due dates and study blocks you approve to a calendar called Wisp. Your calendar is read on-device. The Wisp calendar is kept on this Mac when possible; if your Mac has no on-device calendar account, it is created in your default calendar account (such as iCloud or Google), so those items sync to that provider.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Wisp reads your reminders on this Mac to show them in the notch, adds a reminder when you ask it to, and keeps your daily checklist in a list called Wisp Today. Your reminders are read on-device and never uploaded by Wisp.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Wisp reads your reminders on this Mac to show them in the notch, adds a reminder when you ask it to, and keeps your daily checklist in a list called Wisp Today. Your reminders are read on-device and never uploaded by Wisp.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Wisp controls your web browser (Chrome or Safari) when you ask it to — opening tabs, going to sites and working through pages — asks Music or Spotify what is currently playing to show it in the notch, and sends a message from Messages when you ask it to text someone (always after you confirm), sends an email you drafted from Mail when you press Send, and reads your Apple Notes when you ask it to import them into your brain (read on this Mac, never uploaded).</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Wisp looks up the person you ask it to text — like "mom" or "sarah" — in your contacts on this Mac. Your contacts are read on-device and never uploaded by Wisp.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Wisp uses your location to find places near you — like coffee or restaurants — when you ask. Your location is used on this Mac to search Apple Maps and is never uploaded by Wisp.</string>
+</dict>
+</plist>

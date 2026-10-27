@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --sage: #7f9c86;
+      --terracotta: #c07a64;
+      --text-secondary: #6b6f6a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --text-secondary: #a3a7a2; }
+    }
+    body {
+      margin: 0;
+      padding: 14px 16px;
+      width: 260px;
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+    .status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--terracotta); }
+    .dot.connected { background: var(--sage); }
+    p { margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; }
+    button {
+      margin-top: 10px;
+      padding: 5px 12px;
+      border-radius: 8px;
+      border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+    [hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <div class="status"><span id="statusDot" class="dot"></span><span id="statusTitle">Checking…</span></div>
+  <p id="statusDetail"></p>
+  <button id="reconnectButton" hidden>Try again</button>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120" width="480" height="120">
+  <title>Wisp</title>
+  <g transform="translate(14 66)">
+    <path d="M0,12 C28,12 30,-32 58,-32 C86,-32 84,12 62,10 C46,8 52,-14 70,-12 C100,-8 108,24 140,18 C158,14 166,2 172,-6" fill="none" stroke="#15151A" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="182" cy="-12" r="7" fill="#8F5CF2"/>
+  </g>
+  <!-- The wordmark is live text in a system sans; convert it to outlines in the final typeface before print use. -->
+  <text x="232" y="92" fill="#15151A" font-family="-apple-system, 'SF Pro Rounded', 'Helvetica Neue', Arial, sans-serif" font-size="76" font-weight="500" letter-spacing="-1">wisp</text>
+</svg>

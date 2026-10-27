@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Xcode: per-developer state and build output
+*.xcuserstate
+xcuserdata/
+build/
+
+# Local-only folders
+.claude/
+coding-plans/
+releases/

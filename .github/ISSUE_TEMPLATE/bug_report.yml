@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Wisp isn't working
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Hold ⌃⌥ and say "…"
+        2. …
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Model provider
+      options:
+        - Local (Ollama)
+        - Claude (Anthropic)
+        - GPT (OpenAI)
+        - Gemini (Google)
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      placeholder: qwen2.5vl:3b
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac
+      placeholder: macOS 26.1, MacBook Pro M3 Pro
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "From `log stream --predicate 'process == \"Wisp\"'`. Remove anything private."
+      render: text

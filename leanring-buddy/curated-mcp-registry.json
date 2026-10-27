@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem",
+      "summary": "Read, search, and write files under a folder you choose. Scoped to your Documents folder by default.",
+      "publisher": "Model Context Protocol",
+      "iconSymbol": "folder",
+      "categories": ["Files", "Productivity"],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "kind": "stdio",
+      "command": "npx",
+      "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "~/Documents"]
+    },
+    {
+      "id": "fetch",
+      "name": "Fetch",
+      "summary": "Fetch a web page and return its content as clean markdown for the model to read.",
+      "publisher": "Model Context Protocol",
+      "iconSymbol": "globe",
+      "categories": ["Web", "Research"],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+      "kind": "stdio",
+      "command": "uvx",
+      "arguments": ["mcp-server-fetch"]
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "summary": "Inspect and operate on a local Git repository — status, diffs, log, commits.",
+      "publisher": "Model Context Protocol",
+      "iconSymbol": "arrow.triangle.branch",
+      "categories": ["Developer"],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+      "kind": "stdio",
+      "command": "uvx",
+      "arguments": ["mcp-server-git"]
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "summary": "A persistent knowledge graph the model can write to and recall across conversations.",
+      "publisher": "Model Context Protocol",
+      "iconSymbol": "brain",
+      "categories": ["Productivity"],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "kind": "stdio",
+      "command": "npx",
+      "arguments": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential Thinking",
+      "summary": "A structured step-by-step reasoning tool for breaking hard problems into ordered steps.",
+      "publisher": "Model Context Protocol",
+      "iconSymbol": "list.number",
+      "categories": ["Productivity", "Developer"],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "kind": "stdio",
+      "command": "npx",
+      "arguments": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    {
+      "id": "time",
+      "name": "Time",
+      "summary": "Current time and timezone conversions, so the model always knows what time it is.",
+      "publisher": "Model Context Protocol",
+      "iconSymbol": "clock",
+      "categories": ["Productivity"],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/time",
+      "kind": "stdio",
+      "command": "uvx",
+      "arguments": ["mcp-server-time"]
+    },
+    {
+      "id": "brave-search",
+      "name": "Brave Search",
+      "summary": "Web and local search through the Brave Search API.",
+      "publisher": "Brave",
+      "iconSymbol": "magnifyingglass",
+      "categories": ["Web", "Research"],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+      "kind": "stdio",
+      "command": "npx",
+      "arguments": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "configFields": [
+        {
+          "id": "BRAVE_API_KEY",
+          "label": "Brave API key",
+          "placeholder": "BSA…",
+          "target": "env",
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "summary": "Read channels and messages and post to your Slack workspace.",
+      "publisher": "Model Context Protocol",
+      "iconSymbol": "number",
+      "categories": ["Communication", "Productivity"],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack",
+      "kind": "stdio",
+      "command": "npx",
+      "arguments": ["-y", "@modelcontextprotocol/server-slack"],
+      "configFields": [
+        {
+          "id": "SLACK_BOT_TOKEN",
+          "label": "Bot token",
+          "placeholder": "xoxb-…",
+          "target": "env",
+          "secret": true
+        },
+        {
+          "id": "SLACK_TEAM_ID",
+          "label": "Team ID",
+          "placeholder": "T…",
+          "target": "env",
+          "secret": false
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "summary": "Search repositories and code, read and open issues and pull requests. Hosted GitHub MCP server, reached over HTTP.",
+      "publisher": "GitHub",
+      "iconSymbol": "chevron.left.forwardslash.chevron.right",
+      "categories": ["Developer"],
+      "homepage": "https://github.com/github/github-mcp-server",
+      "kind": "remote",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "configFields": [
+        {
+          "id": "Authorization",
+          "label": "Access token",
+          "placeholder": "Bearer ghp_…",
+          "target": "header",
+          "secret": true
+        }
+      ]
+    }
+  ]
+}

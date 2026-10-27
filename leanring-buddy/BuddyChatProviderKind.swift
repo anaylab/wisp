@@ -1,0 +1,78 @@
+//
+//  BuddyChatProviderKind.swift
+//  leanring-buddy
+//
+//  Which backend answers the user: the local Ollama model, or one of the
+//  bring-your-own-key cloud providers. This is the vocabulary the provider
+//  factory, the settings UI, and the local-only-machinery gates all share.
+//
+//  Nothing consumes this type yet — it is landed ahead of the factory and the
+//  settings UI so those later changes stay small.
+//
+
+import Foundation
+
+/// The chat backend the user has chosen.
+///
+/// The selection is a *runtime* setting (see `BuddyChatProviderSelection`), not
+/// a compile-time Info.plist value, because the user changes it live in the
+/// dashboard. The Info.plist `ChatProvider` key survives only as the shipped
+/// default, which is always local.
+enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codable {
+    /// The on-device Ollama model. The default, and the only provider whose
+    /// requests never leave this machine.
+    case localOllama
+
+    /// Apple's on-device system language model (FoundationModels). Also never
+    /// leaves this machine, and needs no server, download or API key — only
+    /// Apple Intelligence turned on. Image input needs macOS 27.
+    case appleOnDevice
+
+    /// Anthropic's Claude, over the network, with a user-supplied API key.
+    case anthropic
+
+    /// Anthropic's Claude, paid for by the user's Claude subscription by
+    /// driving their own signed-in `claude` command line tool. No API key.
+    case claudeSubscription
+
+    /// OpenAI's GPT, over the network, with a user-supplied API key.
+    case openAI
+
+    /// Google's Gemini, over the network, with a user-supplied API key.
+    case gemini
+
+    var id: String { rawValue }
+
+    /// The human-readable name shown in the provider picker.
+    var displayName: String {
+        switch self {
+        case .localOllama: return "Local (Ollama)"
+        case .appleOnDevice: return "Apple on-device"
+        case .anthropic:  return "Claude (Anthropic)"
+        case .claudeSubscription: return "Claude (your subscription)"
+        case .openAI:      return "GPT (OpenAI)"
+        case .gemini:      return "Gemini (Google)"
+        }
+    }
+
+    /// Whether choosing this provider sends screenshots and the voice
+    /// transcript off this machine.
+    ///
+    /// Drives two things that must never disagree: the privacy notice shown in
+    /// the settings UI, and the gates that switch off the local-only machinery
+    /// (keep-warm heartbeat, push-to-talk preload, residency serialisation)
+    /// when the model no longer lives on this machine.
+    var sendsScreenshotsOffThisMachine: Bool {
+        self != .localOllama && self != .appleOnDevice
+    }
+
+    /// Whether this provider needs a user-supplied API key before it can run.
+    ///
+    /// Only the local provider and the subscription provider (which uses the
+    /// `claude` CLI's own sign-in) work without one. A cloud provider selected
+    /// without a stored key is a configuration error the UI must surface rather
+    /// than a request that silently fails.
+    var requiresAPIKey: Bool {
+        self != .localOllama && self != .appleOnDevice && self != .claudeSubscription
+    }
+}
