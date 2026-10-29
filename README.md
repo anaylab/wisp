@@ -86,6 +86,33 @@ Wisp recognises them and just does it.
 | *"Every morning, summarise what's due today"* | A buddy that does exactly that, on schedule | 🧠 yes |
 | *"Run my Log Water shortcut"* | Runs an Apple Shortcut, after asking | 🧠 yes |
 
+## See it in action
+
+These are real captures of Wisp running, not mockups. None of them used a model: Wisp recognised the
+request and did it directly.
+
+<table>
+<tr>
+<td width="33%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-pointing.png" alt="Wisp's notch says Here's Pi while a pulsing labelled marker sits on the pi button of Calculator">
+  <br><sub><b>"Where is the pi button?"</b> A labelled marker lands on the exact control in about a tenth of a second, matched from the Accessibility tree. The notch confirms what it found.</sub>
+</td>
+<td width="33%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-select-part.png" alt="A dimmed screen with a blue selection rectangle drawn around four Calculator buttons">
+  <br><sub><b>Ask About a Part.</b> Drag a box around anything on screen, or just say "explain option C". Wisp highlights exactly what you chose.</sub>
+</td>
+<td width="33%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-ask-part.png" alt="A small Ask Wisp composer with an About: selected part chip above the highlighted Calculator buttons">
+  <br><sub><b>Follow-ups stay on it.</b> The composer carries an "About: selected part" chip, so "why?" and "next step" are about that region.</sub>
+</td>
+</tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/screenshots/feature-windows.png" alt="Dictionary tiled on the left and TextEdit on the right, with the notch reply: done, Dictionary left, TextEdit right" width="100%">
+  <br><sub><b>"Put Dictionary on the left and TextEdit on the right."</b> Two windows tiled over Accessibility in an instant, no model call, and a one-line confirmation in the notch.</sub>
+</p>
+
 ## Tour
 
 <p align="center">
