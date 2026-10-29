@@ -89,31 +89,47 @@ Wisp recognises them and just does it.
 ## Tour
 
 <p align="center">
-  <img src="docs/assets/screenshots/window-today.png" alt="The Wisp window's Today page: a bento dashboard with an ask bar, today's activity, buddies, up next, brain, routines and recent answers" width="100%">
-  <br><sub><b>Today.</b> A live bento dashboard: ask bar, what Wisp did today, your buddies, your next meeting, the brain, one-click routines and recent answers.</sub>
-</p>
-
-<p align="center">
-  <img src="docs/assets/screenshots/menu-and-settings.png" alt="Wisp's native menu bar menu next to Settings → General with permissions and what's running" width="100%">
-  <br><sub><b>Menu bar and settings.</b> A plain native menu for the quick things, including Pause Listening. Settings shows every permission, the model that is answering, and whether anything leaves your Mac.</sub>
+  <img src="docs/assets/screenshots/today.png" alt="The Wisp window's Today page: a buddy mascot over a dark ask pill, a greeting, today's checklist, buddies, what's next and what's coming up" width="100%">
+  <br><sub><b>Today.</b> Your buddies on the left, and a calm bento dashboard on the right: ask pill, today's checklist, next automations, upcoming events, routines and recent answers.</sub>
 </p>
 
 <table>
 <tr>
-<td width="33%" align="center" valign="top">
-  <img src="docs/assets/screenshots/routines.png" alt="The Routines page: a saved 'Summarize this page' routine with its instruction, a ⌃⌥1 shortcut and the browsers it's suggested in">
-  <br><sub><b>Routines.</b> Saved instructions on <kbd>⌃⌥</kbd>+number, suggested in the notch for the apps they fit.</sub>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/buddies.png" alt="A buddy's page: its mission, suggested jobs, and a Tools panel with per-app and per-ability switches">
+  <br><sub><b>Buddies.</b> Every buddy has its own character, thread and a Tools panel: which connected apps and which Wisp abilities it may use.</sub>
 </td>
-<td width="33%" align="center" valign="top">
-  <img src="docs/assets/screenshots/marketplace.png" alt="Connections → Marketplace: installed MCP servers with their tool counts and toggles, and a searchable catalogue">
-  <br><sub><b>Marketplace.</b> Install MCP servers in a click. Only the few tools relevant to each request reach the model.</sub>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/automations.png" alt="The Automations page: a say-it box and a list of automations with run buttons and switches">
+  <br><sub><b>Automations.</b> Say it in a sentence, or start from a ready-made one. Run, pause or inspect each from the list.</sub>
 </td>
-<td width="33%" align="center" valign="top">
-  <img src="docs/assets/screenshots/settings-general.png" alt="Settings → General: every permission granted, the local model running, and 'Runs entirely on this Mac'">
-  <br><sub><b>Settings.</b> Permissions, what is running, and a plain statement of whether anything leaves your Mac.</sub>
+</tr>
+<tr>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/canvas.png" alt="The Canvas page: paste a calendar feed link and plan your day into Calendar and Reminders">
+  <br><sub><b>Canvas.</b> Paste your calendar feed once; Wisp plans the day into Calendar and Reminders.</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/marketplace.png" alt="Settings → Marketplace: connected and available apps">
+  <br><sub><b>Marketplace.</b> Connect Gmail, Calendar, Drive, GitHub, Slack, Notion and more, with real logos and one-click disconnect.</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/model.png" alt="Settings → Model: provider, Claude model, thinking level, local usage and system memory">
+  <br><sub><b>Model.</b> Pick the brain, set how hard it thinks, and see local usage and memory. Anything that leaves your Mac is flagged.</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/settings.png" alt="Settings → General: permissions, what's running and the theme gallery">
+  <br><sub><b>Settings.</b> Permissions, what is running (speech and voice on-device), and a gallery of themes.</sub>
 </td>
 </tr>
 </table>
+
+<p align="center">
+  <img src="docs/assets/screenshots/notch.png" alt="Wisp answering in the notch" width="100%">
+  <br><sub><b>The notch.</b> Where Wisp is used: answers, glance cards, approvals and quick chat.</sub>
+</p>
 
 ## Everything Wisp does
 
@@ -194,10 +210,10 @@ Wisp recognises them and just does it.
 <td width="50%" valign="top">
 
 ### 🫧 Buddies
-Named, coloured agents that each own one job, in a messenger-style window.
+Named agents that each own one job, listed in the window's sidebar like contacts.
 
-- **Living characters** that breathe, blink, follow your pointer and show a mood: working, happy,
-  sleepy, oops, waiting for your OK.
+- **Living characters**, each its own shape (triangle, pill, cube, cloud, drop…), that breathe,
+  blink, follow your pointer and show a mood: working, happy, sleepy, oops, waiting for your OK.
 - **Their own thread, memory, model and tool allow-list.** Give the news buddy the browser and
   nothing else, limit which connected apps it may use, or run one on a cloud model in parallel.
 - **Personalities** (Coach, Chill, Hype, Deadpan, Teacher) and **specialties** (Coder, Inbox,
@@ -247,10 +263,11 @@ A **local wiki about you and your work**, in `~/.wisp/brain/`: plain markdown an
 <td width="50%" valign="top">
 
 ### 🎨 Made to feel native
-- **Six themes** (Sage, Candy, Sunset, Mint, Berry Night, Mono) in light and dark, contrast-checked.
+- **A theme gallery** (Paper, Midnight, Aqua, Sage and more) in light and dark, contrast-checked.
 - **Liquid Glass** surfaces on macOS 26, one lit-edge button style, a bespoke single-stroke icon set.
-- **A calm window** with four sections by default (Today, Chat, Buddies, Settings), and an
-  **Advanced features** switch for Brain, Routines, History and Connections.
+- **A sidebar window.** Your buddies sit on top, then **Today**, **Chat**, **Automations** and **Canvas**;
+  everything else (shortcuts, dictation, agent, model, routines, history, marketplace, servers, sources)
+  lives under one **Settings** gear, and an **Advanced features** switch adds Brain.
 - **First-run setup** in four skippable steps; nothing is switched on until you tap it.
 - **Playful, but optional.** Squish, bounce and bursts yield to Reduce Motion.
 - **Usage log** with token counts and estimated cost per provider, stored locally, content never kept.
