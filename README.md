@@ -21,7 +21,8 @@
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="#try-saying">Try saying</a> ·
   <a href="#tour">Tour</a> ·
-  <a href="#features">Features</a> ·
+  <a href="#everything-wisp-does">Everything Wisp does</a> ·
+  <a href="#models">Models</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#privacy">Privacy</a> ·
   <a href="#brand">Brand</a>
@@ -36,25 +37,28 @@
 ## What is Wisp?
 
 Wisp is a **menu bar–only AI companion for macOS**. It lives in the notch like a Dynamic Island,
-invisible until you need it. Hold a hotkey and it listens, sees what is on your screen, and answers in
-a compact card. It can:
+invisible until you need it. Hold a hotkey and it listens, sees what is on your screen, and answers
+in a compact card. From there it grows into a small operating layer for your Mac:
 
-- **point** at the button you are looking for and draw walkthroughs over your apps
-- **arrange windows**, **watch your screen** and tell you when a build finishes
-- **drive your browser**, **text your contacts**, **draft emails**
-- keep a **private wiki** of what it learns about you
-- run **scheduled agents** (buddies) in the background
+- **Sees and points.** Marks the button you are looking for in ~0.1s, draws step-by-step
+  walkthroughs over your apps, and writes handwritten working beside a problem.
+- **Does things.** Arranges windows, drives your browser in its own tab, texts your contacts,
+  drafts emails, runs Shortcuts, and operates native apps.
+- **Remembers.** Keeps a private, Obsidian-compatible wiki of what it learns about you.
+- **Works while you are away.** Named buddies and automations run on a schedule or when something
+  happens, quietly, and only interrupt you when it matters.
 
 **It all runs on your Mac by default:** a local vision model through Ollama, on-device speech
 recognition (Parakeet) and speech synthesis (Kokoro) on the Neural Engine, and on-device OCR. Cloud
-models (Claude, GPT, Gemini) are strictly opt-in, bring-your-own-key, and labelled whenever they are on.
+models are strictly opt-in, bring-your-own-key, and labelled whenever they are on.
 
 <table>
 <tr>
-<td align="center" width="25%"><h3>~0.1s</h3><sub>to point at a button, with no vision model</sub></td>
-<td align="center" width="25%"><h3>0</h3><sub>accounts, API keys or analytics needed</sub></td>
-<td align="center" width="25%"><h3>25</h3><sub>languages transcribed on-device</sub></td>
-<td align="center" width="25%"><h3>500+</h3><sub>apps reachable through MCP and Composio</sub></td>
+<td align="center" width="20%"><h3>~0.1s</h3><sub>to point at a button, with no vision model</sub></td>
+<td align="center" width="20%"><h3>0</h3><sub>accounts, API keys or analytics needed</sub></td>
+<td align="center" width="20%"><h3>25</h3><sub>languages transcribed on-device</sub></td>
+<td align="center" width="20%"><h3>500+</h3><sub>apps reachable through MCP and Composio</sub></td>
+<td align="center" width="20%"><h3>100k+</h3><sub>lines of Swift, 35 standalone test suites</sub></td>
 </tr>
 </table>
 
@@ -69,15 +73,17 @@ Wisp recognises them and just does it.
 | *"Put Safari on the left and Xcode on the right"* | Tiles both windows over Accessibility | ⚡ none |
 | *"Tell me when the build finishes"* | Watches the screen and pings you when "Succeeded" appears | ⚡ none |
 | *"Text mom I'm running late"* | Finds Mom in Contacts, shows a Siri-style card, sends on your OK | ⚡ none |
-| *"Draft an email to Sam about moving Friday's meeting"* | Opens an editable draft; nothing is sent until you press Send | 🧠 one call |
 | *"Set a timer for 10 minutes"* | A live countdown card in the notch | ⚡ none |
+| *"Remind me to call the dentist tomorrow at 9"* | Opens an editable automation card instead of a model turn | ⚡ none |
 | *"Organize my tabs"* / *"Close duplicate tabs"* | Groups and tidies Chrome via the Wisp Tabs extension | ⚡ none |
-| *"Explain the third answer"* | Selects that part of the screen and explains just that | 🧠 yes |
 | *"Add this page to my brain"* | Reads the front tab and files it into your local wiki | ⚡ none |
+| *"Explain the third answer"* / *"What does step 2 mean?"* | Selects that part of the screen and explains just that | 🧠 yes |
+| *"Draft an email to Sam about moving Friday's meeting"* | Opens an editable draft; nothing sends until you press Send | 🧠 one call |
+| *"Walk me through turning on FileVault"* | Numbered boxes and arrows drawn over System Settings, one step at a time | 🧠 yes |
+| *"Solve this"* (on a math problem) | Handwritten working beside each line, the answer circled | 🧠 yes |
 | *"Open github and search for swift markdown"* | Drives your real browser, in its own tab | 🧠 sometimes |
-| *"Walk me through turning on FileVault"* | Numbered boxes and arrows drawn over System Settings | 🧠 yes |
 | *"What's the weather in Lisbon?"* | An Apple Weather–style glance card | 🧠 yes |
-| *"Every morning, summarise what's due today"* | Creates an automation that does exactly that, on schedule | 🧠 yes |
+| *"Every morning, summarise what's due today"* | A buddy that does exactly that, on schedule | 🧠 yes |
 | *"Run my Log Water shortcut"* | Runs an Apple Shortcut, after asking | 🧠 yes |
 
 ## Tour
@@ -109,7 +115,7 @@ Wisp recognises them and just does it.
 </tr>
 </table>
 
-## Features
+## Everything Wisp does
 
 <table>
 <tr>
@@ -118,30 +124,34 @@ Wisp recognises them and just does it.
 ### 🎙️ Talk to it
 - **Push-to-talk** with <kbd>⌃</kbd><kbd>⌥</kbd> from any app: hold to talk, tap to type,
   hold + <kbd>⇧</kbd> to dictate into the focused field, double-tap <kbd>⌃</kbd> for hands-free.
-- **On-device speech.** Parakeet on the Neural Engine transcribes in 25 languages, with Apple
-  Speech as automatic fallback. Live partials appear in the notch while you talk.
-- **Custom dictionary and language** so names and jargon come out spelled right.
+  A brief badge names which of the four you fired, and a lavender glow frames your screen while it listens.
+- **On-device speech.** Parakeet on the Neural Engine transcribes 25 languages with live partials,
+  boosted by your own dictionary. Apple Speech is the automatic fallback.
 - **Voice or silent.** Every answer shows as text; in voice mode the model picks *one* short
   line worth saying, spoken by on-device Kokoro.
+- **Quick add.** "Remind me…", "every…", "when…" open an editable automation card, no model turn.
 - **Routines** are saved instructions on <kbd>⌃</kbd><kbd>⌥</kbd>+<kbd>1</kbd>…<kbd>9</kbd>, with
   `{blanks}` Wisp asks for first.
-- **Pause Listening** from the menu bar when you need quiet.
+- **Hardware-aware.** Falls back to the built-in mic with the lid closed or when a mic goes silent,
+  and puts a muted reply on the clipboard instead of speaking into silence.
 
 </td>
 <td width="50%" valign="top">
 
 ### 👀 Sees your screen
 - **Instant pointing.** "Where's X?" is matched against the Accessibility tree and on-device
-  OCR; a marker lands in **~0.1s**, no vision model needed.
-- **Walkthroughs.** Boxes, arrows and highlights over your live screen, stepped one at a time;
-  Wisp finds each next control again as the screen changes, and can click it *for* you.
+  OCR; a marker lands in **~0.1s**, with a marker on each match when a label appears twice.
+- **Guided walkthroughs.** Boxes and arrows stepped one at a time. Wisp finds each next control
+  again on the live screen, advances when you click it, and can click it *for* you (never
+  anything irreversible).
 - **Teaches on the page.** Circles an answer, writes handwritten working beside a problem, and
-  steps through it with a **Next ›** pill.
-- **Ask about a part.** Drag to select a region, or say *"explain option C"*, and the follow-ups
-  stay about that part. **Save worked solution** exports the annotated screen as a PNG.
+  steps through it with a **Next ›** pill or <kbd>⌃⌥→</kbd>. **Save worked solution** exports
+  the annotated screen as a PNG plus Markdown notes.
+- **Ask about a part.** Drag to select a region, click a note Wisp drew, or just say
+  *"explain option C"*; follow-ups stay about that part.
+- **Screen watchers.** "Tell me when it says Done": up to 3 at once, OCR every 3s, no model calls.
 - **Works on anything:** native apps via Accessibility, everything else (terminals, images,
   remote desktops) via Vision OCR.
-- **Screen watchers.** "Tell me when it says Done"; up to 3 at once, no model calls.
 
 </td>
 </tr>
@@ -150,29 +160,69 @@ Wisp recognises them and just does it.
 
 ### 🏝️ Lives in the notch
 - A **Dynamic Island** that wraps the physical notch, solid black like the real thing (Liquid
-  Glass if you prefer), and disappears when idle.
+  Glass if you prefer), and disappears when idle. Hover for the full panel.
 - **Glance cards:** weather, calendar, reminders, timers, now playing, nearby places, and your
   own HTTPS sources.
 - **Quick chat** that drops from the notch, with conversations and buddies in a sidebar.
+- **A working buddy** sits in the notch's flank while its run is in progress.
 - **Drop a file on the notch** to add it to your brain.
 - **Sound cues and haptics** for listening, thinking, replying and approvals.
-- A **morning briefing** with one-click suggestions, and **quiet mode** that stays silent while
-  you are on a call.
+- **Morning briefing** with one-click suggestions, plus **quiet mode** that stays silent while
+  you are on a call or the camera is on.
 
 </td>
 <td width="50%" valign="top" id="acts-for-you">
 
 ### 🤖 Acts for you
 - **Agent mode** with tools, background tasks, and a notification when they finish.
-- **Browser control** of your real Chrome or Safari, through the DOM, in **its own tab**. It
-  never touches the one you are reading.
+- **Browser control** of your real Chrome or Safari, through the DOM, in **its own tab**. A
+  three-tier planner keeps simple tasks model-free; with a cloud model, a long-horizon agent
+  handles forms and multi-page jobs.
+- **Native-app control** through [cua-driver](https://github.com/trycua/cua): click, type and
+  pick menus in any Mac app, each action behind a confirmation card, checked after it runs.
 - **Window management:** halves, quarters, thirds, maximize, center, next display.
 - **Messages & Contacts**, **email drafts** (you press Send), **Calendar & Reminders**,
-  **Apple Shortcuts**, and **native-app control** through cua-driver.
+  **Apple Shortcuts**, and music control.
 - **Learned shortcuts:** save a finished turn and replay it later with no model call.
-- **Wisp Tabs** Chrome extension to group, dedupe and tidy tabs.
+- **Wisp Tabs** Chrome extension to group, dedupe, pin and mute tabs.
 - **MCP client** with a built-in marketplace: any stdio or remote server, plus optional
-  Composio for 500+ apps.
+  Composio for 500+ apps. Only the few most relevant tools are shown per turn.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🫧 Buddies
+Named, coloured agents that each own one job, in a messenger-style window.
+
+- **Living characters** that breathe, blink, follow your pointer and show a mood: working, happy,
+  sleepy, oops, waiting for your OK.
+- **Their own thread, memory, model and tool allow-list.** Give the news buddy the browser and
+  nothing else, limit which connected apps it may use, or run one on a cloud model in parallel.
+- **Personalities** (Coach, Chill, Hype, Deadpan, Teacher) and **specialties** (Coder, Inbox,
+  Planner, Writer, Researcher…) with sensible starter jobs and apps.
+- **Delegation.** A buddy can ask a peer for help in the peer's own thread; crossing from
+  local to cloud asks you first. No chains.
+- **Files.** Drop documents and pictures into a buddy's thread; it can read them later.
+- Unread dots, pins, *notify when finished*, and `.wisp` files to share a buddy's setup.
+
+</td>
+<td width="50%" valign="top">
+
+### ⏱️ Automations and Canvas
+One model: **trigger → source → action → output → notify**.
+
+- **Triggers:** a schedule, a new Canvas item, a meeting about to start, text appearing on
+  screen, a file dropped in a folder, or a button.
+- **Three ways to set one up:** say it, pick a template (Morning brief, Meeting prep, Weekly
+  review, Screen watch…), or save an answer from History.
+- **Unattended means safe.** Scheduled runs only get tools that never prompt, never auto-approve,
+  and pause themselves after three failures in a row.
+- **Canvas calendar sync.** Paste your `.ics` feed once; Wisp keeps a "Wisp" calendar and a daily
+  checklist in Reminders. Study blocks are proposed, and written only after your approval.
+  No model call on the sync path.
+- Waits for wake and the network before running anything in the background.
 
 </td>
 </tr>
@@ -180,14 +230,14 @@ Wisp recognises them and just does it.
 <td width="50%" valign="top">
 
 ### 🧠 The brain
-Wisp keeps a **local wiki about you and your work**, in `~/.wisp/brain/`: plain markdown and a
-valid [Obsidian](https://obsidian.md) vault. Think Karpathy's "LLM wiki", but private.
+A **local wiki about you and your work**, in `~/.wisp/brain/`: plain markdown and a valid
+[Obsidian](https://obsidian.md) vault. Think Karpathy's "LLM wiki", but private.
 
 - **Feeds itself** from what you choose: drop files, PDFs or web pages in, import notes (folders,
   Obsidian, Apple Notes), and digest ended conversations. An activity feed exists too, **off by
   default**, never screenshots, always summarised by the local model.
-- **Every turn gets context** from up to four relevant pages (BM25 search, no embedding model to
-  keep resident).
+- **Every turn gets context** from up to four relevant pages (BM25, no embedding model to keep
+  resident).
 - **Nothing edits a page directly.** Every write is a validated proposal sorted by trust, and
   **every change is one Undo** in Brain → Log.
 - **Keeps itself tidy:** fixes broken links, merges duplicates, splits oversized pages.
@@ -196,18 +246,14 @@ valid [Obsidian](https://obsidian.md) vault. Think Karpathy's "LLM wiki", but pr
 </td>
 <td width="50%" valign="top">
 
-### 🫧 Buddies and automations
-Named little agents that each own one job, like *"every morning, summarise my calendar"*.
-
-- **Its own thread, memory, model and tool allow-list.** Give the news buddy the browser and
-  nothing else, or run one on a cloud model in parallel.
-- **Delegation.** A buddy can ask a peer for help; crossing from local to cloud asks you first.
-- **Automations** follow *trigger → source → action → output → notify*: schedules, new Canvas
-  items, a meeting about to start, text appearing on screen, or a file dropped in a folder.
-- **Three ways to set one up:** say it, pick a template, or save an answer from History.
-- **Canvas calendar sync** keeps a "Wisp" calendar and a daily checklist in Reminders, with
-  study blocks proposed only after your approval. No model call on the sync path.
-- Share a buddy or routine as a `.wisp` file; imports are inert until you review them.
+### 🎨 Made to feel native
+- **Six themes** (Sage, Candy, Sunset, Mint, Berry Night, Mono) in light and dark, contrast-checked.
+- **Liquid Glass** surfaces on macOS 26, one lit-edge button style, a bespoke single-stroke icon set.
+- **A calm window** with four sections by default (Today, Chat, Buddies, Settings), and an
+  **Advanced features** switch for Brain, Routines, History and Connections.
+- **First-run setup** in four skippable steps; nothing is switched on until you tap it.
+- **Playful, but optional.** Squish, bounce and bursts yield to Reduce Motion.
+- **Usage log** with token counts and estimated cost per provider, stored locally, content never kept.
 
 </td>
 </tr>
@@ -219,13 +265,24 @@ Anything that **sends, deletes, pays, posts, invites or runs a command asks firs
 that shows exactly what will happen ("New Email · To · Subject · Body"), **even if you have turned
 on auto-approve**. You can **edit the wording right on the card** before you allow it (never the
 recipient, path or command), and the model is told what you changed. Password and payment fields
-in the browser are refused outright. Unattended automations only ever get tools that never prompt.
+in the browser are refused outright. Per-buddy tool limits are enforced at call time, not just
+hidden, and anything imported from a file is inert until you review it.
 
-### 🎨 Made to feel native
+## Models
 
-Six themes (Sage, Candy, Sunset, Mint, Berry Night, Mono), light and dark, Liquid Glass surfaces,
-a single lit-edge button style, a living buddy character per agent, and a bespoke single-stroke icon
-set. Everything honours Reduce Motion.
+Local is the default and the private path. You choose the brain behind Wisp in **Settings → Model**.
+
+| Provider | Runs | Needs | Notes |
+|---|---|---|---|
+| **Ollama** (default) | On your Mac | Ollama, `qwen2.5vl:3b` | Sees screenshots; bigger models point better but answer slower |
+| **Apple on-device** | On your Mac | Apple Intelligence | System language model through FoundationModels; no server or download |
+| **Claude** (your key) | Anthropic | API key in Keychain | Opus 5.5 by default, adaptive thinking, optional web search |
+| **Claude** (your subscription) | Your `claude` CLI | Signed-in `claude` | No API key; Wisp never touches the CLI's credentials |
+| **GPT** | OpenAI | API key in Keychain | Native tool calling |
+| **Gemini** | Google | API key in Keychain | Native tool calling |
+
+Each buddy can use its own model, and a buddy on a cloud model is never given your private brain
+tools. Anything that sends a screenshot off your Mac is labelled as such.
 
 ## Fast by design
 
@@ -247,21 +304,21 @@ M3 Pro:
 ```mermaid
 flowchart LR
     A["🎙️ Hold ⌃⌥ and speak"] --> B["Parakeet STT<br/>on-device"]
-    B --> R{"Fast routers<br/>timers · windows · watchers<br/>messages · tabs · pointing"}
+    B --> R{"Fast routers<br/>timers · windows · watchers<br/>messages · tabs · pointing<br/>quick add · shortcuts"}
     R -- "recognised" --> X["⚡ Done directly<br/>no model call"]
     R -- "anything else" --> M
-    S["🖥️ Screenshot + AX tree<br/>+ OCR + brain pages"] --> M["Vision model<br/>Ollama · qwen2.5vl<br/>or your own Claude/GPT/Gemini key"]
+    S["🖥️ Screenshot + AX tree<br/>+ OCR + brain pages"] --> M["Your model<br/>Ollama · Apple · Claude<br/>GPT · Gemini"]
     M --> N["🏝️ Notch answer<br/>+ glance cards"]
-    M --> P["🎯 Markers &<br/>walkthroughs"]
+    M --> P["🎯 Markers, walkthroughs<br/>and handwritten notes"]
     M --> T["🛠️ Tools · browser · MCP<br/>Messages · Shortcuts · brain"]
     M --> V["🔊 One spoken line<br/>Kokoro, on-device"]
     T --> C["🛡️ Confirmation card<br/>for anything irreversible"]
 ```
 
 The local model replies in plain text with small structured tags (`[POINT:…]`, `[BOX:…]`,
-`[CARD:…]`, `[TOOL:…]`, `[SAY:…]`) that Wisp parses into markers, cards, tool calls and speech.
-That keeps it working with small models that cannot do native structured output; cloud providers
-use their native tool calling instead.
+`[CIRCLE:…]`, `[NOTE:…]`, `[CARD:…]`, `[TOOL:…]`, `[SAY:…]`) that Wisp parses into markers, cards,
+tool calls and speech. That keeps it working with small models that cannot do native structured
+output; cloud providers use their native tool calling instead.
 
 ## Quick start
 
@@ -312,19 +369,20 @@ permissions survive. Launch it with `open -a Wisp`.
 > resets its privacy permissions.
 
 <details>
-<summary><b>Optional extras</b>: Chrome tabs, MCP servers, cloud models, other voices</summary>
+<summary><b>Optional extras</b>: Chrome tabs, MCP servers, cloud models, native-app control, Canvas</summary>
 
 - **Chrome tab organizing.** Load [`chrome-extension/`](chrome-extension) unpacked in
   `chrome://extensions`. It talks to Wisp over a loopback-only WebSocket that only accepts that
   extension.
 - **MCP servers.** Browse **Connections → Marketplace** in the Wisp window, or edit
   `~/.wisp/mcp.json` (Claude Desktop's format).
-- **Cloud models.** **Settings → Model** → pick Claude (Opus 5.5 by default, with web search in
-  agent mode), GPT or Gemini and paste your key. It is stored in your login Keychain, and Wisp
-  labels clearly that screenshots now leave your Mac. **Claude (your subscription)** runs your own
-  signed-in `claude` CLI instead of an API key.
-- **Apple on-device model.** Pick it in Settings → Model to use the system language model through
-  FoundationModels, with no server or download (needs Apple Intelligence).
+- **Cloud models.** **Settings → Model** → pick Claude, GPT or Gemini and paste your key. It is
+  stored in your login Keychain. **Claude (your subscription)** runs your own signed-in `claude`
+  CLI instead of an API key.
+- **Native-app control.** Install [cua-driver](https://github.com/trycua/cua) and add it to
+  `~/.wisp/mcp.json`; every click and keystroke still asks first.
+- **Canvas.** Paste your Canvas calendar feed URL on the Canvas page (inside Buddies). It lives
+  only in your Keychain.
 - **Other voices.** Set `VoiceTTSProvider` to `apple` for the built-in macOS voices, or to
   `chatterbox` for a local [Chatterbox](https://github.com/resemble-ai/chatterbox) server on port 8004.
 
@@ -335,12 +393,12 @@ permissions survive. Launch it with `open -a Wisp`.
 | | Default | Opt-in |
 |---|---|---|
 | Speech to text | Parakeet on the Neural Engine (Apple Speech fallback), on-device | — |
-| Answers & vision | Ollama on `localhost:11434` | Your own Anthropic, OpenAI or Gemini key, or the Apple on-device model |
+| Answers & vision | Ollama on `localhost:11434` | Apple on-device model, or your own Anthropic, OpenAI or Gemini key |
 | Voice | Kokoro on the Neural Engine (macOS voices fallback), on-device | Chatterbox on `localhost:8004` |
 | Screen reading | Vision OCR + Accessibility, on-device | — |
 | Brain | Markdown on your disk | Activity feed (off by default, local model only) |
 | Network traffic | `localhost`, a one-time speech-model download from HuggingFace, and key-free weather/places lookups you can turn off | Only the provider, Canvas feed or source you enable |
-| Secrets | none needed | API keys and the Canvas feed URL live in your login Keychain |
+| Secrets | none needed | API keys, Composio key and the Canvas feed URL live in your login Keychain |
 | Analytics | **none** | none |
 
 Images are never written to disk in conversation history. Weather and places cards send only a
@@ -378,26 +436,28 @@ Shipped defaults are in [`leanring-buddy/Info.plist`](leanring-buddy/Info.plist)
 | `~/.wisp/skills/*.md` | Skills: only their names cost tokens until one is loaded |
 | `~/.wisp/brain/` | The brain: an Obsidian-compatible markdown vault |
 | `~/.wisp/memory.md` | Facts about you (used when the brain is off) |
-| `~/Library/Application Support/Wisp/` | Conversation history, buddies and their threads/memory, automations, routines, task history, usage log |
+| `~/Library/Application Support/Wisp/` | Conversation history, buddies and their threads/memory/files, automations and run history, routines, learned shortcuts, task history, usage log |
 
 </details>
 
 ## Project layout
 
 ```text
-leanring-buddy/           the app (Swift / SwiftUI + AppKit)
+leanring-buddy/           the app (Swift / SwiftUI + AppKit, ~350 files)
 ├── DesignSystem/         colour, type, spacing, motion tokens and themes
 ├── Components/           Wisp mark, glass panels, bento tiles, icon system
 ├── DynamicIsland/        notch island, quick chat, morning briefing, quiet mode
 ├── WispWindow/           the Wisp window: Today, Chat, Buddies, Brain, Settings…
 ├── Brain/                the local wiki: pages, search, ingest, digests, lint
-├── Buddies/              agents: threads, memory, models, tools, delegation
+├── Buddies/              agents: threads, memory, models, tools, delegation, characters
 ├── Automations/          trigger → source → action → output engine
 ├── Jobs/                 Canvas calendar sync and the daily checklist
+├── LearnedShortcuts/     save and replay a finished turn with no model
 ├── WindowManagement/     voice window layout
+├── Email/                editable email drafts and Mail sending
 └── …                     providers, dictation, screen capture + OCR, agent loop, tools, MCP
 leanring-buddyTests/      unit tests
-Tests/                    standalone suites (plain swiftc, no Xcode build)
+Tests/                    35 standalone suites (plain swiftc, no Xcode build)
 chrome-extension/         Wisp Tabs extension for Chrome
 scripts/                  install and release scripts
 docs/                     design docs and brand assets
@@ -423,11 +483,14 @@ log stream --predicate 'process == "Wisp"'
 ./Tests/AgentRuntimeIntegration/run.sh   # the agent loop, against the whole app
 ./Tests/HostileProviderAttack/run.sh     # an adversarial model vs the real agent loop
 ./Tests/FastPointing/run.sh              # "where is X" parsing and matching
+./Tests/GuidedWalkthrough/run.sh         # walkthrough stepping and click matching
 ./Tests/ScreenWatcher/run.sh             # screen-watch parsing and evaluation
 ./Tests/WindowManagement/run.sh          # window commands, app matching, frame math
 ./Tests/EditableConfirmation/run.sh      # which confirmation fields are editable
 ./Tests/BuddyThread/run.sh               # buddy threads and list rules
 ./Tests/AutomationEngine/run.sh          # automations with fakes: unattended safety, approvals
+./Tests/LearnedShortcuts/run.sh          # replayability rules, matching, drift
+./Tests/CanvasSync/run.sh                # Canvas parser, diff, study blocks
 ./Tests/BrainCore/run.sh                 # brain pages, edit planner, search
 ./Tests/BrainIngest/run.sh               # extraction, chunking, merging
 ./Tests/BrainLint/run.sh                 # lint, merge, split
