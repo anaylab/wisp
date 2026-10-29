@@ -88,8 +88,8 @@ Wisp recognises them and just does it.
 
 ## See it in action
 
-These are real captures of Wisp running, not mockups. None of them used a model: Wisp recognised the
-request and did it directly.
+These are real captures of Wisp running, not mockups. The first four needed no model at all: Wisp
+recognised the request and did it directly.
 
 <table>
 <tr>
@@ -112,6 +112,26 @@ request and did it directly.
   <img src="docs/assets/screenshots/feature-windows.png" alt="Dictionary tiled on the left and TextEdit on the right, with the notch reply: done, Dictionary left, TextEdit right" width="100%">
   <br><sub><b>"Put Dictionary on the left and TextEdit on the right."</b> Two windows tiled over Accessibility in an instant, no model call, and a one-line confirmation in the notch.</sub>
 </p>
+
+### When the model steps in
+
+<p align="center">
+  <img src="docs/assets/screenshots/feature-walkthrough.png" alt="A guided walkthrough: the notch lists two numbered steps with Do it for me, Next and Stop, while a numbered box marks the Bold button in TextEdit" width="100%">
+  <br><sub><b>"Walk me through making this bold and centered."</b> The notch keeps a numbered checklist. Wisp boxes the control for the current step, finds the next one again as the screen changes, and advances when you click it. <b>Do it for me</b> clicks it for you (never anything irreversible).</sub>
+</p>
+
+<table>
+<tr>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-math-step1.png" alt="The problem 3x + 7 = 22 highlighted, with the first handwritten line of working and a Next 1/5 pill">
+  <br><sub><b>"Solve this, step by step, on the page."</b> The problem is highlighted and the first line of working is handwritten beside it, with a <b>Next ›</b> pill.</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-math.png" alt="The finished handwritten working: 3x + 7 = 22, 3x = 22 - 7, 3x = 15, x = 15/3, x = 5">
+  <br><sub><b>Click through, or press <kbd>⌃⌥→</kbd>.</b> Each click reveals the next line of working, down to x = 5. <b>Save worked solution</b> exports the finished page as a PNG.</sub>
+</td>
+</tr>
+</table>
 
 ## Tour
 
