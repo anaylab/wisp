@@ -724,6 +724,21 @@ extension BuddyStore {
 
     static let additionalStartersSeededUserDefaultsKey = "wisp.buddies.additionalStartersSeeded.v1"
 
+    static let coworkStarterSeededUserDefaultsKey = "wisp.buddies.coworkStarterSeeded.v1"
+
+    /// What the Cowork starter may use: the browser group (Chrome tabs, the
+    /// dedicated-tab agent), the screen group (window layout, screen reading)
+    /// and cua-driver, which clicks and types in native apps. cua-driver does
+    /// nothing until it is installed, and every action it takes asks first
+    /// (`ToolCallSafety`), so this widens reach, not what happens unasked.
+    static var coworkToolAccess: BuddyToolAccess {
+        BuddyToolAccess(allowedGroupIDs: [
+            BuddyToolGroup.browser.rawValue,
+            BuddyToolGroup.screen.rawValue,
+            BuddyToolAccessPolicy.groupID(forServerNamed: "cua-driver"),
+        ])
+    }
+
     /// Adds the starter buddies once (Planner, Briefer, Focus; then Inbox, Writer, Researcher under a second flag so existing users get them too). The flag is set the first
     /// time this runs, so a starter the user deletes stays deleted. Inserts without
     /// running anything: `createBuddy` runs a one-off buddy straight away, which a
@@ -736,6 +751,10 @@ extension BuddyStore {
         if !userDefaults.bool(forKey: Self.additionalStartersSeededUserDefaultsKey) {
             userDefaults.set(true, forKey: Self.additionalStartersSeededUserDefaultsKey)
             insertStarterBuddies(StarterBuddyDefinition.additional)
+        }
+        if !userDefaults.bool(forKey: Self.coworkStarterSeededUserDefaultsKey) {
+            userDefaults.set(true, forKey: Self.coworkStarterSeededUserDefaultsKey)
+            insertStarterBuddies(StarterBuddyDefinition.cowork)
         }
     }
 
@@ -751,7 +770,7 @@ extension BuddyStore {
                 createdAt: now,
                 runTaskIDs: [],
                 nextScheduledRunAt: nil,
-                toolAccess: starterDefinition.specialty.toolAccess,
+                toolAccess: starterDefinition.kind == .cowork ? Self.coworkToolAccess : starterDefinition.specialty.toolAccess,
                 specialty: starterDefinition.specialty,
                 personality: starterDefinition.defaultPersonality,
                 starterKind: starterDefinition.kind,
