@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wisp: an AI that lives in your Mac's notch</title>
+<meta name="description" content="Hold ⌃⌥ and ask. Wisp sees your screen, points at what matters, and handles the busywork. Private, on-device, open source.">
+<meta name="theme-color" content="#0E1116">
+<link rel="icon" href="assets/brand/mark-gradient.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/brand/app-icon-256.png">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Wisp: an AI that lives in your Mac's notch">
+<meta property="og:description" content="Hold ⌃⌥ and ask. Wisp sees your screen, points at what matters, and handles the busywork. Private, on-device, open source.">
+<meta property="og:image" content="assets/brand/social-preview.jpg">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="nav" id="top">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Wisp home">
+      <img src="assets/brand/mark-gradient.svg" alt="" width="30" height="30">
+      <span>wisp</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="link-gh" href="https://github.com/anaylab/wisp" aria-label="Wisp on GitHub">
+        <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+      <a class="btn btn-sm" href="#get">Get Wisp</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-glow" aria-hidden="true"></div>
+  <div class="wrap hero-copy">
+    <p class="eyebrow">For Mac · Free · Open source</p>
+    <h1>The AI that lives<br>in your <span class="grad">notch</span>.</h1>
+    <p class="lead">Hold <kbd>⌃</kbd><kbd>⌥</kbd> and ask. Wisp sees your screen, points at what matters, and handles the busywork. Everything runs on your Mac.</p>
+    <div class="cta-row">
+      <a class="btn btn-lg" href="#get">Get Wisp</a>
+      <a class="btn btn-ghost btn-lg" href="https://github.com/anaylab/wisp">Star on GitHub</a>
+    </div>
+    <p class="trust">No account · No API key · No analytics · macOS 26+ on Apple silicon</p>
+  </div>
+
+  <div class="wrap stage-wrap">
+    <div class="stage" id="stage">
+      <div class="notch" aria-hidden="true">
+        <img src="assets/brand/mark-gradient.svg" alt="" width="20" height="20">
+        <span class="notch-text" id="notch-text"></span><span class="caret"></span>
+      </div>
+      <div class="stage-tabs" role="tablist" aria-label="See Wisp in action">
+        <button role="tab" aria-selected="true" data-i="0">Point</button>
+        <button role="tab" aria-selected="false" data-i="1">Guide</button>
+        <button role="tab" aria-selected="false" data-i="2">Solve</button>
+        <button role="tab" aria-selected="false" data-i="3">Tile</button>
+        <button role="tab" aria-selected="false" data-i="4">Browse</button>
+        <button role="tab" aria-selected="false" data-i="5">Draft</button>
+      </div>
+      <figure class="stage-frame">
+        <img id="stage-img" src="assets/shots/feature-pointing.jpg" alt="A labelled marker on the pi button in Calculator" width="1500" height="1300">
+        <figcaption id="stage-cap">A marker lands on the exact control in about a tenth of a second.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- PILLARS -->
+<section class="band">
+  <div class="wrap pillars">
+    <article>
+      <span class="pill-num">~0.1s</span>
+      <h2>Instant, not clever</h2>
+      <p>Pointing, window layouts, timers, tab tidying and screen watchers are recognised and run directly. The model only handles what needs thinking.</p>
+    </article>
+    <article>
+      <span class="pill-num">0</span>
+      <h2>Accounts, keys or analytics</h2>
+      <p>Speech, voice and screen reading run on your Neural Engine. The default model runs locally. Nothing leaves your Mac unless you opt in.</p>
+    </article>
+    <article>
+      <span class="pill-num">Ask</span>
+      <h2>Before it acts</h2>
+      <p>Anything that sends, deletes, pays, posts or runs a command shows a card with exactly what will happen, even with auto-approve on.</p>
+    </article>
+  </div>
+</section>
+
+<!-- SAY IT -->
+<section class="say" aria-label="Things you can say">
+  <div class="marquee" aria-hidden="true">
+    <ul class="marquee-track">
+      <li>“Where's the export button?”</li>
+      <li>“Put Safari on the left and Xcode on the right”</li>
+      <li>“Tell me when the build finishes”</li>
+      <li>“Walk me through turning on FileVault”</li>
+      <li>“Solve this, step by step”</li>
+      <li>“Organize my tabs”</li>
+      <li>“Draft an email to Sam about Friday”</li>
+      <li>“Every morning, summarise what's due today”</li>
+      <li>“Add this page to my brain”</li>
+      <li>“Where's the export button?”</li>
+      <li>“Put Safari on the left and Xcode on the right”</li>
+      <li>“Tell me when the build finishes”</li>
+      <li>“Walk me through turning on FileVault”</li>
+      <li>“Solve this, step by step”</li>
+      <li>“Organize my tabs”</li>
+      <li>“Draft an email to Sam about Friday”</li>
+      <li>“Every morning, summarise what's due today”</li>
+      <li>“Add this page to my brain”</li>
+    </ul>
+  </div>
+  <p class="say-note wrap">Just say it, or tap <kbd>⌃</kbd><kbd>⌥</kbd> to type. Many of these never touch a model at all.</p>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="wrap section-head">
+    <p class="eyebrow">What it does</p>
+    <h2>Not a chatbot in a window.<br>A helper that works on your screen.</h2>
+  </div>
+
+  <div class="wrap feature">
+    <div class="feature-copy">
+      <span class="tag">Point</span>
+      <h3>Find anything, instantly</h3>
+      <p>Ask where a control is and a pulsing, labelled marker lands on it. Wisp matches your words against the Accessibility tree and on-device OCR, so it works in native apps, terminals, images and remote desktops, on whichever monitor it is on.</p>
+      <ul class="ticks"><li>~0.1s, no vision model needed</li><li>A marker on every match, not a guess</li></ul>
+    </div>
+    <figure class="feature-shot"><img loading="lazy" src="assets/shots/feature-pointing.jpg" alt="Marker on the pi button of Calculator with the notch saying Here's Pi" width="1500" height="1300"></figure>
+  </div>
+
+  <div class="wrap feature flip">
+    <div class="feature-copy">
+      <span class="tag">Guide</span>
+      <h3>Walk through any task, on your real screen</h3>
+      <p>Ask how to do something and Wisp turns the answer into numbered steps over your live screen. It finds each next control again as the screen changes, ticks steps off as you click, and can click for you.</p>
+      <ul class="ticks"><li>A checklist in the notch, a box on the control</li><li>“Do it for me” never touches anything irreversible</li></ul>
+    </div>
+    <div class="feature-shot pair">
+      <img loading="lazy" src="assets/shots/feature-walkthrough.jpg" alt="Step 1: the Bold button is boxed" width="1500" height="873">
+      <img loading="lazy" src="assets/shots/feature-walkthrough-step2.jpg" alt="Step 2: bold is ticked off and align center is boxed" width="1500" height="873">
+    </div>
+  </div>
+
+  <div class="wrap feature">
+    <div class="feature-copy">
+      <span class="tag">Teach</span>
+      <h3>Shows its working, right on the page</h3>
+      <p>Point Wisp at a problem and it writes handwritten working beside it, one line at a time, then lets you step through. Save the finished page as a PNG with a Markdown summary.</p>
+      <ul class="ticks"><li>Math, diagrams, forms, anything on screen</li><li>Step through with a click or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>→</kbd></li></ul>
+    </div>
+    <div class="feature-shot pair">
+      <img loading="lazy" src="assets/shots/feature-math-step1.jpg" alt="The first line of handwritten working beside 3x + 7 = 22" width="1500" height="843">
+      <img loading="lazy" src="assets/shots/feature-math.jpg" alt="The finished working down to x = 5" width="1500" height="843">
+    </div>
+  </div>
+
+  <div class="wrap feature flip">
+    <div class="feature-copy">
+      <span class="tag">Focus</span>
+      <h3>Ask about just one part</h3>
+      <p>Drag a box around anything, or say “explain option C”. Wisp highlights exactly what you chose, and follow-ups like “why?” and “next step” stay about that region.</p>
+    </div>
+    <div class="feature-shot pair">
+      <img loading="lazy" src="assets/shots/feature-select-part.jpg" alt="A dimmed screen with a selection box around four buttons" width="1500" height="1300">
+      <img loading="lazy" src="assets/shots/feature-ask-part.jpg" alt="The composer with an About: selected part chip" width="1500" height="1300">
+    </div>
+  </div>
+
+  <div class="wrap feature">
+    <div class="feature-copy">
+      <span class="tag">Arrange</span>
+      <h3>Tidy your desk by voice</h3>
+      <p>“Put Dictionary on the left and TextEdit on the right.” Halves, quarters, thirds, maximize, center and next-display, with no model call and a one-line confirmation in the notch.</p>
+    </div>
+    <figure class="feature-shot"><img loading="lazy" src="assets/shots/feature-windows.jpg" alt="Dictionary tiled on the left and TextEdit on the right" width="1500" height="843"></figure>
+  </div>
+
+  <div class="wrap feature flip">
+    <div class="feature-copy">
+      <span class="tag">Browse</span>
+      <h3>Drives your real browser, politely</h3>
+      <p>“Open Wikipedia and search for the Enigma machine.” Wisp works through the page itself, in its own tab (never the one you are reading), then tells you where it landed.</p>
+      <ul class="ticks"><li>Password and payment fields are refused outright</li><li>Irreversible clicks always ask first</li></ul>
+    </div>
+    <figure class="feature-shot"><img loading="lazy" src="assets/shots/feature-browser.jpg" alt="Chrome on the Enigma machine article with an accurate summary in the notch" width="1500" height="843"></figure>
+  </div>
+
+  <div class="wrap feature">
+    <div class="feature-copy">
+      <span class="tag">Safe</span>
+      <h3>You approve anything that matters</h3>
+      <p>An email request opens an editable draft, and nothing leaves your Mac until you press Send. Riskier actions, like running a Shortcut, show a card with exactly what will happen and a countdown. Edit the wording right on the card.</p>
+    </div>
+    <div class="feature-shot pair">
+      <img loading="lazy" src="assets/shots/feature-email.jpg" alt="An editable email draft with Send and Discard" width="1500" height="843">
+      <img loading="lazy" src="assets/shots/feature-approval.jpg" alt="An approval card to run a Shortcut with Cancel and Allow" width="1500" height="843">
+    </div>
+  </div>
+</section>
+
+<!-- BUDDIES -->
+<section class="buddies">
+  <div class="wrap section-head">
+    <p class="eyebrow">While you're away</p>
+    <h2>Little agents that each own one job.</h2>
+    <p class="section-sub">Buddies have their own thread, memory, model and tool allow-list. Automations run on a schedule or when something happens, and only interrupt you when it matters.</p>
+  </div>
+  <div class="wrap bento">
+    <figure class="bento-a"><img loading="lazy" src="assets/shots/today.jpg" alt="The Today dashboard with buddies, next automations and upcoming events" width="1500" height="919"><figcaption>Today: your buddies, what runs next, what's coming up.</figcaption></figure>
+    <figure><img loading="lazy" src="assets/shots/buddies.jpg" alt="A buddy's page with its Tools panel" width="1500" height="919"><figcaption>Limit each buddy to the apps and abilities it needs.</figcaption></figure>
+    <figure><img loading="lazy" src="assets/shots/automations.jpg" alt="The Automations list" width="1500" height="919"><figcaption>Say it, pick a template, or save an answer as an automation.</figcaption></figure>
+  </div>
+  <ul class="chips wrap" aria-label="Also included">
+    <li>Private local brain (Obsidian-compatible)</li>
+    <li>500+ apps via MCP &amp; Composio</li>
+    <li>Apple Shortcuts</li>
+    <li>Canvas calendar sync</li>
+    <li>Screen watchers</li>
+    <li>Learned shortcuts</li>
+    <li>Themes, light &amp; dark</li>
+  </ul>
+</section>
+
+<!-- HOW -->
+<section class="how" id="how">
+  <div class="wrap section-head">
+    <p class="eyebrow">How it works</p>
+    <h2>Hold. Speak. Done.</h2>
+  </div>
+  <ol class="wrap steps">
+    <li>
+      <span class="step-n">1</span>
+      <h3>Hold <kbd>⌃</kbd><kbd>⌥</kbd> and talk</h3>
+      <p>From any app. Tap instead to type, or double-tap <kbd>⌃</kbd> for hands-free. Your words are transcribed on the Neural Engine, in 25 languages.</p>
+    </li>
+    <li>
+      <span class="step-n">2</span>
+      <h3>Wisp looks and decides</h3>
+      <p>Rigid requests run directly. Everything else goes to your model with a small screenshot, the Accessibility tree and on-screen text.</p>
+    </li>
+    <li>
+      <span class="step-n">3</span>
+      <h3>It acts, and asks first</h3>
+      <p>Answers appear in the notch, markers land on screen, tools run. Anything irreversible waits for your OK.</p>
+    </li>
+  </ol>
+</section>
+
+<!-- PRIVACY -->
+<section class="privacy" id="privacy">
+  <div class="wrap section-head">
+    <p class="eyebrow">Privacy</p>
+    <h2>Your Mac is the whole pipeline.</h2>
+    <p class="section-sub">By default, nothing about your screen, voice or words leaves this machine.</p>
+  </div>
+  <div class="wrap flow" aria-label="Where data goes">
+    <div class="node"><b>Your voice</b><span>Parakeet, on the Neural Engine</span></div>
+    <span class="arrow" aria-hidden="true">→</span>
+    <div class="node"><b>Your screen</b><span>Accessibility + Vision OCR, on-device</span></div>
+    <span class="arrow" aria-hidden="true">→</span>
+    <div class="node"><b>Your model</b><span>Ollama on localhost</span></div>
+    <span class="arrow" aria-hidden="true">→</span>
+    <div class="node"><b>Your answer</b><span>Kokoro voice, on-device</span></div>
+  </div>
+  <div class="wrap cards3">
+    <article><h3>Local first</h3><p>The default model runs on your Mac through Ollama. Brain pages are plain markdown files on your disk.</p></article>
+    <article><h3>Cloud is opt-in</h3><p>Claude, GPT and Gemini are bring-your-own-key, or use your Claude subscription. Wisp labels clearly when a screenshot would leave your Mac.</p></article>
+    <article><h3>Nothing to track you</h3><p>No account, no analytics code, no telemetry. Keys and feed URLs live in your login Keychain. The usage log keeps counts, never content.</p></article>
+  </div>
+</section>
+
+<!-- MODELS -->
+<section class="models">
+  <div class="wrap section-head">
+    <p class="eyebrow">Your model, your call</p>
+    <h2>Run it local. Or bring your own.</h2>
+  </div>
+  <ul class="wrap provider-row">
+    <li><b>Ollama</b><span>Default · on your Mac</span></li>
+    <li><b>Apple on-device</b><span>On your Mac</span></li>
+    <li><b>Claude</b><span>Your key or subscription</span></li>
+    <li><b>GPT</b><span>Your key</span></li>
+    <li><b>Gemini</b><span>Your key</span></li>
+  </ul>
+</section>
+
+<!-- GET -->
+<section class="get" id="get">
+  <div class="wrap get-inner">
+    <div>
+      <p class="eyebrow">Get Wisp</p>
+      <h2>Up and running in a few minutes.</h2>
+      <p class="section-sub">Notarized downloads aren't published yet, so for now you build it once in Xcode. It's free and MIT licensed.</p>
+      <ul class="reqs">
+        <li>Apple-silicon Mac on macOS 26 or later</li>
+        <li>Xcode 26</li>
+        <li><a href="https://ollama.com/download">Ollama</a> for the default local model</li>
+      </ul>
+      <div class="cta-row">
+        <a class="btn btn-lg" href="https://github.com/anaylab/wisp">View on GitHub</a>
+        <a class="btn btn-ghost btn-lg" href="https://github.com/anaylab/wisp#readme">Read the docs</a>
+      </div>
+    </div>
+    <div class="code" role="group" aria-label="Install commands">
+      <div class="code-bar"><span></span><span></span><span></span><button class="copy" id="copy" type="button">Copy</button></div>
+<pre id="code"><code><span class="c"># 1. a local model</span>
+ollama pull qwen2.5vl:3b
+
+<span class="c"># 2. get Wisp</span>
+git clone https://github.com/anaylab/wisp.git
+cd wisp
+open leanring-buddy.xcodeproj
+
+<span class="c"># 3. pick the leanring-buddy scheme and press ⌘R,
+#    then hold ⌃⌥ and talk</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="faq" id="faq">
+  <div class="wrap section-head">
+    <p class="eyebrow">Before you try it</p>
+    <h2>Questions, answered plainly.</h2>
+  </div>
+  <div class="wrap faq-list">
+    <details><summary>Is it really free?</summary><p>Yes. Wisp is open source under the MIT license, and the default setup costs nothing to run because the model, speech and voice are all on your Mac. If you choose a cloud model, you pay that provider with your own key or subscription.</p></details>
+    <details><summary>What leaves my Mac?</summary><p>By default, nothing. Speech to text, voice, OCR and the local model all run on-device. The only network use by default is a one-time download of the speech models and optional weather and places lookups, which send a place name or query, never a screenshot. If you pick a cloud model, your transcript and screenshots go to that provider, and Wisp says so.</p></details>
+    <details><summary>Can it do something I didn't want?</summary><p>Anything that sends, deletes, pays, posts, invites or runs a command shows a card first, even if you turned on auto-approve, and you can edit the wording before you allow it. Password and payment fields in the browser are refused outright. Scheduled automations only get tools that never prompt.</p></details>
+    <details><summary>Which Macs does it need?</summary><p>An Apple-silicon Mac on macOS 26 or later, since the notch uses Liquid Glass. 16 GB of memory is recommended for the local model. You need Xcode 26 to build it.</p></details>
+    <details><summary>Does it work in my apps?</summary><p>Pointing, walkthroughs and screen reading work anywhere: native apps through Accessibility and everything else through on-device OCR. Browser control works with Chrome and Safari.</p></details>
+    <details><summary>Why isn't there a download button?</summary><p>There is no notarized build published yet, and I'd rather say so than point you at something half-finished. Building it takes a few minutes in Xcode, and signed releases are on the way.</p></details>
+  </div>
+</section>
+
+<!-- CLOSING -->
+<section class="closing">
+  <div class="wrap">
+    <img src="assets/brand/mark-gradient.svg" alt="" width="64" height="64">
+    <h2>Stop clicking around.<br>Just ask.</h2>
+    <div class="cta-row center">
+      <a class="btn btn-lg" href="#get">Get Wisp</a>
+      <a class="btn btn-ghost btn-lg" href="https://github.com/anaylab/wisp">Star on GitHub</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <a class="brand" href="#top" aria-label="Wisp home"><img src="assets/brand/mark-gradient.svg" alt="" width="24" height="24"><span>wisp</span></a>
+    <nav aria-label="Footer">
+      <a href="https://github.com/anaylab/wisp">GitHub</a>
+      <a href="https://github.com/anaylab/wisp#readme">Docs</a>
+      <a href="https://github.com/anaylab/wisp/blob/main/CONTRIBUTING.md">Contribute</a>
+      <a href="https://github.com/anaylab/wisp/blob/main/SECURITY.md">Security</a>
+      <a href="https://github.com/anaylab/wisp/blob/main/LICENSE">MIT License</a>
+    </nav>
+    <p>Made to stay out of your way.</p>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
