@@ -730,9 +730,16 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   search Y" request is answered by `runDirectBrowserTask`'s one text-only summary call over that result (no screenshot), and
   it logs what it was shown (`🌐 Browser summary`, `🌐 Browser task final read`). Live step text is `CompanionManager.browserActivityText`, drawn as
   `BrowserActivityIndicator` under the notch. During tier 2
-  each element is marked with a pulsing ring just before the loop clicks/types it, via
+  each element is reached by the **agent cursor** just before the loop clicks/types it, via
   `BrowserCursorGuide` (implemented by `CompanionManager`, which converts the element's global
-  screen point into a `.marker` `ScreenAnnotation` on that display). Element
+  screen point into a display-local `AgentCursorTarget`). It is a separate cursor from the pointing marker:
+  one persistent dart per display (`AgentCursorView`) that glides to each new point along a move planned by the
+  pure `AgentCursorMotion` (Fitts'-law timed min-jerk glide with a slight upward bow; a cubic swoop over 900pt;
+  deterministic; a new target mid-move starts from where the dart is on screen; Reduce Motion places it directly),
+  with an arrival ring and the action text. The step's wait is the glide time + 250ms (min 350ms) instead of a fixed
+  0.6s. Motion constants follow cua-driver's `adaptive` trajectory (trycua/cua, MIT), reimplemented, not copied from
+  OpenBot. It does not cross displays (a move to another display appears there). Not yet used for cua-driver
+  actions or "Do it for me" clicks. Tested by `Tests/AgentCursorMotion`. Element
   screen coordinates come from `BrowserController.screenPoint(ofElementID:)`.
 - **Messages & Contacts** (Siri-style texting): "text mom i'm running late" is recognised by
   `MessageCommandParser` (checked in `sendTranscriptToClaudeWithScreenshot` right after
@@ -1189,6 +1196,8 @@ Files are grouped by role; line counts are rough.
 ### Agent, tools and MCP
 | File | Approx. lines | What it does |
 |---|---|---|
+| `AgentCursorMotion.swift` | ~230 | Pure: plans the agent cursor's moves (Fitts'-timed min-jerk glide, swoop over 900pt, 120 Hz samples) and plays them back by elapsed time. Tested by `Tests/AgentCursorMotion`. |
+| `AgentCursorView.swift` | ~130 | The gliding dart the overlay draws while the browser loop acts: `AgentCursorTarget`, `TimelineView` clock that runs only during a move, arrival ring, action label, Reduce Motion. |
 | `AgentTurnRunner.swift` | ~425 | The agent loop: max 4 iterations for the local model, 10 for a cloud model (`maximumIterationsForCloudModels` — acting in an app takes find/read/act/check), screenshot on iteration 0 only, per-tool timeouts. |
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
 | `ChromeExtensionBridge.swift` | ~330 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts, `connectionState` for the Agent tab. |
@@ -1504,6 +1513,7 @@ running):
 ./Tests/JobsEngine/run.sh                # Jobs engine flow with fakes (sync, throttle, approval, checklist)
 ./Tests/MCPStructuredContent/run.sh      # MCP structuredContent rendering + caps, cua-driver floor and cards
 ./Tests/WispTheme/run.sh                 # themes: contrast ratio for every theme, light and dark
+./Tests/AgentCursorMotion/run.sh         # agent cursor moves: endpoints, timing, bow, playback by time
 ./Tests/BuddyPersonality/run.sh          # personality presets, greeting rule, streak policy
 ./Tests/AutomationDraft/run.sh           # "say it" phrases -> drafts, ambiguous -> asks, templates
 ./Tests/AutomationSchedule/run.sh        # next run, DST, missed slot runs once

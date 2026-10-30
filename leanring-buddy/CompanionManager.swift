@@ -113,6 +113,14 @@ final class CompanionManager: ObservableObject {
     /// Pixel size of the screenshot each display's annotations came from,
     /// needed to scale them onto that display.
     @Published var annotationScreenshotSizeByDisplayFrame: [CGRect: CGSize] = [:]
+    /// Where the agent cursor stands while the browser loop acts, per display
+    /// frame, in that display's top-left point space. At most one display has
+    /// one; it is a separate cursor from the pointing marker (see
+    /// `AgentCursorView`).
+    @Published var agentCursorTargetByDisplayFrame: [CGRect: AgentCursorTarget] = [:]
+    /// Where the agent cursor last stood, so the next step knows how far it has
+    /// to glide (and so how long to wait). Cleared with the guidance.
+    var agentCursorLastPlacement: (displayFrame: CGRect, point: CGPoint)?
     /// How many handwritten notes are showing, nil for all. A reply with several
     /// lines of working starts at one and is stepped through (Next button, ⌃⌥→).
     @Published var visibleNoteLimit: Int?
@@ -4552,23 +4560,32 @@ extension CompanionManager: BrowserCursorGuide {
             y: (displayFrame.origin.y + displayFrame.height) - point.y
         )
 
-        let marker = ScreenAnnotation(
-            style: .marker,
-            regionInScreenshotPixels: CGRect(
-                x: displayLocalPoint.x,
-                y: displayLocalPoint.y,
-                width: 0,
-                height: 0
-            ),
-            label: actionText.isEmpty ? nil : actionText,
-            screenNumber: nil
-        )
-        activeAnnotationsByDisplayFrame = [displayFrame: [marker]]
-        annotationScreenshotSizeByDisplayFrame = [displayFrame: displayFrame.size]
+        // A previous answer's drawings would sit under the acting cursor.
+        if !activeAnnotationsByDisplayFrame.isEmpty {
+            activeAnnotationsByDisplayFrame.removeAll()
+            annotationScreenshotSizeByDisplayFrame.removeAll()
+        }
 
-        // Long enough for the marker to register before the click follows,
-        // and short enough that a thirty-step task is not mostly waiting.
-        try? await Task.sleep(nanoseconds: 600_000_000)
+        // The cursor glides from its last spot, so the wait is the glide itself
+        // plus a beat for the arrival ring, rather than a fixed budget. A first
+        // appearance, a new display or Reduce Motion has no glide to wait for.
+        var glideMilliseconds = 0.0
+        if let lastPlacement = agentCursorLastPlacement,
+           lastPlacement.displayFrame == displayFrame,
+           !WispMotion.prefersReducedMotion {
+            glideMilliseconds = AgentCursorMotion.durationMilliseconds(
+                of: AgentCursorMotion.planMove(from: lastPlacement.point, to: displayLocalPoint)
+            )
+        }
+        agentCursorLastPlacement = (displayFrame, displayLocalPoint)
+        agentCursorTargetByDisplayFrame = [
+            displayFrame: AgentCursorTarget(pointInDisplaySpace: displayLocalPoint, actionText: actionText)
+        ]
+
+        // Long enough for the cursor to arrive and register before the click
+        // follows, and short enough that a thirty-step task is not mostly waiting.
+        let waitMilliseconds = max(350, glideMilliseconds + 250)
+        try? await Task.sleep(nanoseconds: UInt64(waitMilliseconds * 1_000_000))
     }
 
     /// Clears the guidance marker and the progress line once the workflow ends.
@@ -4587,6 +4604,8 @@ extension CompanionManager: BrowserCursorGuide {
         }
         browserActivityText = progressText
 
+        agentCursorTargetByDisplayFrame.removeAll()
+        agentCursorLastPlacement = nil
         // The cloud loop reports each line through both its progress callback
         // and the cursor guide, so a repeat of the last line is the same step.
         if browserTaskStepHistory.last != progressText {

@@ -221,6 +221,13 @@ struct OverlayContentView: View {
                 )
                 .transition(.opacity)
             }
+
+            // The cursor Wisp draws while it acts in the browser for the user:
+            // one dart that glides between steps.
+            if let agentCursorTarget = companionManager.agentCursorTargetByDisplayFrame[screenFrame] {
+                AgentCursorView(target: agentCursorTarget)
+                    .transition(.opacity)
+            }
         }
         .frame(width: screenFrame.width, height: screenFrame.height)
         .ignoresSafeArea()
