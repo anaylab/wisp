@@ -128,6 +128,11 @@ recognised the request and did it directly.
 </tr>
 </table>
 
+<p align="center">
+  <img src="docs/assets/screenshots/feature-browser.png" alt="Chrome showing the Wikipedia article on the Enigma machine, with the notch reply summarising the page" width="100%">
+  <br><sub><b>"Open Wikipedia and search for the Enigma machine."</b> Wisp drives your real Chrome through the page itself, in its own tab (never the one you are reading), then tells you where it landed. Irreversible clicks and password fields are still blocked.</sub>
+</p>
+
 <table>
 <tr>
 <td width="50%" align="center" valign="top">
