@@ -4514,6 +4514,10 @@ extension CompanionManager {
         }
         let summaryText = SpokenLineParser.parse(summaryTurn?.text ?? "").displayText
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Logged so a reply that disagrees with the screen can be traced to
+        // what the model was actually shown (follow with
+        // `log stream --predicate 'process == "Wisp"'`).
+        print("🌐 Browser summary: shown page \"\(pageTitle)\" \(outcome.result.finalSnapshot?.url ?? "no page"), replied \"\(summaryText)\"")
         if summaryText.isEmpty {
             return (pageTitle.isEmpty ? "done." : "done — \(pageTitle.lowercased()) is open.", true)
         }

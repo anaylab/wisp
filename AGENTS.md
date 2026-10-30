@@ -724,7 +724,11 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   `typeText` tag the old document (`window.__wispOutgoingDocument`) and the next `waitUntilLoaded` waits for a document
   without the tag (a click gets 2s, since most don't navigate). A successful `BrowserTaskResult.promptRepresentation()` ends
   with a `STATUS: completed … now on <title> (<url>)` line saying earlier screenshots are out of date, because append-only
-  providers resend the turn-start screenshot on the pass that writes the reply. Live step text is `CompanionManager.browserActivityText`, drawn as
+  providers resend the turn-start screenshot on the pass that writes the reply. `BrowserTaskRunner` also checks that the
+  final read is on the host the last `open`/`navigate` aimed at (`snapshotShowsExpectedPage`, re-reading up to 6s); if not,
+  `finalPageMatchesNavigation` is false, a step-log line says so and no STATUS-completed line is given. A plain "open X and
+  search Y" request is answered by `runDirectBrowserTask`'s one text-only summary call over that result (no screenshot), and
+  it logs what it was shown (`🌐 Browser summary`, `🌐 Browser task final read`). Live step text is `CompanionManager.browserActivityText`, drawn as
   `BrowserActivityIndicator` under the notch. During tier 2
   each element is marked with a pulsing ring just before the loop clicks/types it, via
   `BrowserCursorGuide` (implemented by `CompanionManager`, which converts the element's global

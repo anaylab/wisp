@@ -85,5 +85,20 @@ let failedResult = BrowserTaskResult(
 check(!failedResult.promptRepresentation().contains("STATUS: completed"), "a failed task never claims completion")
 check(failedResult.promptRepresentation().contains("STOPPED: no such field"), "a failed task still reports why")
 
+// A blank or other-site final read is the page from before the navigation.
+check(!BrowserLoadReadiness.snapshotShowsExpectedPage(snapshotURL: "about:blank", expectedHost: "en.wikipedia.org"), "a blank tab is not the expected page")
+check(!BrowserLoadReadiness.snapshotShowsExpectedPage(snapshotURL: "", expectedHost: "en.wikipedia.org"), "no URL is not the expected page")
+check(!BrowserLoadReadiness.snapshotShowsExpectedPage(snapshotURL: "https://github.com/", expectedHost: "en.wikipedia.org"), "the previously open site is not the expected page")
+check(BrowserLoadReadiness.snapshotShowsExpectedPage(snapshotURL: "https://en.wikipedia.org/wiki/Enigma_machine", expectedHost: "en.wikipedia.org"), "a redirect inside the site is the expected page")
+check(BrowserLoadReadiness.snapshotShowsExpectedPage(snapshotURL: "https://www.amazon.com/s?k=x", expectedHost: "amazon.com"), "www subdomain counts as the same site")
+
+let staleResult = BrowserTaskResult(
+    goal: "x", stepLog: ["final read showed about:blank rather than en.wikipedia.org"],
+    finalSnapshot: BrowserPageSnapshot(url: "about:blank", title: "", headings: [], elements: [], text: ""),
+    totalDuration: 1, browserOperationCount: 1, didSucceed: true, failureReason: nil,
+    finalPageMatchesNavigation: false
+)
+check(!staleResult.promptRepresentation().contains("STATUS: completed"), "a stale final read is never reported as completed")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

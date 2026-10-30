@@ -77,6 +77,10 @@ struct BrowserTaskResult: Sendable {
     /// agent has already read that page and distilled it, and handing the
     /// conversation sixty elements it no longer needs only buries the answer.
     var answer: String? = nil
+    /// False when the final read still showed a different site than the one
+    /// the plan navigated to, i.e. a stale page. The result then must not
+    /// claim the browser is on the requested page.
+    var finalPageMatchesNavigation: Bool = true
 
     /// What the model is given to answer from. One read, at the end.
     func promptRepresentation() -> String {
@@ -95,7 +99,7 @@ struct BrowserTaskResult: Sendable {
         if let failureReason {
             lines.append("")
             lines.append("STOPPED: \(failureReason)")
-        } else if didSucceed, let finalSnapshot {
+        } else if didSucceed, finalPageMatchesNavigation, let finalSnapshot {
             // The turn's screenshot was taken before the browser moved and may
             // be resent on this pass (providers that must stay append-only), so
             // it can show a blank tab or the previous site. Say outright which
@@ -150,7 +154,37 @@ enum BrowserTaskRunner {
             }
         }
 
-        let snapshot = try? controller.snapshot()
+        // The host the last navigation was aimed at, if nothing after it could
+        // have moved the page elsewhere. The final read must show that site;
+        // if it doesn't, it is the page from before the navigation (a blank
+        // tab, the previously open site) and the reply built from it would
+        // describe the wrong screen — so read again for a few seconds.
+        var expectedHost: String?
+        for step in plan.steps {
+            switch step {
+            case .open(let url), .navigate(let url): expectedHost = url.host
+            case .typeInto, .clickMatching, .back, .forward: expectedHost = nil
+            case .scroll, .read: break
+            }
+        }
+
+        var finalPageMatchesNavigation = true
+        var snapshot = try? controller.snapshot()
+        if let expectedHost {
+            let deadline = Date().addingTimeInterval(6)
+            while Date() < deadline,
+                  !BrowserLoadReadiness.snapshotShowsExpectedPage(
+                      snapshotURL: snapshot?.url ?? "", expectedHost: expectedHost) {
+                _ = await controller.waitUntilLoaded(timeout: 1)
+                try? await Task.sleep(for: .milliseconds(300))
+                snapshot = try? controller.snapshot()
+            }
+            if !BrowserLoadReadiness.snapshotShowsExpectedPage(snapshotURL: snapshot?.url ?? "", expectedHost: expectedHost) {
+                finalPageMatchesNavigation = false
+                note("final read showed \(snapshot?.url ?? "no page") rather than \(expectedHost)")
+            }
+            print("🌐 Browser task final read: expected host \(expectedHost), got \(snapshot?.url ?? "nil") title \"\(snapshot?.title ?? "")\", \(snapshot?.text.count ?? 0) chars of text")
+        }
         return BrowserTaskResult(
             goal: plan.goal,
             stepLog: stepLog,
@@ -158,7 +192,8 @@ enum BrowserTaskRunner {
             totalDuration: Date().timeIntervalSince(startedAt),
             browserOperationCount: operationCount,
             didSucceed: true,
-            failureReason: nil
+            failureReason: nil,
+            finalPageMatchesNavigation: finalPageMatchesNavigation
         )
     }
 

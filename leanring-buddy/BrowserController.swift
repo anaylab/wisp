@@ -299,6 +299,26 @@ extension BrowserController {
 /// tagged before the action, and a navigation only counts as arrived once the
 /// document no longer carries the tag.
 enum BrowserLoadReadiness {
+    /// Whether a snapshot shows the page a navigation was aimed at.
+    ///
+    /// A second line of defence after `isLoaded`: whatever the browser said
+    /// about readiness, a result that is blank or on another site than the one
+    /// just opened is the previous page, and must not be reported as the
+    /// outcome. Compared by host so a redirect inside the site (a search that
+    /// lands on the article) still counts.
+    static func snapshotShowsExpectedPage(snapshotURL: String, expectedHost: String) -> Bool {
+        guard let snapshotHost = URL(string: snapshotURL)?.host?.lowercased(), !snapshotHost.isEmpty else {
+            return false
+        }
+        // "amazon.com" opens "www.amazon.com", and "youtube.com" can land on
+        // "m.youtube.com": the same site, so one host may be a subdomain of
+        // the other.
+        let expected = expectedHost.lowercased()
+        return snapshotHost == expected
+            || snapshotHost.hasSuffix("." + expected)
+            || expected.hasSuffix("." + snapshotHost)
+    }
+
     /// How long a click or a submitted form is given to replace the document.
     /// Most clicks never navigate (menus, toggles), so this only bounds the
     /// extra wait they cost; a direct navigation waits for the full timeout.
