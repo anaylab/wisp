@@ -19,7 +19,8 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="https://anaylab.github.io/wisp/"><b>Website</b></a> ·
+  <a href="#quick-start">Quick start</a> ·
   <a href="#what-it-does">What it does</a> ·
   <a href="#say-it">Say it</a> ·
   <a href="#models">Models</a> ·
