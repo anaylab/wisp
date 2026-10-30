@@ -285,3 +285,44 @@ extension BrowserController {
         nil
     }
 }
+
+// MARK: - Load readiness
+
+/// Decides whether a page that was just asked to navigate has actually been
+/// replaced and finished loading.
+///
+/// `document.readyState` alone is not enough: for a moment after a navigation
+/// is requested the browser still holds the *outgoing* document, and that one
+/// reports "complete". Waiting on it returns at once, and the snapshot taken
+/// next reads the page that was there before (a blank tab, a dashboard) while
+/// the task goes on to claim success. The outgoing document is therefore
+/// tagged before the action, and a navigation only counts as arrived once the
+/// document no longer carries the tag.
+enum BrowserLoadReadiness {
+    /// How long a click or a submitted form is given to replace the document.
+    /// Most clicks never navigate (menus, toggles), so this only bounds the
+    /// extra wait they cost; a direct navigation waits for the full timeout.
+    static let maximumWaitForClickedNavigationSeconds: TimeInterval = 2
+
+    /// - Parameters:
+    ///   - readyState: `document.readyState` of the current document; nil when
+    ///     the page can't be scripted yet (still being created).
+    ///   - outgoingDocumentStillShowing: the document still carries the tag put
+    ///     on it before the navigation was triggered.
+    ///   - expectsNavigation: an action that may have navigated was just taken.
+    ///   - secondsWaitedForReplacement: time spent since that action.
+    ///   - maximumWaitForReplacementSeconds: how long to wait for the document
+    ///     to be replaced before deciding no navigation happened (a same-page
+    ///     update).
+    static func isLoaded(
+        readyState: String?,
+        outgoingDocumentStillShowing: Bool,
+        expectsNavigation: Bool,
+        secondsWaitedForReplacement: TimeInterval,
+        maximumWaitForReplacementSeconds: TimeInterval
+    ) -> Bool {
+        guard readyState == "complete" else { return false }
+        guard expectsNavigation, outgoingDocumentStillShowing else { return true }
+        return secondsWaitedForReplacement >= maximumWaitForReplacementSeconds
+    }
+}

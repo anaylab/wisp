@@ -120,6 +120,17 @@ final class AppleScriptBrowserController: BrowserController {
     /// True for the duration of a browser task. Outside one, everything targets
     /// the user's front tab exactly as before.
     private var isDrivingDedicatedTab = false
+
+    /// Set by an action that may have navigated (see `BrowserLoadReadiness`),
+    /// consumed by the next `waitUntilLoaded`. `maximumWait` is how long the
+    /// outgoing document may keep showing before it is concluded that nothing
+    /// navigated.
+    private var pendingNavigation: (startedAt: Date, maximumWait: TimeInterval)?
+
+    /// Tags the page that is about to be left; the document that replaces it
+    /// won't carry the tag. Returns a value so the call counts as a success.
+    private static let tagOutgoingDocumentScript = "window.__wispOutgoingDocument=true;'OK'"
+    private static let isOutgoingDocumentShowingScript = "String(window.__wispOutgoingDocument===true)"
     /// Set when the working tab disappears mid-task — almost always because the
     /// user closed it, which is taken as "stop". Every later operation in the
     /// session then fails rather than quietly falling back to the user's tab.
@@ -482,6 +493,9 @@ final class AppleScriptBrowserController: BrowserController {
 
     func navigate(to url: URL) throws {
         let browser = try requireBrowser()
+        // Tag the page being left so the wait that follows can tell the new
+        // document from the old one (which also reads "complete").
+        let didTagOutgoingDocument = runJavaScript(Self.tagOutgoingDocumentScript, in: browser) == "OK"
         let escapedURL = Self.appleScriptEscaped(url.absoluteString)
         let result = runInTargetTab(of: browser) { tabSpecifier in
             // `get URL` afterwards gives the command a string result, which is
@@ -492,6 +506,9 @@ final class AppleScriptBrowserController: BrowserController {
             throw lostTabErrorOr(.scriptFailed("Couldn't navigate to \(url.absoluteString)."))
         }
         dedicatedTab?.lastKnownURL = url.absoluteString
+        // Only worth waiting for a replacement if the old page could be tagged;
+        // an unscriptable page (blank tab) already reports "not ready" itself.
+        pendingNavigation = didTagOutgoingDocument ? (Date(), .infinity) : nil
     }
 
     func goBack() throws { try navigateHistory(delta: -1) }
@@ -624,7 +641,7 @@ final class AppleScriptBrowserController: BrowserController {
         fire(PointerEvent,'pointerdown');fire(MouseEvent,'mousedown');
         if(e.focus){e.focus();}
         o.buttons=0;fire(PointerEvent,'pointerup');fire(MouseEvent,'mouseup');
-        e.click();return 'OK';})()
+        window.__wispOutgoingDocument=true;e.click();return 'OK';})()
         """
         let result = runJavaScript(script, in: browser)
         if result == "MISSING" { throw BrowserControllerError.elementNotFound(elementID) }
@@ -632,6 +649,9 @@ final class AppleScriptBrowserController: BrowserController {
             throw BrowserControllerError.scriptFailed("\(elementID) is disabled right now.")
         }
         guard result == "OK" else { throw BrowserControllerError.scriptFailed("Couldn't click \(elementID).") }
+        // A click may follow a link; give the wait that comes next a short
+        // window to see the old document replaced (see `BrowserLoadReadiness`).
+        pendingNavigation = (Date(), BrowserLoadReadiness.maximumWaitForClickedNavigationSeconds)
     }
 
     func typeText(_ text: String, intoElementID elementID: String, pressEnter: Bool) throws {
@@ -659,7 +679,7 @@ final class AppleScriptBrowserController: BrowserController {
         try{e.dispatchEvent(new InputEvent('input',{bubbles:true,composed:true,data:t,inputType:'insertText'}));}
         catch(z){e.dispatchEvent(new Event('input',{bubbles:true}));}
         e.dispatchEvent(new Event('change',{bubbles:true}));}
-        \(pressEnter ? "wispKey(e,'Enter',true);" : "")
+        \(pressEnter ? "window.__wispOutgoingDocument=true;wispKey(e,'Enter',true);" : "")
         return 'OK';})()
         """
         let result = runJavaScript(script, in: browser)
@@ -668,6 +688,10 @@ final class AppleScriptBrowserController: BrowserController {
             throw BrowserControllerError.scriptFailed("\(elementID) is a password or payment field — only you can fill that in.")
         }
         guard result == "OK" else { throw BrowserControllerError.scriptFailed("Couldn't type into \(elementID).") }
+        // Submitting a search form navigates; same reasoning as `click`.
+        if pressEnter {
+            pendingNavigation = (Date(), BrowserLoadReadiness.maximumWaitForClickedNavigationSeconds)
+        }
     }
 
     func hover(elementID: String) throws {
@@ -827,12 +851,27 @@ final class AppleScriptBrowserController: BrowserController {
 
     func waitUntilLoaded(timeout: TimeInterval = 10) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
+        // Taken once: a later wait belongs to a later action.
+        let navigation = pendingNavigation
+        pendingNavigation = nil
         while Date() < deadline {
             // readyState is the browser's own answer, so this waits exactly as
-            // long as the page needs rather than a guessed constant.
-            if let state = try? requireBrowser(),
-               runJavaScript("document.readyState", in: state) == "complete" {
-                return true
+            // long as the page needs rather than a guessed constant. Right
+            // after a navigation it is also the *outgoing* page's answer, so
+            // the tag left on that page is checked too.
+            if let browser = try? requireBrowser() {
+                let readyState = runJavaScript("document.readyState", in: browser)
+                let outgoingDocumentStillShowing = navigation != nil
+                    && runJavaScript(Self.isOutgoingDocumentShowingScript, in: browser) == "true"
+                if BrowserLoadReadiness.isLoaded(
+                    readyState: readyState,
+                    outgoingDocumentStillShowing: outgoingDocumentStillShowing,
+                    expectsNavigation: navigation != nil,
+                    secondsWaitedForReplacement: navigation.map { Date().timeIntervalSince($0.startedAt) } ?? 0,
+                    maximumWaitForReplacementSeconds: navigation?.maximumWait ?? 0
+                ) {
+                    return true
+                }
             }
             try? await Task.sleep(for: .milliseconds(120))
         }

@@ -718,7 +718,13 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   tab is closed mid-task that is treated as "stop" (`BrowserControllerError.dedicatedTabClosed`)
   — ops never fall back to the user's tab. The user's page at ask-time is passed to the loop so
   "this page" tasks can open it. Outside a task (`read_page`, `click_element`) the user's front
-  tab is still the target. Live step text is `CompanionManager.browserActivityText`, drawn as
+  tab is still the target. **Waiting for a page** (`BrowserLoadReadiness`, `Tests/BrowserReplyGrounding`): right after a
+  navigation the outgoing document also reports `readyState == "complete"`, so the wait used to return at once and the
+  final snapshot (and the model's closing reply) described the previous page. `navigate`, a click and a submitted
+  `typeText` tag the old document (`window.__wispOutgoingDocument`) and the next `waitUntilLoaded` waits for a document
+  without the tag (a click gets 2s, since most don't navigate). A successful `BrowserTaskResult.promptRepresentation()` ends
+  with a `STATUS: completed … now on <title> (<url>)` line saying earlier screenshots are out of date, because append-only
+  providers resend the turn-start screenshot on the pass that writes the reply. Live step text is `CompanionManager.browserActivityText`, drawn as
   `BrowserActivityIndicator` under the notch. During tier 2
   each element is marked with a pulsing ring just before the loop clicks/types it, via
   `BrowserCursorGuide` (implemented by `CompanionManager`, which converts the element's global
@@ -1473,6 +1479,7 @@ running):
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
 ./Tests/ScreenRegionFocus/run.sh         # ask-about-a-part: region clamping, AppKit→screenshot pixels, prompt text
 ./Tests/WorkedSolutionExport/run.sh      # save-a-worked-solution: worth saving, display choice, file names, Markdown
+./Tests/BrowserReplyGrounding/run.sh     # browser load readiness (old page also reads complete) + task result STATUS line
 ./Tests/PartSelection/run.sh            # voice selection of a part: spoken-target parser, OCR list/ordinal resolver, pixels→region round trip
 ./Tests/UsageLog/run.sh                  # usage log: cost estimator, aggregation windows, retention, codec, no content fields, store file
 ./Tests/GuidedWalkthrough/run.sh         # guided walkthrough plan stepping, instruction → label, click-on-target matching

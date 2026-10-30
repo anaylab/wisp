@@ -95,6 +95,13 @@ struct BrowserTaskResult: Sendable {
         if let failureReason {
             lines.append("")
             lines.append("STOPPED: \(failureReason)")
+        } else if didSucceed, let finalSnapshot {
+            // The turn's screenshot was taken before the browser moved and may
+            // be resent on this pass (providers that must stay append-only), so
+            // it can show a blank tab or the previous site. Say outright which
+            // one to believe, or the closing message describes the old screen.
+            lines.append("")
+            lines.append("STATUS: completed. The browser is now on \"\(finalSnapshot.title)\" (\(finalSnapshot.url)). Any screenshot earlier in this conversation was taken before the browser task ran and is out of date; report from this result.")
         }
         return lines.joined(separator: "\n")
     }
