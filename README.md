@@ -115,10 +115,18 @@ recognised the request and did it directly.
 
 ### When the model steps in
 
-<p align="center">
-  <img src="docs/assets/screenshots/feature-walkthrough.png" alt="A guided walkthrough: the notch lists two numbered steps with Do it for me, Next and Stop, while a numbered box marks the Bold button in TextEdit" width="100%">
-  <br><sub><b>"Walk me through making this bold and centered."</b> The notch keeps a numbered checklist. Wisp boxes the control for the current step, finds the next one again as the screen changes, and advances when you click it. <b>Do it for me</b> clicks it for you (never anything irreversible).</sub>
-</p>
+<table>
+<tr>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-walkthrough.png" alt="Walkthrough step 1: the notch lists two numbered steps with Do it for me, Next and Stop, and a numbered box marks the Bold button in TextEdit">
+  <br><sub><b>"Walk me through making this bold and centered."</b> The notch keeps a numbered checklist and Wisp boxes the control for the current step.</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-walkthrough-step2.png" alt="Walkthrough step 2: click bold is ticked and struck through, the text is bold, and the box has moved to the align center button">
+  <br><sub><b>It follows along.</b> Step 1 is ticked off, the text is bold, and the box has moved to the next control. <b>Do it for me</b> clicks it for you, and never anything irreversible.</sub>
+</td>
+</tr>
+</table>
 
 <table>
 <tr>
@@ -129,6 +137,19 @@ recognised the request and did it directly.
 <td width="50%" align="center" valign="top">
   <img src="docs/assets/screenshots/feature-math.png" alt="The finished handwritten working: 3x + 7 = 22, 3x = 22 - 7, 3x = 15, x = 15/3, x = 5">
   <br><sub><b>Click through, or press <kbd>⌃⌥→</kbd>.</b> Each click reveals the next line of working, down to x = 5. <b>Save worked solution</b> exports the finished page as a PNG.</sub>
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-email.png" alt="An editable New email panel with a To address, subject and a polite body ready to review, with Discard and Send buttons">
+  <br><sub><b>"Draft an email to Jordan about moving Friday's review."</b> An editable draft opens at once and the model fills in subject and body. Nothing leaves your Mac until you press <b>Send</b> (⌘↩).</sub>
+</td>
+<td width="50%" align="center" valign="top">
+  <img src="docs/assets/screenshots/feature-approval.png" alt="A Wisp needs your OK card: Run Shortcut, Word of the Day, with Cancel and Allow buttons and a countdown">
+  <br><sub><b>Anything risky asks first.</b> Running a Shortcut always shows a card with exactly what will happen, a countdown, and Cancel or Allow. Deny, or let it time out, and nothing runs.</sub>
 </td>
 </tr>
 </table>
