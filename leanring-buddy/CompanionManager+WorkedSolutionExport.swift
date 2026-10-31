@@ -39,7 +39,36 @@ extension CompanionManager {
             presentWorkedSolutionSaveOutcome("there's no worked solution on screen to save.", didSucceed: false)
             return
         }
-        let questionAsked = lastQuestionAskedByUser
+        beginSavingWorkedSolution(
+            displayFrame: displayFrame,
+            annotations: annotations,
+            screenshotSize: screenshotSize,
+            questionAsked: lastQuestionAskedByUser
+        )
+    }
+
+    /// Save from a note card: the card keeps the annotations and question it was built from, so
+    /// this still works after a new question has cleared the overlay's drawings.
+    func saveWorkedSolution(fromCard card: NoteCard) {
+        guard workedSolutionSaveTask == nil else { return }
+        guard WorkedSolutionExport.isWorthSaving(card.sourceAnnotations) else {
+            presentWorkedSolutionSaveOutcome("there's no worked solution on that card to save.", didSucceed: false)
+            return
+        }
+        beginSavingWorkedSolution(
+            displayFrame: card.displayFrameInAppKitPoints,
+            annotations: card.sourceAnnotations,
+            screenshotSize: card.screenshotSizeInPixels,
+            questionAsked: card.originalQuestion
+        )
+    }
+
+    private func beginSavingWorkedSolution(
+        displayFrame: CGRect,
+        annotations: [ScreenAnnotation],
+        screenshotSize: CGSize,
+        questionAsked: String?
+    ) {
         let savedAtDate = Date()
 
         workedSolutionSaveTask = Task { [weak self] in

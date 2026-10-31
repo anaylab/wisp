@@ -534,6 +534,40 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   (`AnnotationNoteLayout`, pure; later notes move down, never off-screen).
   card follow the *selected* provider (`ActiveStackReadout.chatModelName`/`isChatModelLocal`; the "runs entirely on this Mac" line is false while
   a cloud provider is selected). Tested by `Tests/ScreenRegionFocus`.
+- **Note cards** (`NoteCards/`, `docs/note-cards-plan.md`, all five phases built): the handwritten `[NOTE:]` lines of a reply are no longer drawn on the
+  overlay; `NoteCardBuilder` folds them into **one movable card per display**, placed beside the area the reply drew on
+  (`NoteCardGeometry.cardFrame`: right, left, below, above; on screen; clear of other cards), joined to the active step by a tether. Each card
+  is its own non-activating, **never-key** `NSPanel` (the overlay must stay click-through, so cards are not views inside it) plus a click-through
+  panel per card that draws the tether and numbered pins (`NoteCardTetherView`); `NoteCardManager` (owned by `CompanionManager.noteCardManager`)
+  keeps both in step. Header/background drag (an explicit `DragGesture` that moves the panel: a borderless panel can't be dragged by its SwiftUI background), pin, collapse, close, a step list (tap a row, chevrons, **⌃⌥→/←** step the newest card) and a **follow-up composer**. The
+  composer reads as text until clicked; the click is what makes the panel key (`NoteCardPanel.allowsBecomingKey`, off again on resign-key),
+  so typing works while the user's app stays frontmost. A follow-up (`CompanionManager.runNoteCardFollowUp`) is its **own small turn**, not
+  the notch pipeline (whose fast-command routers would catch "open safari" typed into a card): the card's steps are the system prompt
+  (`NoteCardFollowUp.systemPrompt`), the card's earlier thread is history (last 8, clipped), plus a native-resolution close-up of the active step's
+  region; text-only, no tools, no annotation tags (the prompt forbids them and `displayText` strips them, including a half-written one while
+  streaming). The answer streams into the card's thread (`NoteCard.thread`, 20 messages, one answer at a time), is appended to the conversation
+  transcript, and logged to History and the usage log like any turn. Closing a card cancels its turn. Esc inside a composer only leaves it
+  (`NoteCardManager.isComposerFocused`, with a 0.4s grace so the global Esc handler doesn't also close the card). A detached card has no composer.
+  **Actions** (phase 4): three one-tap **chips** (`NoteCardFollowUp.Chip`: Simpler / Example / Quiz me) that are just fixed questions asked through the same follow-up path;
+  **Copy** (`NoteCardFollowUp.clipboardText`: numbered steps, then the Q/A thread, failures left out); **Save** (the existing Save Worked Solution export, run from the
+  card: a card keeps the `sourceAnnotations`, `screenshotSizeInPixels` and `originalQuestion` it was built from, so it still saves after a new question has cleared the
+  overlay; disabled once detached, since the notes would be painted over a screen that has moved); and **pop-out** on each step of a multi-step card
+  (`NoteCard.tearingOffStep`: the step becomes its own engaged card, placed beside that step, carrying the shapes and its own note; the thread stays with the original). **Lifecycle** is the pure `NoteCardLifecycle`: a new question clears untouched
+  cards only (dragged, pinned, stepped or asked-about cards are "engaged" and stay); Esc keeps only pinned; scrolling another app (the scroll watcher also runs while any card exists) drops untouched
+  cards and *detaches* kept ones (no tether/pins, "screen has moved on"); untouched cards fade after 120s; max 4, oldest unpinned evicted. Cards live in
+  memory only. Notes still sit in `activeAnnotationsByDisplayFrame` (Save Worked Solution draws them from there via
+  `ScreenAnnotationLayer(isForExport:)`; the live overlay passes `drawsNotes: false`) and are filtered out of `AnnotationClickRouter`'s hit test, so
+  the Next pill is gone. Capture already excludes all of Wisp's own windows, so cards never reach the model. Not built: speaking a follow-up into a focused card,
+  annotation tags in follow-up answers (phase 3 leftovers), "Remind me" and "Make automation" actions (phase 4 leftovers), dragging a step out
+  (pop-out is a button).
+  **Polish** (phase 5): a card springs in (`WispMotion.settle`, scale from 0.94) and fades out over 0.16s on close (the view keeps showing the last card it had, since the card is
+  already gone from `cards`; the tether and pins go at once); with Reduce Motion it only fades in and goes at once. Increased contrast gives the card a stronger border.
+  A **display change** (`NSApplication.didChangeScreenParametersNotification`, via `NoteCardManager.reconcileWithDisplays`) drops untouched cards on a display that no longer
+  exists (frame compare, so a resolution change counts), detaches kept ones, and brings a card whose window is on no screen back onto the main one. **VoiceOver**: the card is a labelled
+  group ("Wisp explanation"); every control has a label; the active step is `.isSelected`; the composer is exposed as a button (`accessibilityAction`) because the panel is never key;
+  the logo and the whole tether/pins window are hidden; labels and announcements use `NoteCardFollowUp.spokenText` (no `**`/backticks); a new card and each finished answer are
+  announced politely (VoiceOver is silent about a window appearing under a background app). Half-streamed `**`/backtick markers are hidden until their partner arrives
+  (`balancingInlineMarkdown`). Checked by dumping Wisp's AX tree with `AXUIElement`. Tested by `Tests/NoteCards`.
 - **Save a worked solution** (menu bar → **Save Worked Solution…**, or Talk chord + **S**, `saveWorkedSolutionShortcutPublisher`;
   the letter is rebindable in Settings → Shortcuts like Ask About a Part's, `ShortcutBindingStore.saveWorkedSolutionKey`, and yields to
   Ask About a Part if both are bound to one letter): saves the explanation Wisp drew (needs ≥1 note or circle,
@@ -1194,6 +1228,10 @@ Files are grouped by role; line counts are rough.
 | `ScreenAnnotationLayer.swift` | ~227 | `Canvas` rendering for markers, boxes, arrows and highlights. |
 | `WorkedSolutionExport.swift` | ~140 | Pure: whether the drawings are worth saving (a note or circle), which display's to save, the default PNG name (date + time, no colons), the matching `.md` name and the Markdown text (date, question, numbered notes). Tested by `Tests/WorkedSolutionExport`. |
 | `CompanionManager+WorkedSolutionExport.swift` | ~150 | Glue for Save Worked Solution: native-resolution capture of one display, `ImageRenderer` composite of `ScreenAnnotationLayer(isForExport:)`, `NSSavePanel`, PNG + Markdown write, notch confirmation. No test suite (needs screen capture and UI). |
+| `NoteCards/NoteCard.swift` | ~385 | Pure: `NoteCard`/`NoteCardStep`/`NoteCardMessage` (the thread and its begin/stream/finish/fail rules), `NoteCardBuilder` (notes → one card), `NoteCardGeometry` (placement, tether end, ask region, estimated height), `NoteCardLifecycle` (new question / Esc / scroll / cap / stepping). Tested by `Tests/NoteCards`. |
+| `NoteCards/NoteCardFollowUp.swift` | ~155 | Pure: the follow-up system prompt, thread-to-history projection, reply cleaning (tags stripped, half-written tag hidden), the three chips and the clipboard text. Tested by `Tests/NoteCards`. |
+| `NoteCards/NoteCardManager.swift` | ~540 | `NoteCardManager`: the cards on screen and each one's two panels (the card, never key; a click-through tether/pins panel), drag detection, resize-to-content, dwell expiry, and the events `CompanionManager` forwards. |
+| `NoteCards/NoteCardView.swift` | ~560 | The card's dark-glass SwiftUI (header, step list, scrolling thread, follow-up composer, step chevrons) and `NoteCardTetherView` (tether line + numbered pins). |
 | `ScreenRegionFocus.swift` | ~90 | Pure: `FocusedScreenRegion` (the part of the screen the user chose — clamped, ≥24pt a side, AppKit bottom-left → screenshot top-left pixels, ScreenCaptureKit source rect) and its per-turn prompt text. Tested by `Tests/ScreenRegionFocus`. |
 | `PartSelectionRequest.swift` | ~230 | Pure: `PartSelectionRequestParser` (spoken "ask about the third answer" / "explain option C" / "what does the second line mean" / quoted text → `PartSelectionTarget` + residual question; conservative, rejects "third quarter" and "step 2 of …"), `PartSelectionTarget`/`PartSelectionNoun`/`PartSelectionPosition`. Tested by `Tests/PartSelection`. |
 | `PartSelectionResolver.swift` | ~380 | Pure: `PartSelectionResolver.resolve(target, in: ocrEntries)` → one screenshot-pixel region or `.notFound`/`.ambiguous`: list-marker detection, column/row list building, ordinals/labels, item region (marker + same-row text + wrapped lines), on-screen text matching. |
@@ -1500,6 +1538,7 @@ running):
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
 ./Tests/HostileProviderAttack/run.sh     # adversarial provider vs the real agent loop; lists known defects
 ./Tests/FastPointing/run.sh              # pointing request/matching/reply parsing, ~5s
+./Tests/NoteCards/run.sh                 # note cards: build from notes, placement, tether, lifecycle (cap, Esc, scroll)
 ./Tests/ScreenRegionFocus/run.sh         # ask-about-a-part: region clamping, AppKit→screenshot pixels, prompt text
 ./Tests/WorkedSolutionExport/run.sh      # save-a-worked-solution: worth saving, display choice, file names, Markdown
 ./Tests/BrowserReplyGrounding/run.sh     # browser load readiness (old page also reads complete) + task result STATUS line

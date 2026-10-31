@@ -30,6 +30,9 @@ struct ScreenAnnotationLayer: View {
     /// shown whatever `visibleNoteLimit` says, there is no Next pill, and
     /// nothing pulses or dims (a still image has no animation to catch).
     var isForExport = false
+    /// The live overlay hands handwritten notes to a note card (`NoteCardManager`) and
+    /// leaves them out here; a saved picture still draws them in place.
+    var drawsNotes = true
 
     @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
 
@@ -54,9 +57,11 @@ struct ScreenAnnotationLayer: View {
                 }
             }
 
-            ForEach(shownAnnotations.filter { $0.style == .note }) { annotation in
-                if let noteText = annotation.label {
-                    noteView(for: annotation, text: noteText)
+            if drawsNotes {
+                ForEach(shownAnnotations.filter { $0.style == .note }) { annotation in
+                    if let noteText = annotation.label {
+                        noteView(for: annotation, text: noteText)
+                    }
                 }
             }
 
