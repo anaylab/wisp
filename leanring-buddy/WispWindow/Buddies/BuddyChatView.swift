@@ -476,9 +476,18 @@ struct BuddyChatView: View {
 
     private func composer(for buddy: WispBuddy, isRunning: Bool) -> some View {
         let trimmedDraft = draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let canSend = (!trimmedDraft.isEmpty || !pendingFileURLs.isEmpty) && !isRunning && !isSending
+        // A text message sent while the buddy works joins its line; files and
+        // pictures are read when sent, so they have to wait for it to be free.
+        let canSend = (!trimmedDraft.isEmpty || !pendingFileURLs.isEmpty)
+            && !(isRunning && !pendingFileURLs.isEmpty) && !isSending
         let accent = BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex)
+        let waitingMessages = buddyStore.waitingMessages(of: buddy)
         return VStack(spacing: 8) {
+            if !waitingMessages.isEmpty {
+                waitingMessageLine(for: buddy, waitingMessages: waitingMessages, accent: accent)
+                    .transition(.opacity)
+            }
+
             if !pendingFileURLs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) { ForEach(pendingFileURLs, id: \.self) { pendingFileChip($0) } }
@@ -489,7 +498,7 @@ struct BuddyChatView: View {
             HStack(alignment: .bottom, spacing: 6) {
                 BuddyIconButton(symbolName: "paperclip", label: "Attach files", tint: accent, size: 32) { chooseFiles() }
 
-                TextField(isRunning ? "\(buddy.name) is working…" : "Message \(buddy.name)", text: $draftMessageText, axis: .vertical)
+                TextField(isRunning ? "Queue a message for \(buddy.name)…" : "Message \(buddy.name)", text: $draftMessageText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13.5))
                     .foregroundStyle(WispColor.textPrimary)
@@ -563,6 +572,45 @@ struct BuddyChatView: View {
         addPendingFiles(openPanel.urls)
     }
 
+    /// The messages waiting their turn, with a way to take one back out and to
+    /// hold the whole line.
+    private func waitingMessageLine(for buddy: WispBuddy, waitingMessages: [QueuedBuddyMessage], accent: Color) -> some View {
+        let isLinePaused = buddyStore.isMessageLinePaused(buddyWithID: buddy.id)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(isLinePaused ? "Line paused · \(waitingMessages.count) waiting" : "\(waitingMessages.count) waiting")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(WispColor.textSecondary)
+                Spacer()
+                BuddyIconButton(
+                    symbolName: isLinePaused ? "play.fill" : "pause.fill",
+                    label: isLinePaused ? "Resume line" : "Pause line",
+                    tint: accent,
+                    size: 22
+                ) {
+                    buddyStore.setMessageLinePaused(!isLinePaused, forBuddyWithID: buddy.id)
+                }
+            }
+            ForEach(waitingMessages) { waitingMessage in
+                HStack(spacing: 6) {
+                    Text(waitingMessage.text)
+                        .font(.system(size: 12))
+                        .foregroundStyle(WispColor.textPrimary)
+                        .lineLimit(1)
+                    Spacer()
+                    BuddyIconButton(symbolName: "xmark", label: "Take this message back", tint: accent, size: 22) {
+                        withAnimation(WispMotion.smooth) {
+                            buddyStore.cancelWaitingMessage(withID: waitingMessage.id, ofBuddyWithID: buddy.id)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 2)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(WispColor.surface2.opacity(0.7)))
+            }
+        }
+    }
+
     private func addPendingFiles(_ fileURLs: [URL]) {
         withAnimation(WispMotion.smooth) {
             for fileURL in fileURLs where fileURL.isFileURL && !pendingFileURLs.contains(fileURL) {
@@ -585,7 +633,9 @@ struct BuddyChatView: View {
                 draftMessageText = ""
                 withAnimation(WispMotion.smooth) { pendingFileURLs = [] }
             } else {
-                sendFailureMessage = "Its model is busy — try again in a moment."
+                sendFailureMessage = fileURLs.isEmpty
+                    ? "Its line is full or its model is busy — try again in a moment."
+                    : "Files can't wait in line — send them once it's free."
             }
         }
     }

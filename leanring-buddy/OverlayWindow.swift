@@ -222,6 +222,12 @@ struct OverlayContentView: View {
                 .transition(.opacity)
             }
 
+            // A rim around the browser window Wisp is working in, drawn under the cursor.
+            if let windowFrame = companionManager.agentWindowRimFrameByDisplayFrame[screenFrame] {
+                AgentWindowRimView(windowFrameInDisplaySpace: windowFrame)
+                    .transition(.opacity)
+            }
+
             // The cursor Wisp draws while it acts in the browser for the user:
             // one dart that glides between steps.
             if let agentCursorTarget = companionManager.agentCursorTargetByDisplayFrame[screenFrame] {
@@ -250,6 +256,7 @@ struct OverlayContentView: View {
         // Without this the card's transition had nothing to animate it, so it
         // popped in and out.
         .animation(reduceMotion ? nil : WispMotion.island, value: companionManager.pendingToolConfirmation?.id)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: companionManager.agentWindowRimFrameByDisplayFrame[screenFrame] != nil)
         .onChange(of: companionManager.pendingToolConfirmation?.id) { _ in
             announceConfirmationForVoiceOver()
         }

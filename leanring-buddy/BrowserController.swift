@@ -232,6 +232,11 @@ protocol BrowserController: AnyObject {
     /// missing action.
     func screenPoint(ofElementID elementID: String) throws -> (point: CGPoint, displayFrame: CGRect)?
 
+    /// The frame of the browser window the controller is acting in, in AppKit's
+    /// global coordinates (bottom-left origin), or nil when it cannot say. Only
+    /// used to draw a rim around that window while a task runs.
+    func windowFrameOnScreen() -> CGRect?
+
     /// Opens a tab of Wisp's own (or reuses the one from the last task) and
     /// points every operation at it until `endDedicatedTabSession`.
     ///
@@ -284,6 +289,8 @@ extension BrowserController {
     func screenPoint(ofElementID elementID: String) throws -> (point: CGPoint, displayFrame: CGRect)? {
         nil
     }
+
+    func windowFrameOnScreen() -> CGRect? { nil }
 }
 
 // MARK: - Load readiness

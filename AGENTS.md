@@ -395,6 +395,13 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   and runs another buddy asked for never notify), Duplicate (setup only — no thread or notes), Clear
   conversation (thread restarts, notes and History stay), Delete. The job is editable in place.
   A buddy has no loop of its own: each run is an ordinary background task
+  **Message line** (`Buddies/BuddyMessageQueue.swift`, idea from OpenBot): a text message sent to a buddy that is mid-run (or whose line is paused,
+  or already has messages waiting) joins a per-buddy FIFO instead of being refused — max 10 waiting, answered one run at a time in the order sent.
+  `BuddyStore.drainMessageQueues` starts the front message when the buddy is free (on every task-registry change and on the minute tick); a message
+  leaves the line only after its run has started, so one that can't start (background limit) stays. The thread shows a "N waiting" strip above the
+  composer with a pause/resume button and ✕ per message. Text only (files and pictures are read when sent, so they still need a free buddy);
+  `ask_buddy` delegation still reports a busy peer instead of queueing. Saved beside buddies.json (`buddy-message-queue.json`, 0600), cleared with
+  the buddy or its conversation. Tested by `Tests/BuddyMessageQueue`.
   via `CompanionManager.startBuddyRun` → `BackgroundTaskLauncher.start(title: "Buddy · <name>")`,
   so it queues behind the model like any background work and its record lives in
   `AgentTaskRegistry`/History. The schedule is checked every minute while Wisp runs
@@ -738,8 +745,9 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   deterministic; a new target mid-move starts from where the dart is on screen; Reduce Motion places it directly),
   with an arrival ring and the action text. The step's wait is the glide time + 250ms (min 350ms) instead of a fixed
   0.6s. Motion constants follow cua-driver's `adaptive` trajectory (trycua/cua, MIT), reimplemented, not copied from
-  OpenBot. It does not cross displays (a move to another display appears there). Not yet used for cua-driver
-  actions or "Do it for me" clicks. Tested by `Tests/AgentCursorMotion`. Element
+  OpenBot. It does not cross displays (a move to another display appears there). A calm, static **window rim** (`AgentWindowRimView`, accent tint falling inward, no motion, no hit-testing) marks the browser window
+  Wisp works in for the whole task: the frame comes from `BrowserController.windowFrameOnScreen()` on the first step. Not yet used for cua-driver
+  actions or "Do it for me" clicks (and the rim does not cut out windows in front). Tested by `Tests/AgentCursorMotion`. Element
   screen coordinates come from `BrowserController.screenPoint(ofElementID:)`.
 - **Messages & Contacts** (Siri-style texting): "text mom i'm running late" is recognised by
   `MessageCommandParser` (checked in `sendTranscriptToClaudeWithScreenshot` right after
@@ -1196,13 +1204,14 @@ Files are grouped by role; line counts are rough.
 ### Agent, tools and MCP
 | File | Approx. lines | What it does |
 |---|---|---|
-| `AgentCursorMotion.swift` | ~230 | Pure: plans the agent cursor's moves (Fitts'-timed min-jerk glide, swoop over 900pt, 120 Hz samples) and plays them back by elapsed time. Tested by `Tests/AgentCursorMotion`. |
-| `AgentCursorView.swift` | ~130 | The gliding dart the overlay draws while the browser loop acts: `AgentCursorTarget`, `TimelineView` clock that runs only during a move, arrival ring, action label, Reduce Motion. |
 | `AgentTurnRunner.swift` | ~425 | The agent loop: max 4 iterations for the local model, 10 for a cloud model (`maximumIterationsForCloudModels` — acting in an app takes find/read/act/check), screenshot on iteration 0 only, per-tool timeouts. |
 | `BrowserCommandRouter.swift` | ~200 | Deterministic recognition of spoken browser commands: tab commands (`BrowserTabCommand`) and clear web tasks, so they run without the model choosing a tool. Conservative — misses fall through to a normal turn. |
 | `ChromeExtensionBridge.swift` | ~330 | Loopback-only WebSocket server (127.0.0.1:47823) for the Wisp Tabs extension: Origin-pinned handshake, one live connection, JSON request/response with 10s timeouts, `connectionState` for the Agent tab. |
 | `ChromeTabOrganizer.swift` | ~600 | Tab organizing: `ChromeTab`/`ChromeTabsSnapshot`, `ChromeSiteNamer`, `ChromeTabGroupingPlanner` (per-window plans, loose tabs only, stable colours), `ChromeDuplicateTabFinder`, `ChromeTabTopicPrompt` (numbered prompt + strict reply parsing), `ChromeTabCommand`, and `ChromeTabOrganizer` (runs a plan through the bridge). |
 | `MessageCommandParser.swift` | ~210 | Pure parsing of spoken message commands ("text X saying Y", "send X a text …", "tell X that Y", unseparated "text X Y" → longest-first splits). Conservative; declines pronouns and noun uses ("text size"). |
+| `AgentCursorMotion.swift` | ~230 | Pure: plans the agent cursor's moves (Fitts'-timed min-jerk glide, swoop over 900pt, 120 Hz samples) and plays them back by elapsed time. Tested by `Tests/AgentCursorMotion`. |
+| `AgentCursorView.swift` | ~130 | The gliding dart the overlay draws while the browser loop acts: `AgentCursorTarget`, `TimelineView` clock that runs only during a move, arrival ring, action label, Reduce Motion. |
+| `AgentWindowRimView.swift` | ~50 | The static accent rim drawn around the browser window Wisp is acting in (`CompanionManager.agentWindowRimFrameByDisplayFrame`). |
 | `ContactsDirectory.swift` | ~440 | `ContactRecord`/`ContactHandle` (preferred handle: mobile → phone → email), the pure `ContactMatcher` (ranked tiers, ambiguity, relation words via the Me card), `DirectMessagingHandleParser`, and `ContactsDirectory` (CNContactStore access + off-main fetch). |
 | `MessagesSender.swift` | ~175 | `MessageRecipientResolver` (candidates → one person + handle, or a reason, or "not a message command") and `MessagesAppSender` (AppleScript handler call to Messages with Apple Event parameters; iMessage then SMS; -1743 → Automation hint). |
 | `WindowManagement/WindowLayoutCommand.swift` | ~700 | Pure side of window management: `WindowPlacement`, `WindowLayoutTarget`/`Assignment`/`Command`, `WindowLayoutApplicationNameMatcher` (unique running-app match), `WindowLayoutCommandParser` (spoken commands + tool-argument placements, conservative), `WindowLayoutReplyText`, and `WindowFrameCalculator` (placement + display visibleFrames → AX frame, primary-height flip, next-display relative move). Tested by `Tests/WindowManagement`. |
@@ -1480,6 +1489,7 @@ it isn't, the failure is in attribution. Use `open -a <path-to>/Wisp.app` and fo
 `log stream --predicate 'process == "Wisp"'`.
 
 **Never run `xcodebuild` in the terminal.** It resets the app's TCC permissions, so screen
+| `Buddies/BuddyMessageQueue.swift` | ~100 | Pure per-buddy FIFO of waiting messages: enqueue (cap 10), front/removeFront (leaves only once its run started), pause, cancel, Codable. Tested by `Tests/BuddyMessageQueue`. |
 recording, accessibility and the rest have to be granted again.
 
 **Standalone test suites** (plain `swiftc`, no Xcode build, no TCC reset; nothing needs to be
@@ -1513,7 +1523,6 @@ running):
 ./Tests/JobsEngine/run.sh                # Jobs engine flow with fakes (sync, throttle, approval, checklist)
 ./Tests/MCPStructuredContent/run.sh      # MCP structuredContent rendering + caps, cua-driver floor and cards
 ./Tests/WispTheme/run.sh                 # themes: contrast ratio for every theme, light and dark
-./Tests/AgentCursorMotion/run.sh         # agent cursor moves: endpoints, timing, bow, playback by time
 ./Tests/BuddyPersonality/run.sh          # personality presets, greeting rule, streak policy
 ./Tests/AutomationDraft/run.sh           # "say it" phrases -> drafts, ambiguous -> asks, templates
 ./Tests/AutomationSchedule/run.sh        # next run, DST, missed slot runs once
@@ -1526,6 +1535,7 @@ running):
 ./Tests/LearnedShortcuts/run.sh          # learned shortcuts: replayability rules, template matching, slot filling, drift, store file
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
+./Tests/AgentCursorMotion/run.sh         # agent cursor moves: endpoints, timing, bow, playback by time
 ```
 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a
@@ -1539,6 +1549,7 @@ more of FluidAudio means adding it there with the real signature.
 
 ## Local services
 
+./Tests/BuddyMessageQueue/run.sh         # buddy message line: FIFO order, cap, pause, cancel, codec
 With the default configuration only Ollama must be running (speech in and out is on-device):
 
 ```bash

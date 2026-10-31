@@ -118,6 +118,10 @@ final class CompanionManager: ObservableObject {
     /// one; it is a separate cursor from the pointing marker (see
     /// `AgentCursorView`).
     @Published var agentCursorTargetByDisplayFrame: [CGRect: AgentCursorTarget] = [:]
+    /// The frame of the browser window Wisp is acting in, per display frame, in
+    /// that display's top-left point space; drawn as a rim (`AgentWindowRimView`)
+    /// for the length of the task.
+    @Published var agentWindowRimFrameByDisplayFrame: [CGRect: CGRect] = [:]
     /// Where the agent cursor last stood, so the next step knows how far it has
     /// to glide (and so how long to wait). Cleared with the guidance.
     var agentCursorLastPlacement: (displayFrame: CGRect, point: CGPoint)?
@@ -4591,6 +4595,21 @@ extension CompanionManager: BrowserCursorGuide {
     /// Clears the guidance marker and the progress line once the workflow ends.
     func endCursorGuidance() {
         clearScreenAnnotations()
+        // The rim marks the window once per task, on the first step; the window
+        // is not expected to move while Wisp works in it.
+        if agentCursorLastPlacement == nil,
+           let windowFrame = AgentToolRegistry.shared.browserController.windowFrameOnScreen() {
+            let windowCenter = CGPoint(x: windowFrame.midX, y: windowFrame.midY)
+            let windowDisplayFrame = NSScreen.screens.first(where: { $0.frame.contains(windowCenter) })?.frame ?? displayFrame
+            agentWindowRimFrameByDisplayFrame = [
+                windowDisplayFrame: CGRect(
+                    x: windowFrame.minX - windowDisplayFrame.minX,
+                    y: windowDisplayFrame.maxY - windowFrame.maxY,
+                    width: windowFrame.width,
+                    height: windowFrame.height
+                )
+            ]
+        }
         browserActivityText = ""
         browserTaskStepHistory = []
         browserTaskStepCount = 0
@@ -4605,6 +4624,7 @@ extension CompanionManager: BrowserCursorGuide {
         browserActivityText = progressText
 
         agentCursorTargetByDisplayFrame.removeAll()
+        agentWindowRimFrameByDisplayFrame.removeAll()
         agentCursorLastPlacement = nil
         // The cloud loop reports each line through both its progress callback
         // and the cursor guide, so a repeat of the last line is the same step.

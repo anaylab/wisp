@@ -252,8 +252,14 @@ final class BuddyStore: ObservableObject {
     /// Newest first.
     @Published private(set) var buddies: [WispBuddy] = []
 
+    /// Messages waiting for a buddy that is mid-run, answered in the order sent
+    /// once it is free. Saved beside buddies.json so a restart keeps them.
+    @Published private(set) var messageQueue = BuddyMessageQueue()
+
     private let buddiesFileURL: URL
+    private let messageQueueFileURL: URL
     private var scheduleCheckTimer: Timer?
+    private var taskRecordsObservation: AnyCancellable?
 
     /// Buddies whose standing job an Automation now schedules. `runDueBuddies`
     /// skips them, otherwise the job would run twice (once from here, once from
@@ -272,7 +278,11 @@ final class BuddyStore: ObservableObject {
     /// store on a temporary file.
     init(buddiesFileURL: URL = BuddyStore.defaultBuddiesFileURL) {
         self.buddiesFileURL = buddiesFileURL
+        self.messageQueueFileURL = buddiesFileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("buddy-message-queue.json")
         buddies = loadBuddies()
+        messageQueue = loadMessageQueue()
     }
 
     // MARK: - Scheduling
@@ -285,6 +295,15 @@ final class BuddyStore: ObservableObject {
         // Only the app's own store seeds; a store a test made on a temporary
         // file stays exactly as it was built.
         if self === Self.shared { ensureStarterBuddies() }
+        // A run ending is what frees a buddy for the next waiting message. The
+        // registry publishes before it changes, so the drain waits one turn.
+        if taskRecordsObservation == nil {
+            taskRecordsObservation = AgentTaskRegistry.shared.$records
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    MainActor.assumeIsolated { self?.drainMessageQueues() }
+                }
+        }
         guard scheduleCheckTimer == nil else { return }
         let timer = Timer(timeInterval: Self.scheduleCheckIntervalSeconds, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -303,6 +322,9 @@ final class BuddyStore: ObservableObject {
     /// is skipped for this slot; one that can't start (the background limit)
     /// keeps its due date and is tried again next minute.
     func runDueBuddies(now: Date) {
+        // A waiting message whose run couldn't start earlier (the background
+        // limit) gets another try on every tick.
+        drainMessageQueues()
         // Right after wake the network and connected apps are still coming back; a job started
         // then just fails. Leaving the due date alone means the next minute's check runs it.
         let readinessMonitor = SystemReadinessMonitor.shared
@@ -461,7 +483,58 @@ final class BuddyStore: ObservableObject {
     func sendMessage(_ messageText: String, toBuddyWithID buddyID: UUID) -> Bool {
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessageText.isEmpty, let buddy = buddy(withID: buddyID) else { return false }
+        // Behind a run in progress, a paused line, or messages already waiting:
+        // join the line rather than being refused, so replies keep the order sent.
+        let lineIsHolding = isRunning(buddy)
+            || messageQueue.isPaused(buddyWithID: buddyID)
+            || !messageQueue.waitingMessages(forBuddyWithID: buddyID).isEmpty
+        if lineIsHolding {
+            guard messageQueue.enqueue(trimmedMessageText, forBuddyWithID: buddyID) != nil else { return false }
+            saveMessageQueue()
+            return true
+        }
         return startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText))
+    }
+
+    // MARK: - Message line
+
+    func waitingMessages(of buddy: WispBuddy) -> [QueuedBuddyMessage] {
+        messageQueue.waitingMessages(forBuddyWithID: buddy.id)
+    }
+
+    func isMessageLinePaused(buddyWithID buddyID: UUID) -> Bool {
+        messageQueue.isPaused(buddyWithID: buddyID)
+    }
+
+    func cancelWaitingMessage(withID messageID: UUID, ofBuddyWithID buddyID: UUID) {
+        guard messageQueue.cancel(messageWithID: messageID, forBuddyWithID: buddyID) else { return }
+        saveMessageQueue()
+    }
+
+    func setMessageLinePaused(_ isPaused: Bool, forBuddyWithID buddyID: UUID) {
+        messageQueue.setPaused(isPaused, forBuddyWithID: buddyID)
+        saveMessageQueue()
+        if !isPaused { drainMessageQueues() }
+    }
+
+    /// Starts the front message of every free buddy's line. A message leaves the
+    /// line only once its run has started, so one that can't start (the
+    /// background limit) stays and is tried again.
+    func drainMessageQueues() {
+        for buddyID in messageQueue.buddyIDsWithWaitingMessages {
+            guard let buddy = buddy(withID: buddyID) else {
+                messageQueue.removeAll(forBuddyWithID: buddyID)
+                saveMessageQueue()
+                continue
+            }
+            guard !isRunning(buddy),
+                  let frontMessage = messageQueue.front(forBuddyWithID: buddyID),
+                  startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: frontMessage.text)) else {
+                continue
+            }
+            messageQueue.removeFront(forBuddyWithID: buddyID)
+            saveMessageQueue()
+        }
     }
 
     /// Sends a message with files attached. The files are copied into the
@@ -655,6 +728,8 @@ final class BuddyStore: ObservableObject {
     /// History. Stops a run in progress first so its answer doesn't land in the
     /// cleared thread.
     func clearConversation(ofBuddyWithID buddyID: UUID) {
+        messageQueue.removeAll(forBuddyWithID: buddyID)
+        saveMessageQueue()
         stopRun(ofBuddyWithID: buddyID)
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
         mutateBuddy(withID: buddyID) { buddy in
@@ -665,6 +740,8 @@ final class BuddyStore: ObservableObject {
     }
 
     func deleteBuddy(withID buddyID: UUID) {
+        messageQueue.removeAll(forBuddyWithID: buddyID)
+        saveMessageQueue()
         stopRun(ofBuddyWithID: buddyID)
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
         BuddyMemoryStore.shared.deleteMemory(ofBuddyWithID: buddyID)
@@ -702,6 +779,26 @@ final class BuddyStore: ObservableObject {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return (try? decoder.decode([WispBuddy].self, from: fileData)) ?? []
+    }
+
+    private func loadMessageQueue() -> BuddyMessageQueue {
+        guard let fileData = try? Data(contentsOf: messageQueueFileURL) else { return BuddyMessageQueue() }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode(BuddyMessageQueue.self, from: fileData)) ?? BuddyMessageQueue()
+    }
+
+    /// Owner-only: queued messages are the user's words to a buddy.
+    private func saveMessageQueue() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let fileData = try? encoder.encode(messageQueue) else { return }
+        try? FileManager.default.createDirectory(
+            at: messageQueueFileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? fileData.write(to: messageQueueFileURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: messageQueueFileURL.path)
     }
 
     private func saveBuddies() {
