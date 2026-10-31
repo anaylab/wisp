@@ -112,7 +112,7 @@ enum BrowserAgent {
             if let steps {
                 let deterministicPlan = BrowserTaskPlan(goal: request, steps: steps)
                 onStep?("recognised as \(intent.description) — no planning call needed")
-                let result = await BrowserTaskRunner.execute(deterministicPlan, using: controller, onStep: onStep)
+                let result = await BrowserTaskRunner.execute(deterministicPlan, using: controller, cursorGuide: cursorGuide, onStep: onStep)
                 // A plan that stopped working is dropped, so a site redesign
                 // costs one bad run rather than every run.
                 if !result.didSucceed {
@@ -226,7 +226,7 @@ enum BrowserAgent {
         }
 
         onStep?("plan: " + plan.steps.map(\.description).joined(separator: " → "))
-        let result = await BrowserTaskRunner.execute(plan, using: controller, onStep: onStep)
+        let result = await BrowserTaskRunner.execute(plan, using: controller, cursorGuide: cursorGuide, onStep: onStep)
 
         // A login wall is not a failure to work around. Stop and hand it back.
         if let authPrompt = authenticationPrompt(in: result.finalSnapshot) {

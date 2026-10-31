@@ -16,6 +16,7 @@ swiftc -target arm64-apple-macos14.0 \
   -default-isolation MainActor \
   -o "$BUILD_DIR/browser-reply-grounding" \
   Tests/BrowserReplyGrounding/main.swift \
+  Tests/BrowserReplyGrounding/BrowserCursorGuideStub.swift \
   leanring-buddy/BrowserController.swift \
   leanring-buddy/BrowserTask.swift \
   leanring-buddy/BrowserSiteRegistry.swift \
