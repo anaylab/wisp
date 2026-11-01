@@ -109,6 +109,14 @@ struct BuddyRunRequest {
     var attachmentNames: [String] = []
     /// Attached pictures (downscaled JPEG data and a label) for a vision model.
     var images: [(data: Data, label: String)] = []
+    /// The side thread this message was sent in; nil is the main thread.
+    var threadID: UUID? = nil
+    /// Set for a run that answers a group chat (`BuddyGroupEngine`). Its thread
+    /// is the group's id, its history is the group's shared transcript
+    /// (`historyOverride`), and it gets no notification and no `ask_buddy`.
+    var groupID: UUID? = nil
+    var historyOverride: [BuddyChatMessage]? = nil
+    var extraSystemPrompt: String? = nil
 }
 
 struct WispBuddy: Codable, Identifiable, Equatable {
@@ -151,6 +159,9 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     var isMarkedUnread: Bool?
     /// Whether a finished run posts a notification; nil means yes.
     var notifiesWhenFinished: Bool?
+    /// Tucked away in the sidebar's Hidden group. It still runs on its schedule;
+    /// only the list changes.
+    var isHidden: Bool?
 
     /// The most runs a buddy remembers (older ones stay in History).
     static let maximumRememberedRuns = 20
@@ -158,6 +169,7 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// Nil (older files, or never pinned) reads as not pinned.
     var isPinnedInList: Bool { isPinned ?? false }
     var postsNotificationWhenFinished: Bool { notifiesWhenFinished ?? true }
+    var isHiddenInList: Bool { isHidden ?? false }
 }
 
 /// Names a buddy from its job: a subject from the instruction plus a role —
@@ -480,7 +492,7 @@ final class BuddyStore: ObservableObject {
     /// Sends the user's message to the buddy as the next turn of its thread.
     /// Returns false when the buddy is mid-run or the run couldn't start.
     @discardableResult
-    func sendMessage(_ messageText: String, toBuddyWithID buddyID: UUID) -> Bool {
+    func sendMessage(_ messageText: String, toBuddyWithID buddyID: UUID, inThread threadID: UUID? = nil) -> Bool {
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessageText.isEmpty, let buddy = buddy(withID: buddyID) else { return false }
         // Behind a run in progress, a paused line, or messages already waiting:
@@ -489,11 +501,11 @@ final class BuddyStore: ObservableObject {
             || messageQueue.isPaused(buddyWithID: buddyID)
             || !messageQueue.waitingMessages(forBuddyWithID: buddyID).isEmpty
         if lineIsHolding {
-            guard messageQueue.enqueue(trimmedMessageText, forBuddyWithID: buddyID) != nil else { return false }
+            guard messageQueue.enqueue(trimmedMessageText, forBuddyWithID: buddyID, threadID: threadID) != nil else { return false }
             saveMessageQueue()
             return true
         }
-        return startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText))
+        return startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText, threadID: threadID))
     }
 
     // MARK: - Message line
@@ -529,7 +541,7 @@ final class BuddyStore: ObservableObject {
             }
             guard !isRunning(buddy),
                   let frontMessage = messageQueue.front(forBuddyWithID: buddyID),
-                  startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: frontMessage.text)) else {
+                  startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: frontMessage.text, threadID: frontMessage.threadID)) else {
                 continue
             }
             messageQueue.removeFront(forBuddyWithID: buddyID)
@@ -546,9 +558,10 @@ final class BuddyStore: ObservableObject {
         _ messageText: String,
         attachmentFileURLs: [URL],
         toBuddyWithID buddyID: UUID,
+        inThread threadID: UUID? = nil,
         fileLibrary: BuddyFileLibrary = .shared
     ) async -> Bool {
-        guard !attachmentFileURLs.isEmpty else { return sendMessage(messageText, toBuddyWithID: buddyID) }
+        guard !attachmentFileURLs.isEmpty else { return sendMessage(messageText, toBuddyWithID: buddyID, inThread: threadID) }
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let buddy = buddy(withID: buddyID), !isRunning(buddy) else { return false }
 
@@ -584,7 +597,8 @@ final class BuddyStore: ObservableObject {
             text: BuddyAttachmentPolicy.messageText(userText: sentText, documents: documents, skippedFileNames: unreadableFileNames),
             displayText: sentText,
             attachmentNames: addedAttachments.map(\.fileName),
-            images: images
+            images: images,
+            threadID: threadID
         )
         return startRun(of: buddy, request: request)
     }
@@ -597,6 +611,12 @@ final class BuddyStore: ObservableObject {
             of: buddy,
             request: BuddyRunRequest(origin: .delegated, text: message, requesterName: requesterName)
         )
+    }
+
+    /// Starts a run that answers a group chat; nil while the buddy is busy.
+    func startGroupRun(ofBuddyWithID buddyID: UUID, request: BuddyRunRequest) -> UUID? {
+        guard let buddy = buddy(withID: buddyID) else { return nil }
+        return startRunReturningTaskID(of: buddy, request: request)
     }
 
     private func startRun(of buddy: WispBuddy, request: BuddyRunRequest) -> Bool {
@@ -684,6 +704,10 @@ final class BuddyStore: ObservableObject {
         mutateBuddy(withID: buddyID) { $0.isPinned = isPinned ? true : nil }
     }
 
+    func setHidden(buddyWithID buddyID: UUID, isHidden: Bool) {
+        mutateBuddy(withID: buddyID) { $0.isHidden = isHidden ? true : nil }
+    }
+
     func setNotifiesWhenFinished(buddyWithID buddyID: UUID, notifiesWhenFinished: Bool) {
         mutateBuddy(withID: buddyID) { $0.notifiesWhenFinished = notifiesWhenFinished ? nil : false }
     }
@@ -746,6 +770,8 @@ final class BuddyStore: ObservableObject {
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
         BuddyMemoryStore.shared.deleteMemory(ofBuddyWithID: buddyID)
         BuddyFileLibrary.shared.deleteLibrary(ofBuddyWithID: buddyID)
+        BuddyComposerDraftStore().removeDrafts(ofBuddyWithID: buddyID)
+        BuddyGroupStore.shared.removeBuddy(withID: buddyID)
         buddies.removeAll { $0.id == buddyID }
         saveBuddies()
     }

@@ -80,5 +80,19 @@ savedQueue.setPaused(true, forBuddyWithID: otherBuddy)
 let reloadedQueue = try! decoder.decode(BuddyMessageQueue.self, from: try! encoder.encode(savedQueue))
 check(reloadedQueue == savedQueue, "the queue round-trips through JSON")
 
+// A queued message remembers its thread, and an old saved line still loads.
+do {
+    var threadQueue = BuddyMessageQueue()
+    let threadBuddy = UUID()
+    let sideThread = UUID()
+    threadQueue.enqueue("in a side thread", forBuddyWithID: threadBuddy, threadID: sideThread)
+    threadQueue.enqueue("in main", forBuddyWithID: threadBuddy)
+    check(threadQueue.front(forBuddyWithID: threadBuddy)?.threadID == sideThread, "the queued message keeps its thread")
+    let reloaded = try! JSONDecoder().decode(BuddyMessageQueue.self, from: JSONEncoder().encode(threadQueue))
+    check(reloaded.waitingMessages(forBuddyWithID: threadBuddy).map(\.threadID) == [sideThread, nil], "thread ids survive the codec")
+    let oldMessageJSON = Data(#"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","text":"hi","queuedAt":0}"#.utf8)
+    check((try? JSONDecoder().decode(QueuedBuddyMessage.self, from: oldMessageJSON))?.threadID == nil, "a message queued before threads loads as main")
+}
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

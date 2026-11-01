@@ -84,17 +84,9 @@ struct BuddyTypingDots: View {
 struct BuddyAmbientBackground: View {
     let colorIndex: Int
 
+    /// Flat, as in OpenBot: the page panel's own colour, with no tint from the buddy.
     var body: some View {
-        ZStack {
-            WispColor.windowBackground
-            RadialGradient(
-                colors: [BuddyAppearance.deepColor(forColorIndex: colorIndex).opacity(0.10), .clear],
-                center: .topLeading,
-                startRadius: 0,
-                endRadius: 520
-            )
-        }
-        .animation(WispMotion.gentle, value: colorIndex)
+        Color.clear
     }
 }
 

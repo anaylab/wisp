@@ -28,6 +28,10 @@ struct UsageLogRecord: Codable, Equatable, Identifiable, Sendable {
     let screenshotWasAttached: Bool
     /// True for buddy / background runs, false for a live conversation turn.
     let isBackgroundRun: Bool
+    /// The buddy whose run this was, so a buddy's page can show its own usage.
+    /// An id only, like the other fields: no content. Nil for live turns and
+    /// for records written before buddies were tracked.
+    var buddyID: UUID? = nil
 
     var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
 }
@@ -76,6 +80,8 @@ enum UsageProviderIdentifier {
             ("claude-subscription/", .claudeSubscription),
             ("openai/", .openAI),
             ("gemini/", .gemini),
+            ("grok/", .grok),
+            ("openrouter/", .openRouter),
         ]
         for (prefix, kind) in kindByPrefix where identifier.hasPrefix(prefix) {
             return (kind, String(identifier.dropFirst(prefix.count)))
@@ -115,6 +121,11 @@ struct UsageSummary: Equatable, Sendable {
 }
 
 enum UsageAggregator {
+    /// The records of one buddy's runs.
+    static func records(_ records: [UsageLogRecord], ofBuddyWithID buddyID: UUID) -> [UsageLogRecord] {
+        records.filter { $0.buddyID == buddyID }
+    }
+
     /// "Today" is the calendar day containing `now`; the other windows are
     /// rolling 7 and 30 days back from `now`.
     static func summary(of records: [UsageLogRecord], now: Date, calendar: Calendar = .current) -> UsageSummary {

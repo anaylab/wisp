@@ -24,6 +24,9 @@
 import Foundation
 
 nonisolated enum WispThemeID: String, Codable, CaseIterable, Identifiable, Sendable {
+    /// OpenBot's neutral graphite: flat greys, hairline edges, one inverted action, a
+    /// lavender glint for AI activity. The only theme that also sets the neutrals.
+    case graphite
     /// A clean white messenger look: black accent, flat surfaces, vivid buddies.
     case paper
     /// Near-black window, periwinkle accent.
@@ -51,6 +54,23 @@ nonisolated struct WispThemeColorPair: Equatable, Sendable {
 nonisolated struct WispThemeBuddyColor: Equatable, Sendable {
     let lightHex: String
     let deepHex: String
+}
+
+/// A theme's own greys, for a look (Graphite) that needs neutrals other than the default
+/// warm ones. Hex pairs, like everything else here; the separator's opacity is one number
+/// per appearance.
+nonisolated struct WispThemeNeutrals: Equatable, Sendable {
+    let background: WispThemeColorPair
+    let surface1: WispThemeColorPair
+    let surface2: WispThemeColorPair
+    let surface3: WispThemeColorPair
+    let surface4: WispThemeColorPair
+    let textPrimary: WispThemeColorPair
+    let textSecondary: WispThemeColorPair
+    let textTertiary: WispThemeColorPair
+    let separator: WispThemeColorPair
+    let separatorLightAlpha: Double
+    let separatorDarkAlpha: Double
 }
 
 nonisolated struct WispTheme: Identifiable, Equatable, Sendable {
@@ -90,6 +110,8 @@ nonisolated struct WispTheme: Identifiable, Equatable, Sendable {
     var prefersDarkAppearance: Bool = false
     /// The same, for a theme made for light (Paper).
     var prefersLightAppearance: Bool = false
+    /// Overrides for the neutrals (surfaces, text, hairlines). Nil keeps the default greys.
+    var neutrals: WispThemeNeutrals? = nil
 
     static let buddyPaletteCount = 8
 
@@ -98,10 +120,10 @@ nonisolated struct WispTheme: Identifiable, Equatable, Sendable {
     }
 
     /// Paper is the out-of-the-box look; every other theme is one tap away in the picker.
-    static let defaultTheme: WispTheme = paper
+    static let defaultTheme: WispTheme = graphite
 
     /// The nine themes, in picker order.
-    static let all: [WispTheme] = [paper, midnight, aqua, sage, candy, sunset, mint, berryNight, mono]
+    static let all: [WispTheme] = [graphite, paper, midnight, aqua, sage, candy, sunset, mint, berryNight, mono]
 }
 
 // MARK: - The nine themes
@@ -176,6 +198,45 @@ nonisolated extension WispTheme {
         windowBackground: WispThemeColorPair(lightHex: "#FFFFFF", darkHex: "#101012"),
         cardBackground: WispThemeColorPair(lightHex: "#F5F5F7", darkHex: "#1A1A1D"),
         prefersLightAppearance: true
+    )
+
+    /// OpenBot's look in Wisp's skin: a near-black frame with two flat panels on it, greys
+    /// with no tint, hairline edges, and white as the one action colour. The only colour is
+    /// the buddies and a lavender glint for "working". In light mode it is the same idea on
+    /// paper greys (#F5F5F6 sidebar, white page). Dark is the default appearance.
+    static let graphite = WispTheme(
+        id: .graphite,
+        name: "Graphite",
+        accent: WispThemeColorPair(lightHex: "#141414", darkHex: "#3A3A3C"),
+        accentHover: WispThemeColorPair(lightHex: "#2A2A2C", darkHex: "#4A4A4C"),
+        accentText: WispThemeColorPair(lightHex: "#141414", darkHex: "#F0F0F0"),
+        textOnAccentHex: "#FFFFFF",
+        secondaryAccent: WispThemeColorPair(lightHex: "#6E4CD9", darkHex: "#C9A8F5"),
+        aiActivityAccent: WispThemeColorPair(lightHex: "#7C3AED", darkHex: "#C9A8F5"),
+        backdropStops: [
+            WispThemeColorPair(lightHex: "#FFFFFF", darkHex: "#0D0D0D"),
+            WispThemeColorPair(lightHex: "#F5F5F6", darkHex: "#0D0D0D"),
+            WispThemeColorPair(lightHex: "#EDEDF0", darkHex: "#0D0D0D"),
+        ],
+        buddyPalette: WispTheme.paper.buddyPalette,
+        islandTintHex: "#000000",
+        glassTintStrength: 0,
+        windowBackground: WispThemeColorPair(lightHex: "#E8E8EB", darkHex: "#0D0D0D"),
+        cardBackground: WispThemeColorPair(lightHex: "#F5F5F6", darkHex: "#1A1A1A"),
+        prefersDarkAppearance: true,
+        neutrals: WispThemeNeutrals(
+            background: WispThemeColorPair(lightHex: "#FFFFFF", darkHex: "#1A1A1A"),
+            surface1: WispThemeColorPair(lightHex: "#F5F5F6", darkHex: "#1E1E1E"),
+            surface2: WispThemeColorPair(lightHex: "#F0F0F2", darkHex: "#212121"),
+            surface3: WispThemeColorPair(lightHex: "#E8E8EB", darkHex: "#2A2A2A"),
+            surface4: WispThemeColorPair(lightHex: "#DCDCE0", darkHex: "#333333"),
+            textPrimary: WispThemeColorPair(lightHex: "#141414", darkHex: "#FFFFFF"),
+            textSecondary: WispThemeColorPair(lightHex: "#3A3A3C", darkHex: "#DCDCDC"),
+            textTertiary: WispThemeColorPair(lightHex: "#6B6B70", darkHex: "#979797"),
+            separator: WispThemeColorPair(lightHex: "#141414", darkHex: "#FFFFFF"),
+            separatorLightAlpha: 0.08,
+            separatorDarkAlpha: 0.07
+        )
     )
 
     /// A near-black window with a periwinkle accent: flat dark panels, hairline

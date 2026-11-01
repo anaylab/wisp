@@ -33,6 +33,19 @@ struct BuddyChatView: View {
     @State private var expandedRunIDs: Set<UUID> = []
     @State private var hoveredTaskID: UUID?
     @State private var bounceCount = 0
+    /// The open thread; nil is the main thread. Side threads are named by their first message.
+    @State private var activeThreadID: UUID?
+    /// New threads that have no message yet (not kept past a restart, as in OpenBot).
+    @State private var draftThreadIDs: [UUID] = []
+    @State private var threadPendingDeletion: UUID?
+    /// The run whose Trace window is open.
+    @State private var tracedRunID: UUID?
+    /// False once the user scrolls up from the newest entry; shows the jump-to-latest pill.
+    @State private var isScrolledToBottom = true
+    /// Whose composer text `draftMessageText` is, so a thread or buddy switch can't write
+    /// one conversation's draft into another's.
+    @State private var draftOwner: (buddyID: UUID, threadID: UUID?)?
+    private let draftStore = BuddyComposerDraftStore()
     @FocusState private var isComposerFocused: Bool
 
     private let bottomAnchorID = "buddy-chat-bottom"
@@ -49,24 +62,60 @@ struct BuddyChatView: View {
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
         let mood = buddyStore.mood(of: buddy, in: taskRegistry)
         let latestRunRecord = buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
-        let threadTaskIDs = BuddyListPolicy.threadTaskIDs(
-            exchangeTaskIDs: threadStore.exchanges(ofBuddyWithID: buddy.id).map(\.taskID),
-            runTaskIDs: buddy.runTaskIDs
+        let allExchanges = threadStore.exchanges(ofBuddyWithID: buddy.id)
+        // A group chat's runs are filed under the group's id; they are not tabs of the buddy's own.
+        let ownExchanges = allExchanges.filter { exchange in
+            // A group chat's or a workflow's runs are filed under its own id, not a tab of the buddy's.
+            exchange.threadID.map { !BuddyGroupStore.shared.isGroupID($0) && WorkflowStore.shared.workflow(withID: $0) == nil } ?? true
+        }
+        let threadSummaries = BuddyThreadPolicy.threadSummaries(from: ownExchanges, draftThreadIDs: draftThreadIDs)
+        // Runs from before buddies had threads have no exchange; they belong to the main thread.
+        let threadTaskIDs = activeThreadID == nil
+            ? BuddyListPolicy.threadTaskIDs(
+                exchangeTaskIDs: BuddyThreadPolicy.exchanges(allExchanges, inThread: nil).map(\.taskID),
+                runTaskIDs: buddy.runTaskIDs.filter { runID in !allExchanges.contains { $0.taskID == runID && $0.threadID != nil } }
+            )
+            : BuddyThreadPolicy.exchanges(allExchanges, inThread: activeThreadID).map(\.taskID)
+        let entryStartedAt: [UUID: Date] = Dictionary(
+            threadTaskIDs.compactMap { taskID in
+                let startedAt = allExchanges.first { $0.taskID == taskID }?.startedAt
+                    ?? taskRegistry.records.first { $0.id == taskID }?.startedAt
+                return startedAt.map { (taskID, $0) }
+            },
+            uniquingKeysWith: { first, _ in first }
         )
         return ZStack {
             BuddyAmbientBackground(colorIndex: buddy.colorIndex)
 
             VStack(spacing: 0) {
-                header(for: buddy, mood: mood, isRunning: isRunning, latestRunRecord: latestRunRecord)
-                Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(height: 0.5)
+                header(for: buddy, mood: mood, isRunning: isRunning, latestRunRecord: latestRunRecord, summaries: threadSummaries)
+                Rectangle().fill(WispColor.cardSeparator.opacity(0.4)).frame(height: 0.5)
 
                 ScrollViewReader { scrollProxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
-                            missionRow(for: buddy)
+                            if activeThreadID == nil { missionRow(for: buddy) }
                             if threadTaskIDs.isEmpty { quickStarts(for: buddy) }
-                            ForEach(threadTaskIDs, id: \.self) { taskID in
-                                threadEntry(taskID: taskID, buddy: buddy)
+                            ForEach(Array(threadTaskIDs.enumerated()), id: \.element) { index, taskID in
+                                let startedAt = entryStartedAt[taskID]
+                                let previousStartedAt = index > 0 ? entryStartedAt[threadTaskIDs[index - 1]] : nil
+                                let startsNewDay = startedAt.map {
+                                    BuddyChatLayoutPolicy.startsNewDay(previous: previousStartedAt, current: $0)
+                                } ?? false
+                                if let startedAt, startsNewDay {
+                                    daySeparator(BuddyChatLayoutPolicy.dayLabel(for: startedAt, now: Date()))
+                                }
+                                threadEntry(
+                                    taskID: taskID,
+                                    buddy: buddy,
+                                    continuesRun: BuddyChatLayoutPolicy.continuesAnswerRun(
+                                        previous: previousStartedAt,
+                                        current: startedAt,
+                                        currentHasUserMessage: allExchanges.first { $0.taskID == taskID }?.origin == .message
+                                            || allExchanges.first { $0.taskID == taskID }?.origin == .delegated,
+                                        startsNewDay: startsNewDay
+                                    )
+                                )
                             }
                             Color.clear.frame(height: 1).id(bottomAnchorID)
                         }
@@ -76,6 +125,35 @@ struct BuddyChatView: View {
                         .frame(maxWidth: 760)
                         .frame(maxWidth: .infinity)
                     }
+                    .onScrollGeometryChange(for: Bool.self) { geometry in
+                        BuddyChatLayoutPolicy.isAtBottom(
+                            contentOffsetY: geometry.contentOffset.y,
+                            containerHeight: geometry.containerSize.height,
+                            contentHeight: geometry.contentSize.height
+                        )
+                    } action: { _, isAtBottom in
+                        isScrolledToBottom = isAtBottom
+                    }
+                    .overlay(alignment: .bottom) {
+                        if !isScrolledToBottom {
+                            Button {
+                                withAnimation(WispMotion.smooth) { scrollProxy.scrollTo(bottomAnchorID, anchor: .bottom) }
+                            } label: {
+                                Label("Latest", systemImage: "arrow.down")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(WispColor.textPrimary)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 28)
+                                    .wispBevel(Capsule(style: .continuous), fill: WispColor.surface3)
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .pointerCursor()
+                            .padding(.bottom, 10)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .animation(WispMotion.quick, value: isScrolledToBottom)
                     .onAppear { scrollProxy.scrollTo(bottomAnchorID, anchor: .bottom) }
                     .onChange(of: threadTaskIDs.count) { _, _ in
                         withAnimation(WispMotion.smooth) { scrollProxy.scrollTo(bottomAnchorID, anchor: .bottom) }
@@ -91,16 +169,48 @@ struct BuddyChatView: View {
 
             if isDropTargeted { BuddyDropOverlay(colorIndex: buddy.colorIndex) }
         }
+        .sheet(isPresented: Binding(get: { tracedRunID != nil }, set: { if !$0 { tracedRunID = nil } })) {
+            if let tracedRunID, let tracedRecord = taskRegistry.records.first(where: { $0.id == tracedRunID }) {
+                RunTraceView(runRecord: tracedRecord, buddy: buddy, onClose: { self.tracedRunID = nil })
+            }
+        }
+        .confirmationDialog(
+            "Delete this thread?",
+            isPresented: Binding(
+                get: { threadPendingDeletion != nil },
+                set: { if !$0 { threadPendingDeletion = nil } }
+            )
+        ) {
+            Button("Delete Thread", role: .destructive) {
+                if let threadID = threadPendingDeletion {
+                    threadStore.deleteSideThread(threadID, ofBuddyWithID: buddy.id)
+                    draftThreadIDs.removeAll { $0 == threadID }
+                    if activeThreadID == threadID { activeThreadID = nil }
+                }
+            }
+        } message: {
+            Text("Its messages are removed. The runs stay in History.")
+        }
         .dropDestination(for: URL.self) { droppedURLs, _ in
             addPendingFiles(droppedURLs)
             return true
         } isTargeted: { isTargeted in
             withAnimation(WispMotion.quick) { isDropTargeted = isTargeted }
         }
-        .onAppear { buddyStore.markRead(buddyWithID: buddy.id, in: taskRegistry) }
+        .onAppear {
+            buddyStore.markRead(buddyWithID: buddy.id, in: taskRegistry)
+            loadDraft(buddyID: buddy.id)
+        }
+        .onChange(of: draftMessageText) { _, newText in
+            guard let draftOwner else { return }
+            draftStore.save(newText, buddyID: draftOwner.buddyID, threadID: draftOwner.threadID)
+        }
+        .onChange(of: activeThreadID) { _, _ in loadDraft(buddyID: buddy.id) }
         .onChange(of: buddyID) { _, newBuddyID in
             buddyStore.markRead(buddyWithID: newBuddyID, in: taskRegistry)
-            draftMessageText = ""
+            activeThreadID = nil
+            draftThreadIDs = []
+            loadDraft(buddyID: newBuddyID)
             pendingFileURLs = []
             expandedRunIDs = []
             sendFailureMessage = nil
@@ -108,26 +218,121 @@ struct BuddyChatView: View {
         }
     }
 
+    /// Puts the open conversation's unsent text in the composer. The owner changes
+    /// first, so the text change this causes is saved under the right conversation.
+    private func loadDraft(buddyID: UUID) {
+        draftOwner = (buddyID, activeThreadID)
+        draftMessageText = draftStore.draft(buddyID: buddyID, threadID: activeThreadID)
+    }
+
+    private func daySeparator(_ label: String) -> some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(height: 0.5)
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(WispColor.textTertiary)
+            Rectangle().fill(WispColor.cardSeparator.opacity(0.5)).frame(height: 0.5)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    // MARK: - Threads
+
+    /// The tabs of the top bar: the buddy's own (its character and name) first, then one
+    /// per side thread, then "+" to start another thread.
+    private func threadTabs(for buddy: WispBuddy, summaries: [BuddyThreadSummary], mood: BuddyMood) -> some View {
+        let accent = BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex)
+        return HStack(spacing: 4) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(summaries) { summary in
+                        let isActive = summary.id == activeThreadID
+                        HStack(spacing: 6) {
+                            if summary.isMain {
+                                BuddyCharacter(colorIndex: buddy.colorIndex, size: 18, mood: mood, liveliness: .working, looksAtPointer: false)
+                                    .frame(width: 22, height: 22)
+                            }
+                            Text(summary.isMain ? buddy.name : summary.title)
+                                .font(.system(size: 12.5, weight: isActive ? .semibold : .medium))
+                                .foregroundStyle(isActive ? WispColor.textPrimary : WispColor.textSecondary)
+                                .lineLimit(1)
+                            if let threadID = summary.id, isActive {
+                                Button {
+                                    if summary.exchangeCount == 0 {
+                                        draftThreadIDs.removeAll { $0 == threadID }
+                                        activeThreadID = nil
+                                    } else {
+                                        threadPendingDeletion = threadID
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(WispColor.textTertiary)
+                                }
+                                .buttonStyle(.plain)
+                                .pointerCursor()
+                                .accessibilityLabel("Delete thread")
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(height: 30)
+                        .background {
+                            if isActive {
+                                Color.clear.wispBevel(RoundedRectangle(cornerRadius: 9, style: .continuous), fill: WispColor.surface3)
+                            }
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .onTapGesture { withAnimation(WispMotion.quick) { activeThreadID = summary.id } }
+                        .pointerCursor()
+                        .accessibilityLabel(summary.isMain ? buddy.name : summary.title)
+                        .accessibilityAddTraits(isActive ? [.isSelected, .isButton] : .isButton)
+                    }
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            BuddyIconButton(symbolName: "plus", label: "New thread", tint: accent, size: 26) {
+                let newThreadID = UUID()
+                draftThreadIDs.append(newThreadID)
+                withAnimation(WispMotion.quick) { activeThreadID = newThreadID }
+                isComposerFocused = true
+            }
+        }
+        .animation(WispMotion.quick, value: summaries)
+    }
+
     // MARK: - Header
 
-    private func header(for buddy: WispBuddy, mood: BuddyMood, isRunning: Bool, latestRunRecord: AgentTaskRecord?) -> some View {
-        HStack(spacing: 12) {
-            BuddyCharacter(colorIndex: buddy.colorIndex, size: 40, mood: mood, liveliness: .full, bounceTrigger: bounceCount, looksAtPointer: true)
-                .frame(width: 46, height: 46)
+    /// One bar, as in OpenBot: the buddy's own tab and its side threads (with +) on the
+    /// left; on the right what it is doing, its model, Run / Stop, the menu and the
+    /// details toggle. The buddy's name lives in its tab, so there is no second title.
+    private func header(
+        for buddy: WispBuddy, mood: BuddyMood, isRunning: Bool, latestRunRecord: AgentTaskRecord?,
+        summaries: [BuddyThreadSummary]
+    ) -> some View {
+        HStack(spacing: 8) {
+            threadTabs(for: buddy, summaries: summaries, mood: mood)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(buddy.name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(WispColor.textPrimary)
-                    .lineLimit(1)
+            Spacer(minLength: 8)
+
+            if mood == .working || mood == .waiting || mood == .oops {
                 Text(statusLine(for: buddy, mood: mood, latestRunRecord: latestRunRecord))
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(BuddyFormatting.moodColor(mood, colorIndex: buddy.colorIndex))
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 220, alignment: .trailing)
                     .animation(WispMotion.smooth, value: mood)
             }
 
-            Spacer(minLength: 8)
+            Text(buddy.modelChoice?.displayName ?? ActiveStackReadout.shared.chatModelName)
+                .font(.system(size: 11.5))
+                .foregroundStyle(WispColor.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 160)
+                .nativeTooltip("The model this buddy uses")
 
             if isRunning {
                 Button { buddyStore.stopRun(ofBuddyWithID: buddy.id) } label: { Label("Stop", systemImage: "stop.fill") }
@@ -172,8 +377,8 @@ struct BuddyChatView: View {
                 withAnimation(WispMotion.island) { isInspectorOpen.toggle() }
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .frame(height: 48)
     }
 
     /// One line, only when it says something: what it's doing, or when it next runs.
@@ -234,7 +439,7 @@ struct BuddyChatView: View {
         }
     }
 
-    private func threadEntry(taskID: UUID, buddy: WispBuddy) -> some View {
+    private func threadEntry(taskID: UUID, buddy: WispBuddy, continuesRun: Bool = false) -> some View {
         let runRecord = taskRegistry.records.first { $0.id == taskID }
         let exchange = threadStore.exchange(forTaskID: taskID, ofBuddyWithID: buddy.id)
         let isRunning = runRecord.map { !$0.status.isTerminal } ?? false
@@ -251,7 +456,7 @@ struct BuddyChatView: View {
                 case .running, .waitingForApproval:
                     typingRow(runRecord: runRecord, buddy: buddy)
                 case .succeeded:
-                    answerRow(text: AnswerDisplayText.cleaned(runRecord.finalText ?? "").nonEmptyOr("Done."), taskID: taskID, exchange: exchange, buddy: buddy, isRunning: isRunning, meta: metaText(for: runRecord))
+                    answerRow(text: AnswerDisplayText.cleaned(runRecord.finalText ?? "").nonEmptyOr("Done."), taskID: taskID, exchange: exchange, buddy: buddy, isRunning: isRunning, meta: metaText(for: runRecord), showsAvatar: !continuesRun)
                 case .failed(let failureReason):
                     errorRow(text: AnswerDisplayText.cleaned(runRecord.finalText ?? "").nonEmptyOr(failureReason), meta: metaText(for: runRecord))
                 case .cancelled, .interrupted:
@@ -261,7 +466,7 @@ struct BuddyChatView: View {
                 }
             } else if let exchange {
                 if let answerText = exchange.answerText, !answerText.isEmpty {
-                    answerRow(text: answerText, taskID: taskID, exchange: exchange, buddy: buddy, isRunning: false, meta: BuddyFormatting.timeText(exchange.startedAt))
+                    answerRow(text: answerText, taskID: taskID, exchange: exchange, buddy: buddy, isRunning: false, meta: BuddyFormatting.timeText(exchange.startedAt), showsAvatar: !continuesRun)
                 } else {
                     Text("No answer was kept · \(BuddyFormatting.timeText(exchange.startedAt))")
                         .font(.system(size: 11)).foregroundStyle(WispColor.textTertiary).padding(.leading, 34)
@@ -293,13 +498,13 @@ struct BuddyChatView: View {
             }
             Text(exchange.userText)
                 .font(.system(size: 13.5))
-                .foregroundStyle(WispColor.textOnAccent)
+                .foregroundStyle(WispColor.textPrimary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 14).padding(.vertical, 9)
-                // The user's side is the theme's accent (black in Paper), so the buddies'
-                // own colours stay theirs and a conversation reads as two clear voices.
-                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.accent))
+                // Neutral and quiet, as in OpenBot: the user's words sit in a soft bubble and
+                // the buddy's answer is plain text beside its face.
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface3))
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 70)
@@ -329,10 +534,11 @@ struct BuddyChatView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(WispColor.cardSeparator.opacity(0.8), style: StrokeStyle(lineWidth: 0.7, dash: [4, 3])))
     }
 
-    private func answerRow(text: String, taskID: UUID, exchange: BuddyThreadExchange?, buddy: WispBuddy, isRunning: Bool, meta: String) -> some View {
+    private func answerRow(text: String, taskID: UUID, exchange: BuddyThreadExchange?, buddy: WispBuddy, isRunning: Bool, meta: String, showsAvatar: Bool = true) -> some View {
+        // As in OpenBot: the buddy's reply is a bubble of its own on the left, the same quiet
+        // surface as the user's on the right, with no avatar beside it (the tab and the
+        // list already say who is talking). `showsAvatar` is kept for callers but unused.
         HStack(alignment: .top, spacing: 8) {
-            BuddyCharacter(colorIndex: buddy.colorIndex, size: 24, mood: .idle, liveliness: .still)
-                .frame(width: 26, height: 26)
             VStack(alignment: .leading, spacing: 5) {
                 Text(BuddyAnswerFormatting.attributedAnswer(text))
                     .font(.system(size: 13.5))
@@ -341,8 +547,8 @@ struct BuddyChatView: View {
                     .lineSpacing(3)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 13).padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface2.opacity(0.9)))
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface3))
 
                 HStack(spacing: 2) {
                     Text(meta)
@@ -370,7 +576,7 @@ struct BuddyChatView: View {
                 guard !isRunning else { return }
                 let didStart: Bool
                 if let exchange, exchange.origin == .message {
-                    didStart = buddyStore.sendMessage(exchange.userText, toBuddyWithID: buddy.id)
+                    didStart = buddyStore.sendMessage(exchange.userText, toBuddyWithID: buddy.id, inThread: exchange.threadID)
                 } else {
                     didStart = buddyStore.runNow(buddyWithID: buddy.id)
                 }
@@ -438,38 +644,27 @@ struct BuddyChatView: View {
         }
     }
 
-    private func progressDisclosure(for runRecord: AgentTaskRecord, buddy: WispBuddy) -> some View {
-        let isExpanded = expandedRunIDs.contains(runRecord.id)
-        return VStack(alignment: .leading, spacing: 5) {
-            Button {
-                withAnimation(WispMotion.smooth) {
-                    if isExpanded { expandedRunIDs.remove(runRecord.id) } else { expandedRunIDs.insert(runRecord.id) }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    Text(runRecord.steps.count == 1 ? "1 step" : "\(runRecord.steps.count) steps").font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(WispColor.textTertiary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .pointerCursor()
+    private func stepCountText(for runRecord: AgentTaskRecord) -> String {
+        runRecord.steps.count == 1 ? "1 step" : "\(runRecord.steps.count) steps"
+    }
 
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(runRecord.steps) { step in
-                        HStack(alignment: .top, spacing: 6) {
-                            Circle().fill(step.isError ? DS.Colors.destructive : WispColor.textTertiary).frame(width: 4, height: 4).padding(.top, 5)
-                            Text(step.summary).font(.system(size: 11)).foregroundStyle(WispColor.textTertiary).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .padding(.leading, 12)
-                .transition(.opacity)
+    /// "4 steps  11s ›": opens the run's Trace (`RunTraceView`), as in OpenBot.
+    private func progressDisclosure(for runRecord: AgentTaskRecord, buddy: WispBuddy) -> some View {
+        Button {
+            tracedRunID = runRecord.id
+        } label: {
+            HStack(spacing: 6) {
+                Text(stepCountText(for: runRecord)).font(.system(size: 11.5, weight: .medium))
+                Text(BuddyFormatting.durationText(runRecord.elapsedSeconds)).font(.system(size: 11.5).monospacedDigit())
+                Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
             }
+            .foregroundStyle(WispColor.textTertiary)
+            .contentShape(Rectangle())
         }
-        .padding(.leading, 34)
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .accessibilityLabel("Open trace, \(stepCountText(for: runRecord))")
+        .padding(.leading, 4)
     }
 
     // MARK: - Composer
@@ -496,7 +691,25 @@ struct BuddyChatView: View {
             }
 
             HStack(alignment: .bottom, spacing: 6) {
-                BuddyIconButton(symbolName: "paperclip", label: "Attach files", tint: accent, size: 32) { chooseFiles() }
+                // OpenBot's "+" is a small menu: attach, or start a side thread.
+                Menu {
+                    Button("Attach files…", systemImage: "paperclip") { chooseFiles() }
+                    Button("New thread", systemImage: "plus.bubble") {
+                        let newThreadID = UUID()
+                        draftThreadIDs.append(newThreadID)
+                        withAnimation(WispMotion.quick) { activeThreadID = newThreadID }
+                        isComposerFocused = true
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(accent)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
+                .pointerCursor()
+                .accessibilityLabel("Add")
 
                 TextField(isRunning ? "Queue a message for \(buddy.name)…" : "Message \(buddy.name)", text: $draftMessageText, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -510,9 +723,9 @@ struct BuddyChatView: View {
                 Button { send(to: buddy) } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(canSend ? Color.white : WispColor.textTertiary)
+                        .foregroundStyle(canSend ? WispColor.windowBackground : WispColor.textTertiary)
                         .frame(width: 30, height: 30)
-                        .background(Circle().fill(canSend ? accent : WispColor.surface4.opacity(0.7)))
+                        .background(Circle().fill(canSend ? WispColor.textPrimary : WispColor.surface4.opacity(0.7)))
                         .contentShape(Circle())
                 }
                 .buttonStyle(PressableScaleButtonStyle())
@@ -627,7 +840,7 @@ struct BuddyChatView: View {
         isSending = true
         sendFailureMessage = nil
         Task {
-            let didStart = await buddyStore.sendMessage(messageText, attachmentFileURLs: fileURLs, toBuddyWithID: buddy.id)
+            let didStart = await buddyStore.sendMessage(messageText, attachmentFileURLs: fileURLs, toBuddyWithID: buddy.id, inThread: activeThreadID)
             isSending = false
             if didStart {
                 draftMessageText = ""

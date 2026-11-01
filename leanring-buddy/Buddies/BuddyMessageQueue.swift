@@ -18,6 +18,9 @@ struct QueuedBuddyMessage: Codable, Identifiable, Equatable {
     /// What the model receives.
     let text: String
     let queuedAt: Date
+    /// The side thread it was sent in; nil is the main thread. Optional so a
+    /// line saved before threads existed still loads.
+    var threadID: UUID? = nil
 }
 
 struct BuddyMessageQueue: Codable, Equatable {
@@ -51,6 +54,7 @@ struct BuddyMessageQueue: Codable, Equatable {
     mutating func enqueue(
         _ messageText: String,
         forBuddyWithID buddyID: UUID,
+        threadID: UUID? = nil,
         now: Date = Date(),
         id: UUID = UUID()
     ) -> QueuedBuddyMessage? {
@@ -59,7 +63,7 @@ struct BuddyMessageQueue: Codable, Equatable {
               waitingMessages(forBuddyWithID: buddyID).count < Self.maximumWaitingMessagesPerBuddy else {
             return nil
         }
-        let queuedMessage = QueuedBuddyMessage(id: id, text: trimmedText, queuedAt: now)
+        let queuedMessage = QueuedBuddyMessage(id: id, text: trimmedText, queuedAt: now, threadID: threadID)
         waitingMessagesByBuddyID[buddyID, default: []].append(queuedMessage)
         return queuedMessage
     }

@@ -3085,11 +3085,25 @@ final class CompanionManager: ObservableObject {
                 ? "Something went wrong answering that. Check the dashboard for details."
                 : "I can't reach the local model. Make sure Ollama is running."
 
+            // The synthesizer must outlive this closure, or the line is cut off.
+            let synthesizer = NSSpeechSynthesizer()
             await MainActor.run {
                 guard let self else { return }
-                let synthesizer = NSSpeechSynthesizer()
                 synthesizer.startSpeaking(utterance)
                 self.voiceState = .responding
+            }
+
+            // Nothing else resets the state after this line (the failed turn has
+            // already finished), so wait out the speech and put it back ourselves —
+            // otherwise the notch says "Responding…" forever.
+            while synthesizer.isSpeaking {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+            await MainActor.run {
+                guard let self else { return }
+                if self.voiceState == .responding {
+                    self.voiceState = .idle
+                }
             }
         }
     }
@@ -3231,11 +3245,13 @@ final class CompanionManager: ObservableObject {
                     personalityLine: buddy.personality?.personaLine
                 )
                 + (request.requesterName.map(BuddyThreadPolicy.delegatedRequestAddendum(requesterName:)) ?? "")
+                + (request.extraSystemPrompt ?? "")
                 + BuddyMemoryStore.shared.promptInstructions(forBuddyWithID: buddyID)
                 + BuddyAttachmentPolicy.libraryPromptLine(
                     fileNames: BuddyFileLibrary.shared.attachments(ofBuddyWithID: buddyID).map(\.fileName)
                 ),
-            conversationHistory: buddyThreadStore.historyMessages(forBuddyWithID: buddyID),
+            conversationHistory: request.historyOverride
+                ?? buddyThreadStore.historyMessages(forBuddyWithID: buddyID, inThread: request.threadID),
             images: request.images,
             toolkit: BuddyRunToolkitBuilder.toolkit(
                 forBuddyWithID: buddyID,
@@ -3243,7 +3259,7 @@ final class CompanionManager: ObservableObject {
                 toolAccess: buddy.toolAccess,
                 // A run a peer started can't ask another peer in turn.
                 // ask_buddy is only offered while Advanced features are on.
-                delegation: request.requesterName == nil && WispAdvancedFeaturesPreference.isEnabledNow
+                delegation: request.requesterName == nil && request.groupID == nil && WispAdvancedFeaturesPreference.isEnabledNow
                     ? (caller: buddy, service: .live())
                     : nil
             ),
@@ -3257,9 +3273,10 @@ final class CompanionManager: ObservableObject {
                 )
             },
             // A peer's request is a step in that peer's run, not news of its own.
-            completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated
+            completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated && request.groupID == nil
                 ? .buddy(name: buddy.name, job: buddy.instruction)
                 : nil,
+            usageBuddyID: buddyID,
             speakConfirmation: { [weak self] question in
                 guard let self else { return }
                 await self.speakConfirmationQuestion(question)
@@ -3272,7 +3289,8 @@ final class CompanionManager: ObservableObject {
             origin: request.origin,
             userText: request.displayText ?? request.text,
             requesterName: request.requesterName,
-            attachmentNames: request.attachmentNames
+            attachmentNames: request.attachmentNames,
+            threadID: request.threadID
         )
         return runTaskID
     }
@@ -4703,20 +4721,6 @@ extension CompanionManager: BrowserCursorGuide {
                 of: AgentCursorMotion.planMove(from: lastPlacement.point, to: displayLocalPoint)
             )
         }
-        agentCursorLastPlacement = (displayFrame, displayLocalPoint)
-        agentCursorTargetByDisplayFrame = [
-            displayFrame: AgentCursorTarget(pointInDisplaySpace: displayLocalPoint, actionText: actionText)
-        ]
-
-        // Long enough for the cursor to arrive and register before the click
-        // follows, and short enough that a thirty-step task is not mostly waiting.
-        let waitMilliseconds = max(350, glideMilliseconds + 250)
-        try? await Task.sleep(nanoseconds: UInt64(waitMilliseconds * 1_000_000))
-    }
-
-    /// Clears the guidance marker and the progress line once the workflow ends.
-    func endCursorGuidance() {
-        clearScreenAnnotations()
         // The rim marks the window once per task, on the first step; the window
         // is not expected to move while Wisp works in it.
         if agentCursorLastPlacement == nil,
@@ -4732,6 +4736,23 @@ extension CompanionManager: BrowserCursorGuide {
                 )
             ]
         }
+        agentCursorLastPlacement = (displayFrame, displayLocalPoint)
+        agentCursorTargetByDisplayFrame = [
+            displayFrame: AgentCursorTarget(pointInDisplaySpace: displayLocalPoint, actionText: actionText)
+        ]
+
+        // Long enough for the cursor to arrive and register before the click
+        // follows, and short enough that a thirty-step task is not mostly waiting.
+        let waitMilliseconds = max(350, glideMilliseconds + 250)
+        try? await Task.sleep(nanoseconds: UInt64(waitMilliseconds * 1_000_000))
+    }
+
+    /// Clears the guidance marker and the progress line once the workflow ends.
+    func endCursorGuidance() {
+        agentCursorTargetByDisplayFrame.removeAll()
+        agentWindowRimFrameByDisplayFrame.removeAll()
+        agentCursorLastPlacement = nil
+        clearScreenAnnotations()
         browserActivityText = ""
         browserTaskStepHistory = []
         browserTaskStepCount = 0
@@ -4745,9 +4766,6 @@ extension CompanionManager: BrowserCursorGuide {
         }
         browserActivityText = progressText
 
-        agentCursorTargetByDisplayFrame.removeAll()
-        agentWindowRimFrameByDisplayFrame.removeAll()
-        agentCursorLastPlacement = nil
         // The cloud loop reports each line through both its progress callback
         // and the cursor guide, so a repeat of the last line is the same step.
         if browserTaskStepHistory.last != progressText {

@@ -111,6 +111,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         saveWorkedSolutionItem.isEnabled = companionManager.canSaveWorkedSolution
         menu.addItem(saveWorkedSolutionItem)
         menu.addItem(actionItem(title: "Open Wisp", action: #selector(openToday), keyEquivalent: "o"))
+        menu.addItem(actionItem(
+            title: StudySessionController.shared.menuBarStatusText.map { "Study · \($0)" } ?? "Study…",
+            action: #selector(openStudy)
+        ))
         menu.addItem(actionItem(title: "Chat", action: #selector(openChat)))
         // Buddies are first-class. Brain has no page while Advanced features are off (the
         // router would land the click on Settings), so its items wait until then.
@@ -197,6 +201,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
     @objc private func openToday() {
         // The messenger is the front door; Today is one click away in its sidebar.
         WispWindowNavigator.open(.buddies)
+    }
+
+    @objc private func openStudy() {
+        WispWindowNavigator.open(.study)
     }
 
     @objc private func openChat() {

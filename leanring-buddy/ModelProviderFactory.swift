@@ -55,6 +55,20 @@ enum ModelProviderFactory {
 
         case .openAI:
             return OpenAIProvider(apiKey: ProviderKeychainStore.apiKey(for: .openAI))
+
+        case .grok:
+            return OpenAIProvider(
+                apiKey: ProviderKeychainStore.apiKey(for: .grok),
+                modelName: OpenAIProvider.grokDefaultModelName,
+                endpoint: .grok
+            )
+
+        case .openRouter:
+            return OpenAIProvider(
+                apiKey: ProviderKeychainStore.apiKey(for: .openRouter),
+                modelName: OpenAIProvider.openRouterDefaultModelName,
+                endpoint: .openRouter
+            )
         }
     }
 

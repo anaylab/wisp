@@ -69,6 +69,18 @@ final class MorningBriefingAndQuietModeTests: XCTestCase {
         }
     }
 
+    func testUndecidedCalendarAccessOffersAConnectRowFirst() {
+        let suggestions = MorningSuggestionBuilder.buildSuggestions(
+            routines: [],
+            remainingMeetingCountToday: nil,
+            hasRemindersAccess: true,
+            canOfferCalendarConnection: true,
+            now: now
+        )
+        XCTAssertEqual(suggestions.first?.action, .connectCalendar)
+        XCTAssertEqual(suggestions.map(\.title), ["Connect your calendar", "Check what's due today"])
+    }
+
     func testForgottenUnpinnedRoutinesAreLeftOut() {
         let neverRunRoutine = WispRoutine(name: "Never", instruction: "n")
         let longAgoRoutine = WispRoutine(

@@ -29,6 +29,8 @@ struct PerformanceTab: View {
             VStack(alignment: .leading, spacing: 16) {
                 ModelProviderCard(companionManager: companionManager)
 
+                CodingAgentsCard()
+
                 UsageCard()
 
                 systemSection
@@ -199,21 +201,16 @@ private struct ModelProviderCard: View {
     var body: some View {
         DashboardCard(title: "Model provider") {
             VStack(alignment: .leading, spacing: 12) {
-                Picker("", selection: $selectedProviderKind) {
+                VStack(spacing: 6) {
                     ForEach(BuddyChatProviderKind.allCases) { providerKind in
-                        Text(providerKind.displayName).tag(providerKind)
+                        ProviderListRow(
+                            providerKind: providerKind,
+                            isSelected: providerKind == selectedProviderKind,
+                            status: providerRowStatus(for: providerKind)
+                        ) {
+                            selectProvider(providerKind)
+                        }
                     }
-                }
-                .labelsHidden()
-                .pointerCursor()
-                .onChange(of: selectedProviderKind) { _, newProviderKind in
-                    BuddyChatProviderSelection.set(newProviderKind)
-                    companionManager.rebuildSelectedModelProvider()
-                    // Reset the entry to whatever the newly selected provider
-                    // already has stored, and never carry one provider's typed
-                    // key over to another.
-                    apiKeyDraft = ""
-                    hasStoredAPIKey = ProviderKeychainStore.hasAPIKey(for: newProviderKind)
                 }
 
                 if selectedProviderKind.sendsScreenshotsOffThisMachine {
@@ -240,7 +237,37 @@ private struct ModelProviderCard: View {
         }
         .onAppear {
             hasStoredAPIKey = ProviderKeychainStore.hasAPIKey(for: selectedProviderKind)
+            refreshStoredKeyFlags()
         }
+    }
+
+    /// Which providers have a key in the Keychain. Read once per change, not
+    /// once per row per redraw.
+    @State private var providerKindsWithStoredKey: Set<BuddyChatProviderKind> = []
+
+    private func refreshStoredKeyFlags() {
+        providerKindsWithStoredKey = Set(
+            BuddyChatProviderKind.allCases.filter { ProviderKeychainStore.hasAPIKey(for: $0) }
+        )
+    }
+
+    private func providerRowStatus(for providerKind: BuddyChatProviderKind) -> ProviderRowStatus {
+        if providerKind == selectedProviderKind { return .inUse }
+        if providerKind.requiresAPIKey {
+            return providerKindsWithStoredKey.contains(providerKind) ? .ready : .needsKey
+        }
+        return .ready
+    }
+
+    private func selectProvider(_ newProviderKind: BuddyChatProviderKind) {
+        guard newProviderKind != selectedProviderKind else { return }
+        selectedProviderKind = newProviderKind
+        BuddyChatProviderSelection.set(newProviderKind)
+        companionManager.rebuildSelectedModelProvider()
+        // Reset the entry to whatever the newly selected provider already has
+        // stored, and never carry one provider's typed key over to another.
+        apiKeyDraft = ""
+        hasStoredAPIKey = ProviderKeychainStore.hasAPIKey(for: newProviderKind)
     }
 
     private var cloudPrivacyNotice: some View {
@@ -322,6 +349,7 @@ private struct ModelProviderCard: View {
         ProviderKeychainStore.save(trimmedKey, for: selectedProviderKind)
         apiKeyDraft = ""
         hasStoredAPIKey = true
+        refreshStoredKeyFlags()
         // Rebuild so a provider that was constructed without a key picks the new
         // one up immediately.
         companionManager.rebuildSelectedModelProvider()
@@ -331,7 +359,117 @@ private struct ModelProviderCard: View {
         ProviderKeychainStore.deleteAPIKey(for: selectedProviderKind)
         apiKeyDraft = ""
         hasStoredAPIKey = false
+        refreshStoredKeyFlags()
         companionManager.rebuildSelectedModelProvider()
+    }
+}
+
+// MARK: - Provider list
+
+/// What a provider row says about its readiness, in one word.
+private enum ProviderRowStatus {
+    case inUse
+    case ready
+    case needsKey
+
+    var label: String {
+        switch self {
+        case .inUse: return "In use"
+        case .ready: return "Ready"
+        case .needsKey: return "Needs key"
+        }
+    }
+}
+
+private extension BuddyChatProviderKind {
+    /// The single line under a provider's name in the list.
+    var listDescription: String {
+        switch self {
+        case .localOllama: return "Private. Runs on this Mac through Ollama."
+        case .appleOnDevice: return "Private. Apple's built-in model, no download."
+        case .anthropic: return "Claude with your Anthropic API key."
+        case .claudeSubscription: return "Claude through your signed-in claude CLI."
+        case .openAI: return "GPT with your OpenAI API key."
+        case .gemini: return "Gemini with your Google API key."
+        case .grok: return "Grok with your xAI API key."
+        case .openRouter: return "Hundreds of models with one OpenRouter key."
+        }
+    }
+
+    /// A stand-in mark until real logos are bundled: an SF Symbol on a tile.
+    var listSymbolName: String {
+        switch self {
+        case .localOllama: return "desktopcomputer"
+        case .appleOnDevice: return "apple.logo"
+        case .anthropic, .claudeSubscription: return "sparkle"
+        case .openAI: return "circle.hexagongrid"
+        case .gemini: return "star.circle"
+        case .grok: return "bolt"
+        case .openRouter: return "arrow.triangle.branch"
+        }
+    }
+}
+
+/// One provider in the list: mark, name, one line, and a status on the right.
+/// The chosen one is outlined and reads "In use".
+private struct ProviderListRow: View {
+    let providerKind: BuddyChatProviderKind
+    let isSelected: Bool
+    let status: ProviderRowStatus
+    let onSelect: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                Image(systemName: providerKind.listSymbolName)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(WispColor.textPrimary)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(WispColor.surface3)
+                    )
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(providerKind.displayName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(WispColor.textPrimary)
+                    Text(providerKind.listDescription)
+                        .font(.system(size: 10))
+                        .foregroundStyle(WispColor.textTertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 4) {
+                    if status == .inUse {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                    }
+                    Text(status.label)
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundStyle(status == .needsKey ? WispColor.textTertiary : WispColor.textSecondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isHovering || isSelected ? WispColor.surface2 : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? WispColor.textTertiary : WispColor.borderSubtle, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .onHover { isHovering = $0 }
+        .accessibilityLabel("\(providerKind.displayName), \(status.label)")
     }
 }
 
@@ -585,5 +723,66 @@ struct DashboardEmptyState: View {
             Text(message)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+
+// MARK: - Coding agents on this Mac
+
+/// Which coding-agent CLIs are installed. Detection only; Wisp doesn't run
+/// them from here.
+private struct CodingAgentsCard: View {
+    @State private var installedPathsByID: [String: String] = [:]
+    @State private var hasChecked = false
+
+    var body: some View {
+        DashboardCard(title: "Coding agents on this Mac") {
+            VStack(spacing: 6) {
+                ForEach(CodingAgentCLI.known) { cli in
+                    HStack(spacing: 10) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(WispColor.textPrimary)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(WispColor.surface3)
+                            )
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(cli.displayName)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(WispColor.textPrimary)
+                            Text(installedPathsByID[cli.id] ?? cli.installHint)
+                                .font(.system(size: 10))
+                                .foregroundStyle(WispColor.textTertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer(minLength: 8)
+                        Text(statusLabel(for: cli))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(installedPathsByID[cli.id] != nil ? WispColor.textSecondary : WispColor.textTertiary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(WispColor.borderSubtle, lineWidth: 1)
+                    )
+                }
+            }
+        }
+        .task {
+            let detectedPaths = await Task.detached(priority: .utility) {
+                CodingAgentCLIDetector.installedExecutablePaths()
+            }.value
+            installedPathsByID = detectedPaths
+            hasChecked = true
+        }
+    }
+
+    private func statusLabel(for cli: CodingAgentCLI) -> String {
+        if installedPathsByID[cli.id] != nil { return "Installed" }
+        return hasChecked ? "Not installed" : "Checking…"
     }
 }

@@ -57,7 +57,8 @@ final class UsageLogStore: ObservableObject {
         counts: UsageTokenCounts,
         durationSeconds: TimeInterval,
         screenshotWasAttached: Bool,
-        isBackgroundRun: Bool
+        isBackgroundRun: Bool,
+        buddyID: UUID? = nil
     ) {
         let now = Date()
         let newRecord = UsageLogRecord(
@@ -72,7 +73,8 @@ final class UsageLogStore: ObservableObject {
                 providerKind: providerKind, modelName: modelName, counts: counts),
             durationSeconds: durationSeconds,
             screenshotWasAttached: screenshotWasAttached,
-            isBackgroundRun: isBackgroundRun
+            isBackgroundRun: isBackgroundRun,
+            buddyID: buddyID
         )
         records = UsageLogCodec.pruned(records + [newRecord], now: now)
     }
@@ -84,7 +86,8 @@ final class UsageLogStore: ObservableObject {
         counts: UsageTokenCounts,
         durationSeconds: TimeInterval,
         screenshotWasAttached: Bool,
-        isBackgroundRun: Bool
+        isBackgroundRun: Bool,
+        buddyID: UUID? = nil
     ) {
         guard let parsedProvider = UsageProviderIdentifier.parse(providerIdentifier) else { return }
         recordTurn(
@@ -93,7 +96,8 @@ final class UsageLogStore: ObservableObject {
             counts: counts,
             durationSeconds: durationSeconds,
             screenshotWasAttached: screenshotWasAttached,
-            isBackgroundRun: isBackgroundRun
+            isBackgroundRun: isBackgroundRun,
+            buddyID: buddyID
         )
     }
 

@@ -79,7 +79,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         case .chat: return [.chat]
         // The messenger, the automations buddies own, and the Canvas setup that
         // used to be the Jobs section (the Planner buddy's feeds).
-        case .buddies: return [.buddies, .automations, .canvas]
+        case .buddies: return [.buddies, .automations, .workflows, .canvas, .study]
         // What Wisp knows, how it got there, and how to steer it. The old
         // History → Memory page (memory.md facts + conversation history) folded
         // into Brain: the user's page is Pages → Me, history lives in Settings.
@@ -119,8 +119,12 @@ enum WispPage: String, CaseIterable, Identifiable {
     case chat
     case buddies
     case automations
+    /// The canvas of chained triggers, buddies and outputs (translated from OpenBot's workflows).
+    case workflows
     /// The old Jobs page (Canvas feed link, daily checklist, study blocks).
     case canvas
+    /// Pomodoro-style focus timer that holds distractions back.
+    case study
     case routines
     case brainPages
     case brainGraph
@@ -173,7 +177,9 @@ enum WispPage: String, CaseIterable, Identifiable {
         case .chat: return "Chat"
         case .buddies: return "Buddies"
         case .automations: return "Automations"
+        case .workflows: return "Workflows"
         case .canvas: return "Canvas"
+        case .study: return "Study"
         case .routines: return "Routines"
         case .brainPages: return "Pages"
         case .brainGraph: return "Graph"
@@ -213,6 +219,14 @@ final class WispWindowRouter: ObservableObject {
     @Published var buddyIDPendingDeletion: UUID?
     /// Today's "+" asked the Buddies page to open the new-buddy form.
     @Published var isNewBuddyFormRequested = false
+    /// A group chat the sidebar asked the Buddies page to show; the page takes it and clears it.
+    @Published var groupIDToOpen: UUID?
+    /// The group chat the Buddies page is showing (nil while a buddy or the creation flow is), so the sidebar can mark it.
+    @Published var activeGroupID: UUID?
+    /// The sidebar's "New group" asked the Buddies page to open the group editor.
+    @Published var isNewGroupRequested = false
+    /// A group the sidebar's context menu asked to delete, awaiting its confirmation.
+    @Published var groupIDPendingDeletion: UUID?
 
     /// An automation the Today tile, the notch or a buddy's page asked the
     /// Automations page to open. The page takes it and clears it.

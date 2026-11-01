@@ -51,6 +51,7 @@ enum BackgroundTaskLauncher {
     /// - Parameter completionNotification: How the finish is announced: a buddy
     ///   names itself ("Gmail Digest finished"), and `nil` posts nothing — for a
     ///   buddy the user muted, or a run another buddy asked for.
+    /// - Parameter usageBuddyID: The buddy this run belongs to, written to the usage log.
     /// - Returns: The task's id, or nil when too many are already running.
     @discardableResult
     static func start(
@@ -63,6 +64,7 @@ enum BackgroundTaskLauncher {
         toolkit: AgentRunToolkit = .none,
         onSucceeded: (@MainActor (UUID, String) -> Void)? = nil,
         completionNotification: CompletionNotificationStyle? = .generic,
+        usageBuddyID: UUID? = nil,
         speakConfirmation: @escaping @MainActor (String) async -> Void
     ) -> UUID? {
         let runsOffThisMachine = modelProvider.deployment.sendsDataOffThisMachine
@@ -108,7 +110,8 @@ enum BackgroundTaskLauncher {
                     counts: outcome.usage,
                     durationSeconds: Date().timeIntervalSince(runStartedAt),
                     screenshotWasAttached: !images.isEmpty,
-                    isBackgroundRun: true
+                    isBackgroundRun: true,
+                    buddyID: usageBuddyID
                 )
                 AgentTaskRegistry.shared.finishTask(
                     taskID,
