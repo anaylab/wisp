@@ -14,7 +14,23 @@ set -euo pipefail
 APP_NAME="Wisp.app"
 DESTINATION="/Applications/$APP_NAME"
 
-DERIVED_DATA_APP=$(ls -td ~/Library/Developer/Xcode/DerivedData/leanring-buddy-*/Build/Products/*/"$APP_NAME" 2>/dev/null | head -1 || true)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_PATH="$REPO_ROOT/leanring-buddy.xcodeproj"
+
+# Several DerivedData folders can hold a Wisp.app (agent worktrees each get their own), so pick
+# the one whose recorded workspace is THIS checkout rather than just the newest file. update.sh
+# passes the exact bundle through WISP_SOURCE_APP.
+DERIVED_DATA_APP="${WISP_SOURCE_APP:-}"
+if [[ -z "$DERIVED_DATA_APP" ]]; then
+    for derived_data_folder in $(ls -td ~/Library/Developer/Xcode/DerivedData/leanring-buddy-*/ 2>/dev/null); do
+        recorded_workspace=$(/usr/libexec/PlistBuddy -c 'Print :WorkspacePath' "$derived_data_folder/info.plist" 2>/dev/null || true)
+        candidate=$(ls -td "$derived_data_folder"Build/Products/*/"$APP_NAME" 2>/dev/null | head -1 || true)
+        if [[ "$recorded_workspace" == "$PROJECT_PATH" && -n "$candidate" ]]; then
+            DERIVED_DATA_APP="$candidate"
+            break
+        fi
+    done
+fi
 
 if [[ -z "$DERIVED_DATA_APP" || ! -d "$DERIVED_DATA_APP" ]]; then
     echo "error: no built $APP_NAME found."
