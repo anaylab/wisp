@@ -775,6 +775,27 @@ final class AppleScriptBrowserController: BrowserController {
         return (appKitPoint, display.frame)
     }
 
+    func windowFrameOnScreen() -> CGRect? {
+        guard let browser = try? requireBrowser() else { return nil }
+        // window.screenX/screenY are the window's top-left on the desktop and
+        // outerWidth/outerHeight its size, all in points on macOS.
+        let script = "(function(){return Math.round(window.screenX)+','+Math.round(window.screenY)+','+Math.round(window.outerWidth)+','+Math.round(window.outerHeight);})()"
+        guard let result = runJavaScript(script, in: browser) else { return nil }
+        let parts = result.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count == 4, parts[2] > 0, parts[3] > 0 else { return nil }
+
+        // Top-left origin anchored at the primary display; AppKit is bottom-left
+        // anchored the same way, so the rect's y flips about the primary height.
+        guard let primaryDisplayHeight = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+            ?? NSScreen.main?.frame.height else { return nil }
+        return CGRect(
+            x: parts[0],
+            y: primaryDisplayHeight - parts[1] - parts[3],
+            width: parts[2],
+            height: parts[3]
+        )
+    }
+
     func scroll(_ direction: BrowserScrollDirection) throws {
         let browser = try requireBrowser()
         let body: String

@@ -41,6 +41,13 @@ enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codabl
     /// Google's Gemini, over the network, with a user-supplied API key.
     case gemini
 
+    /// xAI's Grok, over the network, with a user-supplied API key. Speaks
+    /// OpenAI's Chat Completions dialect, so it reuses that client.
+    case grok
+
+    /// OpenRouter, one key for many hosted models. Same dialect as OpenAI.
+    case openRouter
+
     var id: String { rawValue }
 
     /// The human-readable name shown in the provider picker.
@@ -52,6 +59,8 @@ enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codabl
         case .claudeSubscription: return "Claude (your subscription)"
         case .openAI:      return "GPT (OpenAI)"
         case .gemini:      return "Gemini (Google)"
+        case .grok:        return "Grok (xAI)"
+        case .openRouter:  return "OpenRouter"
         }
     }
 

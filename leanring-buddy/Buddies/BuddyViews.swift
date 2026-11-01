@@ -403,6 +403,9 @@ struct BuddyActionsMenuItems: View {
             buddyStore.setPinned(buddyWithID: buddy.id, isPinned: !buddy.isPinnedInList)
         }
         if showsReadState {
+            Button(buddy.isHiddenInList ? "Show in List" : "Hide", systemImage: buddy.isHiddenInList ? "eye" : "eye.slash") {
+                buddyStore.setHidden(buddyWithID: buddy.id, isHidden: !buddy.isHiddenInList)
+            }
             let isUnread = buddyStore.isUnread(buddy, in: taskRegistry)
             Button(isUnread ? "Mark as Read" : "Mark as Unread", systemImage: isUnread ? "circle" : "circle.fill") {
                 buddyStore.setMarkedUnread(buddyWithID: buddy.id, isMarkedUnread: !isUnread)
@@ -478,8 +481,10 @@ struct BuddyDetailView: View {
     private func content(for buddy: WispBuddy) -> some View {
         // The whole stored thread, not just the runs History still holds.
         let threadTaskIDs = BuddyListPolicy.threadTaskIDs(
-            exchangeTaskIDs: threadStore.exchanges(ofBuddyWithID: buddy.id).map(\.taskID),
-            runTaskIDs: buddy.runTaskIDs
+            exchangeTaskIDs: BuddyThreadPolicy.exchanges(threadStore.exchanges(ofBuddyWithID: buddy.id), inThread: nil).map(\.taskID),
+            runTaskIDs: buddy.runTaskIDs.filter { runID in
+                !threadStore.exchanges(ofBuddyWithID: buddy.id).contains { $0.taskID == runID && $0.threadID != nil }
+            }
         )
         let latestRunRecord = buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
         let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)

@@ -92,6 +92,8 @@ check(UsageProviderIdentifier.parse("anthropic/claude-opus-5-5")?.modelName == "
 check(UsageProviderIdentifier.parse("claude-subscription/claude-sonnet-5-5")?.providerKind == .claudeSubscription, "parse subscription")
 check(UsageProviderIdentifier.parse("ollama/qwen2.5vl:3b")?.modelName == "qwen2.5vl:3b", "parse ollama model with colon")
 check(UsageProviderIdentifier.parse("openai/gpt-4o")?.providerKind == .openAI, "parse openai")
+check(UsageProviderIdentifier.parse("grok/grok-4")?.providerKind == .grok, "parse grok")
+check(UsageProviderIdentifier.parse("openrouter/openai/gpt-4o")?.modelName == "openai/gpt-4o", "parse openrouter keeps the slash in the model")
 check(UsageProviderIdentifier.parse("gemini/gemini-2.5-flash")?.providerKind == .gemini, "parse gemini")
 check(UsageProviderIdentifier.parse("scripted-test-double") == nil, "unknown identifier is skipped")
 
@@ -153,11 +155,21 @@ check(decodedRecords == sampleRecords, "codec round trip is lossless")
 check(UsageLogCodec.decode(Data("not json".utf8)) == nil, "garbage does not decode")
 check(UsageLogCodec.decode(Data(#"{"formatVersion":99,"records":[]}"#.utf8)) == nil, "unknown format version is rejected")
 
+// MARK: - Per buddy
+
+let usageBuddyA = UUID()
+let usageBuddyB = UUID()
+var buddyARecord = makeRecord(hoursAgo: 1); buddyARecord.buddyID = usageBuddyA
+var buddyBRecord = makeRecord(hoursAgo: 2); buddyBRecord.buddyID = usageBuddyB
+let perBuddyRecords = UsageAggregator.records([buddyARecord, buddyBRecord, makeRecord(hoursAgo: 3)], ofBuddyWithID: usageBuddyA)
+check(perBuddyRecords.count == 1 && perBuddyRecords[0].buddyID == usageBuddyA, "a buddy's usage is only its own runs")
+check(UsageLogCodec.decode(UsageLogCodec.encode([buddyARecord])!)?.first?.buddyID == usageBuddyA, "buddy id survives the codec")
+
 // MARK: - No content fields in the persisted shape
 
 let allowedRecordKeys: Set<String> = [
     "id", "timestamp", "providerKind", "modelName", "inputTokens", "outputTokens",
-    "cachedInputTokens", "estimatedCostUSD", "durationSeconds", "screenshotWasAttached", "isBackgroundRun",
+    "cachedInputTokens", "estimatedCostUSD", "durationSeconds", "screenshotWasAttached", "isBackgroundRun", "buddyID",
 ]
 let fullRecord = makeRecord(hoursAgo: 1)
 let fullRecordJSON = try! JSONSerialization.jsonObject(with: UsageLogCodec.encode([fullRecord])!) as! [String: Any]

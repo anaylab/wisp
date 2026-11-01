@@ -113,6 +113,18 @@ final class CompanionManager: ObservableObject {
     /// Pixel size of the screenshot each display's annotations came from,
     /// needed to scale them onto that display.
     @Published var annotationScreenshotSizeByDisplayFrame: [CGRect: CGSize] = [:]
+    /// Where the agent cursor stands while the browser loop acts, per display
+    /// frame, in that display's top-left point space. At most one display has
+    /// one; it is a separate cursor from the pointing marker (see
+    /// `AgentCursorView`).
+    @Published var agentCursorTargetByDisplayFrame: [CGRect: AgentCursorTarget] = [:]
+    /// The frame of the browser window Wisp is acting in, per display frame, in
+    /// that display's top-left point space; drawn as a rim (`AgentWindowRimView`)
+    /// for the length of the task.
+    @Published var agentWindowRimFrameByDisplayFrame: [CGRect: CGRect] = [:]
+    /// Where the agent cursor last stood, so the next step knows how far it has
+    /// to glide (and so how long to wait). Cleared with the guidance.
+    var agentCursorLastPlacement: (displayFrame: CGRect, point: CGPoint)?
     /// How many handwritten notes are showing, nil for all. A reply with several
     /// lines of working starts at one and is stepped through (Next button, ⌃⌥→).
     @Published var visibleNoteLimit: Int?
@@ -332,10 +344,11 @@ final class CompanionManager: ObservableObject {
         // and scrolling drops them. The pointer and scroll monitors run only
         // while something is drawn or selected, so Wisp isn't woken for every
         // mouse move system-wide the rest of the time.
+        // A note card the user kept needs the scroll watch too: scrolling is what detaches it.
         annotationClickRouterActivityCancellable = Publishers
-            .CombineLatest($activeAnnotationsByDisplayFrame, $focusedScreenRegion)
-            .map { annotationsByDisplayFrame, focusedRegion in
-                !annotationsByDisplayFrame.isEmpty || focusedRegion != nil
+            .CombineLatest3($activeAnnotationsByDisplayFrame, $focusedScreenRegion, noteCardManager.$cards)
+            .map { annotationsByDisplayFrame, focusedRegion, noteCards in
+                !annotationsByDisplayFrame.isEmpty || focusedRegion != nil || !noteCards.isEmpty
             }
             .removeDuplicates()
             .sink { [weak self] shouldWatchAnnotations in
@@ -394,6 +407,8 @@ final class CompanionManager: ObservableObject {
         activeAnnotationsByDisplayFrame.removeAll()
         annotationScreenshotSizeByDisplayFrame.removeAll()
         visibleNoteLimit = nil
+        // Cards the user has dragged, pinned or asked about outlive the next question.
+        noteCardManager.clearForNewUtterance()
     }
 
     /// Tears down everything `start()` set up: the shortcut tap, any recording,
@@ -1226,6 +1241,19 @@ final class CompanionManager: ObservableObject {
         openTextComposer(keepingFocusedScreenRegion: true)
     }
 
+    /// The movable explanation cards (docs/note-cards-plan.md).
+    lazy var noteCardManager: NoteCardManager = {
+        let manager = NoteCardManager()
+        manager.onFollowUpRequested = { [weak self] cardID, question, focusedRegion in
+            guard let self else { return Task {} }
+            return self.runNoteCardFollowUp(cardID: cardID, question: question, focusedRegion: focusedRegion)
+        }
+        manager.onSaveWorkedSolutionRequested = { [weak self] card in
+            self?.saveWorkedSolution(fromCard: card)
+        }
+        return manager
+    }()
+
     private lazy var annotationClickRouter = AnnotationClickRouter(
         annotationsOnEachDisplay: { [weak self] in
             guard let self else { return [] }
@@ -1235,13 +1263,9 @@ final class CompanionManager: ObservableObject {
                 return AnnotationClickRouter.DisplayAnnotations(
                     displayFrame: displayFrame,
                     screenshotSize: screenshotSize,
-                    annotations: reveal.visible,
-                    nextButtonRect: AnnotationNoteReveal.nextButtonRect(
-                        visibleAnnotations: reveal.visible,
-                        hiddenNoteCount: reveal.hiddenNoteCount,
-                        screenshotSize: screenshotSize,
-                        displaySize: displayFrame.size
-                    )
+                    // Notes live on a card now, which has its own buttons.
+                    annotations: reveal.visible.filter { $0.style != .note },
+                    nextButtonRect: nil
                 )
             }
         },
@@ -1285,21 +1309,114 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// Shows the next (or previous) line of working. Stepping back from "all
-    /// showing" goes to one fewer note; a reply with too few notes to step
-    /// through is left alone.
-    private func stepNoteReveal(by step: Int) {
-        let totalNoteCount = activeAnnotationsByDisplayFrame.values
-            .map { AnnotationNoteReveal.noteCount(in: $0) }
-            .max() ?? 0
-        guard totalNoteCount >= AnnotationNoteReveal.minimumNotesToStepThrough else { return }
+    // MARK: - Note card follow-ups
 
-        let currentLimit = visibleNoteLimit ?? totalNoteCount
-        let steppedLimit = AnnotationNoteReveal.limit(afterStepping: step, from: currentLimit, noteCount: totalNoteCount)
-        // Once the last note shows there is nothing left to step: show all.
-        visibleNoteLimit = steppedLimit >= totalNoteCount ? nil : steppedLimit
-        // Reading takes time: restart the overlay's dwell from this step.
-        scheduleTransientHideIfNeeded()
+    /// A question asked inside a note card. A small turn of its own, not the notch's full pipeline
+    /// (whose fast-command routers would catch "open safari" typed into a card): the card's
+    /// explanation as the system prompt, the card's earlier thread as history, and a close-up of the
+    /// part of the screen the card is about. The answer streams into the card, and the exchange is
+    /// kept in the conversation transcript and History like any other.
+    private func runNoteCardFollowUp(
+        cardID: UUID,
+        question: String,
+        focusedRegion: FocusedScreenRegion?
+    ) -> Task<Void, Never> {
+        let taskID = AgentTaskRegistry.shared.beginTask(title: question)
+        let providerIdentifier = selectedModelProvider.identifier
+        let startedAt = Date()
+
+        return Task { [weak self] in
+            guard let self, let card = self.noteCardManager.card(withID: cardID) else {
+                AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+                return
+            }
+            do {
+                let closeUpImageData: Data?
+                if let focusedRegion {
+                    closeUpImageData = await CompanionScreenCaptureUtility.captureCloseUpAsJPEG(of: focusedRegion)
+                } else {
+                    closeUpImageData = nil
+                }
+
+                let historyMessages = NoteCardFollowUp.history(from: card).map { earlierMessage in
+                    BuddyChatMessage(
+                        role: earlierMessage.role == .user ? .user : .assistant,
+                        text: earlierMessage.text
+                    )
+                }
+                let currentQuestionMessage = BuddyChatMessage(
+                    role: .user,
+                    blocks: [.text(question)]
+                        + (closeUpImageData.map { [.image(data: $0, label: "close-up of the part of the screen the card is about")] } ?? [])
+                )
+                let request = ModelRequest(
+                    systemPrompt: NoteCardFollowUp.systemPrompt(for: card),
+                    messages: historyMessages + [currentQuestionMessage],
+                    tools: [],
+                    maxOutputTokens: nil
+                )
+
+                AgentTaskRegistry.shared.appendStep(
+                    AgentStepRecord(kind: .modelCall, summary: "Asking \(ActiveStackReadout.shared.chatModelName)"),
+                    to: taskID
+                )
+                var rawReplyText = ""
+                let provider = self.selectedModelProvider
+                let turn = try await ModelAccessGate.shared.withAccess(priority: .interactive) {
+                    try await provider.streamTurn(request, onTextDelta: { [weak self] chunk in
+                        rawReplyText += chunk
+                        self?.noteCardManager.setStreamingReply(
+                            forCardID: cardID,
+                            text: NoteCardFollowUp.displayText(fromModelReply: rawReplyText)
+                        )
+                    })
+                }
+                guard !Task.isCancelled else {
+                    AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+                    return
+                }
+
+                let answerText = NoteCardFollowUp.displayText(fromModelReply: turn.text)
+                if answerText.isEmpty {
+                    self.noteCardManager.failReply(forCardID: cardID, message: NoteCardFollowUp.failureMessage)
+                    AgentTaskRegistry.shared.finishTask(taskID, status: .failed("The model returned no text."))
+                    return
+                }
+                self.noteCardManager.finishReply(forCardID: cardID, text: answerText)
+                self.conversationTranscript.append(ConversationTranscript.Turn(messages: [
+                    BuddyChatMessage(role: .user, text: question),
+                    BuddyChatMessage(role: .assistant, text: answerText),
+                ]))
+                AgentTaskRegistry.shared.finishTask(taskID, status: .succeeded, finalText: answerText)
+
+                var usageCounts = UsageTokenCounts()
+                usageCounts.add(
+                    inputTokens: turn.promptTokens,
+                    outputTokens: turn.outputTokens,
+                    cacheReadTokens: turn.cacheReadTokens,
+                    cacheWriteTokens: turn.cacheWriteTokens,
+                    reportedCostUSD: turn.reportedCostUSD
+                )
+                UsageLogStore.shared.recordTurn(
+                    providerIdentifier: providerIdentifier,
+                    counts: usageCounts,
+                    durationSeconds: Date().timeIntervalSince(startedAt),
+                    screenshotWasAttached: closeUpImageData != nil,
+                    isBackgroundRun: false
+                )
+            } catch is CancellationError {
+                AgentTaskRegistry.shared.finishTask(taskID, status: .cancelled)
+            } catch {
+                print("⚠️ Note card follow-up failed: \(error)")
+                self.noteCardManager.failReply(forCardID: cardID, message: NoteCardFollowUp.failureMessage)
+                AgentTaskRegistry.shared.finishTask(taskID, status: .failed(error.localizedDescription))
+            }
+        }
+    }
+
+    /// ⌃⌥→ / ⌃⌥←: moves the newest note card to its next (or previous) line of working.
+    private func stepNoteReveal(by step: Int) {
+        noteCardManager.stepNewestCard(by: step)
     }
 
     /// Esc while Wisp's drawings are up clears them (and the selected part).
@@ -1309,11 +1426,15 @@ final class CompanionManager: ObservableObject {
     private func dropDrawingsAfterEscape() {
         guard !(textComposerWindowController?.isShowing ?? false),
               screenRegionPickerController == nil,
+              // Esc in a card's composer leaves the composer; it must not also close the card.
+              !noteCardManager.isComposerFocused,
               !guidedWalkthrough.isActive,
-              !activeAnnotationsByDisplayFrame.isEmpty || focusedScreenRegion != nil else { return }
+              !activeAnnotationsByDisplayFrame.isEmpty || focusedScreenRegion != nil || noteCardManager.hasCards else { return }
         focusedScreenRegion = nil
         focusedRegionHighlightID = nil
         clearScreenAnnotations()
+        // Esc closes every card that isn't pinned, kept or not.
+        noteCardManager.closeUnpinned()
     }
 
     /// Annotations and the selected part are pinned to screen positions, so
@@ -1323,8 +1444,10 @@ final class CompanionManager: ObservableObject {
     /// marks are left alone.
     private func dropAnnotationsAfterContentScrolled() {
         guard !guidedWalkthrough.isActive,
-              !activeAnnotationsByDisplayFrame.isEmpty || focusedScreenRegion != nil else { return }
+              !activeAnnotationsByDisplayFrame.isEmpty || focusedScreenRegion != nil || noteCardManager.hasCards else { return }
         focusedScreenRegion = nil
+        // Cards the user kept stay but stop pointing; the rest go with the drawings.
+        noteCardManager.detachAfterScroll()
         clearScreenAnnotations()
     }
 
@@ -2962,11 +3085,25 @@ final class CompanionManager: ObservableObject {
                 ? "Something went wrong answering that. Check the dashboard for details."
                 : "I can't reach the local model. Make sure Ollama is running."
 
+            // The synthesizer must outlive this closure, or the line is cut off.
+            let synthesizer = NSSpeechSynthesizer()
             await MainActor.run {
                 guard let self else { return }
-                let synthesizer = NSSpeechSynthesizer()
                 synthesizer.startSpeaking(utterance)
                 self.voiceState = .responding
+            }
+
+            // Nothing else resets the state after this line (the failed turn has
+            // already finished), so wait out the speech and put it back ourselves —
+            // otherwise the notch says "Responding…" forever.
+            while synthesizer.isSpeaking {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+            await MainActor.run {
+                guard let self else { return }
+                if self.voiceState == .responding {
+                    self.voiceState = .idle
+                }
             }
         }
     }
@@ -3108,11 +3245,13 @@ final class CompanionManager: ObservableObject {
                     personalityLine: buddy.personality?.personaLine
                 )
                 + (request.requesterName.map(BuddyThreadPolicy.delegatedRequestAddendum(requesterName:)) ?? "")
+                + (request.extraSystemPrompt ?? "")
                 + BuddyMemoryStore.shared.promptInstructions(forBuddyWithID: buddyID)
                 + BuddyAttachmentPolicy.libraryPromptLine(
                     fileNames: BuddyFileLibrary.shared.attachments(ofBuddyWithID: buddyID).map(\.fileName)
                 ),
-            conversationHistory: buddyThreadStore.historyMessages(forBuddyWithID: buddyID),
+            conversationHistory: request.historyOverride
+                ?? buddyThreadStore.historyMessages(forBuddyWithID: buddyID, inThread: request.threadID),
             images: request.images,
             toolkit: BuddyRunToolkitBuilder.toolkit(
                 forBuddyWithID: buddyID,
@@ -3120,7 +3259,7 @@ final class CompanionManager: ObservableObject {
                 toolAccess: buddy.toolAccess,
                 // A run a peer started can't ask another peer in turn.
                 // ask_buddy is only offered while Advanced features are on.
-                delegation: request.requesterName == nil && WispAdvancedFeaturesPreference.isEnabledNow
+                delegation: request.requesterName == nil && request.groupID == nil && WispAdvancedFeaturesPreference.isEnabledNow
                     ? (caller: buddy, service: .live())
                     : nil
             ),
@@ -3134,9 +3273,10 @@ final class CompanionManager: ObservableObject {
                 )
             },
             // A peer's request is a step in that peer's run, not news of its own.
-            completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated
+            completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated && request.groupID == nil
                 ? .buddy(name: buddy.name, job: buddy.instruction)
                 : nil,
+            usageBuddyID: buddyID,
             speakConfirmation: { [weak self] question in
                 guard let self else { return }
                 await self.speakConfirmationQuestion(question)
@@ -3149,7 +3289,8 @@ final class CompanionManager: ObservableObject {
             origin: request.origin,
             userText: request.displayText ?? request.text,
             requesterName: request.requesterName,
-            attachmentNames: request.attachmentNames
+            attachmentNames: request.attachmentNames,
+            threadID: request.threadID
         )
         return runTaskID
     }
@@ -3400,6 +3541,8 @@ final class CompanionManager: ObservableObject {
                 // resolution are not comparable to anything, so the reuse
                 // cache is dropped regardless of overlay state.
                 ScreenshotReuseCache.invalidateAll()
+                // Note cards on a display that has gone can't point at anything any more.
+                self?.noteCardManager.reconcileWithDisplays()
 
                 guard let self, self.isOverlayVisible else { return }
 
@@ -3673,14 +3816,23 @@ final class CompanionManager: ObservableObject {
             )
         }
 
-        // Several lines of working are revealed one at a time.
-        let mostNotesOnOneDisplay = annotationsByDisplay.values
-            .map { AnnotationNoteReveal.noteCount(in: $0) }
-            .max() ?? 0
-        visibleNoteLimit = AnnotationNoteReveal.initialLimit(forNoteCount: mostNotesOnOneDisplay)
+        // The handwritten notes are not drawn on the overlay: they become a note card
+        // beside what they explain, which steps through several lines itself.
+        visibleNoteLimit = nil
 
         annotationScreenshotSizeByDisplayFrame = screenshotSizes
         activeAnnotationsByDisplayFrame = annotationsByDisplay
+
+        for (displayFrame, displayAnnotations) in annotationsByDisplay {
+            guard let screenshotSize = screenshotSizes[displayFrame],
+                  var noteCard = NoteCardBuilder.card(
+                    fromAnnotations: displayAnnotations,
+                    screenshotSize: screenshotSize,
+                    displayFrameInAppKitPoints: displayFrame
+                  ) else { continue }
+            noteCard.originalQuestion = lastQuestionAskedByUser
+            noteCardManager.present(noteCard)
+        }
 
         let summary = annotations.map { "\($0.style.rawValue)(\($0.label ?? "—"))" }.joined(separator: ", ")
         print("🖍️ Annotations: \(summary)")
@@ -4552,27 +4704,54 @@ extension CompanionManager: BrowserCursorGuide {
             y: (displayFrame.origin.y + displayFrame.height) - point.y
         )
 
-        let marker = ScreenAnnotation(
-            style: .marker,
-            regionInScreenshotPixels: CGRect(
-                x: displayLocalPoint.x,
-                y: displayLocalPoint.y,
-                width: 0,
-                height: 0
-            ),
-            label: actionText.isEmpty ? nil : actionText,
-            screenNumber: nil
-        )
-        activeAnnotationsByDisplayFrame = [displayFrame: [marker]]
-        annotationScreenshotSizeByDisplayFrame = [displayFrame: displayFrame.size]
+        // A previous answer's drawings would sit under the acting cursor.
+        if !activeAnnotationsByDisplayFrame.isEmpty {
+            activeAnnotationsByDisplayFrame.removeAll()
+            annotationScreenshotSizeByDisplayFrame.removeAll()
+        }
 
-        // Long enough for the marker to register before the click follows,
-        // and short enough that a thirty-step task is not mostly waiting.
-        try? await Task.sleep(nanoseconds: 600_000_000)
+        // The cursor glides from its last spot, so the wait is the glide itself
+        // plus a beat for the arrival ring, rather than a fixed budget. A first
+        // appearance, a new display or Reduce Motion has no glide to wait for.
+        var glideMilliseconds = 0.0
+        if let lastPlacement = agentCursorLastPlacement,
+           lastPlacement.displayFrame == displayFrame,
+           !WispMotion.prefersReducedMotion {
+            glideMilliseconds = AgentCursorMotion.durationMilliseconds(
+                of: AgentCursorMotion.planMove(from: lastPlacement.point, to: displayLocalPoint)
+            )
+        }
+        // The rim marks the window once per task, on the first step; the window
+        // is not expected to move while Wisp works in it.
+        if agentCursorLastPlacement == nil,
+           let windowFrame = AgentToolRegistry.shared.browserController.windowFrameOnScreen() {
+            let windowCenter = CGPoint(x: windowFrame.midX, y: windowFrame.midY)
+            let windowDisplayFrame = NSScreen.screens.first(where: { $0.frame.contains(windowCenter) })?.frame ?? displayFrame
+            agentWindowRimFrameByDisplayFrame = [
+                windowDisplayFrame: CGRect(
+                    x: windowFrame.minX - windowDisplayFrame.minX,
+                    y: windowDisplayFrame.maxY - windowFrame.maxY,
+                    width: windowFrame.width,
+                    height: windowFrame.height
+                )
+            ]
+        }
+        agentCursorLastPlacement = (displayFrame, displayLocalPoint)
+        agentCursorTargetByDisplayFrame = [
+            displayFrame: AgentCursorTarget(pointInDisplaySpace: displayLocalPoint, actionText: actionText)
+        ]
+
+        // Long enough for the cursor to arrive and register before the click
+        // follows, and short enough that a thirty-step task is not mostly waiting.
+        let waitMilliseconds = max(350, glideMilliseconds + 250)
+        try? await Task.sleep(nanoseconds: UInt64(waitMilliseconds * 1_000_000))
     }
 
     /// Clears the guidance marker and the progress line once the workflow ends.
     func endCursorGuidance() {
+        agentCursorTargetByDisplayFrame.removeAll()
+        agentWindowRimFrameByDisplayFrame.removeAll()
+        agentCursorLastPlacement = nil
         clearScreenAnnotations()
         browserActivityText = ""
         browserTaskStepHistory = []

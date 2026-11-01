@@ -45,8 +45,20 @@ struct BuddyThreadExchange: Codable, Identifiable, Equatable {
     /// Names of files attached to the user's message, shown as chips.
     /// Optional so threads saved before attachments existed still load.
     var attachmentNames: [String]? = nil
+    /// The side thread this belongs to. Nil is the buddy's main thread, where
+    /// its job runs, peers' requests and every exchange saved before threads
+    /// existed live, so old files load unchanged.
+    var threadID: UUID? = nil
 
     var id: UUID { taskID }
+}
+
+/// One tab in a buddy's thread strip. `id` is nil for the main thread.
+struct BuddyThreadSummary: Identifiable, Equatable {
+    let id: UUID?
+    let title: String
+    let exchangeCount: Int
+    var isMain: Bool { id == nil }
 }
 
 /// The pure rules for turning a stored thread into a prompt, tested without the app.
@@ -65,8 +77,9 @@ enum BuddyThreadPolicy {
     /// answer, oldest first. An exchange with no answer is skipped whole —
     /// replaying a question the buddy never answered would leave two user
     /// messages in a row.
-    static func historyMessages(from exchanges: [BuddyThreadExchange]) -> [BuddyChatMessage] {
+    static func historyMessages(from exchanges: [BuddyThreadExchange], inThread threadID: UUID? = nil) -> [BuddyChatMessage] {
         let answeredExchanges = exchanges.filter { exchange in
+            guard exchange.threadID == threadID else { return false }
             guard let answerText = exchange.answerText else { return false }
             return !answerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
@@ -119,6 +132,51 @@ enum BuddyThreadPolicy {
         """
     }
 
+    /// How long a side thread's tab title may be before it is clipped.
+    static let maximumThreadTitleCharacters = 28
+
+    /// The exchanges of one thread (nil = main), in stored order.
+    static func exchanges(_ exchanges: [BuddyThreadExchange], inThread threadID: UUID?) -> [BuddyThreadExchange] {
+        exchanges.filter { $0.threadID == threadID }
+    }
+
+    /// The tabs: the main thread first, then each side thread in the order it was
+    /// started. A side thread is named after its first message, so there is
+    /// nothing to type and nothing to store beyond the exchanges themselves.
+    /// `draftThreadIDs` are new threads with no message yet; they get a tab too.
+    static func threadSummaries(
+        from exchanges: [BuddyThreadExchange],
+        draftThreadIDs: [UUID] = []
+    ) -> [BuddyThreadSummary] {
+        var orderedThreadIDs: [UUID] = []
+        for exchange in exchanges {
+            if let threadID = exchange.threadID, !orderedThreadIDs.contains(threadID) {
+                orderedThreadIDs.append(threadID)
+            }
+        }
+        let draftsWithoutMessages = draftThreadIDs.filter { !orderedThreadIDs.contains($0) }
+        let sideSummaries = (orderedThreadIDs + draftsWithoutMessages).map { threadID -> BuddyThreadSummary in
+            let threadExchanges = Self.exchanges(exchanges, inThread: threadID)
+            return BuddyThreadSummary(
+                id: threadID,
+                title: threadExchanges.first.map { threadTitle(fromFirstMessage: $0.userText) } ?? "New thread",
+                exchangeCount: threadExchanges.count
+            )
+        }
+        let mainSummary = BuddyThreadSummary(
+            id: nil, title: "Main", exchangeCount: Self.exchanges(exchanges, inThread: nil).count
+        )
+        return [mainSummary] + sideSummaries
+    }
+
+    static func threadTitle(fromFirstMessage messageText: String) -> String {
+        let singleLine = messageText
+            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+        guard !singleLine.isEmpty else { return "New thread" }
+        guard singleLine.count > maximumThreadTitleCharacters else { return singleLine }
+        return String(singleLine.prefix(maximumThreadTitleCharacters - 1)) + "…"
+    }
+
     /// Adds `exchange`, newest last, dropping the oldest beyond the cap.
     static func appending(_ exchange: BuddyThreadExchange, to exchanges: [BuddyThreadExchange]) -> [BuddyThreadExchange] {
         let combined = exchanges + [exchange]
@@ -155,8 +213,8 @@ final class BuddyThreadStore: ObservableObject {
     }
 
     /// What goes in front of the model for this buddy's next run.
-    func historyMessages(forBuddyWithID buddyID: UUID) -> [BuddyChatMessage] {
-        BuddyThreadPolicy.historyMessages(from: exchanges(ofBuddyWithID: buddyID))
+    func historyMessages(forBuddyWithID buddyID: UUID, inThread threadID: UUID? = nil) -> [BuddyChatMessage] {
+        BuddyThreadPolicy.historyMessages(from: exchanges(ofBuddyWithID: buddyID), inThread: threadID)
     }
 
     /// Records the question when its run starts, so the thread shows what was
@@ -167,7 +225,8 @@ final class BuddyThreadStore: ObservableObject {
         origin: BuddyThreadExchange.Origin,
         userText: String,
         requesterName: String? = nil,
-        attachmentNames: [String] = []
+        attachmentNames: [String] = [],
+        threadID: UUID? = nil
     ) {
         let newExchange = BuddyThreadExchange(
             taskID: taskID,
@@ -176,7 +235,8 @@ final class BuddyThreadStore: ObservableObject {
             userText: userText,
             answerText: nil,
             requesterName: requesterName,
-            attachmentNames: attachmentNames.isEmpty ? nil : attachmentNames
+            attachmentNames: attachmentNames.isEmpty ? nil : attachmentNames,
+            threadID: threadID
         )
         exchangesByBuddyID[buddyID] = BuddyThreadPolicy.appending(newExchange, to: exchanges(ofBuddyWithID: buddyID))
         saveThreads()
@@ -188,6 +248,14 @@ final class BuddyThreadStore: ObservableObject {
               let exchangeIndex = buddyExchanges.firstIndex(where: { $0.taskID == taskID }) else { return }
         buddyExchanges[exchangeIndex].answerText = String(answerText.prefix(BuddyThreadPolicy.maximumStoredAnswerCharacters))
         exchangesByBuddyID[buddyID] = buddyExchanges
+        saveThreads()
+    }
+
+    /// Removes one side thread's exchanges. Its runs stay in History.
+    func deleteSideThread(_ threadID: UUID, ofBuddyWithID buddyID: UUID) {
+        guard let buddyExchanges = exchangesByBuddyID[buddyID],
+              buddyExchanges.contains(where: { $0.threadID == threadID }) else { return }
+        exchangesByBuddyID[buddyID] = buddyExchanges.filter { $0.threadID != threadID }
         saveThreads()
     }
 

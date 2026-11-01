@@ -38,6 +38,7 @@ struct WispWindowView: View {
             HStack(spacing: 0) {
                 WispSidebar(companionManager: companionManager, taskRegistry: taskRegistry, router: router)
 
+                // The page sits in its own inset rounded panel on the window's surface, as in OpenBot.
                 VStack(spacing: 0) {
                     contentTopBar
                     // Each page gets its own identity so switching pages crossfades
@@ -50,6 +51,11 @@ struct WispWindowView: View {
                     .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.9), value: router.selectedPage)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .background(WispColor.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(WispColor.cardSeparator.opacity(0.5), lineWidth: 0.5))
+                .padding(.trailing, 8)
+                .padding(.bottom, 8)
             }
         }
         .tint(WispColor.accentText)
@@ -100,6 +106,10 @@ struct WispWindowView: View {
             // The old Jobs page, kept whole: Canvas feed link, daily checklist
             // and study blocks. Automations the Planner buddy owns run on it.
             JobsTab()
+        case .workflows:
+            WorkflowsPage()
+        case .study:
+            StudyPage()
         case .routines:
             RoutinesTab(companionManager: companionManager)
         case .timeline:

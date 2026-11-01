@@ -109,6 +109,14 @@ struct BuddyRunRequest {
     var attachmentNames: [String] = []
     /// Attached pictures (downscaled JPEG data and a label) for a vision model.
     var images: [(data: Data, label: String)] = []
+    /// The side thread this message was sent in; nil is the main thread.
+    var threadID: UUID? = nil
+    /// Set for a run that answers a group chat (`BuddyGroupEngine`). Its thread
+    /// is the group's id, its history is the group's shared transcript
+    /// (`historyOverride`), and it gets no notification and no `ask_buddy`.
+    var groupID: UUID? = nil
+    var historyOverride: [BuddyChatMessage]? = nil
+    var extraSystemPrompt: String? = nil
 }
 
 struct WispBuddy: Codable, Identifiable, Equatable {
@@ -151,6 +159,9 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     var isMarkedUnread: Bool?
     /// Whether a finished run posts a notification; nil means yes.
     var notifiesWhenFinished: Bool?
+    /// Tucked away in the sidebar's Hidden group. It still runs on its schedule;
+    /// only the list changes.
+    var isHidden: Bool?
 
     /// The most runs a buddy remembers (older ones stay in History).
     static let maximumRememberedRuns = 20
@@ -158,6 +169,7 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// Nil (older files, or never pinned) reads as not pinned.
     var isPinnedInList: Bool { isPinned ?? false }
     var postsNotificationWhenFinished: Bool { notifiesWhenFinished ?? true }
+    var isHiddenInList: Bool { isHidden ?? false }
 }
 
 /// Names a buddy from its job: a subject from the instruction plus a role —
@@ -252,8 +264,14 @@ final class BuddyStore: ObservableObject {
     /// Newest first.
     @Published private(set) var buddies: [WispBuddy] = []
 
+    /// Messages waiting for a buddy that is mid-run, answered in the order sent
+    /// once it is free. Saved beside buddies.json so a restart keeps them.
+    @Published private(set) var messageQueue = BuddyMessageQueue()
+
     private let buddiesFileURL: URL
+    private let messageQueueFileURL: URL
     private var scheduleCheckTimer: Timer?
+    private var taskRecordsObservation: AnyCancellable?
 
     /// Buddies whose standing job an Automation now schedules. `runDueBuddies`
     /// skips them, otherwise the job would run twice (once from here, once from
@@ -272,7 +290,11 @@ final class BuddyStore: ObservableObject {
     /// store on a temporary file.
     init(buddiesFileURL: URL = BuddyStore.defaultBuddiesFileURL) {
         self.buddiesFileURL = buddiesFileURL
+        self.messageQueueFileURL = buddiesFileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("buddy-message-queue.json")
         buddies = loadBuddies()
+        messageQueue = loadMessageQueue()
     }
 
     // MARK: - Scheduling
@@ -285,6 +307,15 @@ final class BuddyStore: ObservableObject {
         // Only the app's own store seeds; a store a test made on a temporary
         // file stays exactly as it was built.
         if self === Self.shared { ensureStarterBuddies() }
+        // A run ending is what frees a buddy for the next waiting message. The
+        // registry publishes before it changes, so the drain waits one turn.
+        if taskRecordsObservation == nil {
+            taskRecordsObservation = AgentTaskRegistry.shared.$records
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    MainActor.assumeIsolated { self?.drainMessageQueues() }
+                }
+        }
         guard scheduleCheckTimer == nil else { return }
         let timer = Timer(timeInterval: Self.scheduleCheckIntervalSeconds, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -303,6 +334,9 @@ final class BuddyStore: ObservableObject {
     /// is skipped for this slot; one that can't start (the background limit)
     /// keeps its due date and is tried again next minute.
     func runDueBuddies(now: Date) {
+        // A waiting message whose run couldn't start earlier (the background
+        // limit) gets another try on every tick.
+        drainMessageQueues()
         // Right after wake the network and connected apps are still coming back; a job started
         // then just fails. Leaving the due date alone means the next minute's check runs it.
         let readinessMonitor = SystemReadinessMonitor.shared
@@ -458,10 +492,61 @@ final class BuddyStore: ObservableObject {
     /// Sends the user's message to the buddy as the next turn of its thread.
     /// Returns false when the buddy is mid-run or the run couldn't start.
     @discardableResult
-    func sendMessage(_ messageText: String, toBuddyWithID buddyID: UUID) -> Bool {
+    func sendMessage(_ messageText: String, toBuddyWithID buddyID: UUID, inThread threadID: UUID? = nil) -> Bool {
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessageText.isEmpty, let buddy = buddy(withID: buddyID) else { return false }
-        return startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText))
+        // Behind a run in progress, a paused line, or messages already waiting:
+        // join the line rather than being refused, so replies keep the order sent.
+        let lineIsHolding = isRunning(buddy)
+            || messageQueue.isPaused(buddyWithID: buddyID)
+            || !messageQueue.waitingMessages(forBuddyWithID: buddyID).isEmpty
+        if lineIsHolding {
+            guard messageQueue.enqueue(trimmedMessageText, forBuddyWithID: buddyID, threadID: threadID) != nil else { return false }
+            saveMessageQueue()
+            return true
+        }
+        return startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: trimmedMessageText, threadID: threadID))
+    }
+
+    // MARK: - Message line
+
+    func waitingMessages(of buddy: WispBuddy) -> [QueuedBuddyMessage] {
+        messageQueue.waitingMessages(forBuddyWithID: buddy.id)
+    }
+
+    func isMessageLinePaused(buddyWithID buddyID: UUID) -> Bool {
+        messageQueue.isPaused(buddyWithID: buddyID)
+    }
+
+    func cancelWaitingMessage(withID messageID: UUID, ofBuddyWithID buddyID: UUID) {
+        guard messageQueue.cancel(messageWithID: messageID, forBuddyWithID: buddyID) else { return }
+        saveMessageQueue()
+    }
+
+    func setMessageLinePaused(_ isPaused: Bool, forBuddyWithID buddyID: UUID) {
+        messageQueue.setPaused(isPaused, forBuddyWithID: buddyID)
+        saveMessageQueue()
+        if !isPaused { drainMessageQueues() }
+    }
+
+    /// Starts the front message of every free buddy's line. A message leaves the
+    /// line only once its run has started, so one that can't start (the
+    /// background limit) stays and is tried again.
+    func drainMessageQueues() {
+        for buddyID in messageQueue.buddyIDsWithWaitingMessages {
+            guard let buddy = buddy(withID: buddyID) else {
+                messageQueue.removeAll(forBuddyWithID: buddyID)
+                saveMessageQueue()
+                continue
+            }
+            guard !isRunning(buddy),
+                  let frontMessage = messageQueue.front(forBuddyWithID: buddyID),
+                  startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: frontMessage.text, threadID: frontMessage.threadID)) else {
+                continue
+            }
+            messageQueue.removeFront(forBuddyWithID: buddyID)
+            saveMessageQueue()
+        }
     }
 
     /// Sends a message with files attached. The files are copied into the
@@ -473,9 +558,10 @@ final class BuddyStore: ObservableObject {
         _ messageText: String,
         attachmentFileURLs: [URL],
         toBuddyWithID buddyID: UUID,
+        inThread threadID: UUID? = nil,
         fileLibrary: BuddyFileLibrary = .shared
     ) async -> Bool {
-        guard !attachmentFileURLs.isEmpty else { return sendMessage(messageText, toBuddyWithID: buddyID) }
+        guard !attachmentFileURLs.isEmpty else { return sendMessage(messageText, toBuddyWithID: buddyID, inThread: threadID) }
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let buddy = buddy(withID: buddyID), !isRunning(buddy) else { return false }
 
@@ -511,7 +597,8 @@ final class BuddyStore: ObservableObject {
             text: BuddyAttachmentPolicy.messageText(userText: sentText, documents: documents, skippedFileNames: unreadableFileNames),
             displayText: sentText,
             attachmentNames: addedAttachments.map(\.fileName),
-            images: images
+            images: images,
+            threadID: threadID
         )
         return startRun(of: buddy, request: request)
     }
@@ -524,6 +611,12 @@ final class BuddyStore: ObservableObject {
             of: buddy,
             request: BuddyRunRequest(origin: .delegated, text: message, requesterName: requesterName)
         )
+    }
+
+    /// Starts a run that answers a group chat; nil while the buddy is busy.
+    func startGroupRun(ofBuddyWithID buddyID: UUID, request: BuddyRunRequest) -> UUID? {
+        guard let buddy = buddy(withID: buddyID) else { return nil }
+        return startRunReturningTaskID(of: buddy, request: request)
     }
 
     private func startRun(of buddy: WispBuddy, request: BuddyRunRequest) -> Bool {
@@ -611,6 +704,10 @@ final class BuddyStore: ObservableObject {
         mutateBuddy(withID: buddyID) { $0.isPinned = isPinned ? true : nil }
     }
 
+    func setHidden(buddyWithID buddyID: UUID, isHidden: Bool) {
+        mutateBuddy(withID: buddyID) { $0.isHidden = isHidden ? true : nil }
+    }
+
     func setNotifiesWhenFinished(buddyWithID buddyID: UUID, notifiesWhenFinished: Bool) {
         mutateBuddy(withID: buddyID) { $0.notifiesWhenFinished = notifiesWhenFinished ? nil : false }
     }
@@ -655,6 +752,8 @@ final class BuddyStore: ObservableObject {
     /// History. Stops a run in progress first so its answer doesn't land in the
     /// cleared thread.
     func clearConversation(ofBuddyWithID buddyID: UUID) {
+        messageQueue.removeAll(forBuddyWithID: buddyID)
+        saveMessageQueue()
         stopRun(ofBuddyWithID: buddyID)
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
         mutateBuddy(withID: buddyID) { buddy in
@@ -665,10 +764,14 @@ final class BuddyStore: ObservableObject {
     }
 
     func deleteBuddy(withID buddyID: UUID) {
+        messageQueue.removeAll(forBuddyWithID: buddyID)
+        saveMessageQueue()
         stopRun(ofBuddyWithID: buddyID)
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
         BuddyMemoryStore.shared.deleteMemory(ofBuddyWithID: buddyID)
         BuddyFileLibrary.shared.deleteLibrary(ofBuddyWithID: buddyID)
+        BuddyComposerDraftStore().removeDrafts(ofBuddyWithID: buddyID)
+        BuddyGroupStore.shared.removeBuddy(withID: buddyID)
         buddies.removeAll { $0.id == buddyID }
         saveBuddies()
     }
@@ -704,6 +807,26 @@ final class BuddyStore: ObservableObject {
         return (try? decoder.decode([WispBuddy].self, from: fileData)) ?? []
     }
 
+    private func loadMessageQueue() -> BuddyMessageQueue {
+        guard let fileData = try? Data(contentsOf: messageQueueFileURL) else { return BuddyMessageQueue() }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode(BuddyMessageQueue.self, from: fileData)) ?? BuddyMessageQueue()
+    }
+
+    /// Owner-only: queued messages are the user's words to a buddy.
+    private func saveMessageQueue() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let fileData = try? encoder.encode(messageQueue) else { return }
+        try? FileManager.default.createDirectory(
+            at: messageQueueFileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? fileData.write(to: messageQueueFileURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: messageQueueFileURL.path)
+    }
+
     private func saveBuddies() {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -724,6 +847,21 @@ extension BuddyStore {
 
     static let additionalStartersSeededUserDefaultsKey = "wisp.buddies.additionalStartersSeeded.v1"
 
+    static let coworkStarterSeededUserDefaultsKey = "wisp.buddies.coworkStarterSeeded.v1"
+
+    /// What the Cowork starter may use: the browser group (Chrome tabs, the
+    /// dedicated-tab agent), the screen group (window layout, screen reading)
+    /// and cua-driver, which clicks and types in native apps. cua-driver does
+    /// nothing until it is installed, and every action it takes asks first
+    /// (`ToolCallSafety`), so this widens reach, not what happens unasked.
+    static var coworkToolAccess: BuddyToolAccess {
+        BuddyToolAccess(allowedGroupIDs: [
+            BuddyToolGroup.browser.rawValue,
+            BuddyToolGroup.screen.rawValue,
+            BuddyToolAccessPolicy.groupID(forServerNamed: "cua-driver"),
+        ])
+    }
+
     /// Adds the starter buddies once (Planner, Briefer, Focus; then Inbox, Writer, Researcher under a second flag so existing users get them too). The flag is set the first
     /// time this runs, so a starter the user deletes stays deleted. Inserts without
     /// running anything: `createBuddy` runs a one-off buddy straight away, which a
@@ -736,6 +874,10 @@ extension BuddyStore {
         if !userDefaults.bool(forKey: Self.additionalStartersSeededUserDefaultsKey) {
             userDefaults.set(true, forKey: Self.additionalStartersSeededUserDefaultsKey)
             insertStarterBuddies(StarterBuddyDefinition.additional)
+        }
+        if !userDefaults.bool(forKey: Self.coworkStarterSeededUserDefaultsKey) {
+            userDefaults.set(true, forKey: Self.coworkStarterSeededUserDefaultsKey)
+            insertStarterBuddies(StarterBuddyDefinition.cowork)
         }
     }
 
@@ -751,7 +893,7 @@ extension BuddyStore {
                 createdAt: now,
                 runTaskIDs: [],
                 nextScheduledRunAt: nil,
-                toolAccess: starterDefinition.specialty.toolAccess,
+                toolAccess: starterDefinition.kind == .cowork ? Self.coworkToolAccess : starterDefinition.specialty.toolAccess,
                 specialty: starterDefinition.specialty,
                 personality: starterDefinition.defaultPersonality,
                 starterKind: starterDefinition.kind,

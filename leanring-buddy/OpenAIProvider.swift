@@ -24,25 +24,54 @@ import Foundation
 ///
 /// `@unchecked Sendable` for the same reason as the other providers.
 final class OpenAIProvider: ModelProvider, @unchecked Sendable {
+    /// Where a provider that speaks OpenAI's Chat Completions dialect lives.
+    /// Grok and OpenRouter use this same client with their own address.
+    struct Endpoint: Sendable {
+        let identifierPrefix: String
+        let serviceName: String
+        let chatCompletionsURLString: String
+
+        static let openAI = Endpoint(
+            identifierPrefix: "openai",
+            serviceName: "OpenAI",
+            chatCompletionsURLString: "https://api.openai.com/v1/chat/completions"
+        )
+        static let grok = Endpoint(
+            identifierPrefix: "grok",
+            serviceName: "xAI",
+            chatCompletionsURLString: "https://api.x.ai/v1/chat/completions"
+        )
+        static let openRouter = Endpoint(
+            identifierPrefix: "openrouter",
+            serviceName: "OpenRouter",
+            chatCompletionsURLString: "https://openrouter.ai/api/v1/chat/completions"
+        )
+    }
+
     private let modelName: String
     private let apiKey: String?
     private let session: URLSession
+    private let endpoint: Endpoint
 
     /// Default model. A vision- and tool-capable GPT; overridable via the
     /// initializer, since OpenAI's exact model ids move faster than this file.
     static let defaultModelName = "gpt-4o"
+    static let grokDefaultModelName = "grok-4"
+    static let openRouterDefaultModelName = "openai/gpt-4o"
 
     init(
         apiKey: String?,
         modelName: String = OpenAIProvider.defaultModelName,
+        endpoint: Endpoint = .openAI,
         session: URLSession = .shared
     ) {
+        self.endpoint = endpoint
         self.apiKey = apiKey
         self.modelName = modelName
         self.session = session
     }
 
-    var identifier: String { "openai/\(modelName)" }
+    var identifier: String { "\(endpoint.identifierPrefix)/\(modelName)" }
 
     var capabilities: ModelCapabilities {
         ModelCapabilities(
@@ -57,7 +86,7 @@ final class OpenAIProvider: ModelProvider, @unchecked Sendable {
 
     var deployment: ModelDeployment {
         ModelDeployment(
-            location: .remote(serviceName: "OpenAI"),
+            location: .remote(serviceName: endpoint.serviceName),
             approximateOutputTokensPerSecond: nil
         )
     }
@@ -233,7 +262,7 @@ final class OpenAIProvider: ModelProvider, @unchecked Sendable {
     // MARK: - Request construction
 
     private func buildURLRequest(for request: ModelRequest, apiKey: String) throws -> URLRequest {
-        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+        guard let url = URL(string: endpoint.chatCompletionsURLString) else {
             throw BuddyChatError.providerUnavailable(
                 providerName: identifier,
                 underlyingDescription: "could not form request URL"

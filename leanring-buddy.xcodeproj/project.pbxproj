@@ -182,12 +182,12 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
-					C7DA8FC1CDE24D85BB03F97E = {
-						CreatedOnToolsVersion = 26.2;
-					};
 					891110EF03ED43E4BBA55B79 = {
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = C7DA8FC1CDE24D85BB03F97E;
+					};
+					C7DA8FC1CDE24D85BB03F97E = {
+						CreatedOnToolsVersion = 26.2;
 					};
 					D933250ECC76423EB66AC2A4 = {
 						CreatedOnToolsVersion = 26.2;

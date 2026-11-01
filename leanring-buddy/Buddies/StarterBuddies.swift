@@ -25,6 +25,8 @@ nonisolated enum StarterBuddyKind: String, Codable, CaseIterable, Sendable {
     case writer
     /// Web research with sources.
     case researcher
+    /// Opens and drives Chrome tabs and the Mac's windows and apps.
+    case cowork
 }
 
 nonisolated struct StarterBuddyDefinition: Identifiable, Equatable, Sendable {
@@ -117,8 +119,26 @@ nonisolated struct StarterBuddyDefinition: Identifiable, Equatable, Sendable {
         ),
     ]
 
+    static let coworkBuddyID = UUID(uuidString: "6D1A0001-5EED-4B1D-9A10-0000000000A7")!
+
+    /// The hands-on buddy. Its specialty is `.general` (the palette has no free
+    /// colour for another specialty); its tool limits come from
+    /// `BuddyStore.coworkToolAccess`. Seeded under its own flag.
+    static let cowork: [StarterBuddyDefinition] = [
+        StarterBuddyDefinition(
+            id: coworkBuddyID,
+            kind: .cowork,
+            name: "Cowork",
+            specialty: .general,
+            defaultPersonality: .chill,
+            colorIndex: 7,
+            jobInstruction: "Work alongside me on this Mac: open, group, focus and close Chrome tabs, arrange windows, open apps and click or type in them when I ask. Do the steps, then tell me in one line what you did. Anything that sends, deletes or buys goes through my approval.",
+            readyAutomationTemplateIDs: []
+        ),
+    ]
+
     static func definition(for kind: StarterBuddyKind) -> StarterBuddyDefinition {
         // `all` holds one definition per kind, so this always finds one.
-        (all + additional).first { $0.kind == kind } ?? all[0]
+        (all + additional + cowork).first { $0.kind == kind } ?? all[0]
     }
 }

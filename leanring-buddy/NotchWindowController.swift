@@ -172,10 +172,18 @@ final class NotchWindowController {
             companionManager?.flashIsland(.success)
         }
         JobsEngine.shared.start()
+        // Study mode: a phase ending flashes the island like other finished work.
+        StudySessionController.shared.flashIslandSuccess = { [weak companionManager] in
+            companionManager?.flashIsland(.success)
+        }
         // Buddies' scheduled runs; each run is a background task started here.
         BuddyStore.shared.start { [weak companionManager] buddy, runRequest in
             companionManager?.startBuddyRun(buddy, request: runRequest)
         }
+        // Group chats: watches run endings and files each answer in its group.
+        BuddyGroupEngine.shared.start()
+        // Workflows set to run on a schedule start their triggers at the minute.
+        WorkflowRunEngine.shared.beginScheduleClock()
     }
 
     func hide() {

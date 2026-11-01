@@ -21,9 +21,9 @@ struct BuddyCreationView: View {
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
 
-    private enum Step { case pickSpecialty, details }
+    private enum Step { case pickSpecialty, details, templates }
 
-    @State private var step: Step = .pickSpecialty
+    @State private var step: Step = .details
     @State private var specialty: BuddySpecialty = .general
     @State private var colorIndex = 0
     @State private var personality: BuddyPersonality = .coach
@@ -41,13 +41,31 @@ struct BuddyCreationView: View {
     private var trimmedInstruction: String { instructionText.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
+        content
+            .onAppear {
+                // The form opens ready: a general buddy with its starter colour and a name.
+                guard nameText.isEmpty else { return }
+                specialty = .general
+                colorIndex = BuddySpecialty.general.preferredColorIndex
+                toolAccess = BuddySpecialty.general.toolAccess
+                nameText = suggestedName()
+                isInstructionFocused = true
+            }
+    }
+
+    private var content: some View {
         ZStack {
-            BuddyAmbientBackground(colorIndex: step == .pickSpecialty ? (hoveredSpecialty?.preferredColorIndex ?? 1) : colorIndex)
+            BuddyAmbientBackground(colorIndex: step == .details ? colorIndex : (hoveredSpecialty?.preferredColorIndex ?? 1))
             ScrollView {
                 Group {
                     switch step {
                     case .pickSpecialty: pickSpecialtyStep
                     case .details: detailsStep
+                    case .templates:
+                        BuddyTemplateGalleryView(
+                            onCreated: onCreated,
+                            onBack: { withAnimation(WispMotion.smooth) { step = .details } }
+                        )
                     }
                 }
                 .padding(.horizontal, 36)
@@ -67,6 +85,8 @@ struct BuddyCreationView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(WispColor.textPrimary)
                 Spacer()
+                Button("Templates") { withAnimation(WispMotion.smooth) { step = .templates } }
+                    .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
                 if advancedFeatures.isEnabled {
                     Button("Import from file…") {
                         if let importedBuddyID = WispShareImporter.importFromFile()?.importedBuddyIDs.first {
@@ -156,12 +176,26 @@ struct BuddyCreationView: View {
 
     private var detailsStep: some View {
         VStack(alignment: .leading, spacing: 22) {
-            Button {
-                withAnimation(WispMotion.island) { step = .pickSpecialty }
-            } label: {
-                Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .medium))
+            // One form, as in OpenBot's "Create agent": face, colour, name, what it is for.
+            HStack {
+                Text("New buddy")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(WispColor.textSecondary)
+                Spacer()
+                Button("Templates") { withAnimation(WispMotion.smooth) { step = .templates } }
+                    .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
+                if advancedFeatures.isEnabled {
+                    Button("Import from file…") {
+                        if let importedBuddyID = WispShareImporter.importFromFile()?.importedBuddyIDs.first {
+                            onCreated(importedBuddyID)
+                        }
+                    }
+                    .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
+                }
+                if !isFirstBuddy {
+                    Button("Cancel", action: onCancel).buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
+                }
             }
-            .buttonStyle(.plain).foregroundStyle(WispColor.textSecondary).pointerCursor()
 
             HStack(alignment: .center, spacing: 18) {
                 BuddyCharacter(colorIndex: colorIndex, size: 84, mood: .idle, liveliness: .full, looksAtPointer: true)
@@ -223,8 +257,22 @@ struct BuddyCreationView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
+                Text("Role")
+                    .font(.system(size: 12.5, weight: .medium)).foregroundStyle(WispColor.textSecondary)
+                Menu {
+                    ForEach(BuddySpecialty.allCases) { candidate in
+                        Button { changeRole(to: candidate) } label: {
+                            Label(candidate.title, systemImage: candidate.symbolName)
+                        }
+                    }
+                } label: {
+                    Label(specialty.title, systemImage: specialty.symbolName).font(.system(size: 13, weight: .medium))
+                }
+                .menuStyle(.button).buttonStyle(.plain).fixedSize().pointerCursor()
+
                 Text("How it works")
                     .font(.system(size: 12.5, weight: .medium)).foregroundStyle(WispColor.textSecondary)
+                    .padding(.top, 4)
                 BuddyPersonalityPicker(selection: $personality)
             }
             .padding(16)
@@ -279,6 +327,63 @@ struct BuddyCreationView: View {
                 .disabled(trimmedInstruction.isEmpty)
                 .opacity(trimmedInstruction.isEmpty ? 0.5 : 1)
             }
+
+            suggestions
         }
+    }
+
+    // MARK: - Suggestions
+
+    /// Three ready-made starting points under the form, like OpenBot's suggestion cards. A tap
+    /// fills the form (nothing is created until Create), and Templates has the full gallery.
+    private var suggestions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Suggestions").font(.system(size: 12, weight: .semibold)).foregroundStyle(WispColor.textSecondary)
+            HStack(spacing: 10) {
+                ForEach(BuddyTemplateCatalog.bundled.prefix(3)) { template in
+                    Button { fill(from: template) } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            BuddyCharacter(
+                                colorIndex: template.specialty.preferredColorIndex, size: 30,
+                                mood: .idle, liveliness: .still)
+                                .frame(width: 34, height: 34)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(template.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(WispColor.textPrimary)
+                                Text(template.tagline).font(.system(size: 11.5)).foregroundStyle(WispColor.textSecondary)
+                                    .multilineTextAlignment(.leading).lineLimit(2)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(WispColor.surface2.opacity(0.7)))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(WispColor.cardSeparator.opacity(0.5), lineWidth: 0.5))
+                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(PressableScaleButtonStyle()).pointerCursor()
+                }
+            }
+        }
+        .padding(.top, 6)
+    }
+
+    private func fill(from template: BuddyTemplate) {
+        specialty = template.specialty
+        personality = template.personality
+        colorIndex = template.colorIndex ?? template.specialty.preferredColorIndex
+        instructionText = template.mission
+        toolAccess = template.toolAccess ?? template.specialty.toolAccess
+        modelChoice = template.modelChoice
+        schedule = template.schedule
+        hasChosenScheduleByHand = true
+        hasEditedName = false
+        nameText = suggestedName()
+    }
+
+    private func changeRole(to chosenSpecialty: BuddySpecialty) {
+        specialty = chosenSpecialty
+        toolAccess = chosenSpecialty.toolAccess
+        withAnimation(WispMotion.quick) { colorIndex = chosenSpecialty.preferredColorIndex }
+        if !hasEditedName { nameText = suggestedName() }
     }
 }

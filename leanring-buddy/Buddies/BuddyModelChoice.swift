@@ -47,6 +47,8 @@ struct BuddyModelChoice: Codable, Equatable, Hashable, Identifiable {
         + [
             BuddyModelChoice(providerKind: .openAI, claudeModel: nil),
             BuddyModelChoice(providerKind: .gemini, claudeModel: nil),
+            BuddyModelChoice(providerKind: .grok, claudeModel: nil),
+            BuddyModelChoice(providerKind: .openRouter, claudeModel: nil),
         ]
 }
 

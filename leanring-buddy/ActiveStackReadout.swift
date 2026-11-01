@@ -83,6 +83,10 @@ final class ActiveStackReadout: ObservableObject {
             return OpenAIProvider.defaultModelName
         case .gemini:
             return GeminiProvider.defaultModelName
+        case .grok:
+            return OpenAIProvider.grokDefaultModelName
+        case .openRouter:
+            return OpenAIProvider.openRouterDefaultModelName
         }
     }
 

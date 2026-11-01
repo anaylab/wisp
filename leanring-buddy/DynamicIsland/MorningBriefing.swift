@@ -31,6 +31,8 @@ struct MorningSuggestion: Identifiable, Equatable {
         case runRoutine(routineID: UUID)
         /// Ask Wisp a question, exactly as if the user had typed it.
         case askQuestion(String)
+        /// Ask macOS for Calendar access, then rebuild the briefing with today's meetings.
+        case connectCalendar
     }
 
     let id: String
@@ -52,9 +54,21 @@ enum MorningSuggestionBuilder {
         routines: [WispRoutine],
         remainingMeetingCountToday: Int?,
         hasRemindersAccess: Bool,
+        canOfferCalendarConnection: Bool = false,
         now: Date
     ) -> [MorningSuggestion] {
         var suggestions: [MorningSuggestion] = []
+
+        // The briefing itself never prompts for access, so when Calendar hasn't
+        // been decided yet it offers a row; the user's click is what asks.
+        if canOfferCalendarConnection {
+            suggestions.append(MorningSuggestion(
+                id: "calendar-connect",
+                title: "Connect your calendar",
+                symbolName: "calendar.badge.plus",
+                action: .connectCalendar
+            ))
+        }
 
         // nil means no Calendar access, 0 means a clear day — neither is worth offering.
         if let remainingMeetingCountToday, remainingMeetingCountToday > 0 {
@@ -215,6 +229,13 @@ final class MorningBriefingController: ObservableObject {
     func perform(_ suggestion: MorningSuggestion, companionManager: CompanionManager) {
         pendingSuggestions.removeAll { $0.id == suggestion.id }
         switch suggestion.action {
+        case .connectCalendar:
+            Task {
+                // `snapshot` requests access when it hasn't been decided; the
+                // result itself isn't needed here.
+                _ = try? await CalendarDataProvider.shared.snapshot()
+                presentNow()
+            }
         case .runRoutine(let routineID):
             companionManager.runRoutine(withID: routineID)
         case .askQuestion(let question):
@@ -305,6 +326,7 @@ final class MorningBriefingController: ObservableObject {
             routines: RoutineStore.shared.routines,
             remainingMeetingCountToday: remainingMeetingCountToday,
             hasRemindersAccess: hasRemindersAccess,
+            canOfferCalendarConnection: EKEventStore.authorizationStatus(for: .event) == .notDetermined,
             now: now
         )
         guard !suggestions.isEmpty else { return }

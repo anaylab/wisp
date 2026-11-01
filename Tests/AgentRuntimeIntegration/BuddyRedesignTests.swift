@@ -132,6 +132,20 @@ import Foundation
         let noFileBuddy = busyStore.createBuddy(instruction: "x", schedule: .once, runImmediately: false)
         check("no files falls back to the plain send (and fails without a starter)", await busyStore.sendMessage("hello", attachmentFileURLs: [], toBuddyWithID: noFileBuddy.id) == false)
 
+        // The Cowork starter: seeded once, limited to browser + screen + cua-driver.
+        let coworkStore = BuddyStore(buddiesFileURL: sandbox.appendingPathComponent("cowork-buddies.json"))
+        let coworkDefaults = UserDefaults(suiteName: "cowork-test-\(UUID().uuidString)")!
+        coworkStore.ensureStarterBuddies(userDefaults: coworkDefaults)
+        let cowork = coworkStore.buddy(withID: StarterBuddyDefinition.coworkBuddyID)
+        check("the Cowork starter is seeded", cowork?.name == "Cowork" && cowork?.starterKind == .cowork)
+        check("Cowork may use browser, screen and cua-driver",
+              cowork?.toolAccess?.allowedGroupIDs == ["browser", "screen", BuddyToolAccessPolicy.groupID(forServerNamed: "cua-driver")])
+        check("Cowork gets no brain, messages or memory",
+              cowork?.toolAccess?.allows(.brain) == false && cowork?.toolAccess?.allows(.messaging) == false && cowork?.toolAccess?.allows(.memory) == false)
+        coworkStore.deleteBuddy(withID: StarterBuddyDefinition.coworkBuddyID)
+        coworkStore.ensureStarterBuddies(userDefaults: coworkDefaults)
+        check("a deleted Cowork starter stays deleted", coworkStore.buddy(withID: StarterBuddyDefinition.coworkBuddyID) == nil)
+
         // Old buddies.json without a specialty still loads.
         let legacyJSON = """
         [{"id":"\(UUID().uuidString)","name":"Old","instruction":"x","colorIndex":1,"schedule":{"once":{}},"createdAt":"2026-01-01T00:00:00Z","runTaskIDs":[]}]

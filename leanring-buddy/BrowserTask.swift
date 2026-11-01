@@ -119,6 +119,7 @@ enum BrowserTaskRunner {
     static func execute(
         _ plan: BrowserTaskPlan,
         using controller: BrowserController,
+        cursorGuide: BrowserCursorGuide? = nil,
         onStep: (@MainActor (String) -> Void)? = nil
     ) async -> BrowserTaskResult {
         let startedAt = Date()
@@ -133,7 +134,7 @@ enum BrowserTaskRunner {
         for step in plan.steps {
             let stepStartedAt = Date()
             do {
-                try await perform(step, using: controller)
+                try await perform(step, using: controller, cursorGuide: cursorGuide)
                 operationCount += 1
                 let milliseconds = Int(Date().timeIntervalSince(stepStartedAt) * 1000)
                 note("\(step.description) — \(milliseconds)ms")
@@ -197,7 +198,25 @@ enum BrowserTaskRunner {
         )
     }
 
-    private static func perform(_ step: BrowserStep, using controller: BrowserController) async throws {
+    /// Moves the agent cursor to an element before it is acted on. A miss is
+    /// silent: the cursor is a courtesy to the watching user, never a
+    /// precondition for the action.
+    private static func guideCursor(
+        toElementID elementID: String,
+        actionText: String,
+        controller: BrowserController,
+        cursorGuide: BrowserCursorGuide?
+    ) async {
+        guard let cursorGuide,
+              let located = try? controller.screenPoint(ofElementID: elementID) else { return }
+        await cursorGuide.guideCursor(to: located.point, on: located.displayFrame, actionText: actionText)
+    }
+
+    private static func perform(
+        _ step: BrowserStep,
+        using controller: BrowserController,
+        cursorGuide: BrowserCursorGuide?
+    ) async throws {
         switch step {
         case .open(let url):
             try controller.openURL(url)
@@ -209,6 +228,7 @@ enum BrowserTaskRunner {
 
         case .typeInto(let fieldQuery, let text, let submit):
             let element = try resolveField(matching: fieldQuery, using: controller)
+            await guideCursor(toElementID: element.id, actionText: "type", controller: controller, cursorGuide: cursorGuide)
             try controller.typeText(text, intoElementID: element.id, pressEnter: submit)
             if submit { _ = await controller.waitUntilLoaded(timeout: 10) }
 
@@ -217,6 +237,7 @@ enum BrowserTaskRunner {
             guard let best = candidates.first else {
                 throw BrowserControllerError.elementNotFound(query)
             }
+            await guideCursor(toElementID: best.id, actionText: "click", controller: controller, cursorGuide: cursorGuide)
             try controller.click(elementID: best.id)
             _ = await controller.waitUntilLoaded(timeout: 10)
 

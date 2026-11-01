@@ -90,11 +90,12 @@ enum WispColor {
     // backgrounds. In dark mode they rise (night → lifted moss-greys), the
     // conventional elevation direction.
 
-    static let background = adaptive(light: Brand.cloud,        dark: Brand.night)
-    static let surface1   = adaptive(light: "#F4F4F6",          dark: Brand.darkSurface)
-    static let surface2   = adaptive(light: "#EDEDF0",          dark: "#202220")
-    static let surface3   = adaptive(light: "#E4E4E8",          dark: "#272926")
-    static let surface4   = adaptive(light: "#D9D9DE",          dark: "#2E312D")
+    // A theme that sets its own neutrals (Graphite) wins; every other theme keeps these.
+    static let background = themedNeutral(light: "#F7F6F2", dark: "#111210") { $0.background }
+    static let surface1   = themedNeutral(light: "#F4F4F6", dark: "#191B18") { $0.surface1 }
+    static let surface2   = themedNeutral(light: "#EDEDF0", dark: "#202220") { $0.surface2 }
+    static let surface3   = themedNeutral(light: "#E4E4E8", dark: "#272926") { $0.surface3 }
+    static let surface4   = themedNeutral(light: "#D9D9DE", dark: "#2E312D") { $0.surface4 }
 
     // ── Borders ──
     static let borderSubtle = adaptive(light: Color.black.opacity(0.08),
@@ -103,9 +104,9 @@ enum WispColor {
                                        dark:  Color.white.opacity(0.16))
 
     // ── Text ──
-    static let textPrimary   = adaptive(light: Brand.ink,   dark: "#F2F1EC")
-    static let textSecondary = adaptive(light: "#5A5C55",   dark: "#ADB2A8")
-    static let textTertiary  = adaptive(light: "#8A8C83",   dark: "#6E736B")
+    static let textPrimary   = themedNeutral(light: "#171815", dark: "#F2F1EC") { $0.textPrimary }
+    static let textSecondary = themedNeutral(light: "#5A5C55", dark: "#ADB2A8") { $0.textSecondary }
+    static let textTertiary  = themedNeutral(light: "#8A8C83", dark: "#6E736B") { $0.textTertiary }
 
     // ── Accent (themed) ──
     /// Text/icon colour on top of the accent fill. Every theme's accent fill is
@@ -180,7 +181,7 @@ enum WispColor {
     /// A grouped card sitting on `windowBackground`.
     static let groupedCardBackground = themedSurface(systemColor: .controlBackgroundColor) { $0.cardBackground }
     /// The hairline around a grouped card.
-    static let cardSeparator = Color(nsColor: .separatorColor)
+    static let cardSeparator = themedSeparator()
 
     // ── Semantic (organic-toned, not neon) ──
     static let success        = adaptive(light: "#4E8A6B", dark: "#6FBF9B")
@@ -296,6 +297,28 @@ enum WispColor {
     }
 
     // MARK: - Themed helpers
+
+    /// One of the theme's own neutrals, or the default pair when the theme sets none.
+    nonisolated static func themedNeutral(
+        light: String, dark: String,
+        _ pick: @escaping @Sendable (WispThemeNeutrals) -> WispThemeColorPair
+    ) -> Color {
+        themedColor { theme in
+            theme.neutrals.map(pick) ?? WispThemeColorPair(lightHex: light, darkHex: dark)
+        }
+    }
+
+    /// The hairline around cards and panels: the theme's own, else the system separator.
+    nonisolated static func themedSeparator() -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            guard let neutrals = WispThemeStore.currentThemeNow.neutrals else { return .separatorColor }
+            return NSColor(
+                wispHex: neutrals.separator.lightHex == neutrals.separator.darkHex || !isDark
+                    ? neutrals.separator.lightHex : neutrals.separator.darkHex,
+                alpha: isDark ? neutrals.separatorDarkAlpha : neutrals.separatorLightAlpha)
+        })
+    }
 
     /// A colour that re-reads the current theme every time AppKit resolves it, so a
     /// theme change reskins every call site once its view is rebuilt. `nonisolated`

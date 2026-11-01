@@ -19,6 +19,7 @@
 //  position; this view only reflects `viewModel.isExpanded`.
 //
 
+import Combine
 import SwiftUI
 
 struct NotchHUDView: View {
@@ -45,6 +46,8 @@ struct NotchHUDView: View {
     /// The measured natural height of the answer content, so the answer region
     /// sizes to fit a short reply and the whole island shrinks when idle.
     @State private var answerContentHeight: CGFloat = 0
+    /// Mirrors whether a Study session runs. The tick-driven views observe the controller themselves.
+    @State private var isStudySessionActive = StudySessionController.shared.isSessionActive
 
     /// The buddy shown in the left flank: the one working now, kept for a moment
     /// after it finishes so its bounce can be seen before the flank goes back to
@@ -122,6 +125,9 @@ struct NotchHUDView: View {
             )
             .animation(.spring(response: 0.36, dampingFraction: 0.84), value: islandIsVisible)
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showsLiveCaption)
+        }
+        .onReceive(StudySessionController.shared.$session.map { $0 != nil }.removeDuplicates()) { isActive in
+            isStudySessionActive = isActive
         }
         // The dynamic island is always dark, regardless of the system's light or
         // dark appearance, so the Liquid Glass renders its dark variant and the
@@ -365,6 +371,7 @@ struct NotchHUDView: View {
             || hasJobsContentToDrop
             || !screenWatcherStore.activeWatchers.isEmpty
             || flankBuddyID != nil
+            || isStudySessionActive
     }
 
     /// Whether a flank is showing a label (step count, task count, countdown)
@@ -434,6 +441,8 @@ struct NotchHUDView: View {
                     accessibilityDescription: workingBuddyID == flankBuddy.id ? "\(flankBuddy.name) is working" : "\(flankBuddy.name) is done"
                 )
                 .nativeTooltip(workingBuddyID == flankBuddy.id ? "\(flankBuddy.name) is working" : "\(flankBuddy.name) is done")
+            } else if companionManager.voiceState == .idle && !isExecutingBrowserTask && isStudySessionActive {
+                NotchStudyLeadingGlyph()
             } else if companionManager.voiceState == .idle && !isExecutingBrowserTask && !runningBackgroundTasks.isEmpty {
                 flankActivityLabel("\(runningBackgroundTasks.count)")
                     .nativeTooltip(runningBackgroundTasks.count == 1
@@ -1062,9 +1071,12 @@ struct NotchHUDView: View {
             case .processing:
                 collapsedThinkingDots
             case .idle:
-                // Most time-sensitive first: a meeting about to start, then
-                // results waiting to be seen, then the day's suggestions.
-                if let imminentEvent = upcomingEventMonitor.imminentEvent {
+                // A running study session owns the flank; otherwise the most
+                // time-sensitive first: a meeting about to start, then results
+                // waiting to be seen, then the day's suggestions.
+                if isStudySessionActive {
+                    NotchStudyFlank()
+                } else if let imminentEvent = upcomingEventMonitor.imminentEvent {
                     flankEventCountdown(imminentEvent)
                         .nativeTooltip(imminentEvent.title)
                 } else if !finishedWorkInbox.unseenTaskIDs.isEmpty {
@@ -1206,7 +1218,7 @@ struct NotchHUDView: View {
     /// the cutout. A little wider when a flank carries a label ("4", "12m")
     /// rather than a lone glyph, so the text isn't crowded against the notch.
     private var notchWrapSideExtension: CGFloat {
-        isShowingFlankLabel ? 58 : 44
+        isStudySessionActive ? 74 : (isShowingFlankLabel ? 58 : 44)
     }
 
     /// The collapsed surface's width. On a notched Mac it is the notch width plus a
@@ -1287,6 +1299,12 @@ struct NotchHUDView: View {
 
     private var quickPanelScrollingSections: some View {
             VStack(alignment: .leading, spacing: 8) {
+                // Study: the running timer, or a one-tap launcher while nothing runs
+                // (an answer takes the launcher's place, as it does the day's lists).
+                if isStudySessionActive || !hasAnswer {
+                    NotchStudyPanelSection()
+                }
+
                 // What's in flight right now, with a way to stop it.
                 liveActivitySection
 
