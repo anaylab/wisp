@@ -450,7 +450,7 @@ struct BuddyChatView: View {
         let isRunning = runRecord.map { !$0.status.isTerminal } ?? false
         return VStack(alignment: .leading, spacing: 8) {
             if let exchange, exchange.origin == .delegated, let requesterName = exchange.requesterName {
-                handoffRow(requesterName: requesterName, message: exchange.userText, buddy: buddy)
+                handoffRow(requesterName: requesterName, message: BuddyFlowPolicy.displayText(ofHandOffMessage: exchange.userText), buddy: buddy)
             } else if let exchange, exchange.origin == .message {
                 userBubble(exchange, buddy: buddy)
             }

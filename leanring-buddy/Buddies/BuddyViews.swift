@@ -1038,7 +1038,7 @@ struct BuddyDetailView: View {
             // one the user started with a message shows what they said.
             if let exchange, exchange.origin != .job {
                 userMessageBubble(
-                    exchange.userText,
+                    exchange.origin == .delegated ? BuddyFlowPolicy.displayText(ofHandOffMessage: exchange.userText) : exchange.userText,
                     senderName: exchange.origin == .delegated ? exchange.requesterName : nil
                 )
             }
