@@ -94,6 +94,13 @@ import Foundation
         check("result event: cache read and write reported separately",
               streamOutcome.cacheReadTokens == 900 && streamOutcome.cacheWriteTokens == 200)
         check("result event: total_cost_usd carried", streamOutcome.reportedCostUSD == 0.0421)
+        check("result event: no modelUsage, no context window", streamOutcome.contextWindowTokens == nil)
+        let windowEvent = #"{"type":"result","result":"Hi.","is_error":false,"usage":{"input_tokens":5},"modelUsage":{"claude-haiku-4-5":{"inputTokens":5,"contextWindow":200000,"maxOutputTokens":32000}}}"#
+        let (windowStream, windowContinuation) = AsyncStream<Data>.makeStream()
+        windowContinuation.yield(Data((windowEvent + "\n").utf8))
+        windowContinuation.finish()
+        let windowOutcome = await ClaudeSubscriptionProvider.readEventStream(from: windowStream, onTextDelta: { _ in })
+        check("result event: the context window is read from modelUsage", windowOutcome.contextWindowTokens == 200_000)
         let usageTurn = try? ClaudeSubscriptionProvider.turn(
             from: streamOutcome, standardErrorText: "", exitStatus: 0, duration: 1,
             knownToolNames: [], providerName: "Claude")
@@ -196,6 +203,29 @@ import Foundation
             )
             check("live session: the resumed session remembers", secondTurn.text.lowercased().contains("tangerine"), secondTurn.text)
             check("live session: the same session was kept", sessionStore.record(for: mainKey)?.answeredCallCount == 2)
+            let mainRecord = sessionStore.record(for: mainKey)
+            check("live session: the fill is recorded", (mainRecord?.lastContextTokens ?? 0) > 0 && mainRecord?.contextWindowTokens ?? 0 >= 100_000,
+                  "\(String(describing: mainRecord))")
+
+            // A session the last call left nearly full is started over, with the history.
+            let fullKey = BuddySessionKey(buddyID: buddyID, conversationID: UUID())
+            let fullSessionID = UUID()
+            sessionStore.noteAnsweredCall(in: fullKey, sessionID: fullSessionID, contextTokens: 196_000, contextWindowTokens: 200_000)
+            let fullProvider = ClaudeCodeSessionProvider(
+                modelChoice: .haiku, effortLevel: .low, sessionKey: fullKey, sessionStore: sessionStore
+            )
+            let startedOverTurn = try await fullProvider.streamTurn(
+                ModelRequest(systemPrompt: systemPrompt, messages: [
+                    BuddyChatMessage(role: .user, text: "My dog is called Pepper."),
+                    BuddyChatMessage(role: .assistant, text: "Noted."),
+                    BuddyChatMessage(role: .user, text: "What is my dog called? Just the name."),
+                ]),
+                onTextDelta: { _ in }
+            )
+            let startedOverRecord = sessionStore.record(for: fullKey)
+            check("live session: a full session is started over", startedOverRecord.map { $0.sessionID != fullSessionID } ?? false)
+            check("live session: the restart is counted", startedOverRecord?.restartCount == 1)
+            check("live session: the new session got the history", startedOverTurn.text.lowercased().contains("pepper"), startedOverTurn.text)
 
             let secretTool = BuddyToolDefinition(
                 name: "get_secret_number", description: "Returns the user's secret number.",

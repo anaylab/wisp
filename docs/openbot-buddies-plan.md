@@ -98,7 +98,10 @@ Each phase is its own `feature/…` branch with a `Tests/` suite for the pure pa
    is `CLISessionRuntime`, which keeps a Claude Code (stream-json, persistent `--resume` session) or
    Codex app-server session per buddy thread, inside `~/Library/Application Support/Wisp/buddy-workspaces/<id>/`.
    Its tool calls are routed through Wisp's `ToolPermissionBroker`.
-2. **Session lifecycle.** Context-fill tracking, compaction (native where the CLI supports it,
+2. **Session lifecycle — built.** Claude Code compacts its own sessions, so Wisp tracks how full each one is (shown
+   in the buddy's settings) and only starts over with a handoff when a session is still ≥95% full or overflows.
+   Crash recovery needed nothing new: session ids persist, and a gone session is replaced. Original plan:
+   **Session lifecycle.** Context-fill tracking, compaction (native where the CLI supports it,
    otherwise a handoff to a fresh session), and recovery after a crash or relaunch.
 3. **Queue upgrades.** Steer mode, parallel threads per buddy (default 2), and visible hold reasons.
 4. **Buddy tools.** `list_buddies`, `interrupt_buddy`, `start_thread`, `create_buddy`/`update_buddy`

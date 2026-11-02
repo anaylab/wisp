@@ -273,10 +273,9 @@ struct BuddyRuntimeEditor: View {
         case .signedOut:
             return "Run `claude` in Terminal once to sign in with your subscription, or this buddy can't run."
         case .checking, .signedIn:
-            let sessionCount = BuddySessionStore.shared.records(ofBuddyWithID: buddy.id).count
-            let sessionsText = sessionCount == 0
-                ? "Its first run starts a session."
-                : "\(sessionCount) conversation\(sessionCount == 1 ? "" : "s") kept."
+            let sessionsText = BuddySessionSummary.text(
+                for: Array(BuddySessionStore.shared.records(ofBuddyWithID: buddy.id).values)
+            )
             return "Keeps one Claude Code session per conversation, on your Claude subscription. Its job, threads and notes go to Anthropic. Claude Code's own tools stay off, so whatever it does goes through Wisp and still asks first. "
                 + sessionsText
         }

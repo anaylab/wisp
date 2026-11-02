@@ -129,6 +129,56 @@ check(forgotten.ids == [threadSession, replacementSession], "the buddy's session
 check(BuddySessionStore(fileURL: storeFileURL, removeForgottenSessionFiles: { _ in }).record(for: mainKey) == nil,
       "forgetting is saved")
 
+// MARK: Context fill and starting over
+
+func record(context: Int?, window: Int?, restarts: Int? = nil) -> BuddySessionRecord {
+    BuddySessionRecord(
+        sessionID: UUID(), createdAt: Date(), lastUsedAt: Date(), answeredCallCount: 1,
+        lastContextTokens: context, contextWindowTokens: window, restartCount: restarts
+    )
+}
+check(BuddySessionPolicy.contextFillFraction(of: record(context: 50_000, window: 200_000)) == 0.25, "fill is the last prompt over the window")
+check(BuddySessionPolicy.contextFillFraction(of: record(context: nil, window: 200_000)) == nil, "no reported prompt, no fill")
+check(BuddySessionPolicy.contextFillFraction(of: record(context: 10, window: 0)) == nil, "a zero window is ignored")
+check(BuddySessionPolicy.contextFillFraction(of: record(context: 300_000, window: 200_000)) == 1, "fill is capped at full")
+check(!BuddySessionPolicy.shouldStartOverBeforeResuming(record(context: 160_000, window: 200_000)), "80% full still resumes (the CLI compacts by itself)")
+check(BuddySessionPolicy.shouldStartOverBeforeResuming(record(context: 190_000, window: 200_000)), "95% full starts over")
+check(!BuddySessionPolicy.shouldStartOverBeforeResuming(record(context: nil, window: nil)), "an unknown fill resumes")
+
+check(BuddySessionPolicy.isContextOverflowFailure("API Error: 400 prompt is too long: 215000 tokens > 200000 maximum"), "the API's overflow wording is recognised")
+check(BuddySessionPolicy.isContextOverflowFailure("input exceeds the context window of this model"), "other overflow wording is recognised")
+check(!BuddySessionPolicy.isContextOverflowFailure("No conversation found with session ID: x"), "a gone session is not an overflow")
+check(!BuddySessionPolicy.isContextOverflowFailure("Claude usage limit reached"), "a usage limit is not an overflow")
+
+do {
+    let fillStoreURL = URL(fileURLWithPath: buildDirectory).appendingPathComponent("fill/buddy-sessions.json")
+    let fillStore = BuddySessionStore(fileURL: fillStoreURL, removeForgottenSessionFiles: { _ in })
+    let fillKey = BuddySessionKey(buddyID: UUID(), conversationID: nil)
+    let fillSession = UUID()
+    fillStore.noteAnsweredCall(in: fillKey, sessionID: fillSession, contextTokens: 12_000, contextWindowTokens: 200_000)
+    fillStore.noteAnsweredCall(in: fillKey, sessionID: fillSession, contextTokens: nil, contextWindowTokens: nil)
+    check(fillStore.record(for: fillKey)?.lastContextTokens == 12_000, "a call that reports nothing keeps the last fill")
+    fillStore.noteAnsweredCall(in: fillKey, sessionID: fillSession, contextTokens: 30_000, contextWindowTokens: 200_000, restartCount: 9)
+    check(fillStore.record(for: fillKey)?.lastContextTokens == 30_000, "a later call updates the fill")
+    check(fillStore.record(for: fillKey)?.restartCount == nil, "the restart count is only set when a session starts")
+    let replacement = UUID()
+    fillStore.noteAnsweredCall(in: fillKey, sessionID: replacement, contextTokens: 4_000, contextWindowTokens: 200_000, restartCount: 2)
+    check(fillStore.record(for: fillKey)?.restartCount == 2, "a replacement session carries the restart count")
+    check(BuddySessionStore(fileURL: fillStoreURL, removeForgottenSessionFiles: { _ in }).record(for: fillKey)?.contextWindowTokens == 200_000,
+          "the fill survives a relaunch")
+}
+
+let recordFromBeforeFill = Data(#"{"sessionID":"6F9619FF-8B86-D011-B42D-00C04FC964FF","createdAt":0,"lastUsedAt":0,"answeredCallCount":3}"#.utf8)
+let decodedOldRecord = try? JSONDecoder().decode(BuddySessionRecord.self, from: recordFromBeforeFill)
+check(decodedOldRecord?.answeredCallCount == 3 && decodedOldRecord?.lastContextTokens == nil, "a record saved before fill tracking still loads")
+
+check(BuddySessionSummary.text(for: []) == "Its first run starts a session.", "no sessions yet")
+check(BuddySessionSummary.text(for: [record(context: 68_000, window: 200_000)]) == "1 conversation kept · 34% full.", "one session shows its fill")
+check(BuddySessionSummary.text(for: [record(context: 10_000, window: 200_000), record(context: 100_000, window: 200_000, restarts: 1)])
+      == "2 conversations kept · the fullest is 50% full · started over once when full.", "several sessions show the fullest and restarts")
+check(BuddySessionSummary.text(for: [record(context: nil, window: nil, restarts: 2), record(context: nil, window: nil, restarts: 1)])
+      == "2 conversations kept · started over 3 times when full.", "an unknown fill is left out")
+
 // MARK: Workspace
 
 let workspaceBuddy = UUID()

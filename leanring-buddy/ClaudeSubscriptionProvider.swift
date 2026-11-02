@@ -378,6 +378,9 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
         /// `total_cost_usd` from the result event: what the turn would cost at
         /// API rates. Reported by the CLI itself, so used as-is.
         var reportedCostUSD: Double?
+        /// `modelUsage.<model>.contextWindow`: how many tokens the model's
+        /// context holds, so a kept session can say how full it is.
+        var contextWindowTokens: Int?
         var sawRateLimitRejection = false
     }
 
@@ -426,6 +429,11 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
                     outcome.cacheWriteTokens = cacheCreation
                 }
                 outcome.reportedCostUSD = (event["total_cost_usd"] as? NSNumber)?.doubleValue
+                if let modelUsage = event["modelUsage"] as? [String: Any] {
+                    outcome.contextWindowTokens = modelUsage.values
+                        .compactMap { ($0 as? [String: Any])?["contextWindow"] as? Int }
+                        .max()
+                }
 
             default:
                 return

@@ -63,6 +63,15 @@ nonisolated struct BuddySessionRecord: Codable, Equatable, Sendable {
     var lastUsedAt: Date
     /// Model calls answered in this session, for the settings page.
     var answeredCallCount: Int
+    /// The prompt size of the last call (fresh + cached input), which is how
+    /// much of the context the conversation now fills. Nil until reported, and
+    /// in files from before this was kept.
+    var lastContextTokens: Int?
+    /// How many tokens the model's context holds, as the CLI reports it.
+    var contextWindowTokens: Int?
+    /// How many times this conversation was started over in a new session
+    /// because the old one was full. Nil is never.
+    var restartCount: Int?
 }
 
 /// The pure rules for talking to a kept session. Tested by `Tests/BuddyRuntime`.
@@ -87,6 +96,35 @@ nonisolated enum BuddySessionPolicy {
         return Array(messages[(lastAssistantIndex + 1)...])
     }
 
+    /// How full a session's context was on its last call, 0…1, or nil when
+    /// the CLI hasn't said.
+    static func contextFillFraction(of record: BuddySessionRecord) -> Double? {
+        guard let lastContextTokens = record.lastContextTokens,
+              let contextWindowTokens = record.contextWindowTokens, contextWindowTokens > 0 else { return nil }
+        return min(1, Double(lastContextTokens) / Double(contextWindowTokens))
+    }
+
+    /// The CLI compacts a session by itself as it fills, so a session this
+    /// full on its last call means that didn't happen. Wisp then starts the
+    /// conversation over in a new session (with the recent history as its
+    /// handoff) rather than send one more call that would overflow.
+    static let restartFillFraction = 0.95
+
+    static func shouldStartOverBeforeResuming(_ record: BuddySessionRecord) -> Bool {
+        (contextFillFraction(of: record) ?? 0) >= restartFillFraction
+    }
+
+    /// Whether a call failed because the conversation no longer fits the
+    /// model's context. Substring matching, as the CLI and the API report it
+    /// as prose.
+    static func isContextOverflowFailure(_ failureText: String) -> Bool {
+        let lowercasedText = failureText.lowercased()
+        return lowercasedText.contains("prompt is too long")
+            || lowercasedText.contains("context window")
+            || lowercasedText.contains("context length")
+            || lowercasedText.contains("too many tokens")
+    }
+
     /// Whether the CLI refused to resume because the session is gone (its
     /// file was deleted, or it was made by another machine). Wisp then starts
     /// a fresh session and hands it the history instead. Substring matching
@@ -96,6 +134,26 @@ nonisolated enum BuddySessionPolicy {
         return lowercasedText.contains("no conversation found")
             || lowercasedText.contains("session not found")
             || lowercasedText.contains("no session found")
+    }
+}
+
+/// The one line the buddy's settings show about its kept sessions:
+/// "2 conversations kept · the fullest is 34% full · started over once".
+nonisolated enum BuddySessionSummary {
+    static func text(for records: [BuddySessionRecord]) -> String {
+        guard !records.isEmpty else { return "Its first run starts a session." }
+        var parts = ["\(records.count) conversation\(records.count == 1 ? "" : "s") kept"]
+        if let fullestFraction = records.compactMap(BuddySessionPolicy.contextFillFraction(of:)).max() {
+            let percent = Int((fullestFraction * 100).rounded())
+            parts.append(records.count == 1 ? "\(percent)% full" : "the fullest is \(percent)% full")
+        }
+        let restartTotal = records.compactMap(\.restartCount).reduce(0, +)
+        if restartTotal == 1 {
+            parts.append("started over once when full")
+        } else if restartTotal > 1 {
+            parts.append("started over \(restartTotal) times when full")
+        }
+        return parts.joined(separator: " · ") + "."
     }
 }
 
@@ -138,18 +196,32 @@ nonisolated final class BuddySessionStore: @unchecked Sendable {
     }
 
     /// Records one more answered call, creating the record for a session that
-    /// just started.
-    func noteAnsweredCall(in key: BuddySessionKey, sessionID: UUID, at date: Date = Date()) {
+    /// just started. `restartCount` carries over how often this conversation
+    /// was started over before (only read for a new session).
+    func noteAnsweredCall(
+        in key: BuddySessionKey,
+        sessionID: UUID,
+        contextTokens: Int? = nil,
+        contextWindowTokens: Int? = nil,
+        restartCount: Int? = nil,
+        at date: Date = Date()
+    ) {
         lock.withLock {
-            if var existingRecord = recordsByKey[key], existingRecord.sessionID == sessionID {
-                existingRecord.lastUsedAt = date
-                existingRecord.answeredCallCount += 1
-                recordsByKey[key] = existingRecord
+            var record: BuddySessionRecord
+            if let existingRecord = recordsByKey[key], existingRecord.sessionID == sessionID {
+                record = existingRecord
+                record.lastUsedAt = date
+                record.answeredCallCount += 1
             } else {
-                recordsByKey[key] = BuddySessionRecord(
-                    sessionID: sessionID, createdAt: date, lastUsedAt: date, answeredCallCount: 1
+                record = BuddySessionRecord(
+                    sessionID: sessionID, createdAt: date, lastUsedAt: date, answeredCallCount: 1,
+                    restartCount: restartCount
                 )
             }
+            // A call that reported nothing keeps the last known fill.
+            if let contextTokens { record.lastContextTokens = contextTokens }
+            if let contextWindowTokens { record.contextWindowTokens = contextWindowTokens }
+            recordsByKey[key] = record
             saveLocked()
         }
     }

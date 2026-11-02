@@ -18,6 +18,12 @@
 //  one with the full history, the same handoff OpenBot gives a replacement
 //  session, so a lost session costs one bigger prompt, never the conversation.
 //
+//  The CLI compacts a long session by itself, so Wisp doesn't. It records how
+//  full each session's context is after every call (shown in the buddy's
+//  settings) and starts the conversation over in a new session only as a
+//  safety net: when the last call left it at least 95% full, or the CLI says
+//  the prompt no longer fits.
+//
 //  Sessions are saved by the CLI itself, under `~/.claude/projects/`, in a
 //  project named after the buddy's workspace folder. Clearing or deleting the
 //  buddy removes those files again (`ClaudeCodeSessionFiles`).
@@ -80,11 +86,19 @@ final class ClaudeCodeSessionProvider: ModelProvider, @unchecked Sendable {
         let systemPrompt = await ClaudeSubscriptionProvider.systemPromptIncludingTools(for: request)
         let workspaceURL = BuddyWorkspace.preparedFolderURL(forBuddyWithID: sessionKey.buddyID)
 
+        // How often this conversation has been started over before, carried
+        // to the replacement session's record.
+        var restartCount: Int?
+
         if let existingRecord = sessionStore.record(for: sessionKey) {
             let newMessages = BuddySessionPolicy.messagesNotYetInSession(request.messages)
-            // Nothing new for the session (shouldn't happen): resend everything
-            // in a new session rather than send it an empty message.
-            if newMessages.contains(where: { $0.role == .user }) {
+            if BuddySessionPolicy.shouldStartOverBeforeResuming(existingRecord) {
+                print("🧵 Buddy session \(existingRecord.sessionID) is nearly full; starting over with the recent history")
+                restartCount = (existingRecord.restartCount ?? 0) + 1
+            } else if newMessages.contains(where: { $0.role == .user }) {
+                // (Nothing new for the session shouldn't happen; if it does,
+                // everything is resent in a new session below rather than an
+                // empty message.)
                 let resumeRequest = ModelRequest(
                     systemPrompt: request.systemPrompt,
                     messages: newMessages,
@@ -100,20 +114,27 @@ final class ClaudeCodeSessionProvider: ModelProvider, @unchecked Sendable {
                     inputLine: try ClaudeSubscriptionProvider.userMessageInputLine(for: resumeRequest),
                     onTextDelta: onTextDelta
                 )
+                let failed = processResult.outcome.isError || processResult.exitStatus != 0
                 let failureText = (processResult.outcome.finalResultText ?? "") + "\n" + processResult.standardErrorText
-                let sessionIsGone = (processResult.outcome.isError || processResult.exitStatus != 0)
-                    && BuddySessionPolicy.isMissingSessionFailure(failureText)
-                if !sessionIsGone {
+                if failed && BuddySessionPolicy.isMissingSessionFailure(failureText) {
+                    print("🧵 Buddy session \(existingRecord.sessionID) is gone; starting a new one with the history")
+                    restartCount = existingRecord.restartCount
+                } else if failed && BuddySessionPolicy.isContextOverflowFailure(failureText) {
+                    print("🧵 Buddy session \(existingRecord.sessionID) overflowed; starting over with the recent history")
+                    restartCount = (existingRecord.restartCount ?? 0) + 1
+                } else {
                     let turn = try turn(from: processResult, request: request)
-                    sessionStore.noteAnsweredCall(in: sessionKey, sessionID: existingRecord.sessionID)
+                    noteAnsweredCall(sessionID: existingRecord.sessionID, processResult: processResult)
                     return turn
                 }
-                print("🧵 Buddy session \(existingRecord.sessionID) is gone; starting a new one with the history")
+            } else {
+                restartCount = existingRecord.restartCount
             }
             sessionStore.forgetSession(for: sessionKey)
         }
 
-        // A new session gets the whole conversation so far as its handoff.
+        // A new session gets the conversation so far as its handoff: the
+        // thread's recent exchanges and everything of this run.
         let newSessionID = UUID()
         let processResult = try await runOnce(
             executablePath: executablePath,
@@ -124,8 +145,22 @@ final class ClaudeCodeSessionProvider: ModelProvider, @unchecked Sendable {
             onTextDelta: onTextDelta
         )
         let turn = try turn(from: processResult, request: request)
-        sessionStore.noteAnsweredCall(in: sessionKey, sessionID: newSessionID)
+        noteAnsweredCall(sessionID: newSessionID, processResult: processResult, restartCount: restartCount)
         return turn
+    }
+
+    private func noteAnsweredCall(
+        sessionID: UUID,
+        processResult: ClaudeSubscriptionProvider.ProcessResult,
+        restartCount: Int? = nil
+    ) {
+        sessionStore.noteAnsweredCall(
+            in: sessionKey,
+            sessionID: sessionID,
+            contextTokens: processResult.outcome.promptTokens,
+            contextWindowTokens: processResult.outcome.contextWindowTokens,
+            restartCount: restartCount
+        )
     }
 
     private func runOnce(
