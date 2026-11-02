@@ -347,6 +347,8 @@ struct BuddyInspectorView: View {
                 .pointerCursor()
             }
 
+            BuddyHandOffEditor(buddy: buddy)
+
             if isRunning {
                 Button { buddyStore.stopRun(ofBuddyWithID: buddy.id) } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()

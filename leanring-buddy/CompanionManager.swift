@@ -3295,6 +3295,8 @@ final class CompanionManager: ObservableObject {
         // notes (OpenBot leaves routine and channel turns out too).
         let countsTowardMemoryReview = request.groupID == nil && request.origin == .message
         let memoryReviewConversationID = request.threadID
+        // A finished job hands its answer on along the buddy's hand-off links.
+        let handsAnswerOn = request.groupID == nil && request.origin == .job
         if request.groupID == nil && (request.origin == .message || request.origin == .job) {
             let steeringThreadID = request.threadID
             buddyToolkit.takeSteeringMessages = {
@@ -3334,6 +3336,11 @@ final class CompanionManager: ObservableObject {
                 )
                 if countsTowardMemoryReview {
                     BuddyMemoryReviewer.shared.noteCompletedTurn(buddyID: buddyID, conversationID: memoryReviewConversationID)
+                }
+                if handsAnswerOn {
+                    BuddyFlowEngine.shared.jobAnswered(
+                        buddyID: buddyID, runTaskID: finishedTaskID, answer: AnswerDisplayText.cleaned(answerText)
+                    )
                 }
             },
             // A peer's request is a step in that peer's run, not news of its own.

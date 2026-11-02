@@ -120,4 +120,7 @@ Each phase is its own `feature/…` branch with a `Tests/` suite for the pure pa
    with the failed model passed over for 10 minutes; a cloud backup makes the buddy a cloud buddy for privacy.
    Hidden buddies pause: no new runs or messages, skipped schedule slots and automations, not askable by peers.
    Original plan: **Resilience.** Backup models and failover, plus hidden buddies that pause their routines and refuse new messages.
-7. **Routine flows.** A buddy's scheduled answer is handed to the next buddy, reusing the workflow engine.
+7. **Routine flows — built** as buddy flows: a buddy's job answer is handed to the buddies it names, along a
+   loop-free graph, each waiting for all its inputs; links that would take an answer off this Mac need confirming
+   when added. Built on the buddy run path rather than the workflow engine, since a flow needs no canvas: the
+   links live on the buddy. Original plan: **Routine flows.** A buddy's scheduled answer is handed to the next buddy, reusing the workflow engine.

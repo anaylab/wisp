@@ -368,6 +368,19 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   touch its own file), rendered into its system prompt (≤800 chars, newest first, framed as data not
   instructions since a model that read a web page wrote them), listed with a Forget button on its page.
   Kept out of the Brain on purpose (works with the brain off, never enters the main assistant's retrieval).
+  **Buddy flows** (`Buddies/BuddyFlow.swift` pure, `BuddyFlowEngine.swift` live; phase 7 of `docs/openbot-buddies-plan.md`, OpenBot's
+  routine flows): `WispBuddy.handOffLinks` (≤4, `BuddyFlowLink`) say who gets the buddy's **job** answer (its schedule or Run now; not chats,
+  peers, groups or automations). Edited on its Automation page ("When its job finishes, hand the answer to", `BuddyHandOffEditor`).
+  `BuddyStore.addHandOffLink` refuses loops (`BuddyFlowGraph.wouldCreateLoop`), repeats and a fifth link, and a link that takes the answer
+  somewhere the source's runs don't go (a new provider off this Mac, by model/runtime/backups: `handOffLeavesThisMac`) needs a confirming
+  alert, stored as `acknowledgesLeavingThisMac`; `mayFollowHandOff` re-checks at flow time, so a later model change can stop an old link.
+  When a job answers (`CompanionManager.startBuddyRun` → `BuddyFlowEngine.jobAnswered`), a `BuddyFlowRun` covers the buddies its links
+  reach (≤12): a buddy starts once **every** buddy before it in this flow has ended and gets all their answers in one message
+  (`BuddyFlowPolicy.handOffMessage`, each fenced as data, then its own job); one whose inputs all failed or were blocked is skipped, and so is
+  what only it fed. Each start is a hand-off run (`BuddyStore.startHandOffRun`: origin `.delegated`, "From Briefer and Inbox", a hand-off
+  system-prompt line, so no `ask_buddy`), and the source's run gets a "Handed its answer to …" step. A busy buddy is retried on every task change
+  for 30 minutes, then counts as failed; a hidden or deleted one counts as failed; deleting a buddy removes links to it. Flows live in memory
+  (a relaunch ends them; started runs finish). Tested by `Tests/BuddyFlow` and `Tests/AgentRuntimeIntegration/BuddyFlowTests.swift`.
   **Backup models** (`Buddies/BuddyBackupModels.swift`; phase 6 of `docs/openbot-buddies-plan.md`, OpenBot's backup models and failover):
   `WispBuddy.backupModelChoices` (≤3, cleaned of the buddy's own model and repeats; Wisp loop runtime only; "Backups" under its Model, Advanced).
   `CompanionManager.startBuddyRun` wraps the buddy's model and its backups in a `FailoverModelProvider`, which may switch **only on the run's
@@ -1622,6 +1635,8 @@ names forward here.
 | `DynamicIsland/NotchIslandStyle.swift` | ~125 | `NotchIslandSurfaceStyle` (black default / Liquid Glass), the persisted `NotchIslandStylePreference`, the `wispNotchIslandSurface(in:style:)` modifier, and `WispIslandButtonStyle` (flat subtle fill / white prominent capsule). |
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
 | `Buddies/BuddyMemory.swift` | ~240 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete, which notes the buddy wrote, applying a review). |
+| `Buddies/BuddyFlow.swift` | ~250 | Pure buddy flows: `BuddyFlowLink`, `BuddyFlowGraph` (loops, reach, caps), `BuddyFlowRun` (who runs when, fan-in, skips, blocked links), `BuddyFlowPolicy` (hand-off message, wording). Tested by `Tests/BuddyFlow`. |
+| `Buddies/BuddyFlowEngine.swift` | ~170 | Runs flows: starts hand-off runs, retries busy buddies for 30 minutes, records answers from the task registry, ends flows. |
 | `Buddies/BuddyBackupModels.swift` | ~190 | Backup models: `BuddyFailoverPolicy` (which errors switch, order, cleaning, privacy), `BuddyModelHolds` (10-minute pass-over) and `FailoverModelProvider`. Tested by `Tests/AgentRuntimeIntegration/BuddyFailoverTests.swift`. |
 | `Buddies/BuddyMemoryReview.swift` | ~290 | Pure memory-review rules: `BuddyMemoryReviewInterval`, triggers, prompt, lenient reply parsing, `checkedChanges` (the user's notes untouchable), secret check, summary. Tested by `Tests/BuddyMemoryReview`. |
 | `Buddies/BuddyMemoryReviewer.swift` | ~230 | Runs reviews: per-conversation counts, quiet/clear triggers, one at a time, the review model (local at background priority, Claude on Haiku), applying. |
@@ -1701,6 +1716,7 @@ running):
 ./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
+./Tests/BuddyFlow/run.sh                 # buddy flows: links, loops, fan-in waiting for all, failures skipping what follows, blocked links
 ./Tests/BuddyMemoryReview/run.sh         # buddy memory review: triggers, prompt, reply parsing, the checks that keep the user's notes untouched
 ./Tests/BuddyRunLanes/run.sh             # buddy lanes: one run per conversation, side-thread limit, why a message waits, steering hand-over
 ./Tests/BuddyRuntime/run.sh              # buddy runtime: conversation keys, what a kept session is sent, gone/full sessions, fill, session store file

@@ -182,6 +182,7 @@ final class NotchWindowController {
         }
         // Group chats: watches run endings and files each answer in its group.
         BuddyGroupEngine.shared.start()
+        BuddyFlowEngine.shared.start()
         // Workflows set to run on a schedule start their triggers at the minute.
         WorkflowRunEngine.shared.beginScheduleClock()
     }

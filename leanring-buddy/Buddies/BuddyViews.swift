@@ -209,6 +209,104 @@ struct BuddyModelEditor: View {
     }
 }
 
+// MARK: - Hand-off editor (buddy flows)
+
+/// "When its job finishes, hand the answer to": the buddy's hand-off links
+/// (`BuddyFlow`). Refuses a loop, and asks before a link takes the answer
+/// off this Mac, since nobody is there to ask when a scheduled job finishes.
+struct BuddyHandOffEditor: View {
+    let buddy: WispBuddy
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @State private var refusalText: String?
+
+    var body: some View {
+        let links = buddy.handOffs
+        let linkableBuddies = buddyStore.orderedBuddies().filter { candidate in
+            candidate.id != buddy.id && !candidate.isHiddenInList && !links.contains { $0.targetBuddyID == candidate.id }
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("When its job finishes, hand the answer to")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                Spacer(minLength: 4)
+                if links.count < BuddyFlowGraph.maximumLinksPerBuddy, !linkableBuddies.isEmpty {
+                    Menu("Add") {
+                        ForEach(linkableBuddies) { candidate in
+                            Button(candidate.name) { addLink(to: candidate) }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .pointerCursor()
+                }
+            }
+            if links.isEmpty {
+                Text("No one. Its answer stays in its own chat.")
+                    .font(.system(size: 11.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            ForEach(links, id: \.targetBuddyID) { link in
+                if let target = buddyStore.buddy(withID: link.targetBuddyID) {
+                    HStack(spacing: 8) {
+                        BuddyAvatar(colorIndex: target.colorIndex, size: 18)
+                        Text(target.name).font(.system(size: 12.5)).foregroundColor(DS.Colors.textPrimary)
+                        if link.acknowledgesLeavingThisMac {
+                            Text("· leaves your Mac").font(.system(size: 11)).foregroundColor(DS.Colors.textTertiary)
+                        }
+                        if target.isHiddenInList {
+                            Text("· hidden, skipped").font(.system(size: 11)).foregroundColor(DS.Colors.textTertiary)
+                        }
+                        Spacer(minLength: 4)
+                        Button {
+                            buddyStore.removeHandOffLink(fromBuddyWithID: buddy.id, toBuddyWithID: target.id)
+                        } label: {
+                            Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .pointerCursor()
+                        .nativeTooltip("Stop handing its answer to \(target.name)")
+                    }
+                }
+            }
+            if let refusalText {
+                Text(refusalText).font(.system(size: 11)).foregroundColor(DS.Colors.warningText)
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !links.isEmpty {
+                Text("Only its job's answers go on (on its schedule or Run now), not your chats with it. A buddy that gets answers from several buddies waits for all of them.")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func addLink(to target: WispBuddy) {
+        refusalText = nil
+        switch buddyStore.addHandOffLink(fromBuddyWithID: buddy.id, toBuddyWithID: target.id) {
+        case .added, .alreadyLinked, .unknownBuddy:
+            return
+        case .wouldMakeLoop:
+            refusalText = "That would make a loop: \(target.name)'s answers already come back to \(buddy.name)."
+        case .tooManyLinks:
+            refusalText = "A buddy can hand its answer to \(BuddyFlowGraph.maximumLinksPerBuddy) buddies at most."
+        case .needsConfirmation(let providerNames):
+            let alert = NSAlert()
+            alert.messageText = "Hand \(buddy.name)'s answers to \(target.name)?"
+            alert.informativeText = "\(target.name) runs on \(providerNames), so every time \(buddy.name)'s job finishes, its answer leaves your Mac. Nobody is asked each time."
+            alert.addButton(withTitle: "Hand Them Over")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                buddyStore.addHandOffLink(fromBuddyWithID: buddy.id, toBuddyWithID: target.id, acknowledgesLeavingThisMac: true)
+            }
+        }
+    }
+}
+
 // MARK: - Backup models editor
 
 /// "Backups": models to fall back on, in order, when the buddy's own fails

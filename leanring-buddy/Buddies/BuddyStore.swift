@@ -169,6 +169,8 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// Models to fall back on, in order, when its own fails before doing
     /// anything (`FailoverModelProvider`); nil is none.
     var backupModelChoices: [BuddyModelChoice]?
+    /// Buddies its job's answer is handed to when the job finishes (`BuddyFlow`); nil is none.
+    var handOffLinks: [BuddyFlowLink]?
 
     /// The most runs a buddy remembers (older ones stay in History).
     static let maximumRememberedRuns = 20
@@ -180,6 +182,7 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     var runtimeKind: BuddyRuntimeKind { runtime ?? .wispLoop }
     var busyMode: BuddyBusyMessageMode { busyMessageMode ?? .queue }
     var backupModels: [BuddyModelChoice] { backupModelChoices ?? [] }
+    var handOffs: [BuddyFlowLink] { handOffLinks ?? [] }
 
     /// Whether this buddy's runs leave the Mac: its runtime does, or the model
     /// it runs on (its own choice, else Wisp's) does.
@@ -841,6 +844,89 @@ final class BuddyStore: ObservableObject {
         if !isHidden { drainMessageQueues() }
     }
 
+    // MARK: - Hand-offs (buddy flows)
+
+    enum HandOffLinkOutcome: Equatable {
+        case added
+        case alreadyLinked
+        case wouldMakeLoop
+        case tooManyLinks
+        /// The answer would leave this Mac; add again with `acknowledgesLeavingThisMac`.
+        case needsConfirmation(providerNames: String)
+        case unknownBuddy
+    }
+
+    /// Every buddy's hand-off targets, for the flow graph.
+    var handOffGraph: [UUID: [UUID]] {
+        var graph: [UUID: [UUID]] = [:]
+        for buddy in buddies where !buddy.handOffs.isEmpty {
+            graph[buddy.id] = buddy.handOffs.map(\.targetBuddyID)
+        }
+        return graph
+    }
+
+    /// The providers a buddy's runs may reach (its model or runtime, and its backups).
+    func possibleProviderKinds(of buddy: WispBuddy) -> Set<BuddyChatProviderKind> {
+        let backups = buddy.runtimeKind == .wispLoop ? buddy.backupModels.map(\.providerKind) : []
+        return Set([BuddyDelegationPolicy.effectiveProviderKind(of: buddy)] + backups)
+    }
+
+    /// Whether handing `source`'s answers to `target` sends them somewhere
+    /// the source's own runs don't go.
+    func handOffLeavesThisMac(from source: WispBuddy, to target: WispBuddy) -> Bool {
+        let sourceProviders = possibleProviderKinds(of: source)
+        let newProviders = possibleProviderKinds(of: target).subtracting(sourceProviders)
+        return newProviders.contains(where: \.sendsScreenshotsOffThisMachine)
+            || (!newProviders.isEmpty && sourceProviders.contains(where: \.sendsScreenshotsOffThisMachine))
+    }
+
+    @discardableResult
+    func addHandOffLink(fromBuddyWithID sourceID: UUID, toBuddyWithID targetID: UUID, acknowledgesLeavingThisMac: Bool = false) -> HandOffLinkOutcome {
+        guard let source = buddy(withID: sourceID), let target = buddy(withID: targetID) else { return .unknownBuddy }
+        if source.handOffs.contains(where: { $0.targetBuddyID == targetID }) { return .alreadyLinked }
+        guard source.handOffs.count < BuddyFlowGraph.maximumLinksPerBuddy else { return .tooManyLinks }
+        if BuddyFlowGraph.wouldCreateLoop(adding: targetID, to: sourceID, links: handOffGraph) { return .wouldMakeLoop }
+        let leavesThisMac = handOffLeavesThisMac(from: source, to: target)
+        if leavesThisMac && !acknowledgesLeavingThisMac {
+            let providerNames = possibleProviderKinds(of: target).subtracting(possibleProviderKinds(of: source))
+                .map(\.displayName).sorted().joined(separator: ", ")
+            return .needsConfirmation(providerNames: providerNames)
+        }
+        mutateBuddy(withID: sourceID) { buddy in
+            buddy.handOffLinks = buddy.handOffs + [BuddyFlowLink(targetBuddyID: targetID, acknowledgesLeavingThisMac: leavesThisMac)]
+        }
+        return .added
+    }
+
+    func removeHandOffLink(fromBuddyWithID sourceID: UUID, toBuddyWithID targetID: UUID) {
+        mutateBuddy(withID: sourceID) { buddy in
+            let remaining = buddy.handOffs.filter { $0.targetBuddyID != targetID }
+            buddy.handOffLinks = remaining.isEmpty ? nil : remaining
+        }
+    }
+
+    /// Whether a link may be followed now: confirmed if it leaves this Mac
+    /// (a model change after confirming can make one that didn't, so it's
+    /// checked each time).
+    func mayFollowHandOff(from sourceID: UUID, to targetID: UUID) -> Bool {
+        guard let source = buddy(withID: sourceID), let target = buddy(withID: targetID),
+              let link = source.handOffs.first(where: { $0.targetBuddyID == targetID }) else { return false }
+        return !handOffLeavesThisMac(from: source, to: target) || link.acknowledgesLeavingThisMac
+    }
+
+    /// Starts a hand-off run: another buddy's job answer for this buddy to
+    /// use. Filed like a peer's request ("From …"). Nil when it can't start.
+    func startHandOffRun(ofBuddyWithID buddyID: UUID, message: String, fromBuddyNames: [String]) -> UUID? {
+        guard let buddy = buddy(withID: buddyID) else { return nil }
+        return startRunReturningTaskID(of: buddy, request: BuddyRunRequest(
+            origin: .delegated,
+            text: message,
+            requesterName: BuddyFlowPolicy.senderNames(fromBuddyNames),
+            extraSystemPrompt: "\n\nThis is a hand-off: another buddy's finished job, passed to you to use for your own job. "
+                + "Do your job with it; you can't ask the sender anything."
+        ))
+    }
+
     func updateBackupModels(ofBuddyWithID buddyID: UUID, to newBackups: [BuddyModelChoice]) {
         mutateBuddy(withID: buddyID) { buddy in
             let cleanedBackups = BuddyFailoverPolicy.cleanedBackups(newBackups, primary: buddy.modelChoice)
@@ -924,6 +1010,10 @@ final class BuddyStore: ObservableObject {
         BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
         BuddyWorkspace.deleteFolder(ofBuddyWithID: buddyID)
         BuddyMemoryReviewer.shared.forgetBuddy(buddyID: buddyID)
+        // No buddy hands its answer to one that's gone.
+        for sourceBuddy in buddies where sourceBuddy.handOffs.contains(where: { $0.targetBuddyID == buddyID }) {
+            removeHandOffLink(fromBuddyWithID: sourceBuddy.id, toBuddyWithID: buddyID)
+        }
         buddies.removeAll { $0.id == buddyID }
         saveBuddies()
     }
