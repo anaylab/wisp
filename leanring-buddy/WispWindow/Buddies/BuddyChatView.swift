@@ -59,7 +59,9 @@ struct BuddyChatView: View {
     }
 
     private func content(for buddy: WispBuddy) -> some View {
-        let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
+        // Each thread is its own lane: the open one's run decides Stop, the
+        // typing dots and the composer, whatever the buddy's other threads do.
+        let isRunning = buddyStore.isRunning(buddy, inConversation: activeThreadID, in: taskRegistry)
         let mood = buddyStore.mood(of: buddy, in: taskRegistry)
         let latestRunRecord = buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
         let allExchanges = threadStore.exchanges(ofBuddyWithID: buddy.id)
@@ -336,7 +338,7 @@ struct BuddyChatView: View {
                 .nativeTooltip("The model this buddy uses")
 
             if isRunning {
-                Button { buddyStore.stopRun(ofBuddyWithID: buddy.id) } label: { Label("Stop", systemImage: "stop.fill") }
+                Button { buddyStore.stopRun(ofBuddyWithID: buddy.id, inConversation: activeThreadID) } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false))
                     .pointerCursor()
             } else {
@@ -506,6 +508,17 @@ struct BuddyChatView: View {
                 // Neutral and quiet, as in OpenBot: the user's words sit in a soft bubble and
                 // the buddy's answer is plain text beside its face.
                 .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface3))
+            // Messages the run took in while it worked (steer mode), in the order sent.
+            ForEach(Array((exchange.addedTexts ?? []).enumerated()), id: \.offset) { _, addedText in
+                Text(addedText)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(WispColor.textPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface3))
+                    .nativeTooltip("Sent while it worked; it took this in at its next step")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 70)
@@ -712,7 +725,7 @@ struct BuddyChatView: View {
                 .pointerCursor()
                 .accessibilityLabel("Add")
 
-                TextField(isRunning ? "Queue a message for \(buddy.name)…" : "Message \(buddy.name)", text: $draftMessageText, axis: .vertical)
+                TextField(isRunning ? (buddy.busyMode == .steer ? "Add to what \(buddy.name) is doing…" : "Queue a message for \(buddy.name)…") : "Message \(buddy.name)", text: $draftMessageText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13.5))
                     .foregroundStyle(WispColor.textPrimary)
@@ -807,10 +820,21 @@ struct BuddyChatView: View {
             }
             ForEach(waitingMessages) { waitingMessage in
                 HStack(spacing: 6) {
-                    Text(waitingMessage.text)
-                        .font(.system(size: 12))
-                        .foregroundStyle(WispColor.textPrimary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(waitingMessage.text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(WispColor.textPrimary)
+                            .lineLimit(1)
+                        // Why it hasn't started; a message for another thread says so.
+                        if let holdReason = buddyStore.holdReason(forWaitingMessage: waitingMessage, of: buddy) {
+                            Text(waitingMessage.threadID == activeThreadID
+                                 ? holdReason.displayText
+                                 : "In another thread · " + holdReason.displayText)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(WispColor.textTertiary)
+                                .lineLimit(1)
+                        }
+                    }
                     Spacer()
                     BuddyIconButton(symbolName: "xmark", label: "Take this message back", tint: accent, size: 22) {
                         withAnimation(WispMotion.smooth) {

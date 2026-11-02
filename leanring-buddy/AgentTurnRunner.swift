@@ -437,6 +437,26 @@ final class AgentTurnRunner {
                 )
             }
 
+            // Messages the user sent while this run worked join it here, after
+            // the results, so the next model call answers with them in mind.
+            if let takeSteeringMessages = toolkit.takeSteeringMessages {
+                let steeringMessageTexts = takeSteeringMessages()
+                if !steeringMessageTexts.isEmpty {
+                    resultBlocks.append(.text(AgentRunSteering.promptText(for: steeringMessageTexts)))
+                    let steeringStep = AgentStepRecord(
+                        kind: .modelCall,
+                        summary: steeringMessageTexts.count == 1
+                            ? "Took in your message"
+                            : "Took in your \(steeringMessageTexts.count) messages",
+                        detail: steeringMessageTexts.joined(separator: "\n"),
+                        startedAt: Date(),
+                        durationSeconds: 0
+                    )
+                    steps.append(steeringStep)
+                    onStep(steeringStep)
+                }
+            }
+
             // Record what was asked and what came back. The results become the
             // last user message, so they are what the model answers next — and
             // because they carry no image, the screenshot is not resent.

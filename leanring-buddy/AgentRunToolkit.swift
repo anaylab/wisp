@@ -36,6 +36,11 @@ struct AgentRunToolkit: Sendable {
     var alwaysOffersComposioTools = false
     /// Tools offered on every pass of this run, whatever the request says.
     var additionalTools: [AgentRunTool] = []
+    /// Messages the user sent while this run worked, handed over at each step
+    /// (a buddy in steer mode). Called after a pass's tool results are in;
+    /// whatever it returns is added beside them, so the next model call sees
+    /// it. Nil, or nothing returned, changes nothing.
+    var takeSteeringMessages: (@MainActor @Sendable () -> [String])?
 
     static let none = AgentRunToolkit()
 
@@ -46,5 +51,19 @@ struct AgentRunToolkit: Sendable {
 
     func additionalTool(named toolName: String) -> AgentRunTool? {
         additionalTools.first { $0.definition.name == toolName }
+    }
+}
+
+/// What the model is told when messages join a run in progress.
+enum AgentRunSteering {
+    /// Kept apart from the tool results so it reads as the user, not as a
+    /// tool's output.
+    static func promptText(for messageTexts: [String]) -> String {
+        let quotedMessages = messageTexts.map { "\"\($0)\"" }.joined(separator: "\n")
+        return """
+        While you were working, the user sent \(messageTexts.count == 1 ? "this message" : "these messages"):
+        \(quotedMessages)
+        Take \(messageTexts.count == 1 ? "it" : "them") into account from here on.
+        """
     }
 }

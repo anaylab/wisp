@@ -545,6 +545,26 @@ struct BuddyInspectorView: View {
                 ))
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                header("Messages while it's busy")
+                Picker("Messages while it's busy", selection: Binding(
+                    get: { buddy.busyMode },
+                    set: { buddyStore.updateBusyMessageMode(ofBuddyWithID: buddy.id, to: $0) }
+                )) {
+                    ForEach(BuddyBusyMessageMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
+                if buddy.busyMode == .steer {
+                    Text("A message you send while it works is taken in at its next step. If it's already writing its answer, the message runs next instead.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(WispColor.textTertiary)
+                        .frame(minWidth: 280, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             if advancedFeatures.isEnabled {
                 VStack(alignment: .leading, spacing: 8) {
                     header("Model")

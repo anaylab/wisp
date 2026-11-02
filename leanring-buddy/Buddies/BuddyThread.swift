@@ -49,6 +49,9 @@ struct BuddyThreadExchange: Codable, Identifiable, Equatable {
     /// its job runs, peers' requests and every exchange saved before threads
     /// existed live, so old files load unchanged.
     var threadID: UUID? = nil
+    /// Messages the user sent while this run was working, which it took in
+    /// at a step (steer mode). Nil for none, and in files from before.
+    var addedTexts: [String]? = nil
 
     var id: UUID { taskID }
 }
@@ -96,8 +99,16 @@ enum BuddyThreadPolicy {
 
     /// What the model is shown as the question: a peer's request says who sent it.
     static func userText(for exchange: BuddyThreadExchange) -> String {
-        guard exchange.origin == .delegated, let requesterName = exchange.requesterName else { return exchange.userText }
-        return "\(requesterName) asked you: \(exchange.userText)"
+        let askedText: String
+        if exchange.origin == .delegated, let requesterName = exchange.requesterName {
+            askedText = "\(requesterName) asked you: \(exchange.userText)"
+        } else {
+            askedText = exchange.userText
+        }
+        // Messages taken in mid-run were part of the question the answer
+        // responds to, so a later run sees them with it.
+        guard let addedTexts = exchange.addedTexts, !addedTexts.isEmpty else { return askedText }
+        return askedText + "\n\n" + addedTexts.map { "Then, while you worked: \($0)" }.joined(separator: "\n")
     }
 
     /// Added to the prompt of a run started by another buddy: it is a peer's
@@ -239,6 +250,16 @@ final class BuddyThreadStore: ObservableObject {
             threadID: threadID
         )
         exchangesByBuddyID[buddyID] = BuddyThreadPolicy.appending(newExchange, to: exchanges(ofBuddyWithID: buddyID))
+        saveThreads()
+    }
+
+    /// Adds messages a run in progress took in (steer mode) to its exchange.
+    func appendAddedTexts(_ addedTexts: [String], forBuddyWithID buddyID: UUID, taskID: UUID) {
+        guard !addedTexts.isEmpty,
+              var buddyExchanges = exchangesByBuddyID[buddyID],
+              let exchangeIndex = buddyExchanges.firstIndex(where: { $0.taskID == taskID }) else { return }
+        buddyExchanges[exchangeIndex].addedTexts = (buddyExchanges[exchangeIndex].addedTexts ?? []) + addedTexts
+        exchangesByBuddyID[buddyID] = buddyExchanges
         saveThreads()
     }
 

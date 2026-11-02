@@ -103,7 +103,10 @@ Each phase is its own `feature/…` branch with a `Tests/` suite for the pure pa
    Crash recovery needed nothing new: session ids persist, and a gone session is replaced. Original plan:
    **Session lifecycle.** Context-fill tracking, compaction (native where the CLI supports it,
    otherwise a handoff to a fresh session), and recovery after a crash or relaunch.
-3. **Queue upgrades.** Steer mode, parallel threads per buddy (default 2), and visible hold reasons.
+3. **Queue upgrades — built.** Each conversation is a lane (one run each, 2 side lanes beside the main thread), every
+   waiting message says why it waits, and steer mode hands waiting messages to the run at its next tool step (Wisp's
+   loop has no native steering, so a run that answers straight away takes nothing and the message runs next).
+   Original plan: **Queue upgrades.** Steer mode, parallel threads per buddy (default 2), and visible hold reasons.
 4. **Buddy tools.** `list_buddies`, `interrupt_buddy`, `start_thread`, `create_buddy`/`update_buddy`
    (each creation asks first), multi-recipient asks with gathered answers, and the blocker report format.
 5. **Memory review.** Background add/update/forget over `BuddyMemoryStore`, local model by default,

@@ -327,7 +327,7 @@ final class BuddyGroupEngine: ObservableObject {
             guard let group = groupStore.group(withID: assignment.groupID),
                   group.memberIDs.contains(assignment.ownerID),
                   let owner = buddyStore.buddy(withID: assignment.ownerID) else { continue }   // gone: drop it
-            if buddyStore.isRunning(owner) || startRun(for: assignment, in: group, owner: owner) == false {
+            if buddyStore.isRunning(owner, inConversation: group.id) || startRun(for: assignment, in: group, owner: owner) == false {
                 stillWaiting.append(assignment)
             }
         }
