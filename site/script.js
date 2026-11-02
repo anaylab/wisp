@@ -20,6 +20,26 @@
     video.addEventListener("error", function () { video.remove(); }, { once: true });
   });
 
+  // The reel's clips play while their card is mostly on screen, in either layout.
+  var flowVideos = Array.prototype.slice.call(document.querySelectorAll("video[data-flow]"));
+  if (!reduceMotion && "IntersectionObserver" in window) {
+    var flowObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var video = entry.target;
+        if (entry.isIntersecting) {
+          // Starting playback is what loads the clip, so nothing downloads before it's needed.
+          video.play().catch(function () {});
+        } else {
+          video.pause();
+        }
+      });
+    }, { threshold: 0.6 });
+    flowVideos.forEach(function (video) {
+      video.addEventListener("playing", function () { video.classList.add("ready"); }, { once: true });
+      flowObserver.observe(video);
+    });
+  }
+
   function scrub(video, seconds) {
     if (!video.duration || video.readyState < 1 || video.seeking) return;
     var target = clamp(seconds, 0, video.duration - 0.05);
