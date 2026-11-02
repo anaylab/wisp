@@ -17,7 +17,7 @@ import Foundation
 final class BuddyGroupStore: ObservableObject {
     static let shared = BuddyGroupStore()
 
-    static let defaultFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddy-groups.json")
 
     @Published private(set) var groups: [BuddyGroup] = []
@@ -91,6 +91,7 @@ final class BuddyGroupStore: ObservableObject {
         guard let group = group(withID: groupID) else { return }
         for memberID in group.memberIDs {
             BuddyThreadStore.shared.deleteSideThread(groupID, ofBuddyWithID: memberID)
+            BuddySessionStore.shared.forgetSession(for: BuddySessionKey(buddyID: memberID, conversationID: groupID))
         }
         groups.removeAll { $0.id == groupID }
         messagesByGroupID[groupID] = nil
@@ -115,6 +116,10 @@ final class BuddyGroupStore: ObservableObject {
 
     func clearMessages(ofGroupWithID groupID: UUID) {
         messagesByGroupID[groupID] = nil
+        // A member's kept session would still remember the cleared chat.
+        for memberID in group(withID: groupID)?.memberIDs ?? [] {
+            BuddySessionStore.shared.forgetSession(for: BuddySessionKey(buddyID: memberID, conversationID: groupID))
+        }
         save()
     }
 
@@ -322,7 +327,7 @@ final class BuddyGroupEngine: ObservableObject {
             guard let group = groupStore.group(withID: assignment.groupID),
                   group.memberIDs.contains(assignment.ownerID),
                   let owner = buddyStore.buddy(withID: assignment.ownerID) else { continue }   // gone: drop it
-            if buddyStore.isRunning(owner) || startRun(for: assignment, in: group, owner: owner) == false {
+            if buddyStore.isRunning(owner, inConversation: group.id) || startRun(for: assignment, in: group, owner: owner) == false {
                 stillWaiting.append(assignment)
             }
         }

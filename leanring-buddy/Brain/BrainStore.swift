@@ -104,7 +104,7 @@ final class BrainStore: ObservableObject {
     private var lastWikiFingerprint: String = ""
 
     private init() {
-        vaultURL = FileManager.default.homeDirectoryForCurrentUser
+        vaultURL = WispDemoMode.dataHome
             .appendingPathComponent(".wisp", isDirectory: true)
             .appendingPathComponent("brain", isDirectory: true)
         ensureVaultExists()

@@ -20,6 +20,7 @@ swiftc -target arm64-apple-macos14.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/canvas-sync" \
   Tests/CanvasSync/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   leanring-buddy/Jobs/CanvasModels.swift \
   leanring-buddy/Jobs/CanvasFeedParser.swift \
   leanring-buddy/Jobs/CanvasSyncPlanner.swift \

@@ -136,6 +136,8 @@ nonisolated struct AutomationBuddyDescriptor: Equatable, Sendable {
     let name: String
     /// `deployment.sendsDataOffThisMachine` of the buddy's model.
     let sendsDataOffThisMachine: Bool
+    /// The owning buddy is hidden, which pauses its automations' own runs.
+    var isHidden: Bool = false
 }
 
 nonisolated enum AutomationSourceFetchResult: Equatable, Sendable {
@@ -413,6 +415,8 @@ final class AutomationEngine: ObservableObject {
 
     /// One pass of the clock. Internal so tests can drive it without a timer.
     func clockTick() {
+        // In demo mode nothing runs on its own; the sample automations are only for show.
+        guard !WispDemoMode.isOn else { return }
         mirrorJobsSwitchesIntoStore()
         runDueScheduledAutomations()
         Task { @MainActor [weak self] in await self?.pollMeetingTriggers() }
@@ -459,6 +463,14 @@ final class AutomationEngine: ObservableObject {
         }
 
         let buddyDescriptor = dependencies.buddyDescriptor(forBuddyID: automation.buddyID)
+        // A hidden buddy is paused: its automations skip their slots, as a
+        // paused automation does, so showing it again sets off no backlog.
+        if buddyDescriptor?.isHidden == true, isUnattended {
+            return AutomationRunRecord(
+                automationID: automationID, buddyID: automation.buddyID, reason: reason,
+                startedAt: startedAt, finishedAt: startedAt, outcome: .skippedPaused
+            )
+        }
         let needsInternet = AutomationNetworkPolicy.needsInternet(
             action: automation.action,
             buddySendsDataOffThisMachine: buddyDescriptor?.sendsDataOffThisMachine == true

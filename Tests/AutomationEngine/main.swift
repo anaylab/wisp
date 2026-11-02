@@ -363,6 +363,22 @@ do {
     check(manual?.outcome.map { $0.isSuccess } == true, "a person can still Run now on a paused automation")
 }
 
+// A hidden buddy is paused: its automations skip their slots and leave no backlog; Run now still works.
+do {
+    let fixture = makeFixture(); prepare(fixture)
+    let hiddenBuddyID = UUID()
+    fixture.dependencies.buddyDescriptors[hiddenBuddyID] = AutomationBuddyDescriptor(
+        id: hiddenBuddyID, name: "Sleepy", sendsDataOffThisMachine: false, isHidden: true
+    )
+    var owned = makeAutomation()
+    owned.buddyID = hiddenBuddyID
+    owned = fixture.store.add(owned)
+    let skipped = await fixture.engine.run(automationID: owned.id, reason: .schedule, parameterValues: nil)
+    check(skipped?.outcome == .skippedPaused && fixture.dependencies.modelRunPrompts.isEmpty, "a hidden buddy's automation does not run on a schedule")
+    let manual = await fixture.engine.run(automationID: owned.id, reason: .manual, parameterValues: nil)
+    check(manual?.outcome.map { $0.isSuccess } == true, "a person can still Run now on a hidden buddy's automation")
+}
+
 // MARK: - Test run writes nothing
 
 do {

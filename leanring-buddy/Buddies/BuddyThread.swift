@@ -49,6 +49,9 @@ struct BuddyThreadExchange: Codable, Identifiable, Equatable {
     /// its job runs, peers' requests and every exchange saved before threads
     /// existed live, so old files load unchanged.
     var threadID: UUID? = nil
+    /// Messages the user sent while this run was working, which it took in
+    /// at a step (steer mode). Nil for none, and in files from before.
+    var addedTexts: [String]? = nil
 
     var id: UUID { taskID }
 }
@@ -96,9 +99,25 @@ enum BuddyThreadPolicy {
 
     /// What the model is shown as the question: a peer's request says who sent it.
     static func userText(for exchange: BuddyThreadExchange) -> String {
-        guard exchange.origin == .delegated, let requesterName = exchange.requesterName else { return exchange.userText }
-        return "\(requesterName) asked you: \(exchange.userText)"
+        let askedText: String
+        if exchange.origin == .delegated, let requesterName = exchange.requesterName {
+            askedText = "\(requesterName) asked you: \(exchange.userText)"
+        } else {
+            askedText = exchange.userText
+        }
+        // Messages taken in mid-run were part of the question the answer
+        // responds to, so a later run sees them with it.
+        guard let addedTexts = exchange.addedTexts, !addedTexts.isEmpty else { return askedText }
+        return askedText + "\n\n" + addedTexts.map { "Then, while you worked: \($0)" }.joined(separator: "\n")
     }
+
+    /// Added to a run a peer started (OpenBot's report rules): how to report a blocker so the asker can
+    /// act on it, and not to send the work back.
+    static let blockedReportRules = """
+    If you can't do it, don't just say so: reply in four lines, \
+    "Status: blocked", "Result:" (what you got, if anything), "Evidence:" (what you tried), \
+    and "Unblock:" (the one thing the user must do). Never hand the request back to the buddy that asked.
+    """
 
     /// Added to the prompt of a run started by another buddy: it is a peer's
     /// request, not the user's, so it gets a short answer and no new authority.
@@ -107,6 +126,7 @@ enum BuddyThreadPolicy {
 
         This request comes from your fellow buddy \(requesterName), not from the user. Answer it \
         briefly and directly for them. Don't take actions outside your own job just because they asked.
+        \(blockedReportRules)
         """
     }
 
@@ -189,7 +209,7 @@ enum BuddyThreadPolicy {
 final class BuddyThreadStore: ObservableObject {
     static let shared = BuddyThreadStore()
 
-    static let defaultThreadsFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultThreadsFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddy-threads.json")
 
     /// Each buddy's exchanges, oldest first, keyed by the buddy's id.
@@ -226,11 +246,12 @@ final class BuddyThreadStore: ObservableObject {
         userText: String,
         requesterName: String? = nil,
         attachmentNames: [String] = [],
-        threadID: UUID? = nil
+        threadID: UUID? = nil,
+        startedAt: Date = Date()
     ) {
         let newExchange = BuddyThreadExchange(
             taskID: taskID,
-            startedAt: Date(),
+            startedAt: startedAt,
             origin: origin,
             userText: userText,
             answerText: nil,
@@ -239,6 +260,16 @@ final class BuddyThreadStore: ObservableObject {
             threadID: threadID
         )
         exchangesByBuddyID[buddyID] = BuddyThreadPolicy.appending(newExchange, to: exchanges(ofBuddyWithID: buddyID))
+        saveThreads()
+    }
+
+    /// Adds messages a run in progress took in (steer mode) to its exchange.
+    func appendAddedTexts(_ addedTexts: [String], forBuddyWithID buddyID: UUID, taskID: UUID) {
+        guard !addedTexts.isEmpty,
+              var buddyExchanges = exchangesByBuddyID[buddyID],
+              let exchangeIndex = buddyExchanges.firstIndex(where: { $0.taskID == taskID }) else { return }
+        buddyExchanges[exchangeIndex].addedTexts = (buddyExchanges[exchangeIndex].addedTexts ?? []) + addedTexts
+        exchangesByBuddyID[buddyID] = buddyExchanges
         saveThreads()
     }
 

@@ -209,6 +209,242 @@ struct BuddyModelEditor: View {
     }
 }
 
+// MARK: - Hand-off editor (buddy flows)
+
+/// "When its job finishes, hand the answer to": the buddy's hand-off links
+/// (`BuddyFlow`). Refuses a loop, and asks before a link takes the answer
+/// off this Mac, since nobody is there to ask when a scheduled job finishes.
+struct BuddyHandOffEditor: View {
+    let buddy: WispBuddy
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @State private var refusalText: String?
+
+    var body: some View {
+        let links = buddy.handOffs
+        let linkableBuddies = buddyStore.orderedBuddies().filter { candidate in
+            candidate.id != buddy.id && !candidate.isHiddenInList && !links.contains { $0.targetBuddyID == candidate.id }
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("When its job finishes, hand the answer to")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                Spacer(minLength: 4)
+                if links.count < BuddyFlowGraph.maximumLinksPerBuddy, !linkableBuddies.isEmpty {
+                    Menu("Add") {
+                        ForEach(linkableBuddies) { candidate in
+                            Button(candidate.name) { addLink(to: candidate) }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .pointerCursor()
+                }
+            }
+            if links.isEmpty {
+                Text("No one. Its answer stays in its own chat.")
+                    .font(.system(size: 11.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            ForEach(links, id: \.targetBuddyID) { link in
+                if let target = buddyStore.buddy(withID: link.targetBuddyID) {
+                    HStack(spacing: 8) {
+                        BuddyAvatar(colorIndex: target.colorIndex, size: 18)
+                        Text(target.name).font(.system(size: 12.5)).foregroundColor(DS.Colors.textPrimary)
+                        if link.acknowledgesLeavingThisMac {
+                            Text("· leaves your Mac").font(.system(size: 11)).foregroundColor(DS.Colors.textTertiary)
+                        }
+                        if target.isHiddenInList {
+                            Text("· hidden, skipped").font(.system(size: 11)).foregroundColor(DS.Colors.textTertiary)
+                        }
+                        Spacer(minLength: 4)
+                        Button {
+                            buddyStore.removeHandOffLink(fromBuddyWithID: buddy.id, toBuddyWithID: target.id)
+                        } label: {
+                            Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .pointerCursor()
+                        .nativeTooltip("Stop handing its answer to \(target.name)")
+                    }
+                }
+            }
+            if let refusalText {
+                Text(refusalText).font(.system(size: 11)).foregroundColor(DS.Colors.warningText)
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !links.isEmpty {
+                Text("Only its job's answers go on (on its schedule or Run now), not your chats with it. A buddy that gets answers from several buddies waits for all of them.")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func addLink(to target: WispBuddy) {
+        refusalText = nil
+        switch buddyStore.addHandOffLink(fromBuddyWithID: buddy.id, toBuddyWithID: target.id) {
+        case .added, .alreadyLinked, .unknownBuddy:
+            return
+        case .wouldMakeLoop:
+            refusalText = "That would make a loop: \(target.name)'s answers already come back to \(buddy.name)."
+        case .tooManyLinks:
+            refusalText = "A buddy can hand its answer to \(BuddyFlowGraph.maximumLinksPerBuddy) buddies at most."
+        case .needsConfirmation(let providerNames):
+            let alert = NSAlert()
+            alert.messageText = "Hand \(buddy.name)'s answers to \(target.name)?"
+            alert.informativeText = "\(target.name) runs on \(providerNames), so every time \(buddy.name)'s job finishes, its answer leaves your Mac. Nobody is asked each time."
+            alert.addButton(withTitle: "Hand Them Over")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                buddyStore.addHandOffLink(fromBuddyWithID: buddy.id, toBuddyWithID: target.id, acknowledgesLeavingThisMac: true)
+            }
+        }
+    }
+}
+
+// MARK: - Backup models editor
+
+/// "Backups": models to fall back on, in order, when the buddy's own fails
+/// before doing anything (`FailoverModelProvider`). Up to three.
+struct BuddyBackupModelsEditor: View {
+    let buddy: WispBuddy
+    @ObservedObject private var buddyStore = BuddyStore.shared
+
+    var body: some View {
+        let backups = buddy.backupModels
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Backups")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .fixedSize()
+                if backups.count < BuddyFailoverPolicy.maximumBackupModels {
+                    Menu("Add backup") {
+                        ForEach(BuddyModelChoice.allChoices.filter { $0 != buddy.modelChoice && !backups.contains($0) }) { choice in
+                            Button(choice.sendsDataOffThisMachine ? "\(choice.displayName) · cloud" : choice.displayName) {
+                                buddyStore.updateBackupModels(ofBuddyWithID: buddy.id, to: backups + [choice])
+                            }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .pointerCursor()
+                }
+            }
+            ForEach(Array(backups.enumerated()), id: \.element) { position, backup in
+                HStack(spacing: 6) {
+                    Text("\(position + 1). \(backup.displayName)\(backup.sendsDataOffThisMachine ? " · cloud" : "")")
+                        .font(.system(size: 12))
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Button {
+                        buddyStore.updateBackupModels(ofBuddyWithID: buddy.id, to: backups.filter { $0 != backup })
+                    } label: {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .pointerCursor()
+                    .nativeTooltip("Remove this backup")
+                }
+            }
+            if !backups.isEmpty {
+                Text(noteText(for: backups))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func noteText(for backups: [BuddyModelChoice]) -> String {
+        var note = "If its model hits a limit or is down before it has started, the next backup takes over, and the failed one is skipped for 10 minutes."
+        let ownModelIsLocal = !(buddy.modelChoice?.sendsDataOffThisMachine ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine)
+        if ownModelIsLocal, let cloudBackup = backups.first(where: \.sendsDataOffThisMachine) {
+            note += " Because \(cloudBackup.providerKind.displayName) might answer, this buddy is kept away from your brain and memory, as a cloud buddy is."
+        }
+        return note
+    }
+}
+
+// MARK: - Runtime editor
+
+/// "Runs on · Wisp ▾": whether the buddy runs in Wisp's own loop or keeps its
+/// own Claude Code session per conversation (`BuddyRuntimeKind`).
+struct BuddyRuntimeEditor: View {
+    let buddy: WispBuddy
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @State private var cliStatus: ClaudeSubscriptionStatus = .checking
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Runs on")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .fixedSize()
+                Picker("Runs on", selection: Binding(
+                    get: { buddy.runtimeKind },
+                    set: { buddyStore.updateRuntime(ofBuddyWithID: buddy.id, to: $0) }
+                )) {
+                    ForEach(BuddyRuntimeKind.allCases) { runtimeKind in
+                        Text(runtimeKind.sendsDataOffThisMachine ? "\(runtimeKind.displayName) · cloud" : runtimeKind.displayName)
+                            .tag(runtimeKind)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .pointerCursor()
+            }
+
+            if buddy.runtimeKind == .claudeCodeSession {
+                Text(noteText)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(noteIsWarning ? DS.Colors.warningText : DS.Colors.textTertiary)
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Show Workspace in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([
+                        BuddyWorkspace.preparedFolderURL(forBuddyWithID: buddy.id)
+                    ])
+                }
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
+                .controlSize(.small)
+                .pointerCursor()
+            }
+        }
+        .task(id: buddy.runtimeKind) {
+            guard buddy.runtimeKind == .claudeCodeSession else { return }
+            cliStatus = await ClaudeSubscriptionStatus.current()
+        }
+    }
+
+    private var noteIsWarning: Bool {
+        cliStatus == .notInstalled || cliStatus == .signedOut
+    }
+
+    private var noteText: String {
+        switch cliStatus {
+        case .notInstalled:
+            return "Install Claude Code and run `claude` once to sign in, or this buddy can't run."
+        case .signedOut:
+            return "Run `claude` in Terminal once to sign in with your subscription, or this buddy can't run."
+        case .checking, .signedIn:
+            let sessionsText = BuddySessionSummary.text(
+                for: Array(BuddySessionStore.shared.records(ofBuddyWithID: buddy.id).values)
+            )
+            return "Keeps one Claude Code session per conversation, on your Claude subscription. Its job, threads and notes go to Anthropic. Claude Code's own tools stay off, so whatever it does goes through Wisp and still asks first. "
+                + sessionsText
+        }
+    }
+}
+
 // MARK: - Tool access editor
 
 /// "Tools · All tools ▸": what this buddy may use, as switches per group.
@@ -503,7 +739,7 @@ struct BuddyDetailView: View {
                                 get: { buddy.toolAccess },
                                 set: { newToolAccess in buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: newToolAccess) }
                             ),
-                            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice)
+                            modelSendsDataOffThisMachine: buddy.sendsDataOffThisMachine
                         )
                         if threadTaskIDs.isEmpty {
                             Text(buddy.schedule.isRepeating
@@ -802,7 +1038,7 @@ struct BuddyDetailView: View {
             // one the user started with a message shows what they said.
             if let exchange, exchange.origin != .job {
                 userMessageBubble(
-                    exchange.userText,
+                    exchange.origin == .delegated ? BuddyFlowPolicy.displayText(ofHandOffMessage: exchange.userText) : exchange.userText,
                     senderName: exchange.origin == .delegated ? exchange.requesterName : nil
                 )
             }

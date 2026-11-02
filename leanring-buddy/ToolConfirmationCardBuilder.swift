@@ -87,6 +87,9 @@ enum ToolConfirmationCardBuilder {
         if ToolCallInspection.bareToolName(toolName) == BuddyDelegationToolNames.askBuddy {
             return askBuddyCard(toolInput: toolInput)
         }
+        if ToolCallInspection.bareToolName(toolName) == BuddyTeamToolNames.createBuddy {
+            return createBuddyCard(toolInput: toolInput)
+        }
         if ToolCallInspection.bareToolName(toolName) == JobsToolNames.applyStudyBlocks {
             return studyBlocksCard(toolInput: toolInput)
         }
@@ -450,6 +453,24 @@ enum ToolConfirmationCardBuilder {
             blocks.append(.list(rows: [
                 GlanceListRow(text: boundaryNote, iconName: "exclamationmark.triangle", tone: .neutral)
             ]))
+        }
+        return GlanceCard(blocks: blocks)
+    }
+
+    /// "New Buddy": who asked, its name, job, when it runs, its model and tools.
+    static func createBuddyCard(toolInput: JSONValue) -> GlanceCard {
+        var blocks: [GlanceBlock] = [
+            .header(title: "New Buddy", iconName: "person.badge.plus", trailingText: "Buddies")
+        ]
+        var keyValuePairs: [GlanceKeyValuePair] = []
+        for (key, label) in [("from", "Asked by"), ("name", "Name"), ("runs", "Runs"), ("model", "Model"), ("tools", "Tools")] {
+            if let value = ToolCallInspection.stringValue(forAnyOf: [key], in: toolInput) {
+                keyValuePairs.append(GlanceKeyValuePair(key: label, value: truncatedFieldValue(value), tone: .neutral))
+            }
+        }
+        if !keyValuePairs.isEmpty { blocks.append(.keyValue(pairs: keyValuePairs)) }
+        if let jobPreviewBlock = bodyPreviewBlock(forAnyOf: ["job"], in: toolInput) {
+            blocks.append(jobPreviewBlock)
         }
         return GlanceCard(blocks: blocks)
     }

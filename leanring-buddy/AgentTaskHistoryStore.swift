@@ -21,7 +21,7 @@ enum AgentTaskHistoryStore {
     static let retentionPeriodSeconds: TimeInterval = 30 * 24 * 60 * 60
 
     static var historyFileURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        WispDemoMode.dataHome
             .appendingPathComponent("Library/Application Support/Wisp/task-history.json")
     }
 

@@ -63,7 +63,7 @@ nonisolated enum JobsAccessState: String, Sendable {
 /// the user's own calendar and reminders, so they are owner-only.
 nonisolated enum JobsPrivateJSONFile {
     static func fileURL(named fileName: String) -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        WispDemoMode.dataHome
             .appendingPathComponent("Library/Application Support/Wisp/\(fileName)")
     }
 

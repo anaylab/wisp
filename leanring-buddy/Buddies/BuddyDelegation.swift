@@ -51,9 +51,11 @@ enum BuddyDelegationPolicy {
         case ambiguous([String])
     }
 
-    /// The model a buddy really runs on: its own choice, else Wisp's.
+    /// The model a buddy really runs on: a kept Claude Code session is the
+    /// user's Claude subscription; otherwise its own choice, else Wisp's.
     static func effectiveProviderKind(of buddy: WispBuddy) -> BuddyChatProviderKind {
-        buddy.modelChoice?.providerKind ?? BuddyChatProviderSelection.current
+        if buddy.runtimeKind == .claudeCodeSession { return .claudeSubscription }
+        return buddy.modelChoice?.providerKind ?? BuddyChatProviderSelection.current
     }
 
     /// Whether a message between two buddies crosses a boundary the user should
@@ -117,8 +119,20 @@ struct BuddyDelegationService {
     var cancelRun: (_ taskID: UUID) -> Void
     var broker: ToolPermissionBroker
     var providerKind: (WispBuddy) -> BuddyChatProviderKind = BuddyDelegationPolicy.effectiveProviderKind(of:)
+    /// The providers a buddy's backups would send to if its own model failed.
+    var backupProviderKinds: (WispBuddy) -> [BuddyChatProviderKind] = { buddy in
+        buddy.runtimeKind == .wispLoop ? buddy.backupModels.map(\.providerKind) : []
+    }
     var pollIntervalSeconds: TimeInterval = 0.5
     var answerTimeoutSeconds: TimeInterval = BuddyDelegationPolicy.answerTimeoutSeconds
+    /// What `list_buddies` says about a peer.
+    var peerStatus: (WispBuddy) -> BuddyPeerStatus = { _ in BuddyPeerStatus() }
+    /// Starts `task` in a new side thread of `caller` (`start_thread`).
+    var startSideThread: (_ caller: WispBuddy, _ task: String) -> BuddyTeamPolicy.ThreadStart = { _, _ in .failed }
+    /// Makes a new buddy with the creator's model, runtime and tool limits; nil on failure.
+    var createBuddy: (_ draft: BuddyTeamPolicy.NewBuddyDraft, _ creator: WispBuddy) -> WispBuddy? = { _, _ in nil }
+    /// Buddies this run has created so far, shared by every copy of the service.
+    let createdBuddyLedger = CreatedBuddyLedger()
 
     /// The live service, backed by the real buddy store and task registry.
     static func live(buddyStore: BuddyStore = .shared) -> BuddyDelegationService {
@@ -129,73 +143,195 @@ struct BuddyDelegationService {
             },
             runRecord: { taskID in AgentTaskRegistry.shared.records.first { $0.id == taskID } },
             cancelRun: { taskID in AgentTaskRegistry.shared.cancelTask(taskID) },
-            broker: ToolConfirmationCoordinator.shared
+            broker: ToolConfirmationCoordinator.shared,
+            peerStatus: { peer in
+                let mood = buddyStore.mood(of: peer)
+                let latestRun = buddyStore.latestRunRecord(of: peer)
+                return BuddyPeerStatus(
+                    state: mood == .waiting ? .waitingForApproval : (buddyStore.isRunning(peer) ? .working : .free),
+                    waitingMessageCount: buddyStore.waitingMessages(of: peer).count,
+                    lastActivityAt: latestRun?.startedAt ?? BuddyThreadStore.shared.exchanges(ofBuddyWithID: peer.id).last?.startedAt
+                )
+            },
+            startSideThread: { caller, task in
+                let openSideThreadCount = BuddyThreadPolicy.threadSummaries(
+                    from: BuddyThreadStore.shared.exchanges(ofBuddyWithID: caller.id), draftThreadIDs: []
+                ).filter { !$0.isMain }.count
+                guard openSideThreadCount < BuddyTeamPolicy.maximumOpenSideThreads else { return .tooManyOpenThreads }
+                let newThreadID = UUID()
+                guard buddyStore.sendMessage(task, toBuddyWithID: caller.id, inThread: newThreadID) else { return .failed }
+                return buddyStore.isRunning(caller, inConversation: newThreadID) ? .started : .queued
+            },
+            createBuddy: { draft, creator in
+                let newBuddy = buddyStore.createBuddy(
+                    instruction: draft.job,
+                    schedule: draft.schedule,
+                    // The creator's limits, never more: no buddy can make itself a freer copy.
+                    modelChoice: creator.modelChoice,
+                    toolAccess: creator.toolAccess,
+                    name: draft.name,
+                    runImmediately: false
+                )
+                buddyStore.updateRuntime(ofBuddyWithID: newBuddy.id, to: creator.runtimeKind)
+                return buddyStore.buddy(withID: newBuddy.id)
+            }
         )
     }
 
     /// Runs one `ask_buddy` call for `caller` and returns what the model is told.
     func askBuddy(from caller: WispBuddy, targetName: String, message rawMessage: String) async -> String {
+        await askBuddies(from: caller, targetNames: [targetName], message: rawMessage)
+    }
+
+    /// The same message to one or several peers at once; their answers come
+    /// back together, each under its buddy's name, in the order asked. A
+    /// crossing of a model boundary is asked about once, on one card naming
+    /// every peer it reaches.
+    func askBuddies(from caller: WispBuddy, targetNames: [String], message rawMessage: String) async -> String {
         let message = String(rawMessage.trimmingCharacters(in: .whitespacesAndNewlines)
             .prefix(BuddyDelegationPolicy.maximumMessageCharacters))
         guard !message.isEmpty else { return "i need a message to send." }
+        guard !targetNames.isEmpty else { return "i need the name of the buddy to ask." }
 
-        let allBuddies = buddies()
-        let target: WispBuddy
-        switch BuddyDelegationPolicy.resolveTarget(named: targetName, among: allBuddies, excludingBuddyWithID: caller.id) {
-        case .found(let foundBuddy):
-            target = foundBuddy
-        case .ambiguous(let candidateNames):
-            return "\"\(targetName)\" could be \(candidateNames.joined(separator: " or ")). say which."
-        case .notFound:
-            let peerNames = allBuddies.filter { $0.id != caller.id }.map(\.name)
-            return peerNames.isEmpty
-                ? "you have no other buddies to ask."
-                : "no buddy called \"\(targetName)\". your peers are: \(peerNames.joined(separator: ", "))."
+        // A hidden buddy takes no requests, so it isn't one of the peers.
+        let allBuddies = buddies().filter { !$0.isHiddenInList || $0.id == caller.id }
+        var targets: [WispBuddy] = []
+        var unresolvedReplies: [String] = []
+        for targetName in targetNames {
+            switch BuddyDelegationPolicy.resolveTarget(named: targetName, among: allBuddies, excludingBuddyWithID: caller.id) {
+            case .found(let foundBuddy):
+                if !targets.contains(where: { $0.id == foundBuddy.id }) { targets.append(foundBuddy) }
+            case .ambiguous(let candidateNames):
+                unresolvedReplies.append("\"\(targetName)\" could be \(candidateNames.joined(separator: " or ")). say which.")
+            case .notFound:
+                let peerNames = allBuddies.filter { $0.id != caller.id }.map(\.name)
+                unresolvedReplies.append(peerNames.isEmpty
+                    ? "you have no other buddies to ask."
+                    : "no buddy called \"\(targetName)\". your peers are: \(peerNames.joined(separator: ", ")).")
+            }
         }
+        guard !targets.isEmpty else { return BuddyTeamPolicy.gatheredAnswers(unresolvedReplies) }
 
         let callerProvider = providerKind(caller)
-        let targetProvider = providerKind(target)
-        if BuddyDelegationPolicy.requiresApproval(callerProvider: callerProvider, targetProvider: targetProvider) {
+        // Every model either side might answer on counts, backups included.
+        let callerProviders = Set([callerProvider] + backupProviderKinds(caller))
+        let crossingTargets = targets.filter { target in
+            BuddyDelegationPolicy.requiresApproval(callerProvider: callerProvider, targetProvider: providerKind(target))
+                || Set([providerKind(target)] + backupProviderKinds(target)) != callerProviders
+        }
+        if !crossingTargets.isEmpty {
             let approval = await broker.requestApproval(
                 toolName: BuddyDelegationToolNames.askBuddy,
                 toolInput: .object([
                     "from": .string(caller.name),
                     "from_model": .string(callerProvider.displayName),
-                    "to": .string(target.name),
-                    "to_model": .string(targetProvider.displayName),
+                    "to": .string(crossingTargets.map(\.name).joined(separator: ", ")),
+                    "to_model": .string(Array(Set(crossingTargets.flatMap { target in
+                        ([providerKind(target)] + backupProviderKinds(target)).map(\.displayName)
+                    })).sorted().joined(separator: ", ")),
                     "message": .string(message),
-                    "note": .string(BuddyDelegationPolicy.boundaryNote(
-                        callerName: caller.name, callerProvider: callerProvider,
-                        targetName: target.name, targetProvider: targetProvider)),
+                    "note": .string(crossingTargets.map { target in
+                        BuddyDelegationPolicy.boundaryNote(
+                            callerName: caller.name, callerProvider: callerProvider,
+                            targetName: target.name, targetProvider: providerKind(target))
+                    }.joined(separator: " ")),
                 ])
             )
-            guard approval.isApproved else {
-                return "the user didn't approve sending that to \(target.name). carry on without it."
+            if !approval.isApproved {
+                let refusedNames = crossingTargets.map(\.name).joined(separator: " and ")
+                let refusal = "the user didn't approve sending that to \(refusedNames). carry on without it."
+                // Peers on the caller's own model were never in question.
+                targets.removeAll { target in crossingTargets.contains { $0.id == target.id } }
+                guard !targets.isEmpty else { return BuddyTeamPolicy.gatheredAnswers(unresolvedReplies + [refusal]) }
+                unresolvedReplies.append(refusal)
             }
         }
 
-        guard let runTaskID = startRun(target, message, caller.name) else {
-            return "\(target.name) is busy right now. carry on without it, or try again later."
+        var replyByTargetID: [UUID: String] = [:]
+        var runTaskIDByTargetID: [UUID: UUID] = [:]
+        for target in targets {
+            if let runTaskID = startRun(target, message, caller.name) {
+                runTaskIDByTargetID[target.id] = runTaskID
+            } else {
+                replyByTargetID[target.id] = "\(target.name) is busy right now. carry on without it, or try again later."
+            }
         }
-        return await waitForAnswer(of: target, runTaskID: runTaskID)
+        // Peers each run in their own lane, so they answer side by side.
+        let answeredReplies = await waitForAnswers(
+            of: targets.filter { runTaskIDByTargetID[$0.id] != nil },
+            runTaskIDByTargetID: runTaskIDByTargetID
+        )
+        replyByTargetID.merge(answeredReplies) { _, answered in answered }
+        return BuddyTeamPolicy.gatheredAnswers(targets.compactMap { replyByTargetID[$0.id] } + unresolvedReplies)
     }
 
-    private func waitForAnswer(of target: WispBuddy, runTaskID: UUID) async -> String {
+    private func waitForAnswers(of targets: [WispBuddy], runTaskIDByTargetID: [UUID: UUID]) async -> [UUID: String] {
+        var replyByTargetID: [UUID: String] = [:]
         let deadline = Date().addingTimeInterval(answerTimeoutSeconds)
-        while true {
-            if let record = runRecord(runTaskID), record.status.isTerminal {
-                return outcomeText(for: record, from: target)
+        while replyByTargetID.count < targets.count {
+            for target in targets where replyByTargetID[target.id] == nil {
+                guard let runTaskID = runTaskIDByTargetID[target.id] else { continue }
+                if let record = runRecord(runTaskID), record.status.isTerminal {
+                    replyByTargetID[target.id] = outcomeText(for: record, from: target)
+                }
             }
-            if Task.isCancelled {
-                cancelRun(runTaskID)
-                return "stopped before \(target.name) answered."
-            }
-            if Date() >= deadline {
-                cancelRun(runTaskID)
-                return "\(target.name) didn't answer in time, so i stopped it."
+            if replyByTargetID.count == targets.count { break }
+            let unansweredTargets = targets.filter { replyByTargetID[$0.id] == nil }
+            if Task.isCancelled || Date() >= deadline {
+                let timedOut = !Task.isCancelled
+                for target in unansweredTargets {
+                    if let runTaskID = runTaskIDByTargetID[target.id] { cancelRun(runTaskID) }
+                    replyByTargetID[target.id] = timedOut
+                        ? "\(target.name) didn't answer in time, so i stopped it."
+                        : "stopped before \(target.name) answered."
+                }
+                break
             }
             try? await Task.sleep(nanoseconds: UInt64(pollIntervalSeconds * 1_000_000_000))
         }
+        return replyByTargetID
+    }
+
+    /// `list_buddies`: every peer with its job and whether it is free.
+    func listBuddies(for caller: WispBuddy, now: Date = Date()) -> String {
+        let peers = buddies().filter { $0.id != caller.id && !$0.isHiddenInList }
+        return BuddyTeamPolicy.peerListing(peers.map { ($0, peerStatus($0)) }, now: now)
+    }
+
+    /// `start_thread`: hands a piece of the caller's own work to a new side thread.
+    func startThread(for caller: WispBuddy, task rawTask: String) -> String {
+        let task = String(rawTask.trimmingCharacters(in: .whitespacesAndNewlines).prefix(BuddyTeamPolicy.maximumThreadTaskCharacters))
+        guard !task.isEmpty else { return "i need the task for the new thread." }
+        return BuddyTeamPolicy.threadStartReply(startSideThread(caller, task), taskText: task)
+    }
+
+    /// `create_buddy`: a new teammate, only after the user says yes on a card.
+    func createBuddy(for caller: WispBuddy, name: String?, job: String?) async -> String {
+        let draft: BuddyTeamPolicy.NewBuddyDraft
+        switch BuddyTeamPolicy.newBuddyDraft(name: name, job: job) {
+        case .success(let validDraft): draft = validDraft
+        case .failure(let refusal): return refusal.replyText
+        }
+        guard createdBuddyLedger.createdCount < BuddyTeamPolicy.maximumBuddiesCreatedPerRun else {
+            return "you've already made \(BuddyTeamPolicy.maximumBuddiesCreatedPerRun) buddies in this run. ask the user before making more."
+        }
+        let approval = await broker.requestApproval(
+            toolName: BuddyTeamToolNames.createBuddy,
+            toolInput: .object([
+                "from": .string(caller.name),
+                "name": .string(draft.name ?? "(Wisp picks one)"),
+                "job": .string(draft.job),
+                "runs": .string(BuddyTeamPolicy.firstRunText(for: draft.schedule)),
+                "model": .string(caller.runtimeKind == .claudeCodeSession
+                    ? caller.runtimeKind.displayName
+                    : providerKind(caller).displayName),
+                "tools": .string(caller.toolAccess == nil ? "Every tool, like \(caller.name)" : "The same tools as \(caller.name)"),
+            ])
+        )
+        guard approval.isApproved else { return "the user didn't want a new buddy. carry on without one." }
+        guard let newBuddy = createBuddy(draft, caller) else { return "couldn't make the buddy." }
+        createdBuddyLedger.createdCount += 1
+        return "made \(newBuddy.name) (\(BuddyTeamPolicy.firstRunText(for: newBuddy.schedule).lowercased())). tell the user it exists; you can ask it with ask_buddy from your next run."
     }
 
     private func outcomeText(for record: AgentTaskRecord, from target: WispBuddy) -> String {
@@ -213,17 +349,23 @@ struct BuddyDelegationService {
     }
 }
 
+/// Counts the buddies one run created, across copies of its service.
+final class CreatedBuddyLedger {
+    var createdCount = 0
+}
+
 @MainActor
 enum BuddyDelegationToolBuilder {
     /// The `ask_buddy` tool for `caller`, or nil when it has no peer to ask.
     static func tool(for caller: WispBuddy, service: BuddyDelegationService) -> AgentRunTool? {
-        let peerListing = BuddyDelegationPolicy.peerListing(of: service.buddies(), excludingBuddyWithID: caller.id)
+        let peerListing = BuddyDelegationPolicy.peerListing(of: service.buddies().filter { !$0.isHiddenInList }, excludingBuddyWithID: caller.id)
         guard !peerListing.isEmpty else { return nil }
         return AgentRunTool(
             definition: BuddyToolDefinition(
                 name: BuddyDelegationToolNames.askBuddy,
-                description: "Ask one of your fellow buddies for help with a part of your job and get its answer back. "
-                    + "Use it only when another buddy's job covers what you need. Your peers: \(peerListing).",
+                description: "Ask one or a few of your fellow buddies for help with a part of your job and get their answers back. "
+                    + "Use it only when another buddy's job covers what you need; name several to hear each one's view. "
+                    + "Your peers: \(peerListing). " + BuddyTeamPolicy.answerHandlingRules,
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -231,12 +373,17 @@ enum BuddyDelegationToolBuilder {
                             "type": .string("string"),
                             "description": .string("The peer's name, e.g. \"Gmail Digest\""),
                         ]),
+                        "buddies": .object([
+                            "type": .string("array"),
+                            "items": .object(["type": .string("string")]),
+                            "description": .string("Several peers' names, to ask them all at once (up to \(BuddyTeamPolicy.maximumBuddiesPerAsk))"),
+                        ]),
                         "message": .object([
                             "type": .string("string"),
                             "description": .string("What you need, in a sentence or two. Include any context it needs; it can't see your conversation."),
                         ]),
                     ]),
-                    "required": .array([.string("buddy"), .string("message")]),
+                    "required": .array([.string("message")]),
                 ]),
                 // The approval (when one is needed) is asked inside the call, with
                 // a card naming both buddies — the registry's generic prompt would not.
@@ -244,12 +391,88 @@ enum BuddyDelegationToolBuilder {
             ),
             run: { input in
                 guard case .object(let arguments) = input,
-                      case .string(let targetName)? = arguments["buddy"],
                       case .string(let message)? = arguments["message"] else {
                     return "i need the buddy's name and a message."
                 }
-                return await service.askBuddy(from: caller, targetName: targetName, message: message)
+                var singleName: String?
+                if case .string(let name)? = arguments["buddy"] { singleName = name }
+                var severalNames: [String] = []
+                if case .array(let nameValues)? = arguments["buddies"] {
+                    severalNames = nameValues.compactMap { if case .string(let name) = $0 { return name } else { return nil } }
+                }
+                let targetNames = BuddyTeamPolicy.requestedNames(single: singleName, several: severalNames)
+                guard !targetNames.isEmpty else { return "i need the buddy's name and a message." }
+                return await service.askBuddies(from: caller, targetNames: targetNames, message: message)
             }
         )
+    }
+
+    /// `list_buddies`, `start_thread` and `create_buddy` for `caller`. Offered
+    /// with `ask_buddy` (same gate: not in a run a peer started, and only with
+    /// the "Other buddies" group); `list_buddies` only when there is a peer.
+    static func teamTools(for caller: WispBuddy, service: BuddyDelegationService) -> [AgentRunTool] {
+        var tools: [AgentRunTool] = []
+        let hasPeers = service.buddies().contains { $0.id != caller.id && !$0.isHiddenInList }
+        if hasPeers {
+            tools.append(AgentRunTool(
+                definition: BuddyToolDefinition(
+                    name: BuddyTeamToolNames.listBuddies,
+                    description: "List your fellow buddies: each one's job and whether it is free, working or waiting. "
+                        + "Check it before saying something is outside what you can do; a buddy whose job covers it can be asked with ask_buddy.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                    metadata: .reading(.localMachine)
+                ),
+                run: { _ in service.listBuddies(for: caller) }
+            ))
+        }
+        tools.append(AgentRunTool(
+            definition: BuddyToolDefinition(
+                name: BuddyTeamToolNames.startThread,
+                description: "Split off a separate piece of your own work into a new side thread of yours. It runs on its own, "
+                    + "beside this one, and its answer shows in that thread, not here. Use it for long work that doesn't block your answer. "
+                    + "Threads share your files and notes; don't give two threads the same thing to change.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object(["task": .object([
+                        "type": .string("string"),
+                        "description": .string("Everything the thread needs to do the work; it can't see this conversation."),
+                    ])]),
+                    "required": .array([.string("task")]),
+                ]),
+                metadata: .writing(.localMachine)
+            ),
+            run: { input in
+                guard case .object(let arguments) = input, case .string(let task)? = arguments["task"] else {
+                    return "i need the task for the new thread."
+                }
+                return service.startThread(for: caller, task: task)
+            }
+        ))
+        tools.append(AgentRunTool(
+            definition: BuddyToolDefinition(
+                name: BuddyTeamToolNames.createBuddy,
+                description: "Make a new buddy for a job none of your peers covers. Only when the user asked for one or agreed to it: "
+                    + "the user approves a card first. It gets your model and your tool limits.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "name": .object(["type": .string("string"), "description": .string("Optional; Wisp picks one from the job")]),
+                        "job": .object(["type": .string("string"), "description": .string("Its standing job, e.g. \"every morning, summarize my unread email\"")]),
+                    ]),
+                    "required": .array([.string("job")]),
+                ]),
+                // The approval is asked inside the call, with a card naming the job.
+                metadata: .writing(.localMachine)
+            ),
+            run: { input in
+                guard case .object(let arguments) = input else { return BuddyTeamPolicy.NewBuddyRefusal.noJob.replyText }
+                var name: String?
+                if case .string(let value)? = arguments["name"] { name = value }
+                var job: String?
+                if case .string(let value)? = arguments["job"] { job = value }
+                return await service.createBuddy(for: caller, name: name, job: job)
+            }
+        ))
+        return tools
     }
 }

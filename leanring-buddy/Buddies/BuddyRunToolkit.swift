@@ -42,13 +42,18 @@ enum BuddyRunToolkitBuilder {
         // `ask_buddy` is a run-only tool, so the allow-list is checked here
         // rather than by the registry filter. A run started by another buddy
         // passes no `delegation`, which is what stops chains and loops.
+        let mayWorkWithPeers = BuddyToolAccessPolicy.isPermitted(
+            toolNamed: BuddyDelegationToolNames.askBuddy,
+            access: toolAccess,
+            modelSendsDataOffThisMachine: modelSendsDataOffThisMachine
+        )
         let askBuddyTool: AgentRunTool? = delegation.flatMap { delegationContext in
-            BuddyToolAccessPolicy.isPermitted(
-                toolNamed: BuddyDelegationToolNames.askBuddy,
-                access: toolAccess,
-                modelSendsDataOffThisMachine: modelSendsDataOffThisMachine
-            ) ? BuddyDelegationToolBuilder.tool(for: delegationContext.caller, service: delegationContext.service) : nil
+            mayWorkWithPeers ? BuddyDelegationToolBuilder.tool(for: delegationContext.caller, service: delegationContext.service) : nil
         }
+        // list_buddies / start_thread / create_buddy ride on the same gate.
+        let teamTools: [AgentRunTool] = delegation.map { delegationContext in
+            mayWorkWithPeers ? BuddyDelegationToolBuilder.teamTools(for: delegationContext.caller, service: delegationContext.service) : []
+        } ?? []
         return AgentRunToolkit(
             excludedToolNames: BuddyRunToolPolicy.excludedToolNames(
                 modelSendsDataOffThisMachine: modelSendsDataOffThisMachine
@@ -70,6 +75,7 @@ enum BuddyRunToolkitBuilder {
             ]
             + (BuddyFileLibrary.shared.attachments(ofBuddyWithID: buddyID).isEmpty ? [] : [readMyFileTool(forBuddyWithID: buddyID)])
             + (askBuddyTool.map { [$0] } ?? [])
+            + teamTools
         )
     }
 
@@ -134,7 +140,10 @@ enum BuddyRunToolkitBuilder {
                 guard case .object(let arguments) = input, case .string(let fact)? = arguments["fact"] else {
                     return "i need the note to save."
                 }
-                switch memoryStore.remember(fact, forBuddyWithID: buddyID) {
+                // The buddy's own note: its background review may tidy it later.
+                let outcome = memoryStore.remember(fact, forBuddyWithID: buddyID, writtenByBuddy: true)
+                BuddyMemoryReviewer.shared.noteBuddyChangedItsNotes(buddyID: buddyID)
+                switch outcome {
                 case .added(let savedFact): return "saved: \(savedFact)"
                 case .alreadyKnown: return "you already have that note."
                 case .nothingToRemember: return "there was nothing to save in that."
@@ -155,6 +164,7 @@ enum BuddyRunToolkitBuilder {
                 guard case .object(let arguments) = input, case .string(let query)? = arguments["fact"] else {
                     return "i need to know which note to delete."
                 }
+                BuddyMemoryReviewer.shared.noteBuddyChangedItsNotes(buddyID: buddyID)
                 switch memoryStore.forget(matching: query, forBuddyWithID: buddyID) {
                 case .removed(let removedFacts): return "deleted: " + removedFacts.joined(separator: "; ")
                 case .nothingMatched: return "none of your notes match \"\(query)\"."

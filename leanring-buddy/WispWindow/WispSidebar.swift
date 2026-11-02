@@ -23,6 +23,7 @@ struct WispSidebar: View {
     @ObservedObject var router: WispWindowRouter
     @ObservedObject private var buddyStore = BuddyStore.shared
     @ObservedObject private var groupStore = BuddyGroupStore.shared
+    @ObservedObject private var threadStore = BuddyThreadStore.shared
     @ObservedObject private var groupEngine = BuddyGroupEngine.shared
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var jobsEngine = JobsEngine.shared
@@ -766,14 +767,38 @@ struct WispSidebar: View {
         if let latestRunRecord = buddyStore.latestRunRecord(of: buddy, in: taskRegistry),
            let latestAnswer = latestRunRecord.finalText,
            !latestAnswer.isEmpty {
-            return AnswerDisplayText.cleaned(latestAnswer).replacingOccurrences(of: "\n", with: " ")
+            return previewText(of: latestAnswer)
+        }
+        // Once History has let the run go (30 days), the thread still has the answer.
+        if let latestAnsweredExchange = latestAnsweredExchange(of: buddy),
+           let latestAnswer = latestAnsweredExchange.answerText {
+            return previewText(of: latestAnswer)
         }
         return buddy.schedule.summary()
     }
 
+    /// One line of an answer for the row: no machine tags, line breaks, bullets or `**`.
+    private func previewText(of answer: String) -> String {
+        AnswerDisplayText.cleaned(answer)
+            .components(separatedBy: "\n")
+            .map { line in
+                let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+                return trimmedLine.hasPrefix("- ") ? String(trimmedLine.dropFirst(2)) : trimmedLine
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .replacingOccurrences(of: "**", with: "")
+    }
+
+    private func latestAnsweredExchange(of buddy: WispBuddy) -> BuddyThreadExchange? {
+        threadStore.exchanges(ofBuddyWithID: buddy.id).last { !($0.answerText ?? "").isEmpty }
+    }
+
     /// When the buddy last did something, in the messenger's right-hand column.
     private func buddyLatestTimeText(_ buddy: WispBuddy) -> String? {
-        buddyStore.latestRunRecord(of: buddy, in: taskRegistry).map { BuddyFormatting.timeText($0.startedAt) }
+        let latestStart = buddyStore.latestRunRecord(of: buddy, in: taskRegistry)?.startedAt
+            ?? latestAnsweredExchange(of: buddy)?.startedAt
+        return latestStart.map { BuddyFormatting.timeText($0) }
     }
 
     /// A dot beside a destination that has something waiting.

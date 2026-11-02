@@ -187,7 +187,8 @@ final class MorningBriefingController: ObservableObject {
 
     /// Starts the once-a-minute check. Safe to call more than once.
     func start() {
-        guard checkTimer == nil else { return }
+        // No banner in demo mode: it would build suggestions from the real calendar.
+        guard checkTimer == nil, !WispDemoMode.isOn else { return }
         let timer = Timer(timeInterval: Self.checkIntervalSeconds, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.presentIfDue()

@@ -156,7 +156,7 @@ enum WorkflowEditing {
 @MainActor
 final class WorkflowStore: ObservableObject {
     static let shared = WorkflowStore()
-    static let defaultFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/workflows.json")
 
     @Published private(set) var workflows: [Workflow] = []

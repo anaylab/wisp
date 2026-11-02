@@ -3224,15 +3224,87 @@ final class CompanionManager: ObservableObject {
     /// background-task limit is reached (the buddy store retries a scheduled run
     /// a minute later).
     func startBuddyRun(_ buddy: WispBuddy, request: BuddyRunRequest) -> UUID? {
+        // The run's task id is only known once it has started; the steering
+        // and failover closures built before then read it from here.
+        let runTaskIDBox = BuddyRunTaskIDBox()
+
         // The buddy's own model if it picked one, else whatever Wisp uses. A
         // cloud buddy is checked against the cloud ceiling, not the local queue.
-        let buddyModelProvider: any ModelProvider = buddy.modelChoice.map(ModelProviderFactory.make)
-            ?? selectedModelProvider
+        let buddyModelProvider: any ModelProvider
+        switch buddy.runtimeKind {
+        case .wispLoop:
+            let ownModelProvider = buddy.modelChoice.map(ModelProviderFactory.make) ?? selectedModelProvider
+            let backupChoices = BuddyFailoverPolicy.cleanedBackups(buddy.backupModels, primary: buddy.modelChoice)
+            if backupChoices.isEmpty {
+                buddyModelProvider = ownModelProvider
+            } else {
+                // Its backups take over when its own model fails before doing
+                // anything; the switch is a step in the run's history.
+                buddyModelProvider = FailoverModelProvider(
+                    members: [ownModelProvider] + backupChoices.map(ModelProviderFactory.make),
+                    memberNames: [buddy.modelChoice?.displayName ?? BuddyChatProviderSelection.current.displayName]
+                        + backupChoices.map(\.displayName),
+                    onSwitch: { failedModelName, backupModelName in
+                        guard let runTaskID = runTaskIDBox.runTaskID else { return }
+                        AgentTaskRegistry.shared.appendStep(AgentStepRecord(
+                            kind: .modelCall,
+                            summary: BuddyFailoverPolicy.switchStepSummary(fromModelName: failedModelName, toModelName: backupModelName),
+                            detail: nil,
+                            startedAt: Date(),
+                            durationSeconds: 0
+                        ), to: runTaskID)
+                    }
+                )
+            }
+        case .claudeCodeSession:
+            // One kept session per conversation. The thread's history below is
+            // still passed; the session sends it only when it has to start over.
+            buddyModelProvider = ClaudeCodeSessionProvider(
+                modelChoice: buddy.modelChoice?.claudeModel ?? AnthropicModelSettings.selectedModel,
+                effortLevel: AnthropicModelSettings.effortLevel,
+                sessionKey: BuddySessionKey(
+                    buddyID: buddy.id,
+                    conversationID: BuddySessionPolicy.conversationID(threadID: request.threadID, groupID: request.groupID)
+                )
+            )
+        }
         let runsOffThisMachine = buddyModelProvider.deployment.sendsDataOffThisMachine
         guard BackgroundTaskLauncher.canStartAnotherTask(runsOffThisMachine: runsOffThisMachine) else { return nil }
+        // What the run may read is decided by every model that might answer
+        // it: a cloud backup makes a local buddy's run a cloud run from the start.
+        let runMaySendDataOffThisMachine = runsOffThisMachine || buddy.sendsDataOffThisMachine
 
         let buddyThreadStore = BuddyThreadStore.shared
         let buddyID = buddy.id
+
+        var buddyToolkit = BuddyRunToolkitBuilder.toolkit(
+            forBuddyWithID: buddyID,
+            modelSendsDataOffThisMachine: runMaySendDataOffThisMachine,
+            toolAccess: buddy.toolAccess,
+            // A run a peer started can't ask another peer in turn.
+            // ask_buddy is only offered while Advanced features are on.
+            delegation: request.requesterName == nil && request.groupID == nil && WispAdvancedFeaturesPreference.isEnabledNow
+                ? (caller: buddy, service: .live())
+                : nil
+        )
+        // The user's own conversations take messages sent while the run works
+        // (steer mode, decided at each step so a switch applies at once).
+        // Group, workflow and peer runs answer someone else and never do. The
+        // run's id is only known once it has started, hence the box.
+        // Only the user's own messages count toward a review of the buddy's
+        // notes (OpenBot leaves routine and channel turns out too).
+        let countsTowardMemoryReview = request.groupID == nil && request.origin == .message
+        let memoryReviewConversationID = request.threadID
+        // A finished job hands its answer on along the buddy's hand-off links.
+        let handsAnswerOn = request.groupID == nil && request.origin == .job
+        if request.groupID == nil && (request.origin == .message || request.origin == .job) {
+            let steeringThreadID = request.threadID
+            buddyToolkit.takeSteeringMessages = {
+                guard let runTaskID = runTaskIDBox.runTaskID else { return [] }
+                return BuddyStore.shared.takeSteeringMessages(forBuddyWithID: buddyID, runTaskID: runTaskID, inThread: steeringThreadID)
+            }
+        }
+
         guard let runTaskID = BackgroundTaskLauncher.start(
             request: request.text,
             title: AgentTaskRecord.buddyRunTitlePrefix + buddy.name,
@@ -3253,16 +3325,7 @@ final class CompanionManager: ObservableObject {
             conversationHistory: request.historyOverride
                 ?? buddyThreadStore.historyMessages(forBuddyWithID: buddyID, inThread: request.threadID),
             images: request.images,
-            toolkit: BuddyRunToolkitBuilder.toolkit(
-                forBuddyWithID: buddyID,
-                modelSendsDataOffThisMachine: runsOffThisMachine,
-                toolAccess: buddy.toolAccess,
-                // A run a peer started can't ask another peer in turn.
-                // ask_buddy is only offered while Advanced features are on.
-                delegation: request.requesterName == nil && request.groupID == nil && WispAdvancedFeaturesPreference.isEnabledNow
-                    ? (caller: buddy, service: .live())
-                    : nil
-            ),
+            toolkit: buddyToolkit,
             onSucceeded: { finishedTaskID, answerText in
                 buddyThreadStore.completeExchange(
                     forBuddyWithID: buddyID,
@@ -3271,6 +3334,14 @@ final class CompanionManager: ObservableObject {
                     // shows the model a [POINT:…] or [SAY:…] it would imitate.
                     answerText: AnswerDisplayText.cleaned(answerText)
                 )
+                if countsTowardMemoryReview {
+                    BuddyMemoryReviewer.shared.noteCompletedTurn(buddyID: buddyID, conversationID: memoryReviewConversationID)
+                }
+                if handsAnswerOn {
+                    BuddyFlowEngine.shared.jobAnswered(
+                        buddyID: buddyID, runTaskID: finishedTaskID, answer: AnswerDisplayText.cleaned(answerText)
+                    )
+                }
             },
             // A peer's request is a step in that peer's run, not news of its own.
             completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated && request.groupID == nil
@@ -3283,6 +3354,7 @@ final class CompanionManager: ObservableObject {
             }
         ) else { return nil }
 
+        runTaskIDBox.runTaskID = runTaskID
         buddyThreadStore.beginExchange(
             forBuddyWithID: buddyID,
             taskID: runTaskID,
@@ -4888,4 +4960,10 @@ extension CompanionManager {
             }
         }
     }
+}
+
+/// Holds a buddy run's task id for its steering and failover closures, which
+/// are built before the run starts and so before the id exists.
+final class BuddyRunTaskIDBox: @unchecked Sendable {
+    var runTaskID: UUID?
 }

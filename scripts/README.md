@@ -1,5 +1,16 @@
 # Scripts
 
+## `update.sh` — Build, install and relaunch in one command
+
+Asks Xcode to build (never `xcodebuild`, which resets permissions), installs the result into
+`/Applications` with `install.sh`, quits the running copy and relaunches that one.
+
+```bash
+./scripts/update.sh              # build + install + relaunch
+./scripts/update.sh --no-build   # install what you already built
+./scripts/update.sh --clean      # also offer to delete stale builds (agent worktrees etc.)
+```
+
 ## `install.sh` — Put your dev build in /Applications
 
 Copies the `Wisp.app` you last built in Xcode (Cmd+B) into `/Applications`, keeping its

@@ -55,6 +55,11 @@ swiftc -target arm64-apple-macos26.0 \
   Tests/AgentRuntimeIntegration/AnthropicProviderTests.swift \
   Tests/AgentRuntimeIntegration/BuddyBotTests.swift \
   Tests/AgentRuntimeIntegration/ClaudeSubscriptionProviderTests.swift \
+  Tests/AgentRuntimeIntegration/BuddySteeringTests.swift \
+  Tests/AgentRuntimeIntegration/BuddyTeamTests.swift \
+  Tests/AgentRuntimeIntegration/BuddyMemoryReviewTests.swift \
+  Tests/AgentRuntimeIntegration/BuddyFailoverTests.swift \
+  Tests/AgentRuntimeIntegration/BuddyFlowTests.swift \
   Tests/AgentRuntimeIntegration/ComposioConnectionsTests.swift \
   Tests/AgentRuntimeIntegration/CuaToolRoutingTests.swift \
   Tests/AgentRuntimeIntegration/ConfirmationTimingTests.swift \

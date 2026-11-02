@@ -344,6 +344,7 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   toggle for the blocklist. An answer replaces the launcher, not the running card. Not built yet: a voice command, Do Not Disturb.
   **Study buddy**: a `BuddyCharacter` companion (fixed hue) in the notch flank (dot = offer waiting), the hover card's ring and the window; `StudySessionController` holds `buddyMessage` (speech bubble, optional one-tap offer: +5 min / Resume / Start) and speaks up on its own via `StudyBuddyNudgePlanner`, cheers on wins and held-back distractions, and the launcher greets by time of day and outlines the preset closest to the user's usual block.
   Tested by `Tests/StudyMode`.
+- **Inbox (Today's "Needs you")**: `HomeTab` builds one list from the pending tool confirmation, failed/interrupted tasks, automation attention items (`AutomationEngine.needsYou`), health problems and unseen finished results (`FinishedWorkInbox`), and `WispInboxPolicy` orders and caps it (3 shown, "Show N more"). Approvals always show. Rendering only; no store was changed. **Next up** (`AutomationNextRunsTile`) likewise reads one merged list (`WispScheduledPolicy`) instead of only `AutomationEngine.nextRuns`, so buddies on their own schedule and scheduled workflows show there too; "Show all" groups it by day.
 - **Quick add and first run**: `AutomationQuickAddRouter` / `AutomationQuickAddPlanner` (`QuickAdd/`) are asked first by
   `sendTranscriptToClaudeWithScreenshot` (voice, composer and Today's ask bar alike): "remind me…", "every…", "when…" open the draft card
   (`WispWindowRouter.presentAutomationDraft`) instead of a model turn; biased toward not matching, "remind me in 10 minutes"/timers stay with
@@ -367,6 +368,52 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   touch its own file), rendered into its system prompt (≤800 chars, newest first, framed as data not
   instructions since a model that read a web page wrote them), listed with a Forget button on its page.
   Kept out of the Brain on purpose (works with the brain off, never enters the main assistant's retrieval).
+  **Buddy flows** (`Buddies/BuddyFlow.swift` pure, `BuddyFlowEngine.swift` live; phase 7 of `docs/openbot-buddies-plan.md`, OpenBot's
+  routine flows): `WispBuddy.handOffLinks` (≤4, `BuddyFlowLink`) say who gets the buddy's **job** answer (its schedule or Run now; not chats,
+  peers, groups or automations). Edited on its Automation page ("When its job finishes, hand the answer to", `BuddyHandOffEditor`).
+  `BuddyStore.addHandOffLink` refuses loops (`BuddyFlowGraph.wouldCreateLoop`), repeats and a fifth link, and a link that takes the answer
+  somewhere the source's runs don't go (a new provider off this Mac, by model/runtime/backups: `handOffLeavesThisMac`) needs a confirming
+  alert, stored as `acknowledgesLeavingThisMac`; `mayFollowHandOff` re-checks at flow time, so a later model change can stop an old link.
+  When a job answers (`CompanionManager.startBuddyRun` → `BuddyFlowEngine.jobAnswered`), a `BuddyFlowRun` covers the buddies its links
+  reach (≤12): a buddy starts once **every** buddy before it in this flow has ended and gets all their answers in one message
+  (`BuddyFlowPolicy.handOffMessage`, each fenced as data, then its own job); one whose inputs all failed or were blocked is skipped, and so is
+  what only it fed. Each start is a hand-off run (`BuddyStore.startHandOffRun`: origin `.delegated`, "From Briefer and Inbox", a hand-off
+  system-prompt line, so no `ask_buddy`), and the source's run gets a "Handed its answer to …" step. A busy buddy is retried on every task change
+  for 30 minutes, then counts as failed; a hidden or deleted one counts as failed; deleting a buddy removes links to it. Flows live in memory
+  (a relaunch ends them; started runs finish). Tested by `Tests/BuddyFlow` and `Tests/AgentRuntimeIntegration/BuddyFlowTests.swift`.
+  **Backup models** (`Buddies/BuddyBackupModels.swift`; phase 6 of `docs/openbot-buddies-plan.md`, OpenBot's backup models and failover):
+  `WispBuddy.backupModelChoices` (≤3, cleaned of the buddy's own model and repeats; Wisp loop runtime only; "Backups" under its Model, Advanced).
+  `CompanionManager.startBuddyRun` wraps the buddy's model and its backups in a `FailoverModelProvider`, which may switch **only on the run's
+  first model call and only before any text streamed**, and only for a provider-side failure (`BuddyFailoverPolicy.isFailoverError`: rate
+  limit, missing/rejected key, provider unavailable — a refused local connection counts, measured live — no network, timeout; not
+  cancellation, vision/tools/context-window problems). The failed model is passed over for 10 minutes for every buddy (`BuddyModelHolds`,
+  in memory), so later runs start on the backup; a successful call on it ends the hold. Once a run has answered it stays on that model. The
+  wrapper reads as the answering model (identifier → usage log, deployment), and the switch is a step in the run ("Local didn't answer, so
+  Claude Sonnet took over"). **Privacy**: a cloud backup makes a local buddy a cloud buddy from the start (`WispBuddy.sendsDataOffThisMachine`
+  → no brain/personal memory in its toolkit, the network hold, and delegation: `BuddyDelegationService.backupProviderKinds` makes a peer whose
+  backups reach another provider need the user's ok, naming that provider on the card). Automations keep their own model with no failover.
+  Tested by `Tests/AgentRuntimeIntegration/BuddyFailoverTests.swift` (live: a local model on a dead port, then Haiku).
+  **Hidden buddies** (phase 6, OpenBot's hidden agents): hiding pauses a buddy. `BuddyStore` refuses new runs of every kind (job, Run now,
+  message, peer request, group or workflow turn — a run already going finishes), `sendMessage` returns false, its waiting messages hold
+  (`BuddyRunHoldReason.hidden`), its schedule slots pass without running (advanced, so no backlog), its unattended automations are skipped as
+  if paused (`AutomationBuddyDescriptor.isHidden` → `.skippedPaused`; Run now still works), and it isn't a peer for `ask_buddy`/`list_buddies`.
+  The chat shows "Hidden: it doesn't run on its schedule or take messages" with Show in List; showing it again moves its schedule to the next
+  future slot and drains its line. A group turn for a hidden member waits until it is shown; a workflow step for one times out as busy.
+  **Background memory review** (`Buddies/BuddyMemoryReview.swift` pure, `BuddyMemoryReviewer.swift` live; phase 5 of
+  `docs/openbot-buddies-plan.md`, OpenBot's memory review): `BuddyMemoryStore` now records which notes the buddy wrote itself
+  (`<id>.written-by-buddy.json` beside the .md; `remember(…, writtenByBuddy:)` — its tool and the review pass true, the Memory page's Add
+  memory doesn't). Everything else — the user's notes, hand edits, notes from before — is protected. A review starts after
+  `BuddyMemoryReviewInterval` of the user's messages (10/20/40/never, default 20, UserDefaults, global; picked on a buddy's Memory page), after
+  15 quiet minutes with ≥3 new messages (the minute tick), or just before Clear conversation; a buddy saving or forgetting a note itself
+  restarts the count. Only the user's own main/side-thread messages count (not jobs, peers, groups, workflows). One review at a time: one
+  text-only call (no tools, no images, temperature 0) on the buddy's own provider — local model at background priority through
+  `ModelAccessGate`, Claude (key, subscription or a Claude Code session buddy, outside its session) on Haiku — showing its notes as `n1 [user]` /
+  `n2 [assistant]` and the unreviewed exchanges (≤20) fenced as data. The JSON answer (`add` / `update {id,text}` / `forget [id]`) is read
+  leniently and checked strictly (`checkedChanges`): only the buddy's own notes, only while they still read as shown, one change per note,
+  ≤5 per kind, ≤200 chars, no duplicates, nothing credential- or key-like; `applyReviewChanges` re-checks against the file. Counts and reviewed
+  exchange ids are in memory only. The Memory page shows the interval, "Last tidied …: added 1, rewrote 1", and marks the user's notes "You".
+  Tested by `Tests/BuddyMemoryReview` and `Tests/AgentRuntimeIntegration/BuddyMemoryReviewTests.swift` (live with `WISP_LIVE_CLAUDE=1` on Haiku
+  and `WISP_LIVE_OLLAMA=1` on the local model: 7.4s, updated the due date, missed a preference Haiku caught).
 **Per-buddy tool allow-list** (`WispBuddy.toolAccess: BuddyToolAccess?`, nil = every tool, so existing
   buddies are unchanged): limited to *groups* — `BuddyToolGroup` (Browser, Screen, Messages & Contacts, Reminders,
   Shortcuts, Coding agent, Brain, Your memory) plus one `mcp:<server>` group per connected server — because the tool
@@ -395,6 +442,40 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   from the tool list and refused by name (`AgentRunToolkit`), and bypasses `ModelAccessGate` (no resident model to
   protect), so cloud buddies run in parallel with each other and with a live local turn. Capacity is
   `BackgroundTaskCapacityPolicy`: 2 local, 4 cloud, counted separately in `BackgroundTaskLauncher`.
+  **Runtime** (`Buddies/BuddyRuntime.swift`, `ClaudeCodeSessionProvider.swift`; phase 1 of `docs/openbot-buddies-plan.md`):
+  `WispBuddy.runtime: BuddyRuntimeKind?` (nil = `.wispLoop`, today's path). `.claudeCodeSession` gives the buddy **its own Claude Code
+  session per conversation** (main thread, each side thread, each group — `BuddySessionKey`, `BuddySessionPolicy.conversationID`) through
+  the user's signed-in `claude` CLI, the way OpenBot backs each agent with a CLI session. The first call starts it under an id Wisp
+  chose (`--session-id`) with the history as handoff; later calls `--resume` it and send only what follows the last assistant message
+  (`messagesNotYetInSession`), with `--system-prompt-snapshot off` because the CLI otherwise replays the first call's system prompt
+  (and so a stale tool list) on every resume. A gone session ("No conversation found…") is replaced by a new one with the history.
+  **Context fill** (phase 2): each call records the session's prompt size and the model's context window (`modelUsage.<model>.contextWindow`
+  in the CLI's result event) on its `BuddySessionRecord`. The CLI compacts a session by itself (it has an `autocompact` phase), so Wisp
+  doesn't; it starts the conversation over in a new session with the recent history only as a safety net — the last call left it ≥95%
+  full (`BuddySessionPolicy.shouldStartOverBeforeResuming`) or the CLI reports an overflow (`isContextOverflowFailure`) — and counts it
+  (`restartCount`). Settings show one line per buddy (`BuddySessionSummary`: "2 conversations kept · the fullest is 34% full").
+  The CLI is still a bare model (no CLI tools/MCP/settings, `[TOOL:]` tags through the agent loop, so confirmations and
+  `ToolCallSafety` are unchanged) — OpenBot's full-access mode is deliberately not copied. Runs happen in
+  `~/Library/Application Support/Wisp/buddy-workspaces/<id>/` (0700); session ids live in `buddy-sessions.json` (0600,
+  `BuddySessionStore`, lock-guarded, off-main). Clearing, a side-thread/group delete, a runtime switch or deleting the buddy forgets the
+  sessions and removes the CLI's own `~/.claude/projects/…/<id>.jsonl` files (`ClaudeCodeSessionFiles`, only ids Wisp chose); deleting
+  also removes the workspace. Off this Mac (`WispBuddy.sendsDataOffThisMachine`, delegation sees it as `.claudeSubscription`); usage is
+  logged as a subscription turn. Picked with `BuddyRuntimeEditor` ("Runs on") under the buddy's Model (Advanced). Automations keep the
+  old path. Tested by `Tests/BuddyRuntime` and, live, `WISP_LIVE_CLAUDE=1 ./Tests/AgentRuntimeIntegration/run.sh`.
+  **Lanes and steering** (`Buddies/BuddyRunLanes.swift`, phase 3 of `docs/openbot-buddies-plan.md`): each conversation of a buddy is a
+  **lane** — the main thread, each side thread, each group chat or workflow (whose runs are filed under that id). One run per lane, and at
+  most `BuddyRunLanePolicy.maximumParallelSideLanes` (2) side lanes at once beside the main thread, which doesn't count (OpenBot's task
+  limit); `BackgroundTaskCapacityPolicy` still applies above it. A run's lane is read from its exchange's `threadID`
+  (`BuddyStore.runningConversationIDs`), so no new state is kept. The message line drains per lane (`front(forBuddyWithID:inThread:)`), the
+  schedule only waits on the main lane, the group engine on the group's lane, and the chat's Stop/typing/composer follow the open thread
+  (`stopRun(ofBuddyWithID:inConversation:)`; the inspector's Stop stops all). Each waiting message shows why it waits
+  (`BuddyRunHoldReason`: paused, busy here, behind an earlier message, side-thread limit, background limit). **Steer mode**
+  (`WispBuddy.busyMessageMode`, "Messages while it's busy" under How it works; default queue): `AgentRunToolkit.takeSteeringMessages` is
+  called by `AgentTurnRunner` after each pass's tool results, and `BuddyStore.takeSteeringMessages` hands over that lane's waiting messages
+  (only the user's own main/side-thread runs — never group, workflow or peer runs — and never from a paused line). They are added as text after
+  the tool results (`AgentRunSteering.promptText`), logged as a "Took in your message" step and stored on the exchange
+  (`BuddyThreadExchange.addedTexts`, shown as extra bubbles and replayed in later history). A run that answers without another step never takes
+  them, so they run next as queued. Tested by `Tests/BuddyRunLanes` and `Tests/AgentRuntimeIntegration/BuddySteeringTests.swift`.
   **Message line** (`Buddies/BuddyMessageQueue.swift`, idea from OpenBot): a text message sent to a buddy that is mid-run (or whose line is paused,
   or already has messages waiting) joins a per-buddy FIFO instead of being refused — max 10 waiting, answered one run at a time in the order sent.
   `BuddyStore.drainMessageQueues` starts the front message when the buddy is free (on every task-registry change and on the minute tick); a message
@@ -402,6 +483,21 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   composer with a pause/resume button and ✕ per message. Text only (files and pictures are read when sent, so they still need a free buddy);
   `ask_buddy` delegation still reports a busy peer instead of queueing. Saved beside buddies.json (`buddy-message-queue.json`, 0600), cleared with
   the buddy or its conversation. Tested by `Tests/BuddyMessageQueue`.
+  **Team tools** (`Buddies/BuddyTeam.swift` pure + `BuddyDelegationService`/`BuddyDelegationToolBuilder.teamTools`; phase 4 of
+  `docs/openbot-buddies-plan.md`, from OpenBot's `list_agents`/`start_task`/`create_agent`): offered beside `ask_buddy` under the same gate
+  (the user's own run, never one a peer started; the "Other buddies" group; Advanced on). `list_buddies` (read-only, only with a peer): each
+  visible peer's job (300 chars), free/working/waiting for ok, waiting messages, last activity. **`ask_buddy` takes `buddies: [..]`** (≤4)
+  besides `buddy`: one message to several peers, who run in their own lanes side by side; answers come back together in the order asked
+  (`askBuddies`), busy/unknown/timed-out peers named; crossings are asked on **one** card naming only the peers across a boundary, and
+  declining drops just those. `start_thread`: the buddy hands part of its own work to a new side thread of its own (≤8 open,
+  `BuddyTeamPolicy.maximumOpenSideThreads`), through `BuddyStore.sendMessage`, so it runs in its own lane or waits in the line; its answer lands
+  in that thread. `create_buddy`: always asks (`ToolCallSafety.alwaysAskBareToolNames`, "New Buddy" card: asked by, name, job, when it runs,
+  model, tools), ≤2 per run (`CreatedBuddyLedger`), schedule read from the job, and the new buddy gets **the creator's model, runtime and tool
+  limits, never more**. Report rules: a peer's run is told to answer a blocker in four lines (Status / Result / Evidence / Unblock,
+  `BuddyThreadPolicy.blockedReportRules`), and the teammate tools tell the asker to name the buddy and pass a blocker to the user instead of
+  asking again (`BuddyTeamPolicy.answerHandlingRules`). No `interrupt_buddy`: `ask_buddy` waits inside one tool call, so a caller could
+  never use it, and the 5-minute timeout already stops a peer. Tested by `Tests/AgentRuntimeIntegration/BuddyTeamTests.swift` (live
+  multi-ask with `WISP_LIVE_CLAUDE=1`).
   **Delegation** (`ask_buddy`, `Buddies/BuddyDelegation.swift`): a buddy can ask a peer for help; the peer answers in
   *its own* thread (origin `.delegated`, `BuddyThreadExchange.requesterName`, shown with a "From <buddy>" label and
   fed to the model as "<name> asked you: …"; the run's prompt says it's a peer's request, not the user's) and the
@@ -418,12 +514,12 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   **Workflows** (translated from OpenBot's workflow canvas; `Workflows/Workflow.swift` + `WorkflowEditing.swift` pure and tested by `Tests/Workflows`, `WispWindow/Workflows/*` the canvas): a rail tab opens a canvas of nodes — **trigger, prompt, buddy, condition, approval, output**, plus **text** and **sticky notes** for people — joined by edges. Same rules as OpenBot's table: a port-type table decides which connections can exist (nothing feeds a trigger, an output sends nothing on, annotations are not steps, only a condition has yes/no branches, no duplicates), loops are found by the same iterative depth-first walk and drawn back under their nodes, undo/redo keeps 100 steps with a drag as one step, snap is 8px, zoom 25–200% in 1.2 steps around the pointer with fit, and the dot grid is OpenBot's (1px dots, the world step doubling as you zoom out). Pan with two-finger scroll or the pan tool, ⌘-scroll or pinch to zoom, drag a header to move, drag an output port to connect, box-select on empty canvas, Delete / ⌘Z / ⇧⌘Z / ⌘D / ⌘A / ⌘0 / arrows. Saved in `workflows.json` (0600). **Running** (`Workflows/WorkflowRun.swift` pure core, tested with a fake executor; `WorkflowRunEngine.swift` the live one): **Run** walks the graph from every trigger and every prompt nothing feeds; each step gets the text its edge carries and hands its output on; a **buddy** step is an ordinary buddy run (`BuddyStore.startGroupRun`, `groupID` = the workflow's id, no earlier conversation, so the buddy's own tool limits, confirmation cards and model apply; it waits up to 2 minutes for a busy buddy), a **condition** asks a buddy "answer yes or no" and follows only that branch (unclear = no), an **approval** is a Wisp alert and a "Stop" ends the run, an **output** notifies or saves `~/Documents/Wisp Workflows/<title> <time>.md`. A loop edge is taken at most 3 times and a run is capped at 60 steps; Stop cancels the buddy run too. "Run from here" is in a node's menu; each node shows running / waiting / done / failed and a one-line output chip under it. A workflow with a schedule trigger can be switched **On schedule** (off by default; checked every 20s, starts at the minute, no catch-up for a missed run). Workflow runs are filed under the workflow's id, so they stay out of a buddy's thread tabs. **Performance rule learned the hard way:** a `Canvas` must resolve a themed colour once per draw (`Color(WispColor.x.resolve(in: context.environment))`) and draw many marks as one `Path` — the dot grid once resolved a dynamic colour per dot and froze Wisp at 100% CPU. And the 40,000pt world layer is an `overlay` on a clear view, never a sized child, or it stretches the layout and pushes the toolbar off-screen.
   **Look: Graphite (default) and flat controls.** `WispTheme.graphite` is OpenBot's palette — a near-black frame (#0D0D0D), a #1A1A1A list panel and page panel, flat greys (#212121 / #2A2A2A / #333), white text, hairline edges, a lavender glint for AI activity — and the first theme that also sets the **neutrals** (`WispThemeNeutrals`: background, surfaces 1–4, text, separator; every other theme leaves them nil and keeps the warm defaults). It prefers dark; its light form is #F5F5F6 / white. Controls are flat everywhere (`WispBevel` is a fill plus a hairline, no lit edge, sheen or shadow; `WispPillButtonStyle` prominent is *inverted* — text colour as fill, window colour as label — neutral is a grey pill with a hairline, destructive a soft red; no lift, squish or tint), and `BuddyAmbientBackground` no longer tints the chat. See `docs/workflows-plan.md` for the next piece.
   **Window shell (OpenBot's layout)**: three columns on the themed surface — a permanent **icon rail** of destinations (Buddies, Today, Chat, Automations, Canvas, Study; Brain, Routines, History, Connections with Advanced; Settings at the bottom; `WispSidebar.navigationRail`), the **list column** (buddies and groups, search, "+", status footer) in an inset rounded panel that can collapse to characters only, and the page in its own inset rounded panel (`WispWindowView`). The buddy chat's top bar is the buddy's tab (face + name) with its thread tabs and **+**, then its model, Run/Stop, the menu and the details toggle; a buddy's reply is a bubble on the left and the user's a bubble on the right in the same quiet surface (no avatar beside a reply, checked against the installed OpenBot app), and a run's steps fold into one "4 steps  11s ›" line above its reply. The settings panel groups its rows as OpenBot's agent settings does: **Brain** (look & personality, model), **Knows** (memory, files, tools), **Does** (automation, usage, save as template) and **Rules** (notify me).
-  **Sidebar groups and badges** (shape borrowed from OpenBot's agent sidebar; `Buddies/BuddySidebarPolicy.swift` pure, drawn by `WispSidebar`): the buddy list is split into **Needs you** (mood `.waiting`, an approval is pending; the row's time slot becomes an Approve chip), **Pinned**, **Buddies** and a **Hidden** group (`WispBuddy.isHidden`, context menu Hide / Show in List; folded by default, opened by a search; the buddy still runs on its schedule). Groups have collapsible headers (`WispSidebarCollapsedGroups`); the rail shows hairlines instead. Each row wears one badge by precedence (`BuddySidebarPolicy.state`: waiting > working > failed > responded > unread) and a role chip from its specialty. ⌘1–9 count over the visible rows in display order. Tested by `Tests/BuddyThread`.
+  **Sidebar groups and badges** (shape borrowed from OpenBot's agent sidebar; `Buddies/BuddySidebarPolicy.swift` pure, drawn by `WispSidebar`): the buddy list is split into **Needs you** (mood `.waiting`, an approval is pending; the row's time slot becomes an Approve chip), **Pinned**, **Buddies** and a **Hidden** group (`WispBuddy.isHidden`, context menu Hide / Show in List; folded by default, opened by a search). Hiding **pauses** the buddy (phase 6): see **Hidden buddies** below. Groups have collapsible headers (`WispSidebarCollapsedGroups`); the rail shows hairlines instead. Each row wears one badge by precedence (`BuddySidebarPolicy.state`: waiting > working > failed > responded > unread) and a role chip from its specialty. ⌘1–9 count over the visible rows in display order. Tested by `Tests/BuddyThread`.
   **New buddy is one form** (OpenBot's "Create agent"): face, colour dots, name, "what should it do?", Role menu, how it works, schedule/model/tools, **Create**, and three template **Suggestions** underneath that fill the form (`BuddyCreationView.detailsStep`; the old specialty grid step is no longer reached). **Run trace** (`Buddies/RunTrace.swift`, `RunTraceView`): the "4 steps  11s ›" line opens a sheet with duration, step, model-call, tool-call and error counts and every step as a bar on one time axis, slowest marked. The composer's **+** is a menu (Attach files, New thread). A buddy's Memory page opens with "Tell it once. It will remember." and an Add memory button. The group editor is a small sheet like OpenBot's New channel (name, searchable buddy list, Create). Tested by `Tests/BuddyThread`.
   **Buddy templates** (OpenBot's agent templates, `Buddies/BuddyTemplate.swift`, `WispWindow/Buddies/BuddyTemplateViews.swift`): New buddy → **Templates** opens a gallery (search, Daily / Study / Work / On your Mac) of 11 bundled templates plus the ones you saved; a card opens a **review** (what it does, when it runs, what it can use, where it runs — a cloud model is flagged as leaving the Mac) and only **Add buddy** creates it (`BuddyStore.addBuddy(from:)`; a schedule starts at its next due time, "when asked" does not run at once). **Save as template** on a buddy's settings overview stores its setup only (job, role, tone, schedule, colour, tool limits, model — no thread, notes, files or ids) in `buddy-templates.json` (0600, 50 max, same-name save replaces); right-click a saved card to remove it. Unlike OpenBot there is no hosted publish/install-by-link — nothing leaves the Mac; to give a buddy to another person use its Share… file. Bundled templates use only Wisp's own tools (no connected app). Tested by `Tests/AgentRuntimeIntegration/BuddyTemplateTests.swift`.
   **Group chats** (OpenBot's channels; `Buddies/BuddyGroup.swift` pure, `BuddyGroupStore.swift`, `WispWindow/Buddies/BuddyGroupViews.swift`): several buddies in one chat with one shared transcript (`buddy-groups.json`, 0600, text only, 200 messages per group). The sidebar lists groups under **Groups** (overlapped member faces, preview, "Working…"); sidebar "+" → New Group (needs two buddies); the Buddies page shows `BuddyGroupChatView` or `BuddyGroupEditorView` (`WispWindowRouter.groupIDToOpen`/`activeGroupID`/`isNewGroupRequested`). **One owner answers each user message**, chosen deterministically (`BuddyGroupPolicy.route`: a leading `@Name`, else whoever answered last, else the lead, else the first member — not a model, because the 3B default can't route). The owner may hand the task on with `[HANDOFF:Name: what to ask]` (taught in the group's system prompt; unknown names and self-handoffs are ignored) up to `maximumHandoffsPerMessage` (3) hops, with a notice row each time. `BuddyGroupEngine` (started in `NotchWindowController.show`) turns an assignment into an ordinary buddy run through `BuddyStore.startGroupRun` (`BuddyRunRequest.groupID`: history is the group's transcript as that buddy sees it, `historyOverride`, plus `extraSystemPrompt`; no `ask_buddy`, no finish notification), files the answer in the transcript when the run ends (watching `AgentTaskRegistry.records`), and retries an assignment for a busy buddy on every registry change. The run's exchange is filed in the buddy's own thread store under the **group's id** (so the buddy's History/mood/unread still work) and is kept out of the buddy's thread tabs (`BuddyGroupStore.isGroupID`) and the notch chat (which shows the main thread only). Controls: Stop (cancels runs, drops waiting ones), "Give Last Message To" (OpenBot's Reassign), Archive/Restore, Clear, Delete; a deleted buddy leaves its groups. Local models share the same two-task cap, so a busy group answers one buddy at a time. Tested by `Tests/BuddyGroup` (routing, handoff, history, codec); the engine and views are glue with no suite.
   **Chat layout** (OpenBot's conversation, `Buddies/BuddyChatLayout.swift` pure): the buddy chat puts a **day separator** (Today / Yesterday / weekday / date) above the first entry of each day, drops the answer avatar (keeping its column) when an answer continues the one above it (no user message between, same day, within 5 minutes), shows a **Latest ↓** pill when scrolled up from the newest entry (`onScrollGeometryChange`), and keeps **unsent composer text per buddy and thread** (`BuddyComposerDraftStore`, UserDefaults, text only, removed when the buddy is deleted; `draftOwner` stops a thread or buddy switch writing one conversation's draft into another's). Tested by `Tests/BuddyThread`.
-  **Side threads** (OpenBot's thread tabs; Buddies page only, the notch chat still shows the main thread): a buddy's thread strip holds **Main** (job runs, peers' requests, everything saved before threads) plus any number of side threads started with **+**. A thread is nothing but the `BuddyThreadExchange.threadID` its exchanges carry (nil = main), so there is no extra file: a side thread is named after its first message (`BuddyThreadPolicy.threadSummaries`), an empty new thread exists only in the chat view's state, and the ✕ on the open tab deletes its exchanges (runs stay in History). A run's prompt history is built from its own thread only (`historyMessages(inThread:)`); `BuddyRunRequest.threadID`, `QueuedBuddyMessage.threadID` and `sendMessage(inThread:)` carry the choice, so a queued message lands in the thread it was sent from. A buddy still runs one thing at a time across all its threads. Tested by `Tests/BuddyThread`, `Tests/BuddyMessageQueue`.
+  **Side threads** (OpenBot's thread tabs; Buddies page only, the notch chat still shows the main thread): a buddy's thread strip holds **Main** (job runs, peers' requests, everything saved before threads) plus any number of side threads started with **+**. A thread is nothing but the `BuddyThreadExchange.threadID` its exchanges carry (nil = main), so there is no extra file: a side thread is named after its first message (`BuddyThreadPolicy.threadSummaries`), an empty new thread exists only in the chat view's state, and the ✕ on the open tab deletes its exchanges (runs stay in History). A run's prompt history is built from its own thread only (`historyMessages(inThread:)`); `BuddyRunRequest.threadID`, `QueuedBuddyMessage.threadID` and `sendMessage(inThread:)` carry the choice, so a queued message lands in the thread it was sent from. Each thread is its own lane (see **Lanes and steering** below), so threads no longer wait on each other. Tested by `Tests/BuddyThread`, `Tests/BuddyMessageQueue`.
   **List experience** (modeled on Rakazo's bot list): buddies are ordered pinned first, then by latest
   activity; one that finishes a run while you aren't looking is **unread** (dot in both lists, counted in the
   Buddies sidebar badge with working buddies) until its thread is opened. Right-click (window) or ⋯ (page):
@@ -1059,6 +1155,20 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   is background priority through `ModelAccessGate`; switches live in `BrainPreferences`. UI: sidebar
   **Brain** with Pages (reader/editor, backlinks), Graph (force layout), Inbox (drop zone, jobs,
   notes import), Health, Log (undo), Settings.
+- **Demo mode** (`DemoMode/`, `scripts/demo.sh`): Wisp run on a sample day for screenshots and demos, so nothing personal is on
+  screen. A launch option, not a switch (every store reads its file once at launch): `scripts/demo.sh` quits Wisp and opens it with
+  `-WispDemoMode YES` (UserDefaults' argument domain, never saved); `--reset` starts from fresh sample data, `--off` goes back.
+  `WispDemoMode.dataHome` is the one place stores get their home from: the real home, or `~/Library/Application Support/Wisp Demo/home/`
+  in demo mode — every store of the user's data (buddies, threads, memory, groups, templates, files, sessions, workspaces, automations,
+  runs, routines, workflows, learned shortcuts, task history, conversation, usage log, study log, Canvas snapshot, Jobs state, memory.md
+  and the brain) goes through it, so a demo session never reads or writes the real data (checked by file times around a session). MCP
+  servers, skills, sources, keys and UserDefaults stay the real ones, so a model still answers; the starter-buddy flags use their own
+  suite (`com.gluepixel.wisp.demo`). Nothing runs on its own: buddy schedules, the automation clock, Canvas sync and the morning banner
+  are off, and the calendar (Today's Up next, glance cards, the notch countdown) shows `WispDemoSampleData` events. `WispDemoSeed` fills
+  an empty demo folder once through the stores' own methods: the starters, a pinned Briefer on a 9:00 schedule handing its brief to the
+  Writer, Planner/Inbox/Researcher chats, three gallery automations and three recent answers. The menu bar says "Demo mode". A buddy row
+  in the sidebar now falls back to the latest answer in its thread once History has let the run go (also true outside the demo).
+  Tested by `Tests/DemoMode`.
 - **Reliability guards** (fixes for problems users reported):
   - **One copy only**: `SingleInstanceGuard` runs first in `applicationDidFinishLaunching`. A second copy (another path, e.g. a
     DerivedData build beside an installed one) would install a second Talk event tap and answer everything twice. Instead it posts a
@@ -1214,7 +1324,8 @@ Files are grouped by role; line counts are rough.
 | `OllamaProvider.swift` | ~294 | Presents `LocalOllamaAPI` as a `ModelProvider`; owns the `[TOOL:...]` text convention that fakes tool calls for the local model. |
 | `AnthropicProvider.swift` | ~680 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, adaptive thinking + `effort` (Opus/Sonnet 5.5), signed thinking and web blocks kept as `.providerReplay` and resent verbatim within a tool loop (`drop_block` for stale ones), prompt caching (system breakpoint + automatic), server-side `web_search`/`web_fetch` on tool-bearing turns (resumes `pause_turn`), `fallbacks: "default"` for refusals, no sampling params on models that reject them. |
 | `AnthropicModelSettings.swift` | ~140 | Claude's settings (UserDefaults): `AnthropicModelChoice` (Opus 5.5 default / Sonnet 5.5 / Haiku 4.5, with each model's API differences as data), `AnthropicEffortLevel` (low default), and the web-access switch. Edited in Settings → Model, read by `ModelProviderFactory`. |
-| `ClaudeSubscriptionProvider.swift` | ~430 | Claude over the user's own `claude` CLI (subscription, no key): per-turn stream-json process with all CLI tools off, inline screenshot, `[TOOL:]` text tags, failure-text → `BuddyChatError`, plus `ClaudeSubscriptionStatus` (`claude auth status`). Tested by `Tests/AgentRuntimeIntegration` (live round trip with `WISP_LIVE_CLAUDE=1`). |
+| `ClaudeSubscriptionProvider.swift` | ~560 | Claude over the user's own `claude` CLI (subscription, no key): per-turn stream-json process with all CLI tools off, inline screenshot, `[TOOL:]` text tags, failure-text → `BuddyChatError`, plus `ClaudeSubscriptionStatus` (`claude auth status`). `runCLI`, `systemPromptIncludingTools` and `commandLineArguments(session:)` are shared with the session provider. Tested by `Tests/AgentRuntimeIntegration` (live round trip with `WISP_LIVE_CLAUDE=1`). |
+| `ClaudeCodeSessionProvider.swift` | ~225 | A buddy's kept Claude Code session: start with `--session-id` + history handoff, `--resume` with only the new messages, replace a gone, overflowing or ≥95%-full session, record the fill. |
 | `OpenAIProvider.swift` | ~435 | GPT as a bring-your-own-key `ModelProvider` over Chat Completions: tool results become separate `role:"tool"` messages. |
 | `GeminiProvider.swift` | ~415 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. |
 | `AppleOnDeviceProvider.swift` | ~300 | Apple's on-device system model (FoundationModels) as a `ModelProvider`: history replayed as text, screenshot as an `Attachment` (macOS 27), snapshots diffed to deltas, `[TOOL:]` tags parsed with the echo guard, `GenerationError` → `BuddyChatError`, `unavailabilityDescription` for Settings. |
@@ -1395,6 +1506,12 @@ Files are grouped by role; line counts are rough.
 | `QuickAdd/AutomationQuickAddPlanner.swift` / `AutomationQuickAddRouter.swift` | ~70/~35 | Pure "is this an automation?" decision and the router that opens the draft card. Tested by `Tests/AutomationQuickAdd`. |
 | `FirstRun/FirstRunSetupFlow.swift` / `WispFirstRunState.swift` | ~305/~40 | The four-step first-run setup and its once-only flag. |
 
+### Inbox and scheduled list
+| File | Approx. lines | What it does |
+|---|---|---|
+| `Scheduling/WispScheduled.swift` | ~100 | Pure merge rule (`WispScheduledPolicy`) for Today's "Next up": automations, buddies that still keep their own schedule (not those an automation owns) and scheduled workflows in one soonest-first list, grouped Today / Tomorrow / Later, plus the next "HH:mm" run for a workflow trigger. Engines and stores are untouched. Tested by `Tests/WispScheduled`. |
+| `Inbox/WispInbox.swift` | ~85 | Pure inbox rule (`WispInboxPolicy`): one order for everything waiting on the user (approval, failure, system, result; newest first) and a cap of 3 with "Show N more"; an approval is never hidden. Idea from AgentUse's approval queue and Paperclip's inbox. Tested by `Tests/WispInbox`. |
+
 ### Study mode
 | File | Approx. lines | What it does |
 |---|---|---|
@@ -1531,13 +1648,24 @@ names forward here.
 | `DynamicIsland/NotchWorkspaceView.swift` | ~725 | The notch's quick chat: `NotchWorkspacePage` (.chat), a sidebar of buddies and searchable conversations (Settings / Open Wisp buttons open the window), thread bubbles, the talk pill and a Type field → `askTypedQuestion`. |
 | `DynamicIsland/NotchIslandStyle.swift` | ~125 | `NotchIslandSurfaceStyle` (black default / Liquid Glass), the persisted `NotchIslandStylePreference`, the `wispNotchIslandSurface(in:style:)` modifier, and `WispIslandButtonStyle` (flat subtle fill / white prominent capsule). |
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
-| `Buddies/BuddyMemory.swift` | ~170 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete). |
+| `Buddies/BuddyMemory.swift` | ~240 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete, which notes the buddy wrote, applying a review). |
+| `Buddies/BuddyFlow.swift` | ~250 | Pure buddy flows: `BuddyFlowLink`, `BuddyFlowGraph` (loops, reach, caps), `BuddyFlowRun` (who runs when, fan-in, skips, blocked links), `BuddyFlowPolicy` (hand-off message, wording). Tested by `Tests/BuddyFlow`. |
+| `DemoMode/WispDemoMode.swift` | ~50 | Whether this launch is a demo, and `dataHome`: the real home or the demo's stand-in, used by every store of the user's data. |
+| `DemoMode/WispDemoSampleData.swift` | ~120 | Pure sample day: checklist, calendar events (always ahead of now), the buddies' answers, recent answers. Tested by `Tests/DemoMode`. |
+| `DemoMode/WispDemoSeed.swift` | ~95 | Fills an empty demo folder once through the stores: starters, chats, the Briefer → Writer hand-off, automations, recent answers. |
+| `Buddies/BuddyFlowEngine.swift` | ~170 | Runs flows: starts hand-off runs, retries busy buddies for 30 minutes, records answers from the task registry, ends flows. |
+| `Buddies/BuddyBackupModels.swift` | ~190 | Backup models: `BuddyFailoverPolicy` (which errors switch, order, cleaning, privacy), `BuddyModelHolds` (10-minute pass-over) and `FailoverModelProvider`. Tested by `Tests/AgentRuntimeIntegration/BuddyFailoverTests.swift`. |
+| `Buddies/BuddyMemoryReview.swift` | ~290 | Pure memory-review rules: `BuddyMemoryReviewInterval`, triggers, prompt, lenient reply parsing, `checkedChanges` (the user's notes untouchable), secret check, summary. Tested by `Tests/BuddyMemoryReview`. |
+| `Buddies/BuddyMemoryReviewer.swift` | ~230 | Runs reviews: per-conversation counts, quiet/clear triggers, one at a time, the review model (local at background priority, Claude on Haiku), applying. |
 | `Buddies/BuddyModelChoice.swift` | ~75 | `BuddyModelChoice` (provider + optional Claude model, `allChoices`) and `BackgroundTaskCapacityPolicy` (local vs cloud concurrency). |
-| `Buddies/BuddyDelegation.swift` | ~230 | `ask_buddy`: `BuddyDelegationPolicy` (pure: peer resolution, when to ask, the boundary note), `BuddyDelegationService` (approval, start, wait, outcome; injectable) and the run-only tool. |
+| `Buddies/BuddyDelegation.swift` | ~480 | `ask_buddy` (one or several peers) plus `list_buddies`/`start_thread`/`create_buddy`: `BuddyDelegationPolicy` (pure: peer resolution, when to ask, the boundary note), `BuddyDelegationService` (approval, start, wait for all, listing, threads, creation; injectable) and the run-only tools. |
+| `Buddies/BuddyTeam.swift` | ~190 | Pure team rules: tool names, `BuddyPeerStatus`, `BuddyTeamPolicy` (peer listing, requested names, gathered answers, thread replies, new-buddy draft, caps, answer-handling rules). |
 | `Buddies/BuddyToolAccess.swift` | ~200 | `BuddyToolGroup`, `BuddyToolAccess` (the allow-list) and the pure `BuddyToolAccessPolicy` (`isPermitted`, server discovery, summaries). |
 | `Buddies/BuddyRunToolkit.swift` | ~120 | `BuddyRunToolPolicy` (tools a cloud buddy may not use) and `BuddyRunToolkitBuilder` (per-buddy memory tools + exclusions). |
-| `AgentRunToolkit.swift` | ~35 | Per-run tool changes for `AgentTurnRunner`: names to hide/refuse and run-only tools. |
-| `Buddies/BuddyMessageQueue.swift` | ~100 | Pure per-buddy FIFO of waiting messages: enqueue (cap 10), front/removeFront (leaves only once its run started), pause, cancel, Codable. Tested by `Tests/BuddyMessageQueue`. |
+| `AgentRunToolkit.swift` | ~75 | Per-run changes for `AgentTurnRunner`: names to hide/refuse, run-only tools, and `takeSteeringMessages` (steer mode) with its wording, `AgentRunSteering`. |
+| `Buddies/BuddyRuntime.swift` | ~340 | `BuddyRuntimeKind`, `BuddySessionKey`/`Record` (incl. context fill), pure `BuddySessionPolicy` (conversation id, what a kept session is sent, gone-session and overflow wording, when to start over), `BuddySessionSummary`, `BuddySessionStore` (`buddy-sessions.json`), `BuddyWorkspace` and `ClaudeCodeSessionFiles`. Tested by `Tests/BuddyRuntime`. |
+| `Buddies/BuddyMessageQueue.swift` | ~130 | Pure per-buddy FIFO of waiting messages: enqueue (cap 10), per-lane front, `takeAll` for steering, pause, cancel, Codable. Tested by `Tests/BuddyMessageQueue`, `Tests/BuddyRunLanes`. |
+| `Buddies/BuddyRunLanes.swift` | ~125 | Pure lane rules: `BuddyBusyMessageMode`, `BuddyRunHoldReason`, `BuddyRunLanePolicy` (one run per conversation, 2 side lanes, why a message waits). Tested by `Tests/BuddyRunLanes`. |
 | `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyStore.swift` | ~580 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
 | `Buddies/BuddySidebarPolicy.swift` | ~95 | Pure sidebar rules: the one badge a row wears by precedence (`BuddySidebarState`) and the Needs you / Pinned / rest / Hidden grouping (`BuddySidebarGrouping`). Tested by `Tests/BuddyThread`. |
@@ -1605,6 +1733,11 @@ running):
 ./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
+./Tests/DemoMode/run.sh                  # demo mode: off by default, the sample day stays believable at any hour
+./Tests/BuddyFlow/run.sh                 # buddy flows: links, loops, fan-in waiting for all, failures skipping what follows, blocked links
+./Tests/BuddyMemoryReview/run.sh         # buddy memory review: triggers, prompt, reply parsing, the checks that keep the user's notes untouched
+./Tests/BuddyRunLanes/run.sh             # buddy lanes: one run per conversation, side-thread limit, why a message waits, steering hand-over
+./Tests/BuddyRuntime/run.sh              # buddy runtime: conversation keys, what a kept session is sent, gone/full sessions, fill, session store file
 ./Tests/BuddyMessageQueue/run.sh         # buddy message line: FIFO order, cap, pause, cancel, codec
 ./Tests/BuddyGroup/run.sh                # group chats: @Name routing, handoff tag, shared history, codec
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
@@ -1628,6 +1761,8 @@ running):
 ./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
 ./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
 ./Tests/LearnedShortcuts/run.sh          # learned shortcuts: replayability rules, template matching, slot filling, drift, store file
+./Tests/WispInbox/run.sh                 # inbox: approvals > failures > system > results, newest first, cap of 3 (approvals never hidden)
+./Tests/WispScheduled/run.sh             # one scheduled list: automations + standalone buddy schedules + scheduled workflows, soonest first, grouped Today/Tomorrow/Later
 ./Tests/StudyMode/run.sh                # study mode: plan, session state machine, blocklist matching, stats
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver

@@ -1,12 +1,12 @@
 // Hero stage: a tab strip that swaps the real captures and types the matching request into the notch.
 (function () {
   var scenes = [
-    { prompt: "Where is the pi button?", src: "assets/shots/feature-pointing.jpg", alt: "A labelled marker on the pi button in Calculator", cap: "A marker lands on the exact control in about a tenth of a second." },
-    { prompt: "Walk me through making this bold and centered", src: "assets/shots/feature-walkthrough.jpg", alt: "A numbered checklist in the notch and a box on the Bold button", cap: "Numbered steps on your real screen, one boxed control at a time." },
-    { prompt: "Solve this, step by step", src: "assets/shots/feature-math.jpg", alt: "Handwritten working beside 3x + 7 = 22, ending in x = 5", cap: "Handwritten working on the page, one line at a time." },
-    { prompt: "Put Dictionary on the left and TextEdit on the right", src: "assets/shots/feature-windows.jpg", alt: "Two windows tiled side by side", cap: "Windows tiled by voice, with no model call." },
+    { prompt: "Draft an email to Sam about moving Friday's review", src: "assets/shots/feature-email.jpg", alt: "An editable email draft with Send and Discard", cap: "A finished draft to the right person. Nothing is sent until you press Send." },
+    { prompt: "Every weekday at 8, tell me what's due", src: "assets/shots/buddy-handoff.jpg", alt: "The Briefer's morning brief, its daily schedule and its hand-off to the Writer", cap: "Say it once. A buddy does it on schedule, and hands its answer on." },
     { prompt: "Open Wikipedia and search for the Enigma machine", src: "assets/shots/feature-browser.jpg", alt: "Chrome on the Enigma machine article", cap: "Your real browser, in its own tab, and an honest summary of where it landed." },
-    { prompt: "Draft an email about moving Friday's review", src: "assets/shots/feature-email.jpg", alt: "An editable email draft with Send and Discard", cap: "An editable draft. Nothing is sent until you press Send." }
+    { prompt: "Put Dictionary on the left and TextEdit on the right", src: "assets/shots/feature-windows.jpg", alt: "Two windows tiled side by side", cap: "Windows tiled by voice, with no model call." },
+    { prompt: "Walk me through making this bold and centered", src: "assets/shots/feature-walkthrough.jpg", alt: "A numbered checklist in the notch and a box on the Bold button", cap: "Steps on your real screen, ticked off as you go. Or let Wisp click." },
+    { prompt: "Solve this, step by step", src: "assets/shots/feature-math.jpg", alt: "Handwritten working beside 3x + 7 = 22, ending in x = 5", cap: "The working, written on the page one line at a time." }
   ];
 
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -99,5 +99,105 @@
     } else {
       done();
     }
+  });
+})();
+
+// A day with Wisp: the chapter in the middle of the screen picks the frame on the right,
+// a clip plays while its chapter is showing, and the bar fills as you scroll the day.
+(function () {
+  var chapters = Array.prototype.slice.call(document.querySelectorAll(".chapter"));
+  var shots = Array.prototype.slice.call(document.querySelectorAll(".story-shot"));
+  var list = document.querySelector(".chapters");
+  var fill = document.getElementById("story-progress-fill");
+  if (!chapters.length || !shots.length) return;
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function videoFor(shot) {
+    var existing = shot.querySelector("video");
+    if (existing || !shot.dataset.video) return existing;
+    var video = document.createElement("video");
+    video.muted = true; video.loop = true; video.playsInline = true; video.preload = "auto";
+    video.setAttribute("aria-hidden", "true");
+    video.src = shot.dataset.video;
+    video.addEventListener("error", function () { video.remove(); });
+    shot.appendChild(video);
+    return video;
+  }
+
+  function activate(index) {
+    chapters.forEach(function (c, k) { c.classList.toggle("is-active", k === index); });
+    shots.forEach(function (shot, k) {
+      var isActive = k === index;
+      shot.classList.toggle("is-active", isActive);
+      var video = isActive && !reduceMotion ? videoFor(shot) : shot.querySelector("video");
+      if (!video) return;
+      if (isActive && !reduceMotion) { video.currentTime = 0; video.play().catch(function () {}); }
+      else video.pause();
+    });
+  }
+
+  var activeIndex = 0;
+  var ticking = false;
+  function updateProgress() {
+    ticking = false;
+    var middle = window.innerHeight / 2;
+    // The chapter whose middle is nearest the middle of the screen is the one showing.
+    var nearestIndex = activeIndex, nearestDistance = Infinity;
+    chapters.forEach(function (c, k) {
+      var box = c.getBoundingClientRect();
+      var distance = Math.abs(box.top + box.height / 2 - middle);
+      if (distance < nearestDistance) { nearestDistance = distance; nearestIndex = k; }
+    });
+    if (nearestIndex !== activeIndex) { activeIndex = nearestIndex; activate(activeIndex); }
+    if (!fill || !list) return;
+    var listBox = list.getBoundingClientRect();
+    var done = (middle - listBox.top) / listBox.height;
+    fill.style.width = (Math.max(0, Math.min(1, done)) * 100).toFixed(1) + "%";
+  }
+  window.addEventListener("scroll", function () {
+    if (!ticking) { ticking = true; window.requestAnimationFrame(updateProgress); }
+  }, { passive: true });
+  // The first chapter is showing before any scroll, so start its clip now.
+  activate(activeIndex);
+  updateProgress();
+})();
+
+// Sections rise in as they arrive; the feature cards follow one another.
+(function () {
+  var items = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+  if (!("IntersectionObserver" in window)) { items.forEach(function (el) { el.classList.add("is-in"); }); return; }
+  document.querySelectorAll(".cat-card").forEach(function (card, k) { card.style.setProperty("--reveal-order", k % 4); });
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("is-in");
+      observer.unobserve(entry.target);
+    });
+  }, { rootMargin: "0px 0px -8% 0px" });
+  items.forEach(function (el) { observer.observe(el); });
+})();
+
+// Feature filters, and a soft glow that follows the pointer over a card.
+(function () {
+  var buttons = Array.prototype.slice.call(document.querySelectorAll(".filters button"));
+  var cards = Array.prototype.slice.call(document.querySelectorAll(".cat-card"));
+  var grid = document.getElementById("cat-grid");
+  buttons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      var filter = button.dataset.filter;
+      buttons.forEach(function (b) { b.setAttribute("aria-pressed", b === button ? "true" : "false"); });
+      cards.forEach(function (card) {
+        card.hidden = filter !== "all" && card.dataset.cat !== filter;
+        card.classList.add("is-in");
+      });
+    });
+  });
+  if (!grid) return;
+  grid.addEventListener("pointermove", function (event) {
+    var card = event.target.closest(".cat-card");
+    if (!card) return;
+    var box = card.getBoundingClientRect();
+    card.style.setProperty("--glow-x", (event.clientX - box.left) + "px");
+    card.style.setProperty("--glow-y", (event.clientY - box.top) + "px");
   });
 })();

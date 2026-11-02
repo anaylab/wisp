@@ -19,6 +19,7 @@ swiftc -target arm64-apple-macos26.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/buddy-thread" \
   Tests/BuddyThread/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   leanring-buddy/Buddies/BuddyThread.swift \
   leanring-buddy/Buddies/BuddyPersonality.swift \
   leanring-buddy/Buddies/BuddyMood.swift \

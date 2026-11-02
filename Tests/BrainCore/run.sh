@@ -27,6 +27,7 @@ swiftc -target arm64-apple-macos26.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/brain-core" \
   Tests/BrainCore/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   leanring-buddy/Brain/BrainPage.swift \
   leanring-buddy/Brain/BrainEdit.swift \
   leanring-buddy/Brain/BrainSearch.swift \

@@ -54,6 +54,8 @@ struct BuddyInspectorView: View {
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var memoryStore = BuddyMemoryStore.shared
+    @ObservedObject private var memoryReviewer = BuddyMemoryReviewer.shared
+    @State private var memoryReviewInterval = BuddyMemoryReviewInterval.current
     @ObservedObject private var fileLibrary = BuddyFileLibrary.shared
     @ObservedObject private var usageLog = UsageLogStore.shared
 
@@ -216,7 +218,7 @@ struct BuddyInspectorView: View {
 
     /// The model is chosen on the Look & personality page, so this row only reads it.
     private func modelRow(for buddy: WispBuddy) -> some View {
-        BuddyInspectorLinkRow(symbolName: "cpu", title: "Model", value: buddy.modelChoice?.displayName ?? "Follows Wisp") {
+        BuddyInspectorLinkRow(symbolName: "cpu", title: "Model", value: buddy.runsOnLabel ?? "Follows Wisp") {
             withAnimation(WispMotion.smooth) { openPage = .identity }
         }
     }
@@ -345,6 +347,8 @@ struct BuddyInspectorView: View {
                 .pointerCursor()
             }
 
+            BuddyHandOffEditor(buddy: buddy)
+
             if isRunning {
                 Button { buddyStore.stopRun(ofBuddyWithID: buddy.id) } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false)).pointerCursor()
@@ -435,6 +439,8 @@ struct BuddyInspectorView: View {
     private func memoryTab(for buddy: WispBuddy) -> some View {
         let notes = memoryStore.facts(ofBuddyWithID: buddy.id)
         return VStack(alignment: .leading, spacing: 12) {
+            // Shown with or without notes: the setting decides whether any get tidied later.
+            memoryReviewRow(for: buddy)
             if notes.isEmpty && !isAddingMemory {
                 // OpenBot's empty state: say what memory is for, and offer to add one.
                 VStack(spacing: 6) {
@@ -470,16 +476,54 @@ struct BuddyInspectorView: View {
                         }
                     }
                 }
+                let buddyWrittenNotes = memoryStore.buddyWrittenFacts(ofBuddyWithID: buddy.id)
                 ForEach(notes, id: \.self) { note in
                     HStack(alignment: .top, spacing: 8) {
                         Text(note).font(.system(size: 13)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 4)
+                        // Yours: tidying never changes or removes it.
+                        if !buddyWrittenNotes.contains(note) {
+                            Text("You")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(WispColor.textTertiary)
+                                .nativeTooltip("You added this. Tidying never changes or removes it.")
+                        }
                         BuddyIconButton(symbolName: "trash", label: "Forget this", size: 22) {
                             withAnimation(WispMotion.smooth) { memoryStore.forgetExactFact(note, forBuddyWithID: buddy.id) }
                         }
                     }
                     .padding(.vertical, 2)
                 }
+            }
+        }
+    }
+
+    /// "Tidies its notes · Every 20 messages ▾" and how the last tidy went.
+    private func memoryReviewRow(for buddy: WispBuddy) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Tidies its notes")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(WispColor.textSecondary)
+                Picker("Tidies its notes", selection: Binding(
+                    get: { memoryReviewInterval },
+                    set: { newInterval in
+                        BuddyMemoryReviewInterval.current = newInterval
+                        memoryReviewInterval = newInterval
+                    }
+                )) {
+                    ForEach(BuddyMemoryReviewInterval.allCases) { reviewInterval in
+                        Text(reviewInterval.displayName).tag(reviewInterval)
+                    }
+                }
+                .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
+                .nativeTooltip("For every buddy: after this many of your messages, or a quiet spell, it rereads the chat and updates its own notes")
+            }
+            if memoryReviewer.reviewingBuddyID == buddy.id {
+                Text("Tidying its notes…").font(.system(size: 11)).foregroundStyle(WispColor.textTertiary)
+            } else if let lastSummary = memoryReviewer.lastSummaryByBuddyID[buddy.id] {
+                Text("Last tidied \(lastSummary.reviewedAt.formatted(.relative(presentation: .named))): \(lastSummary.displayText).")
+                    .font(.system(size: 11)).foregroundStyle(WispColor.textTertiary)
             }
         }
     }
@@ -499,7 +543,7 @@ struct BuddyInspectorView: View {
                 get: { buddy.toolAccess },
                 set: { buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: $0) }
             ),
-            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice),
+            modelSendsDataOffThisMachine: buddy.sendsDataOffThisMachine,
             colorIndex: buddy.colorIndex
         )
     }
@@ -545,6 +589,26 @@ struct BuddyInspectorView: View {
                 ))
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                header("Messages while it's busy")
+                Picker("Messages while it's busy", selection: Binding(
+                    get: { buddy.busyMode },
+                    set: { buddyStore.updateBusyMessageMode(ofBuddyWithID: buddy.id, to: $0) }
+                )) {
+                    ForEach(BuddyBusyMessageMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
+                if buddy.busyMode == .steer {
+                    Text("A message you send while it works is taken in at its next step. If it's already writing its answer, the message runs next instead.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(WispColor.textTertiary)
+                        .frame(minWidth: 280, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             if advancedFeatures.isEnabled {
                 VStack(alignment: .leading, spacing: 8) {
                     header("Model")
@@ -552,6 +616,10 @@ struct BuddyInspectorView: View {
                         get: { buddy.modelChoice },
                         set: { buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: $0) }
                     ))
+                    if buddy.runtimeKind == .wispLoop {
+                        BuddyBackupModelsEditor(buddy: buddy)
+                    }
+                    BuddyRuntimeEditor(buddy: buddy)
                 }
             }
         }

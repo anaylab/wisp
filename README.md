@@ -14,7 +14,7 @@
 
 <p align="center">
   Wisp is an AI companion for macOS that lives in your notch.<br>
-  It sees your screen, points at what matters, and quietly does the busywork.<br>
+  It drafts the email, runs the browser errand, and keeps a team of buddies working on a schedule.<br>
   <b>No account. No API key. Nothing leaves your Mac.</b>
 </p>
 
@@ -30,8 +30,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshots/feature-walkthrough.png" alt="Wisp guiding a task step by step: a numbered checklist in the notch and a box on the exact button to click" width="100%">
-  <br><sub>Ask for help and Wisp walks you through it on your real screen, one boxed control at a time.</sub>
+  <img src="docs/assets/screenshots/feature-email.png" alt="An editable email draft Wisp wrote, with Send and Discard" width="100%">
+  <br><sub>"Draft an email to Sam about Friday." A finished draft opens, and nothing is sent until you press Send.</sub>
 </p>
 
 ---
@@ -48,8 +48,8 @@ Speech recognition, voice and screen reading run on your Mac's Neural Engine. Th
 </td>
 <td width="33%" valign="top">
 
-### ⚡ Instant, not clever
-Pointing at a button takes **~0.1s** with no vision model. Timers, window layouts, tab tidying and screen watchers are recognised and run directly, so the model only does the hard parts.
+### ⚡ Instant for everyday jobs
+Texting, timers, window layouts, tab tidying, music and screen watchers are recognised and run in **~0.1s**, with no model call, so the model only does the hard parts.
 
 </td>
 <td width="33%" valign="top">
@@ -90,12 +90,59 @@ Don't launch `Wisp.app/Contents/MacOS/Wisp` from a shell (speech recognition the
 
 ## What it does
 
-### 🎯 Point at anything
 
-Ask "where is the pi button?" and a pulsing, labelled marker lands on the exact control in about a tenth of a second. Wisp matches your words against the app's Accessibility tree and on-device OCR, so it works in native apps, terminals, images and remote desktops, on whichever monitor the control is on.
+### 🫧 Buddies and automations that work while you're away
+
+Buddies are named agents that each own one job, with their own thread, memory, model and tool allow-list. Automations follow **trigger → source → action → output → notify**, set up by saying it, picking a template, or saving an answer from History. Scheduled runs only get tools that never prompt, and pause themselves after three failures in a row.
+
+**Buddies now work as a team:**
+
+- **Hand off the answer.** When one buddy's job finishes, its answer goes to the buddies you chose. The Briefer's morning brief can start the Writer. A buddy with several inputs waits for all of them, and a link that would take the answer off your Mac asks first.
+- **Ask the team.** A buddy can list its teammates, ask up to four at once, split work into side threads of its own, or draft a new buddy (always with your OK, never with more access than its own).
+- **Threads side by side.** Each chat with a buddy runs on its own, with up to two side threads beside the main one. A message sent mid-job can wait its turn or steer the work in progress.
+- **Backup models.** If a buddy's model hits a limit or goes down before answering, a backup takes over and the failed model is passed over for 10 minutes. A cloud backup counts as leaving your Mac from the start.
+- **A session of its own.** Optionally run a buddy on your Claude subscription with a kept Claude Code session per conversation, started fresh when it gets close to full.
+- **Tidies its own notes.** Every 20 messages (or 10, 40, never) a buddy reviews what it remembered and fixes it. Notes you wrote are never touched.
+- **Hide to pause.** A hidden buddy stops running on its schedule and taking messages until you show it again.
+
+<p><img src="docs/assets/screenshots/buddy-team.png" alt="A buddy's settings: how it handles messages while busy, its model, backup models and what it runs on"></p>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/screenshots/buddy-handoff.png" alt="The Briefer's morning brief, its daily 9:00 schedule, and its answer set to go to the Writer"></td>
+<td width="50%"><img src="docs/assets/screenshots/buddy-writer.png" alt="The Writer's chat: the brief from the Briefer, then a plan for the lab report"></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/assets/screenshots/today.png" alt="Today: the day's checklist, buddies, what runs next and what's coming up"></td>
+<td width="50%"><img src="docs/assets/screenshots/automations.png" alt="The Automations list"></td>
+</tr>
+</table>
+
+### ✉️ Drafts you review, actions you approve
+
+"Draft an email to Sam about moving Friday's meeting" opens a finished, editable draft addressed from Contacts, and "text mom I'm running late" shows the message before Messages sends it. No email leaves your Mac until you press **Send**. Anything riskier, like running a Shortcut, shows a card with exactly what will happen and a countdown.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/screenshots/feature-email.png" alt="An editable New email draft with Send and Discard"></td>
+<td width="50%"><img src="docs/assets/screenshots/feature-approval.png" alt="A Wisp needs your OK card to run a Shortcut, with Cancel and Allow"></td>
+</tr>
+</table>
+
+### 🌐 Drives your real browser
+
+"Open Wikipedia and search for the Enigma machine." Wisp works through the page itself, in its own tab (never the one you are reading), then tells you where it landed. Password and payment fields are refused outright, and irreversible clicks always ask.
 
 <p align="center">
-  <img src="docs/assets/screenshots/feature-pointing.png" alt="A labelled marker on the pi button of Calculator, with the notch saying Here's Pi" width="70%">
+  <img src="docs/assets/screenshots/feature-browser.png" alt="Chrome on the Enigma machine article with Wisp's accurate summary in the notch" width="100%">
+</p>
+
+### 🪟 Rearrange your desk by voice
+
+"Put Dictionary on the left and TextEdit on the right." Halves, quarters, thirds, maximize, center and next-display, over Accessibility, with no model call.
+
+<p align="center">
+  <img src="docs/assets/screenshots/feature-windows.png" alt="Dictionary tiled left and TextEdit right, with the notch confirming" width="100%">
 </p>
 
 ### 🧭 Guided walkthroughs
@@ -120,6 +167,14 @@ Point Wisp at a problem and it writes handwritten working beside it, line by lin
 </tr>
 </table>
 
+### 🎯 Point at anything
+
+Ask "where is the pi button?" and a pulsing, labelled marker lands on the exact control in about a tenth of a second. Wisp matches your words against the app's Accessibility tree and on-device OCR, so it works in native apps, terminals, images and remote desktops, on whichever monitor the control is on.
+
+<p align="center">
+  <img src="docs/assets/screenshots/feature-pointing.png" alt="A labelled marker on the pi button of Calculator, with the notch saying Here's Pi" width="70%">
+</p>
+
 ### ✂️ Ask about just a part
 
 Drag a box around anything on screen, or just say "explain option C". Wisp highlights exactly what you chose, and the follow-ups ("why?", "next step") stay about that region.
@@ -128,48 +183,6 @@ Drag a box around anything on screen, or just say "explain option C". Wisp highl
 <tr>
 <td width="50%"><img src="docs/assets/screenshots/feature-select-part.png" alt="A dimmed screen with a selection box around four buttons"></td>
 <td width="50%"><img src="docs/assets/screenshots/feature-ask-part.png" alt="The composer with an About: selected part chip"></td>
-</tr>
-</table>
-
-### 🪟 Rearrange your desk by voice
-
-"Put Dictionary on the left and TextEdit on the right." Halves, quarters, thirds, maximize, center and next-display, over Accessibility, with no model call.
-
-<p align="center">
-  <img src="docs/assets/screenshots/feature-windows.png" alt="Dictionary tiled left and TextEdit right, with the notch confirming" width="100%">
-</p>
-
-### 🌐 Drives your real browser
-
-"Open Wikipedia and search for the Enigma machine." Wisp works through the page itself, in its own tab (never the one you are reading), then tells you where it landed. Password and payment fields are refused outright, and irreversible clicks always ask.
-
-<p align="center">
-  <img src="docs/assets/screenshots/feature-browser.png" alt="Chrome on the Enigma machine article with Wisp's accurate summary in the notch" width="100%">
-</p>
-
-### ✉️ Drafts you review, actions you approve
-
-An email request opens an editable draft instantly, and nothing leaves your Mac until you press **Send**. Anything riskier, like running a Shortcut, shows a card with exactly what will happen and a countdown.
-
-<table>
-<tr>
-<td width="50%"><img src="docs/assets/screenshots/feature-email.png" alt="An editable New email draft with Send and Discard"></td>
-<td width="50%"><img src="docs/assets/screenshots/feature-approval.png" alt="A Wisp needs your OK card to run a Shortcut, with Cancel and Allow"></td>
-</tr>
-</table>
-
-### 🫧 Buddies and automations that work while you're away
-
-Buddies are named agents that each own one job, with their own thread, memory, model and tool allow-list. Automations follow **trigger → source → action → output → notify**, set up by saying it, picking a template, or saving an answer from History. Scheduled runs only get tools that never prompt, and pause themselves after three failures in a row.
-
-<table>
-<tr>
-<td width="50%"><img src="docs/assets/screenshots/today.png" alt="The Today dashboard with buddies, next automations and upcoming events"></td>
-<td width="50%"><img src="docs/assets/screenshots/buddies.png" alt="A buddy's page with its Tools panel"></td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/assets/screenshots/automations.png" alt="The Automations list"></td>
-<td width="50%"><img src="docs/assets/screenshots/canvas.png" alt="The Canvas page for calendar sync"></td>
 </tr>
 </table>
 
@@ -312,6 +325,7 @@ Almost everything lives in the Wisp window. Shipped defaults are in [`leanring-b
 # Unit tests: in Xcode, press ⌘U
 log stream --predicate 'process == "Wisp"'     # logs from a running copy
 ./Tests/FastPointing/run.sh                    # standalone suites: plain swiftc, no Xcode, no permission reset
+./scripts/demo.sh                              # run Wisp on sample data for screenshots (--reset, --off)
 ```
 
 <details>
@@ -331,9 +345,9 @@ leanring-buddy/           the app (Swift / SwiftUI + AppKit, ~350 files)
 ├── WindowManagement/     voice window layout
 ├── Email/                editable drafts and Mail sending
 └── …                     providers, dictation, screen capture + OCR, agent loop, tools, MCP
-Tests/                    36 standalone suites
+Tests/                    37 standalone suites
 chrome-extension/         Wisp Tabs extension for Chrome
-scripts/                  install and release scripts
+scripts/                  install, update, demo and release scripts
 docs/                     design docs and brand assets
 ```
 

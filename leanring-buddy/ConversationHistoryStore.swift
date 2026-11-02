@@ -312,10 +312,7 @@ final class ConversationHistoryStore: ObservableObject {
     private var applicationWillTerminateObserver: NSObjectProtocol?
 
     private init() {
-        let applicationSupportDirectory = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support", isDirectory: true)
+        let applicationSupportDirectory = WispDemoMode.applicationSupportDirectory
         historyFileURL = applicationSupportDirectory
             .appendingPathComponent("Wisp", isDirectory: true)
             .appendingPathComponent("conversation.json", isDirectory: false)

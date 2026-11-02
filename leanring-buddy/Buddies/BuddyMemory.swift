@@ -18,6 +18,12 @@
 //  helpers as `~/.wisp/memory.md`, `MemoryFileFormat`), at
 //  `~/Library/Application Support/Wisp/buddy-memory/<buddy id>.md`.
 //
+//  Beside each file, `<buddy id>.written-by-buddy.json` lists the notes the
+//  buddy wrote itself (its remember tool, its background review). Everything
+//  else — notes the user added, hand edits, notes from before this was kept —
+//  is the user's, and the background review (`BuddyMemoryReviewPolicy`) may
+//  never change or remove it.
+//
 //  Because a fact is written by the model — possibly after reading a web page —
 //  and then rides every later system prompt, it is framed to the model as the
 //  buddy's own notes and *data*, never as instructions.
@@ -70,7 +76,7 @@ enum BuddyMemoryPolicy {
 final class BuddyMemoryStore: ObservableObject {
     static let shared = BuddyMemoryStore()
 
-    static let defaultMemoryDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultMemoryDirectoryURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddy-memory")
 
     enum RememberOutcome: Equatable {
@@ -89,6 +95,8 @@ final class BuddyMemoryStore: ObservableObject {
     /// Facts per buddy, oldest first. A cache of the files, so the buddy's page
     /// redraws when a run saves one.
     @Published private(set) var factsByBuddyID: [UUID: [String]] = [:]
+    /// Notes each buddy wrote itself (see the header). A cache of the side files.
+    private var buddyWrittenFactsByBuddyID: [UUID: Set<String>] = [:]
 
     private let memoryDirectoryURL: URL
 
@@ -108,15 +116,54 @@ final class BuddyMemoryStore: ObservableObject {
         BuddyMemoryPolicy.promptInstructions(forFacts: facts(ofBuddyWithID: buddyID))
     }
 
+    /// Saves a note. `writtenByBuddy` is true for the buddy's own tool and its
+    /// review, false for a note the user added (which the review won't touch).
     @discardableResult
-    func remember(_ fact: String, forBuddyWithID buddyID: UUID) -> RememberOutcome {
+    func remember(_ fact: String, forBuddyWithID buddyID: UUID, writtenByBuddy: Bool = false) -> RememberOutcome {
         guard let normalizedFact = MemoryFileFormat.normalizedFact(fact) else { return .nothingToRemember }
         let currentMarkdown = readMarkdown(forBuddyWithID: buddyID)
         guard let addition = BuddyMemoryPolicy.markdown(afterAdding: normalizedFact, to: currentMarkdown) else {
             return .alreadyKnown
         }
         writeMarkdown(addition.updatedMarkdown, forBuddyWithID: buddyID)
+        if writtenByBuddy { markWrittenByBuddy([addition.savedFact], forBuddyWithID: buddyID) }
         return .added(addition.savedFact)
+    }
+
+    /// The buddy's current notes that it wrote itself.
+    func buddyWrittenFacts(ofBuddyWithID buddyID: UUID) -> Set<String> {
+        loadBuddyWrittenFacts(forBuddyWithID: buddyID).intersection(facts(ofBuddyWithID: buddyID))
+    }
+
+    /// Applies a checked review. Each change is applied only if it still fits
+    /// the notes as they are now: an update or removal only to a note the
+    /// buddy wrote that still reads the same. Returns the changes made.
+    @discardableResult
+    func applyReviewChanges(_ changes: [BuddyMemoryReviewChange], forBuddyWithID buddyID: UUID) -> [BuddyMemoryReviewChange] {
+        var appliedChanges: [BuddyMemoryReviewChange] = []
+        for change in changes {
+            let ownFacts = buddyWrittenFacts(ofBuddyWithID: buddyID)
+            switch change {
+            case .add(let newText):
+                if case .added = remember(newText, forBuddyWithID: buddyID, writtenByBuddy: true) { appliedChanges.append(change) }
+            case .update(let oldText, let newText):
+                guard ownFacts.contains(oldText),
+                      let normalizedNewText = MemoryFileFormat.normalizedFact(newText),
+                      !MemoryFileFormat.containsFact(normalizedNewText, in: readMarkdown(forBuddyWithID: buddyID)) else { continue }
+                let removal = MemoryFileFormat.removingFacts(from: readMarkdown(forBuddyWithID: buddyID)) { $0 == oldText }
+                guard !removal.removedFacts.isEmpty else { continue }
+                writeMarkdown(MemoryFileFormat.appendingFact(normalizedNewText, to: removal.updatedMarkdown), forBuddyWithID: buddyID)
+                markWrittenByBuddy([normalizedNewText], forBuddyWithID: buddyID)
+                appliedChanges.append(change)
+            case .forget(let factText):
+                guard ownFacts.contains(factText) else { continue }
+                let removal = MemoryFileFormat.removingFacts(from: readMarkdown(forBuddyWithID: buddyID)) { $0 == factText }
+                guard !removal.removedFacts.isEmpty else { continue }
+                writeMarkdown(removal.updatedMarkdown, forBuddyWithID: buddyID)
+                appliedChanges.append(change)
+            }
+        }
+        return appliedChanges
     }
 
     /// Removes facts containing `query` (a buddy describing what to forget),
@@ -141,7 +188,9 @@ final class BuddyMemoryStore: ObservableObject {
 
     func deleteMemory(ofBuddyWithID buddyID: UUID) {
         try? FileManager.default.removeItem(at: fileURL(forBuddyWithID: buddyID))
+        try? FileManager.default.removeItem(at: buddyWrittenFactsFileURL(forBuddyWithID: buddyID))
         factsByBuddyID[buddyID] = nil
+        buddyWrittenFactsByBuddyID[buddyID] = nil
     }
 
     // MARK: - Files
@@ -158,5 +207,29 @@ final class BuddyMemoryStore: ObservableObject {
         try? FileManager.default.createDirectory(at: memoryDirectoryURL, withIntermediateDirectories: true)
         try? markdown.write(to: fileURL(forBuddyWithID: buddyID), atomically: true, encoding: .utf8)
         factsByBuddyID[buddyID] = MemoryFileFormat.parseFacts(from: markdown)
+    }
+
+    private func buddyWrittenFactsFileURL(forBuddyWithID buddyID: UUID) -> URL {
+        memoryDirectoryURL.appendingPathComponent("\(buddyID.uuidString).written-by-buddy.json")
+    }
+
+    private func loadBuddyWrittenFacts(forBuddyWithID buddyID: UUID) -> Set<String> {
+        if let cachedFacts = buddyWrittenFactsByBuddyID[buddyID] { return cachedFacts }
+        let loadedFacts = (try? Data(contentsOf: buddyWrittenFactsFileURL(forBuddyWithID: buddyID)))
+            .flatMap { try? JSONDecoder().decode([String].self, from: $0) }
+            .map(Set.init) ?? []
+        buddyWrittenFactsByBuddyID[buddyID] = loadedFacts
+        return loadedFacts
+    }
+
+    /// Adds to the buddy's own notes, keeping only notes still in the file.
+    private func markWrittenByBuddy(_ newFacts: [String], forBuddyWithID buddyID: UUID) {
+        let updatedFacts = loadBuddyWrittenFacts(forBuddyWithID: buddyID)
+            .union(newFacts)
+            .intersection(facts(ofBuddyWithID: buddyID))
+        buddyWrittenFactsByBuddyID[buddyID] = updatedFacts
+        try? FileManager.default.createDirectory(at: memoryDirectoryURL, withIntermediateDirectories: true)
+        guard let data = try? JSONEncoder().encode(updatedFacts.sorted()) else { return }
+        try? data.write(to: buddyWrittenFactsFileURL(forBuddyWithID: buddyID), options: .atomic)
     }
 }

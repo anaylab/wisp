@@ -59,7 +59,9 @@ struct BuddyChatView: View {
     }
 
     private func content(for buddy: WispBuddy) -> some View {
-        let isRunning = buddyStore.isRunning(buddy, in: taskRegistry)
+        // Each thread is its own lane: the open one's run decides Stop, the
+        // typing dots and the composer, whatever the buddy's other threads do.
+        let isRunning = buddyStore.isRunning(buddy, inConversation: activeThreadID, in: taskRegistry)
         let mood = buddyStore.mood(of: buddy, in: taskRegistry)
         let latestRunRecord = buddyStore.latestRunRecord(of: buddy, in: taskRegistry)
         let allExchanges = threadStore.exchanges(ofBuddyWithID: buddy.id)
@@ -184,6 +186,7 @@ struct BuddyChatView: View {
             Button("Delete Thread", role: .destructive) {
                 if let threadID = threadPendingDeletion {
                     threadStore.deleteSideThread(threadID, ofBuddyWithID: buddy.id)
+                    BuddySessionStore.shared.forgetSession(for: BuddySessionKey(buddyID: buddy.id, conversationID: threadID))
                     draftThreadIDs.removeAll { $0 == threadID }
                     if activeThreadID == threadID { activeThreadID = nil }
                 }
@@ -326,7 +329,7 @@ struct BuddyChatView: View {
                     .animation(WispMotion.smooth, value: mood)
             }
 
-            Text(buddy.modelChoice?.displayName ?? ActiveStackReadout.shared.chatModelName)
+            Text(buddy.runsOnLabel ?? ActiveStackReadout.shared.chatModelName)
                 .font(.system(size: 11.5))
                 .foregroundStyle(WispColor.textSecondary)
                 .lineLimit(1)
@@ -335,12 +338,14 @@ struct BuddyChatView: View {
                 .nativeTooltip("The model this buddy uses")
 
             if isRunning {
-                Button { buddyStore.stopRun(ofBuddyWithID: buddy.id) } label: { Label("Stop", systemImage: "stop.fill") }
+                Button { buddyStore.stopRun(ofBuddyWithID: buddy.id, inConversation: activeThreadID) } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false))
                     .pointerCursor()
             } else {
                 Button {
-                    if !buddyStore.runNow(buddyWithID: buddy.id) { sendFailureMessage = "Its model is busy — try again in a moment." }
+                    if !buddyStore.runNow(buddyWithID: buddy.id) {
+                        sendFailureMessage = buddy.isHiddenInList ? "It's hidden. Show it in the list to run it." : "Its model is busy — try again in a moment."
+                    }
                 } label: { Label("Run now", systemImage: "play.fill") }
                     .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex))
                     .pointerCursor()
@@ -445,7 +450,7 @@ struct BuddyChatView: View {
         let isRunning = runRecord.map { !$0.status.isTerminal } ?? false
         return VStack(alignment: .leading, spacing: 8) {
             if let exchange, exchange.origin == .delegated, let requesterName = exchange.requesterName {
-                handoffRow(requesterName: requesterName, message: exchange.userText, buddy: buddy)
+                handoffRow(requesterName: requesterName, message: BuddyFlowPolicy.displayText(ofHandOffMessage: exchange.userText), buddy: buddy)
             } else if let exchange, exchange.origin == .message {
                 userBubble(exchange, buddy: buddy)
             }
@@ -505,6 +510,17 @@ struct BuddyChatView: View {
                 // Neutral and quiet, as in OpenBot: the user's words sit in a soft bubble and
                 // the buddy's answer is plain text beside its face.
                 .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface3))
+            // Messages the run took in while it worked (steer mode), in the order sent.
+            ForEach(Array((exchange.addedTexts ?? []).enumerated()), id: \.offset) { _, addedText in
+                Text(addedText)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(WispColor.textPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(WispColor.surface3))
+                    .nativeTooltip("Sent while it worked; it took this in at its next step")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 70)
@@ -522,7 +538,7 @@ struct BuddyChatView: View {
                 Text("From \(requesterName)")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(WispColor.textSecondary)
-                Text(message)
+                Text(BuddyAnswerFormatting.attributedAnswer(message))
                     .font(.system(size: 12.5))
                     .foregroundStyle(WispColor.textSecondary)
                     .lineLimit(6)
@@ -585,7 +601,7 @@ struct BuddyChatView: View {
             if advancedFeatures.isEnabled && !peers.isEmpty {
                 Menu {
                     ForEach(peers) { peer in
-                        Button(peer.modelChoice?.sendsDataOffThisMachine == true ? "\(peer.name) · cloud model" : peer.name) {
+                        Button(peer.runtimeKind == .claudeCodeSession || peer.modelChoice?.sendsDataOffThisMachine == true ? "\(peer.name) · cloud model" : peer.name) {
                             handOff(answer: text, from: buddy, to: peer)
                         }
                     }
@@ -673,11 +689,27 @@ struct BuddyChatView: View {
         let trimmedDraft = draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
         // A text message sent while the buddy works joins its line; files and
         // pictures are read when sent, so they have to wait for it to be free.
+        // A hidden buddy takes nothing new until it's shown again.
         let canSend = (!trimmedDraft.isEmpty || !pendingFileURLs.isEmpty)
-            && !(isRunning && !pendingFileURLs.isEmpty) && !isSending
+            && !(isRunning && !pendingFileURLs.isEmpty) && !isSending && !buddy.isHiddenInList
         let accent = BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex)
         let waitingMessages = buddyStore.waitingMessages(of: buddy)
         return VStack(spacing: 8) {
+            if buddy.isHiddenInList {
+                HStack(spacing: 8) {
+                    Image(systemName: "eye.slash").foregroundStyle(WispColor.textTertiary)
+                    Text("Hidden: it doesn't run on its schedule or take messages.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(WispColor.textSecondary)
+                    Spacer()
+                    Button("Show in List") { buddyStore.setHidden(buddyWithID: buddy.id, isHidden: false) }
+                        .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false))
+                        .controlSize(.small)
+                        .pointerCursor()
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(WispColor.surface2.opacity(0.7)))
+            }
             if !waitingMessages.isEmpty {
                 waitingMessageLine(for: buddy, waitingMessages: waitingMessages, accent: accent)
                     .transition(.opacity)
@@ -711,7 +743,7 @@ struct BuddyChatView: View {
                 .pointerCursor()
                 .accessibilityLabel("Add")
 
-                TextField(isRunning ? "Queue a message for \(buddy.name)…" : "Message \(buddy.name)", text: $draftMessageText, axis: .vertical)
+                TextField(isRunning ? (buddy.busyMode == .steer ? "Add to what \(buddy.name) is doing…" : "Queue a message for \(buddy.name)…") : "Message \(buddy.name)", text: $draftMessageText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13.5))
                     .foregroundStyle(WispColor.textPrimary)
@@ -806,10 +838,21 @@ struct BuddyChatView: View {
             }
             ForEach(waitingMessages) { waitingMessage in
                 HStack(spacing: 6) {
-                    Text(waitingMessage.text)
-                        .font(.system(size: 12))
-                        .foregroundStyle(WispColor.textPrimary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(waitingMessage.text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(WispColor.textPrimary)
+                            .lineLimit(1)
+                        // Why it hasn't started; a message for another thread says so.
+                        if let holdReason = buddyStore.holdReason(forWaitingMessage: waitingMessage, of: buddy) {
+                            Text(waitingMessage.threadID == activeThreadID
+                                 ? holdReason.displayText
+                                 : "In another thread · " + holdReason.displayText)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(WispColor.textTertiary)
+                                .lineLimit(1)
+                        }
+                    }
                     Spacer()
                     BuddyIconButton(symbolName: "xmark", label: "Take this message back", tint: accent, size: 22) {
                         withAnimation(WispMotion.smooth) {

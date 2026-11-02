@@ -64,7 +64,7 @@ private nonisolated enum AutomationPrivateJSONFile {
 final class AutomationStore: ObservableObject {
     static let shared = AutomationStore()
 
-    static let defaultFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/automations.json")
 
     /// Creation order.
@@ -211,7 +211,7 @@ final class AutomationRunHistoryStore: ObservableObject {
     static let maximumRecordsPerAutomation = 30
     static let retentionDays = 30
 
-    static let defaultFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/automation-runs.json")
 
     /// Newest first.

@@ -28,7 +28,7 @@ final class UsageLogStore: ObservableObject {
     private static let writeQueue = DispatchQueue(label: "wisp.usageLog.write", qos: .utility)
 
     nonisolated static var defaultFileURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        WispDemoMode.dataHome
             .appendingPathComponent("Library/Application Support/Wisp/usage-log.json")
     }
 

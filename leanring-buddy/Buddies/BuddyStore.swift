@@ -162,6 +162,15 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// Tucked away in the sidebar's Hidden group. It still runs on its schedule;
     /// only the list changes.
     var isHidden: Bool?
+    /// What carries out its runs; nil is Wisp's own loop (`BuddyRuntimeKind`).
+    var runtime: BuddyRuntimeKind?
+    /// What a message sent while it's busy does; nil waits (`BuddyBusyMessageMode`).
+    var busyMessageMode: BuddyBusyMessageMode?
+    /// Models to fall back on, in order, when its own fails before doing
+    /// anything (`FailoverModelProvider`); nil is none.
+    var backupModelChoices: [BuddyModelChoice]?
+    /// Buddies its job's answer is handed to when the job finishes (`BuddyFlow`); nil is none.
+    var handOffLinks: [BuddyFlowLink]?
 
     /// The most runs a buddy remembers (older ones stay in History).
     static let maximumRememberedRuns = 20
@@ -170,6 +179,30 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     var isPinnedInList: Bool { isPinned ?? false }
     var postsNotificationWhenFinished: Bool { notifiesWhenFinished ?? true }
     var isHiddenInList: Bool { isHidden ?? false }
+    var runtimeKind: BuddyRuntimeKind { runtime ?? .wispLoop }
+    var busyMode: BuddyBusyMessageMode { busyMessageMode ?? .queue }
+    var backupModels: [BuddyModelChoice] { backupModelChoices ?? [] }
+    var handOffs: [BuddyFlowLink] { handOffLinks ?? [] }
+
+    /// Whether this buddy's runs leave the Mac: its runtime does, or the model
+    /// it runs on (its own choice, else Wisp's) does.
+    var sendsDataOffThisMachine: Bool {
+        runtimeKind.sendsDataOffThisMachine
+            || (modelChoice?.sendsDataOffThisMachine ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine)
+            // A backup off this Mac may answer any run (`BuddyFailoverPolicy`).
+            || (runtimeKind == .wispLoop && backupModels.contains(where: \.sendsDataOffThisMachine))
+    }
+
+    /// The short "what does it run on" label for the chat header and settings,
+    /// or nil when it follows Wisp's model.
+    var runsOnLabel: String? {
+        switch runtimeKind {
+        case .claudeCodeSession:
+            return "Claude Code session · \(modelChoice?.claudeModel?.displayName ?? AnthropicModelSettings.selectedModel.displayName)"
+        case .wispLoop:
+            return modelChoice?.displayName
+        }
+    }
 }
 
 /// Names a buddy from its job: a subject from the instruction plus a role —
@@ -256,7 +289,7 @@ enum BuddyNameGenerator {
 final class BuddyStore: ObservableObject {
     static let shared = BuddyStore()
 
-    static let defaultBuddiesFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultBuddiesFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddies.json")
 
     private static let scheduleCheckIntervalSeconds: TimeInterval = 60
@@ -306,7 +339,12 @@ final class BuddyStore: ObservableObject {
         // First launch only (the flag is remembered): the rail is never empty.
         // Only the app's own store seeds; a store a test made on a temporary
         // file stays exactly as it was built.
-        if self === Self.shared { ensureStarterBuddies() }
+        if self === Self.shared {
+            // A demo session keeps its own flags, so its starters don't depend on the real ones.
+            ensureStarterBuddies(userDefaults: WispDemoMode.isOn
+                ? (UserDefaults(suiteName: WispDemoMode.demoUserDefaultsSuiteName) ?? .standard)
+                : .standard)
+        }
         // A run ending is what frees a buddy for the next waiting message. The
         // registry publishes before it changes, so the drain waits one turn.
         if taskRecordsObservation == nil {
@@ -337,18 +375,26 @@ final class BuddyStore: ObservableObject {
         // A waiting message whose run couldn't start earlier (the background
         // limit) gets another try on every tick.
         drainMessageQueues()
+        BuddyMemoryReviewer.shared.checkQuietConversations()
         // Right after wake the network and connected apps are still coming back; a job started
         // then just fails. Leaving the due date alone means the next minute's check runs it.
+        // In demo mode nothing runs on its own; the sample schedules are only for show.
+        guard !WispDemoMode.isOn else { return }
         let readinessMonitor = SystemReadinessMonitor.shared
         guard readinessMonitor.isSettledAfterWake(now: now) else { return }
         for buddy in buddies {
             guard !buddyIDsWhoseSchedulesAreOwnedByAutomations.contains(buddy.id) else { continue }
             guard let nextScheduledRunAt = buddy.nextScheduledRunAt, nextScheduledRunAt <= now else { continue }
+            // A hidden buddy's slots pass without running, so showing it again
+            // doesn't set off a backlog (OpenBot skips them the same way).
+            if buddy.isHiddenInList {
+                advanceSchedule(ofBuddyWithID: buddy.id, after: now)
+                continue
+            }
             // A cloud-model buddy can't do anything offline; hold its slot until the connection is back.
-            let buddySendsDataOffThisMachine = buddy.modelChoice?.sendsDataOffThisMachine
-                ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine
-            if buddySendsDataOffThisMachine && !readinessMonitor.isNetworkReachable { continue }
-            if isRunning(buddy) {
+            if buddy.sendsDataOffThisMachine && !readinessMonitor.isNetworkReachable { continue }
+            // The job runs in the main thread; side threads busy elsewhere don't hold it.
+            if isRunning(buddy, inConversation: nil) {
                 advanceSchedule(ofBuddyWithID: buddy.id, after: now)
                 continue
             }
@@ -377,12 +423,48 @@ final class BuddyStore: ObservableObject {
         }
     }
 
+    /// Whether any of the buddy's conversations has a run in progress.
     func isRunning(_ buddy: WispBuddy, in taskRegistry: AgentTaskRegistry = .shared) -> Bool {
-        guard let latestRunTaskID = buddy.runTaskIDs.last,
-              let latestRunRecord = taskRegistry.records.first(where: { $0.id == latestRunTaskID }) else {
-            return false
+        !runningTaskIDs(of: buddy, in: taskRegistry).isEmpty
+    }
+
+    /// Whether one conversation (nil = main thread; a side thread's or a
+    /// group's id otherwise) has a run in progress.
+    func isRunning(_ buddy: WispBuddy, inConversation conversationID: UUID?, in taskRegistry: AgentTaskRegistry = .shared) -> Bool {
+        runningConversationIDs(of: buddy, in: taskRegistry).contains(conversationID)
+    }
+
+    /// The buddy's runs still in progress, oldest first.
+    private func runningTaskIDs(of buddy: WispBuddy, in taskRegistry: AgentTaskRegistry = .shared) -> [UUID] {
+        // Only recent runs can still be going, and the registry is scanned per id.
+        buddy.runTaskIDs.suffix(BuddyRunLanePolicy.maximumParallelSideLanes + 4).filter { runTaskID in
+            taskRegistry.records.first(where: { $0.id == runTaskID }).map { !$0.status.isTerminal } ?? false
         }
-        return !latestRunRecord.status.isTerminal
+    }
+
+    /// The conversation (lane) of each run in progress. A run's exchange says
+    /// which: its side thread, or the group or workflow it answers (filed under
+    /// that id); a run with no exchange is the main thread's.
+    func runningConversationIDs(of buddy: WispBuddy, in taskRegistry: AgentTaskRegistry = .shared) -> [UUID?] {
+        let runningIDs = runningTaskIDs(of: buddy, in: taskRegistry)
+        guard !runningIDs.isEmpty else { return [] }
+        let exchanges = BuddyThreadStore.shared.exchanges(ofBuddyWithID: buddy.id)
+        return runningIDs.map { runTaskID in
+            exchanges.first(where: { $0.taskID == runTaskID })?.threadID
+        }
+    }
+
+    /// Why a waiting message hasn't started yet, for the line above the composer.
+    func holdReason(forWaitingMessage message: QueuedBuddyMessage, of buddy: WispBuddy) -> BuddyRunHoldReason? {
+        if buddy.isHiddenInList { return .hidden }
+        return BuddyRunLanePolicy.holdReason(
+            forWaitingMessageWithID: message.id,
+            waitingMessages: messageQueue.waitingMessages(forBuddyWithID: buddy.id),
+            isLinePaused: messageQueue.isPaused(buddyWithID: buddy.id),
+            runningConversationIDs: runningConversationIDs(of: buddy),
+            busyMessageMode: buddy.busyMode,
+            backgroundHasRoom: BackgroundTaskLauncher.canStartAnotherTask(runsOffThisMachine: buddy.sendsDataOffThisMachine)
+        )
     }
 
     /// The buddy's latest run that the registry still holds.
@@ -494,12 +576,15 @@ final class BuddyStore: ObservableObject {
     @discardableResult
     func sendMessage(_ messageText: String, toBuddyWithID buddyID: UUID, inThread threadID: UUID? = nil) -> Bool {
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedMessageText.isEmpty, let buddy = buddy(withID: buddyID) else { return false }
-        // Behind a run in progress, a paused line, or messages already waiting:
-        // join the line rather than being refused, so replies keep the order sent.
-        let lineIsHolding = isRunning(buddy)
-            || messageQueue.isPaused(buddyWithID: buddyID)
-            || !messageQueue.waitingMessages(forBuddyWithID: buddyID).isEmpty
+        // A hidden buddy takes no new messages until it's shown again.
+        guard !trimmedMessageText.isEmpty, let buddy = buddy(withID: buddyID), !buddy.isHiddenInList else { return false }
+        // Behind a run in this conversation, a paused line, messages already
+        // waiting here, or the side-thread limit: join the line rather than
+        // being refused, so replies keep the order sent. Another conversation
+        // being busy doesn't hold this one (`BuddyRunLanePolicy`).
+        let lineIsHolding = messageQueue.isPaused(buddyWithID: buddyID)
+            || messageQueue.front(forBuddyWithID: buddyID, inThread: threadID) != nil
+            || !BuddyRunLanePolicy.canStartRun(inConversation: threadID, runningConversationIDs: runningConversationIDs(of: buddy))
         if lineIsHolding {
             guard messageQueue.enqueue(trimmedMessageText, forBuddyWithID: buddyID, threadID: threadID) != nil else { return false }
             saveMessageQueue()
@@ -529,9 +614,9 @@ final class BuddyStore: ObservableObject {
         if !isPaused { drainMessageQueues() }
     }
 
-    /// Starts the front message of every free buddy's line. A message leaves the
-    /// line only once its run has started, so one that can't start (the
-    /// background limit) stays and is tried again.
+    /// Starts the oldest message of every free conversation of every buddy. A
+    /// message leaves the line only once its run has started, so one that can't
+    /// start (the side-thread or background limit) stays and is tried again.
     func drainMessageQueues() {
         for buddyID in messageQueue.buddyIDsWithWaitingMessages {
             guard let buddy = buddy(withID: buddyID) else {
@@ -539,14 +624,35 @@ final class BuddyStore: ObservableObject {
                 saveMessageQueue()
                 continue
             }
-            guard !isRunning(buddy),
-                  let frontMessage = messageQueue.front(forBuddyWithID: buddyID),
-                  startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: frontMessage.text, threadID: frontMessage.threadID)) else {
-                continue
+            // Messages for a hidden buddy wait until it's shown again.
+            guard !buddy.isHiddenInList else { continue }
+            for threadID in messageQueue.threadIDsWithWaitingMessages(forBuddyWithID: buddyID) {
+                guard let frontMessage = messageQueue.front(forBuddyWithID: buddyID, inThread: threadID),
+                      startRun(of: buddy, request: BuddyRunRequest(origin: .message, text: frontMessage.text, threadID: threadID)) else {
+                    continue
+                }
+                messageQueue.cancel(messageWithID: frontMessage.id, forBuddyWithID: buddyID)
+                saveMessageQueue()
             }
-            messageQueue.removeFront(forBuddyWithID: buddyID)
-            saveMessageQueue()
         }
+    }
+
+    /// Hands a run in progress the messages that arrived for its conversation
+    /// while it worked, when the buddy is in steer mode (called by the agent
+    /// loop at each step). They leave the line and are recorded with the run's
+    /// exchange. Nothing for a paused line or a buddy that queues.
+    func takeSteeringMessages(forBuddyWithID buddyID: UUID, runTaskID: UUID, inThread threadID: UUID?) -> [String] {
+        guard let buddy = buddy(withID: buddyID), buddy.busyMode == .steer else { return [] }
+        let takenMessages = messageQueue.takeAll(forBuddyWithID: buddyID, inThread: threadID)
+        guard !takenMessages.isEmpty else { return [] }
+        saveMessageQueue()
+        let takenTexts = takenMessages.map(\.text)
+        BuddyThreadStore.shared.appendAddedTexts(takenTexts, forBuddyWithID: buddyID, taskID: runTaskID)
+        return takenTexts
+    }
+
+    func updateBusyMessageMode(ofBuddyWithID buddyID: UUID, to newMode: BuddyBusyMessageMode) {
+        mutateBuddy(withID: buddyID) { $0.busyMessageMode = newMode == .queue ? nil : newMode }
     }
 
     /// Sends a message with files attached. The files are copied into the
@@ -563,7 +669,8 @@ final class BuddyStore: ObservableObject {
     ) async -> Bool {
         guard !attachmentFileURLs.isEmpty else { return sendMessage(messageText, toBuddyWithID: buddyID, inThread: threadID) }
         let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let buddy = buddy(withID: buddyID), !isRunning(buddy) else { return false }
+        guard let buddy = buddy(withID: buddyID), !buddy.isHiddenInList,
+              BuddyRunLanePolicy.canStartRun(inConversation: threadID, runningConversationIDs: runningConversationIDs(of: buddy)) else { return false }
 
         let (addedAttachments, skippedFileNames) = fileLibrary.add(fileURLs: attachmentFileURLs, toBuddyWithID: buddyID)
         var documents: [(fileName: String, text: String)] = []
@@ -625,7 +732,12 @@ final class BuddyStore: ObservableObject {
 
     private func startRunReturningTaskID(of buddy: WispBuddy, request: BuddyRunRequest) -> UUID? {
         let buddyID = buddy.id
-        guard !isRunning(buddy), let runStarter, let runTaskID = runStarter(buddy, request) else {
+        let conversationID = BuddySessionPolicy.conversationID(threadID: request.threadID, groupID: request.groupID)
+        // A hidden buddy starts nothing new: no job, message, peer request,
+        // group or workflow turn. A run already going finishes.
+        guard !buddy.isHiddenInList,
+              BuddyRunLanePolicy.canStartRun(inConversation: conversationID, runningConversationIDs: runningConversationIDs(of: buddy)),
+              let runStarter, let runTaskID = runStarter(buddy, request) else {
             return nil
         }
         mutateBuddy(withID: buddyID) { buddy in
@@ -637,9 +749,21 @@ final class BuddyStore: ObservableObject {
         return runTaskID
     }
 
+    /// Stops every run of the buddy in progress.
     func stopRun(ofBuddyWithID buddyID: UUID) {
-        guard let latestRunTaskID = buddy(withID: buddyID)?.runTaskIDs.last else { return }
-        AgentTaskRegistry.shared.cancelTask(latestRunTaskID)
+        guard let buddy = buddy(withID: buddyID) else { return }
+        for runTaskID in runningTaskIDs(of: buddy) {
+            AgentTaskRegistry.shared.cancelTask(runTaskID)
+        }
+    }
+
+    /// Stops the run of one conversation, leaving the buddy's others going.
+    func stopRun(ofBuddyWithID buddyID: UUID, inConversation conversationID: UUID?) {
+        guard let buddy = buddy(withID: buddyID) else { return }
+        let runningIDs = runningTaskIDs(of: buddy)
+        for (runTaskID, runConversationID) in zip(runningIDs, runningConversationIDs(of: buddy)) where runConversationID == conversationID {
+            AgentTaskRegistry.shared.cancelTask(runTaskID)
+        }
     }
 
     func rename(buddyWithID buddyID: UUID, to newName: String) {
@@ -675,6 +799,16 @@ final class BuddyStore: ObservableObject {
         mutateBuddy(withID: buddyID) { $0.modelChoice = newModelChoice }
     }
 
+    /// Switches what carries out the buddy's runs. Any kept sessions are
+    /// dropped: switching back later starts fresh sessions that get the
+    /// thread as their handoff, rather than resuming one that missed what
+    /// happened in between.
+    func updateRuntime(ofBuddyWithID buddyID: UUID, to newRuntime: BuddyRuntimeKind) {
+        guard let buddy = buddy(withID: buddyID), buddy.runtimeKind != newRuntime else { return }
+        BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
+        mutateBuddy(withID: buddyID) { $0.runtime = newRuntime == .wispLoop ? nil : newRuntime }
+    }
+
     func updateSchedule(ofBuddyWithID buddyID: UUID, to newSchedule: BuddySchedule) {
         mutateBuddy(withID: buddyID) { buddy in
             buddy.schedule = newSchedule
@@ -704,8 +838,107 @@ final class BuddyStore: ObservableObject {
         mutateBuddy(withID: buddyID) { $0.isPinned = isPinned ? true : nil }
     }
 
+    /// Hiding tucks the buddy away and pauses it: its schedule's slots pass
+    /// without running, new messages are refused, waiting ones wait. Showing
+    /// it again picks up from the next slot and starts what's waiting.
     func setHidden(buddyWithID buddyID: UUID, isHidden: Bool) {
-        mutateBuddy(withID: buddyID) { $0.isHidden = isHidden ? true : nil }
+        mutateBuddy(withID: buddyID) { buddy in
+            buddy.isHidden = isHidden ? true : nil
+            if !isHidden, buddy.schedule.isRepeating {
+                buddy.nextScheduledRunAt = buddy.schedule.nextRunDate(after: Date(), calendar: .current)
+            }
+        }
+        if !isHidden { drainMessageQueues() }
+    }
+
+    // MARK: - Hand-offs (buddy flows)
+
+    enum HandOffLinkOutcome: Equatable {
+        case added
+        case alreadyLinked
+        case wouldMakeLoop
+        case tooManyLinks
+        /// The answer would leave this Mac; add again with `acknowledgesLeavingThisMac`.
+        case needsConfirmation(providerNames: String)
+        case unknownBuddy
+    }
+
+    /// Every buddy's hand-off targets, for the flow graph.
+    var handOffGraph: [UUID: [UUID]] {
+        var graph: [UUID: [UUID]] = [:]
+        for buddy in buddies where !buddy.handOffs.isEmpty {
+            graph[buddy.id] = buddy.handOffs.map(\.targetBuddyID)
+        }
+        return graph
+    }
+
+    /// The providers a buddy's runs may reach (its model or runtime, and its backups).
+    func possibleProviderKinds(of buddy: WispBuddy) -> Set<BuddyChatProviderKind> {
+        let backups = buddy.runtimeKind == .wispLoop ? buddy.backupModels.map(\.providerKind) : []
+        return Set([BuddyDelegationPolicy.effectiveProviderKind(of: buddy)] + backups)
+    }
+
+    /// Whether handing `source`'s answers to `target` sends them somewhere
+    /// the source's own runs don't go.
+    func handOffLeavesThisMac(from source: WispBuddy, to target: WispBuddy) -> Bool {
+        let sourceProviders = possibleProviderKinds(of: source)
+        let newProviders = possibleProviderKinds(of: target).subtracting(sourceProviders)
+        return newProviders.contains(where: \.sendsScreenshotsOffThisMachine)
+            || (!newProviders.isEmpty && sourceProviders.contains(where: \.sendsScreenshotsOffThisMachine))
+    }
+
+    @discardableResult
+    func addHandOffLink(fromBuddyWithID sourceID: UUID, toBuddyWithID targetID: UUID, acknowledgesLeavingThisMac: Bool = false) -> HandOffLinkOutcome {
+        guard let source = buddy(withID: sourceID), let target = buddy(withID: targetID) else { return .unknownBuddy }
+        if source.handOffs.contains(where: { $0.targetBuddyID == targetID }) { return .alreadyLinked }
+        guard source.handOffs.count < BuddyFlowGraph.maximumLinksPerBuddy else { return .tooManyLinks }
+        if BuddyFlowGraph.wouldCreateLoop(adding: targetID, to: sourceID, links: handOffGraph) { return .wouldMakeLoop }
+        let leavesThisMac = handOffLeavesThisMac(from: source, to: target)
+        if leavesThisMac && !acknowledgesLeavingThisMac {
+            let providerNames = possibleProviderKinds(of: target).subtracting(possibleProviderKinds(of: source))
+                .map(\.displayName).sorted().joined(separator: ", ")
+            return .needsConfirmation(providerNames: providerNames)
+        }
+        mutateBuddy(withID: sourceID) { buddy in
+            buddy.handOffLinks = buddy.handOffs + [BuddyFlowLink(targetBuddyID: targetID, acknowledgesLeavingThisMac: leavesThisMac)]
+        }
+        return .added
+    }
+
+    func removeHandOffLink(fromBuddyWithID sourceID: UUID, toBuddyWithID targetID: UUID) {
+        mutateBuddy(withID: sourceID) { buddy in
+            let remaining = buddy.handOffs.filter { $0.targetBuddyID != targetID }
+            buddy.handOffLinks = remaining.isEmpty ? nil : remaining
+        }
+    }
+
+    /// Whether a link may be followed now: confirmed if it leaves this Mac
+    /// (a model change after confirming can make one that didn't, so it's
+    /// checked each time).
+    func mayFollowHandOff(from sourceID: UUID, to targetID: UUID) -> Bool {
+        guard let source = buddy(withID: sourceID), let target = buddy(withID: targetID),
+              let link = source.handOffs.first(where: { $0.targetBuddyID == targetID }) else { return false }
+        return !handOffLeavesThisMac(from: source, to: target) || link.acknowledgesLeavingThisMac
+    }
+
+    /// Starts a hand-off run: another buddy's job answer for this buddy to
+    /// use. Filed like a peer's request ("From …"). Nil when it can't start.
+    func startHandOffRun(ofBuddyWithID buddyID: UUID, message: String, fromBuddyNames: [String]) -> UUID? {
+        guard let buddy = buddy(withID: buddyID) else { return nil }
+        return startRunReturningTaskID(of: buddy, request: BuddyRunRequest(
+            origin: .delegated,
+            text: message,
+            requesterName: BuddyFlowPolicy.senderNames(fromBuddyNames),
+            extraSystemPrompt: "\n\nThis is a hand-off: another buddy's finished job, passed to you to use for your own job. "
+                + "Do your job with it; you can't ask the sender anything."
+        ))
+    }
+
+    func updateBackupModels(ofBuddyWithID buddyID: UUID, to newBackups: [BuddyModelChoice]) {
+        mutateBuddy(withID: buddyID) { buddy in
+            let cleanedBackups = BuddyFailoverPolicy.cleanedBackups(newBackups, primary: buddy.modelChoice)
+            buddy.backupModelChoices = cleanedBackups.isEmpty ? nil : cleanedBackups
+        }
     }
 
     func setNotifiesWhenFinished(buddyWithID buddyID: UUID, notifiesWhenFinished: Bool) {
@@ -740,7 +973,11 @@ final class BuddyStore: ObservableObject {
             toolAccess: originalBuddy.toolAccess,
             specialty: originalBuddy.specialty,
             personality: originalBuddy.personality,
-            notifiesWhenFinished: originalBuddy.notifiesWhenFinished
+            notifiesWhenFinished: originalBuddy.notifiesWhenFinished,
+            // The runtime is setup and is copied; its sessions are not.
+            runtime: originalBuddy.runtime,
+            busyMessageMode: originalBuddy.busyMessageMode,
+            backupModelChoices: originalBuddy.backupModelChoices
         )
         buddies.insert(duplicatedBuddy, at: 0)
         saveBuddies()
@@ -755,7 +992,12 @@ final class BuddyStore: ObservableObject {
         messageQueue.removeAll(forBuddyWithID: buddyID)
         saveMessageQueue()
         stopRun(ofBuddyWithID: buddyID)
+        // Its notes outlive the conversation, so they get one last look at it first.
+        BuddyMemoryReviewer.shared.reviewBeforeClearing(
+            buddyID: buddyID, exchanges: BuddyThreadStore.shared.exchanges(ofBuddyWithID: buddyID)
+        )
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
+        BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
         mutateBuddy(withID: buddyID) { buddy in
             buddy.runTaskIDs = []
             buddy.isMarkedUnread = nil
@@ -772,6 +1014,13 @@ final class BuddyStore: ObservableObject {
         BuddyFileLibrary.shared.deleteLibrary(ofBuddyWithID: buddyID)
         BuddyComposerDraftStore().removeDrafts(ofBuddyWithID: buddyID)
         BuddyGroupStore.shared.removeBuddy(withID: buddyID)
+        BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
+        BuddyWorkspace.deleteFolder(ofBuddyWithID: buddyID)
+        BuddyMemoryReviewer.shared.forgetBuddy(buddyID: buddyID)
+        // No buddy hands its answer to one that's gone.
+        for sourceBuddy in buddies where sourceBuddy.handOffs.contains(where: { $0.targetBuddyID == buddyID }) {
+            removeHandOffLink(fromBuddyWithID: sourceBuddy.id, toBuddyWithID: buddyID)
+        }
         buddies.removeAll { $0.id == buddyID }
         saveBuddies()
     }

@@ -18,6 +18,7 @@ swiftc -target arm64-apple-macos26.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/workflows" \
   Tests/Workflows/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   leanring-buddy/Workflows/Workflow.swift \
   leanring-buddy/Workflows/WorkflowEditing.swift \
   leanring-buddy/Workflows/WorkflowRun.swift

@@ -89,6 +89,9 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         menu.removeAllItems()
 
         menu.addItem(disabledItem(title: statusTitle))
+        if WispDemoMode.isOn {
+            menu.addItem(disabledItem(title: "Demo mode: sample data, your own is untouched"))
+        }
         menu.addItem(disabledItem(
             title: companionManager.isListeningPaused
                 ? "The talk shortcut is ignored until you resume"

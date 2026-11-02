@@ -19,6 +19,7 @@ swiftc -target arm64-apple-macos26.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/automation-engine" \
   Tests/AutomationEngine/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   Tests/AutomationDraft/StarterBuddyKindShim.swift \
   leanring-buddy/Automations/Automation.swift \
   leanring-buddy/Automations/AutomationSchedule.swift \

@@ -267,5 +267,24 @@ check(sidebarGroups.everyoneElse.map(\.name) == ["a", "e"], "the rest keep their
 check(sidebarGroups.hidden.map(\.name) == ["d"], "a hidden buddy leaves every group, even while waiting")
 check(sidebarGroups.visibleInDisplayOrder.map(\.name) == ["b", "c", "a", "e"], "shortcuts count over the visible rows in display order")
 
+// Messages a run took in while it worked (steer mode) are part of its question.
+do {
+    var steeredExchange = BuddyThreadExchange(
+        taskID: UUID(), startedAt: Date(), origin: .message, userText: "plan my week", answerText: "Done: Monday is light."
+    )
+    check(BuddyThreadPolicy.userText(for: steeredExchange) == "plan my week", "no added messages, the question as sent")
+    steeredExchange.addedTexts = ["skip Friday", "keep mornings free"]
+    let steeredQuestion = BuddyThreadPolicy.userText(for: steeredExchange)
+    check(steeredQuestion.hasPrefix("plan my week\n\n")
+          && steeredQuestion.contains("Then, while you worked: skip Friday\nThen, while you worked: keep mornings free"),
+          "added messages follow the question in order")
+    let history = BuddyThreadPolicy.historyMessages(from: [steeredExchange])
+    check(history.first?.combinedText.contains("skip Friday") == true, "a later run sees the added messages")
+    let oldExchangeJSON = Data(#"{"taskID":"6F9619FF-8B86-D011-B42D-00C04FC964FF","startedAt":"2026-10-01T09:00:00Z","origin":"message","userText":"hi"}"#.utf8)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    check((try? decoder.decode(BuddyThreadExchange.self, from: oldExchangeJSON))?.addedTexts == nil, "an exchange saved before steering still loads")
+}
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

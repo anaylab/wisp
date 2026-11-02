@@ -103,8 +103,7 @@ actor CanvasFeedStore {
     }
 
     nonisolated static func defaultSnapshotFileURL() -> URL {
-        let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        let supportDirectory = WispDemoMode.applicationSupportDirectory
         return supportDirectory.appendingPathComponent("Wisp/jobs-canvas-snapshot.json")
     }
 

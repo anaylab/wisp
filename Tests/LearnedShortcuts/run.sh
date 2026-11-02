@@ -20,6 +20,7 @@ swiftc -target arm64-apple-macos26.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/learned-shortcuts" \
   Tests/LearnedShortcuts/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   leanring-buddy/LearnedShortcuts/ShortcutRecordedToolCall.swift \
   leanring-buddy/LearnedShortcuts/LearnedShortcut.swift \
   leanring-buddy/LearnedShortcuts/LearnedShortcutPhrase.swift \
