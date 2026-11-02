@@ -37,6 +37,7 @@ struct HomeTab: View {
     @ObservedObject private var jobsEngine = JobsEngine.shared
     @ObservedObject private var automationEngine = AutomationEngine.shared
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
+    @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
 
     /// Moves the Wisp window to another page (e.g. "All routines").
     let onSelectPage: (WispPage) -> Void
@@ -47,6 +48,8 @@ struct HomeTab: View {
     @State private var calendarState: TodayCalendarState = .loading
     /// Alerts the user dismissed this session, keyed by `NeedsYouAlert.id`.
     @State private var dismissedAlertIDs: Set<String> = []
+    /// Whether the inbox shows everything instead of its few most pressing items.
+    @State private var isInboxExpanded = false
     /// The recent answer whose Copy button just fired, for its checkmark.
     @State private var recentlyCopiedRecordID: UUID?
 
@@ -703,6 +706,9 @@ struct HomeTab: View {
         /// Set for an automation's failure or approval request, so dismissing
         /// the card also tells the engine and it stays gone.
         var automationAttentionItemID: UUID? = nil
+        /// Where it sorts in the inbox: approvals first, finished results last.
+        var kind: WispInboxKind = .system
+        var occurredAt: Date = .distantPast
     }
 
     private var needsYouAlerts: [NeedsYouAlert] {
@@ -751,7 +757,9 @@ struct HomeTab: View {
                 title: "Wisp is waiting for your ok",
                 detail: "The request is under the notch — allow it or cancel it there.",
                 actionTitle: nil,
-                action: nil
+                action: nil,
+                kind: .approval,
+                occurredAt: Date()
             ))
         }
 
@@ -762,7 +770,9 @@ struct HomeTab: View {
                 title: "Didn't finish: \(recentFailure.title)",
                 detail: failureDetail(for: recentFailure),
                 actionTitle: "See in History",
-                action: { onSelectPage(.timeline) }
+                action: { onSelectPage(.timeline) },
+                kind: .failure,
+                occurredAt: recentFailure.finishedAt ?? recentFailure.startedAt
             ))
         }
 
@@ -780,7 +790,27 @@ struct HomeTab: View {
                     WispWindowRouter.shared.automationIDToOpen = attentionItem.automationID
                     onSelectPage(.automations)
                 },
-                automationAttentionItemID: attentionItem.id
+                automationAttentionItemID: attentionItem.id,
+                kind: .failure,
+                occurredAt: attentionItem.occurredAt
+            ))
+        }
+
+        // Work that finished while the user was away. Nothing is wrong, so it sorts last
+        // and goes away once the user has looked at it.
+        for finishedRecord in finishedWorkInbox.unseenRecords(in: taskRegistry) {
+            alerts.append(NeedsYouAlert(
+                id: "finished-\(finishedRecord.id.uuidString)",
+                symbolName: "checkmark.circle",
+                title: "Finished: \(finishedRecord.title)",
+                detail: "Ready to read in History.",
+                actionTitle: "See result",
+                action: {
+                    finishedWorkInbox.markAllSeen()
+                    onSelectPage(.timeline)
+                },
+                kind: .result,
+                occurredAt: finishedRecord.finishedAt ?? finishedRecord.startedAt
             ))
         }
 
@@ -812,18 +842,35 @@ struct HomeTab: View {
     @ViewBuilder
     private var needsYouStrip: some View {
         let alerts = needsYouAlerts
+        let inboxLayout = WispInboxPolicy.layout(
+            of: alerts.map { WispInboxEntry(id: $0.id, kind: $0.kind, occurredAt: $0.occurredAt) },
+            showsAll: isInboxExpanded
+        )
+        let shownAlerts = inboxLayout.shownIDs.compactMap { shownID in
+            alerts.first { $0.id == shownID }
+        }
         if !alerts.isEmpty {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 300), spacing: tileSpacing, alignment: .top)],
-                alignment: .leading,
-                spacing: tileSpacing
-            ) {
-                ForEach(alerts) { alert in
-                    needsYouCard(alert)
-                        .transition(.scale(scale: 0.96).combined(with: .opacity))
+            VStack(alignment: .leading, spacing: tileSpacing) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 300), spacing: tileSpacing, alignment: .top)],
+                    alignment: .leading,
+                    spacing: tileSpacing
+                ) {
+                    ForEach(shownAlerts) { alert in
+                        needsYouCard(alert)
+                            .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    }
+                }
+                if inboxLayout.hiddenCount > 0 || isInboxExpanded {
+                    Button(isInboxExpanded ? "Show less" : "Show \(inboxLayout.hiddenCount) more") {
+                        withAnimation(WispMotion.island) { isInboxExpanded.toggle() }
+                    }
+                    .buttonStyle(WispPillButtonStyle(isProminent: false))
+                    .controlSize(.small)
+                    .pointerCursor()
                 }
             }
-            .animation(WispMotion.island, value: alerts.map(\.id))
+            .animation(WispMotion.island, value: shownAlerts.map(\.id))
         }
     }
 

@@ -344,6 +344,7 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   toggle for the blocklist. An answer replaces the launcher, not the running card. Not built yet: a voice command, Do Not Disturb.
   **Study buddy**: a `BuddyCharacter` companion (fixed hue) in the notch flank (dot = offer waiting), the hover card's ring and the window; `StudySessionController` holds `buddyMessage` (speech bubble, optional one-tap offer: +5 min / Resume / Start) and speaks up on its own via `StudyBuddyNudgePlanner`, cheers on wins and held-back distractions, and the launcher greets by time of day and outlines the preset closest to the user's usual block.
   Tested by `Tests/StudyMode`.
+- **Inbox (Today's "Needs you")**: `HomeTab` builds one list from the pending tool confirmation, failed/interrupted tasks, automation attention items (`AutomationEngine.needsYou`), health problems and unseen finished results (`FinishedWorkInbox`), and `WispInboxPolicy` orders and caps it (3 shown, "Show N more"). Approvals always show. Rendering only; no store was changed. **Next up** (`AutomationNextRunsTile`) likewise reads one merged list (`WispScheduledPolicy`) instead of only `AutomationEngine.nextRuns`, so buddies on their own schedule and scheduled workflows show there too; "Show all" groups it by day.
 - **Quick add and first run**: `AutomationQuickAddRouter` / `AutomationQuickAddPlanner` (`QuickAdd/`) are asked first by
   `sendTranscriptToClaudeWithScreenshot` (voice, composer and Today's ask bar alike): "remind me…", "every…", "when…" open the draft card
   (`WispWindowRouter.presentAutomationDraft`) instead of a model turn; biased toward not matching, "remind me in 10 minutes"/timers stay with
@@ -1395,6 +1396,12 @@ Files are grouped by role; line counts are rough.
 | `QuickAdd/AutomationQuickAddPlanner.swift` / `AutomationQuickAddRouter.swift` | ~70/~35 | Pure "is this an automation?" decision and the router that opens the draft card. Tested by `Tests/AutomationQuickAdd`. |
 | `FirstRun/FirstRunSetupFlow.swift` / `WispFirstRunState.swift` | ~305/~40 | The four-step first-run setup and its once-only flag. |
 
+### Inbox and scheduled list
+| File | Approx. lines | What it does |
+|---|---|---|
+| `Scheduling/WispScheduled.swift` | ~100 | Pure merge rule (`WispScheduledPolicy`) for Today's "Next up": automations, buddies that still keep their own schedule (not those an automation owns) and scheduled workflows in one soonest-first list, grouped Today / Tomorrow / Later, plus the next "HH:mm" run for a workflow trigger. Engines and stores are untouched. Tested by `Tests/WispScheduled`. |
+| `Inbox/WispInbox.swift` | ~85 | Pure inbox rule (`WispInboxPolicy`): one order for everything waiting on the user (approval, failure, system, result; newest first) and a cap of 3 with "Show N more"; an approval is never hidden. Idea from AgentUse's approval queue and Paperclip's inbox. Tested by `Tests/WispInbox`. |
+
 ### Study mode
 | File | Approx. lines | What it does |
 |---|---|---|
@@ -1628,6 +1635,8 @@ running):
 ./Tests/DayChecklist/run.sh              # daily checklist builder: rollover, caps, ordering
 ./Tests/JobsEngine/run.sh                # Jobs engine orchestration with injected dependencies
 ./Tests/LearnedShortcuts/run.sh          # learned shortcuts: replayability rules, template matching, slot filling, drift, store file
+./Tests/WispInbox/run.sh                 # inbox: approvals > failures > system > results, newest first, cap of 3 (approvals never hidden)
+./Tests/WispScheduled/run.sh             # one scheduled list: automations + standalone buddy schedules + scheduled workflows, soonest first, grouped Today/Tomorrow/Later
 ./Tests/StudyMode/run.sh                # study mode: plan, session state machine, blocklist matching, stats
 ./Tests/AudioDevices/run.sh              # microphone choice (lid closed, silent mic, no loopback devices), dead-mic check, muted output
 WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live check against ~/.local/bin/cua-driver
