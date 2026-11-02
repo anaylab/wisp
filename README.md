@@ -162,6 +162,18 @@ An email request opens an editable draft instantly, and nothing leaves your Mac 
 
 Buddies are named agents that each own one job, with their own thread, memory, model and tool allow-list. Automations follow **trigger → source → action → output → notify**, set up by saying it, picking a template, or saving an answer from History. Scheduled runs only get tools that never prompt, and pause themselves after three failures in a row.
 
+**Buddies now work as a team:**
+
+- **Hand off the answer.** When one buddy's job finishes, its answer goes to the buddies you chose. The Briefer's morning brief can start the Writer. A buddy with several inputs waits for all of them, and a link that would take the answer off your Mac asks first.
+- **Ask the team.** A buddy can list its teammates, ask up to four at once, split work into side threads of its own, or draft a new buddy (always with your OK, never with more access than its own).
+- **Threads side by side.** Each chat with a buddy runs on its own, with up to two side threads beside the main one. A message sent mid-job can wait its turn or steer the work in progress.
+- **Backup models.** If a buddy's model hits a limit or goes down before answering, a backup takes over and the failed model is passed over for 10 minutes. A cloud backup counts as leaving your Mac from the start.
+- **A session of its own.** Optionally run a buddy on your Claude subscription with a kept Claude Code session per conversation, started fresh when it gets close to full.
+- **Tidies its own notes.** Every 20 messages (or 10, 40, never) a buddy reviews what it remembered and fixes it. Notes you wrote are never touched.
+- **Hide to pause.** A hidden buddy stops running on its schedule and taking messages until you show it again.
+
+<p><img src="docs/assets/screenshots/buddy-team.png" alt="A buddy's settings: how it handles messages while busy, its model, backup models and what it runs on"></p>
+
 <table>
 <tr>
 <td width="50%"><img src="docs/assets/screenshots/today.png" alt="The Today dashboard with buddies, next automations and upcoming events"></td>
