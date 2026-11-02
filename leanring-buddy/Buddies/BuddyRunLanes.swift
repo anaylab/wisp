@@ -53,6 +53,8 @@ nonisolated enum BuddyRunHoldReason: Equatable, Sendable {
     case sideLaneLimit(Int)
     /// Wisp's own limit on background work at once.
     case backgroundLimit
+    /// The buddy is hidden; it starts nothing until it's shown again.
+    case hidden
 
     var displayText: String {
         switch self {
@@ -62,6 +64,7 @@ nonisolated enum BuddyRunHoldReason: Equatable, Sendable {
         case .behindEarlierMessage: return "After the message before it"
         case .sideLaneLimit(let limit): return "Waits for one of its \(limit) other threads to finish"
         case .backgroundLimit: return "Waits for other background work to finish"
+        case .hidden: return "Waits until you show this buddy in the list again"
         }
     }
 }

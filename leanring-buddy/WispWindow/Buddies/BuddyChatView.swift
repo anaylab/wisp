@@ -343,7 +343,9 @@ struct BuddyChatView: View {
                     .pointerCursor()
             } else {
                 Button {
-                    if !buddyStore.runNow(buddyWithID: buddy.id) { sendFailureMessage = "Its model is busy — try again in a moment." }
+                    if !buddyStore.runNow(buddyWithID: buddy.id) {
+                        sendFailureMessage = buddy.isHiddenInList ? "It's hidden. Show it in the list to run it." : "Its model is busy — try again in a moment."
+                    }
                 } label: { Label("Run now", systemImage: "play.fill") }
                     .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex))
                     .pointerCursor()
@@ -687,11 +689,27 @@ struct BuddyChatView: View {
         let trimmedDraft = draftMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
         // A text message sent while the buddy works joins its line; files and
         // pictures are read when sent, so they have to wait for it to be free.
+        // A hidden buddy takes nothing new until it's shown again.
         let canSend = (!trimmedDraft.isEmpty || !pendingFileURLs.isEmpty)
-            && !(isRunning && !pendingFileURLs.isEmpty) && !isSending
+            && !(isRunning && !pendingFileURLs.isEmpty) && !isSending && !buddy.isHiddenInList
         let accent = BuddyAppearance.deepColor(forColorIndex: buddy.colorIndex)
         let waitingMessages = buddyStore.waitingMessages(of: buddy)
         return VStack(spacing: 8) {
+            if buddy.isHiddenInList {
+                HStack(spacing: 8) {
+                    Image(systemName: "eye.slash").foregroundStyle(WispColor.textTertiary)
+                    Text("Hidden: it doesn't run on its schedule or take messages.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(WispColor.textSecondary)
+                    Spacer()
+                    Button("Show in List") { buddyStore.setHidden(buddyWithID: buddy.id, isHidden: false) }
+                        .buttonStyle(BuddyPillButtonStyle(colorIndex: buddy.colorIndex, isProminent: false))
+                        .controlSize(.small)
+                        .pointerCursor()
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(WispColor.surface2.opacity(0.7)))
+            }
             if !waitingMessages.isEmpty {
                 waitingMessageLine(for: buddy, waitingMessages: waitingMessages, accent: accent)
                     .transition(.opacity)

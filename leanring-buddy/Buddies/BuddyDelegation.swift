@@ -119,6 +119,10 @@ struct BuddyDelegationService {
     var cancelRun: (_ taskID: UUID) -> Void
     var broker: ToolPermissionBroker
     var providerKind: (WispBuddy) -> BuddyChatProviderKind = BuddyDelegationPolicy.effectiveProviderKind(of:)
+    /// The providers a buddy's backups would send to if its own model failed.
+    var backupProviderKinds: (WispBuddy) -> [BuddyChatProviderKind] = { buddy in
+        buddy.runtimeKind == .wispLoop ? buddy.backupModels.map(\.providerKind) : []
+    }
     var pollIntervalSeconds: TimeInterval = 0.5
     var answerTimeoutSeconds: TimeInterval = BuddyDelegationPolicy.answerTimeoutSeconds
     /// What `list_buddies` says about a peer.
@@ -189,7 +193,8 @@ struct BuddyDelegationService {
         guard !message.isEmpty else { return "i need a message to send." }
         guard !targetNames.isEmpty else { return "i need the name of the buddy to ask." }
 
-        let allBuddies = buddies()
+        // A hidden buddy takes no requests, so it isn't one of the peers.
+        let allBuddies = buddies().filter { !$0.isHiddenInList || $0.id == caller.id }
         var targets: [WispBuddy] = []
         var unresolvedReplies: [String] = []
         for targetName in targetNames {
@@ -208,8 +213,11 @@ struct BuddyDelegationService {
         guard !targets.isEmpty else { return BuddyTeamPolicy.gatheredAnswers(unresolvedReplies) }
 
         let callerProvider = providerKind(caller)
-        let crossingTargets = targets.filter {
-            BuddyDelegationPolicy.requiresApproval(callerProvider: callerProvider, targetProvider: providerKind($0))
+        // Every model either side might answer on counts, backups included.
+        let callerProviders = Set([callerProvider] + backupProviderKinds(caller))
+        let crossingTargets = targets.filter { target in
+            BuddyDelegationPolicy.requiresApproval(callerProvider: callerProvider, targetProvider: providerKind(target))
+                || Set([providerKind(target)] + backupProviderKinds(target)) != callerProviders
         }
         if !crossingTargets.isEmpty {
             let approval = await broker.requestApproval(
@@ -218,7 +226,9 @@ struct BuddyDelegationService {
                     "from": .string(caller.name),
                     "from_model": .string(callerProvider.displayName),
                     "to": .string(crossingTargets.map(\.name).joined(separator: ", ")),
-                    "to_model": .string(Array(Set(crossingTargets.map { providerKind($0).displayName })).sorted().joined(separator: ", ")),
+                    "to_model": .string(Array(Set(crossingTargets.flatMap { target in
+                        ([providerKind(target)] + backupProviderKinds(target)).map(\.displayName)
+                    })).sorted().joined(separator: ", ")),
                     "message": .string(message),
                     "note": .string(crossingTargets.map { target in
                         BuddyDelegationPolicy.boundaryNote(
@@ -348,7 +358,7 @@ final class CreatedBuddyLedger {
 enum BuddyDelegationToolBuilder {
     /// The `ask_buddy` tool for `caller`, or nil when it has no peer to ask.
     static func tool(for caller: WispBuddy, service: BuddyDelegationService) -> AgentRunTool? {
-        let peerListing = BuddyDelegationPolicy.peerListing(of: service.buddies(), excludingBuddyWithID: caller.id)
+        let peerListing = BuddyDelegationPolicy.peerListing(of: service.buddies().filter { !$0.isHiddenInList }, excludingBuddyWithID: caller.id)
         guard !peerListing.isEmpty else { return nil }
         return AgentRunTool(
             definition: BuddyToolDefinition(
@@ -402,7 +412,7 @@ enum BuddyDelegationToolBuilder {
     /// the "Other buddies" group); `list_buddies` only when there is a peer.
     static func teamTools(for caller: WispBuddy, service: BuddyDelegationService) -> [AgentRunTool] {
         var tools: [AgentRunTool] = []
-        let hasPeers = service.buddies().contains { $0.id != caller.id }
+        let hasPeers = service.buddies().contains { $0.id != caller.id && !$0.isHiddenInList }
         if hasPeers {
             tools.append(AgentRunTool(
                 definition: BuddyToolDefinition(

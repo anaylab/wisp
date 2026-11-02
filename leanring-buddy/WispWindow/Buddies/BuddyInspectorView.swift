@@ -613,6 +613,9 @@ struct BuddyInspectorView: View {
                         get: { buddy.modelChoice },
                         set: { buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: $0) }
                     ))
+                    if buddy.runtimeKind == .wispLoop {
+                        BuddyBackupModelsEditor(buddy: buddy)
+                    }
                     BuddyRuntimeEditor(buddy: buddy)
                 }
             }

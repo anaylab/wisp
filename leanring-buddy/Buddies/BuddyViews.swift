@@ -209,6 +209,71 @@ struct BuddyModelEditor: View {
     }
 }
 
+// MARK: - Backup models editor
+
+/// "Backups": models to fall back on, in order, when the buddy's own fails
+/// before doing anything (`FailoverModelProvider`). Up to three.
+struct BuddyBackupModelsEditor: View {
+    let buddy: WispBuddy
+    @ObservedObject private var buddyStore = BuddyStore.shared
+
+    var body: some View {
+        let backups = buddy.backupModels
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Backups")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .fixedSize()
+                if backups.count < BuddyFailoverPolicy.maximumBackupModels {
+                    Menu("Add backup") {
+                        ForEach(BuddyModelChoice.allChoices.filter { $0 != buddy.modelChoice && !backups.contains($0) }) { choice in
+                            Button(choice.sendsDataOffThisMachine ? "\(choice.displayName) · cloud" : choice.displayName) {
+                                buddyStore.updateBackupModels(ofBuddyWithID: buddy.id, to: backups + [choice])
+                            }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .pointerCursor()
+                }
+            }
+            ForEach(Array(backups.enumerated()), id: \.element) { position, backup in
+                HStack(spacing: 6) {
+                    Text("\(position + 1). \(backup.displayName)\(backup.sendsDataOffThisMachine ? " · cloud" : "")")
+                        .font(.system(size: 12))
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Button {
+                        buddyStore.updateBackupModels(ofBuddyWithID: buddy.id, to: backups.filter { $0 != backup })
+                    } label: {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .pointerCursor()
+                    .nativeTooltip("Remove this backup")
+                }
+            }
+            if !backups.isEmpty {
+                Text(noteText(for: backups))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func noteText(for backups: [BuddyModelChoice]) -> String {
+        var note = "If its model hits a limit or is down before it has started, the next backup takes over, and the failed one is skipped for 10 minutes."
+        let ownModelIsLocal = !(buddy.modelChoice?.sendsDataOffThisMachine ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine)
+        if ownModelIsLocal, let cloudBackup = backups.first(where: \.sendsDataOffThisMachine) {
+            note += " Because \(cloudBackup.providerKind.displayName) might answer, this buddy is kept away from your brain and memory, as a cloud buddy is."
+        }
+        return note
+    }
+}
+
 // MARK: - Runtime editor
 
 /// "Runs on · Wisp ▾": whether the buddy runs in Wisp's own loop or keeps its

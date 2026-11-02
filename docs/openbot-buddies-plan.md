@@ -116,5 +116,8 @@ Each phase is its own `feature/…` branch with a `Tests/` suite for the pure pa
    own. It runs on the buddy's own provider (local model at background priority; Claude on Haiku), checked strictly
    before anything is written. Tried live on Haiku and on the local 3B model. Original plan: **Memory review.** Background add/update/forget over `BuddyMemoryStore`, local model by default,
    `ModelAccessGate` background priority, with a setting (10/20/40/off).
-6. **Resilience.** Backup models and failover, plus hidden buddies that pause their routines and refuse new messages.
+6. **Resilience — built.** Up to three backup models per buddy, switched to only before a run has done anything,
+   with the failed model passed over for 10 minutes; a cloud backup makes the buddy a cloud buddy for privacy.
+   Hidden buddies pause: no new runs or messages, skipped schedule slots and automations, not askable by peers.
+   Original plan: **Resilience.** Backup models and failover, plus hidden buddies that pause their routines and refuse new messages.
 7. **Routine flows.** A buddy's scheduled answer is handed to the next buddy, reusing the workflow engine.

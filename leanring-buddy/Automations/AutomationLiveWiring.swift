@@ -140,7 +140,8 @@ final class LiveAutomationDependencies: AutomationEngineDependencies {
         return AutomationBuddyDescriptor(
             id: buddy?.id ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
             name: buddy?.name ?? "Wisp",
-            sendsDataOffThisMachine: companionManager?.automationRunSendsDataOffThisMachine(buddy: buddy) ?? true
+            sendsDataOffThisMachine: companionManager?.automationRunSendsDataOffThisMachine(buddy: buddy) ?? true,
+            isHidden: buddy?.isHiddenInList ?? false
         )
     }
 
