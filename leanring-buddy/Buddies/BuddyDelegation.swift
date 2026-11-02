@@ -51,9 +51,11 @@ enum BuddyDelegationPolicy {
         case ambiguous([String])
     }
 
-    /// The model a buddy really runs on: its own choice, else Wisp's.
+    /// The model a buddy really runs on: a kept Claude Code session is the
+    /// user's Claude subscription; otherwise its own choice, else Wisp's.
     static func effectiveProviderKind(of buddy: WispBuddy) -> BuddyChatProviderKind {
-        buddy.modelChoice?.providerKind ?? BuddyChatProviderSelection.current
+        if buddy.runtimeKind == .claudeCodeSession { return .claudeSubscription }
+        return buddy.modelChoice?.providerKind ?? BuddyChatProviderSelection.current
     }
 
     /// Whether a message between two buddies crosses a boundary the user should

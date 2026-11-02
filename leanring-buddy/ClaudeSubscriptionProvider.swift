@@ -76,23 +76,65 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
             )
         }
 
+        let systemPrompt = await Self.systemPromptIncludingTools(for: request)
+        let processResult = try await Self.runCLI(
+            executablePath: executablePath,
+            arguments: Self.commandLineArguments(
+                systemPrompt: systemPrompt,
+                modelChoice: modelChoice,
+                effortLevel: effortLevel
+            ),
+            workingDirectory: Self.scratchWorkingDirectory(),
+            inputLine: try Self.userMessageInputLine(for: request),
+            providerName: userFacingName,
+            onTextDelta: onTextDelta
+        )
+
+        return try Self.turn(
+            from: processResult.outcome,
+            standardErrorText: processResult.standardErrorText,
+            exitStatus: processResult.exitStatus,
+            duration: processResult.duration,
+            knownToolNames: Set(request.tools.map(\.name)),
+            exampleToolName: request.tools.first?.name,
+            providerName: userFacingName
+        )
+    }
+
+    /// Wisp's system prompt plus the `[TOOL:]` instructions for this turn's
+    /// tools and, when `load_skill` is offered, the skill index.
+    static func systemPromptIncludingTools(for request: ModelRequest) async -> String {
         let skills = request.tools.contains(where: { $0.name == "load_skill" })
             ? await SkillManager.shared.skills
             : []
-        let systemPrompt = request.systemPrompt
+        return request.systemPrompt
             + StructuredTextToolProtocol.promptInstructions(for: request.tools)
             + SkillIndex.promptInstructions(for: skills)
+    }
 
-        let inputLine = try Self.userMessageInputLine(for: request)
+    /// What one run of the CLI came back with.
+    struct ProcessResult: Sendable {
+        let outcome: StreamOutcome
+        let standardErrorText: String
+        let exitStatus: Int32
+        let duration: TimeInterval
+    }
 
+    /// Runs the CLI once: writes the one stream-json input line, reads the
+    /// event stream until the process ends, and terminates it if the task is
+    /// cancelled. Shared with `ClaudeCodeSessionProvider`.
+    static func runCLI(
+        executablePath: String,
+        arguments: [String],
+        workingDirectory: URL,
+        inputLine: Data,
+        providerName: String,
+        onTextDelta: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> ProcessResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
-        process.currentDirectoryURL = Self.scratchWorkingDirectory()
-        process.arguments = Self.commandLineArguments(
-            systemPrompt: systemPrompt,
-            modelChoice: modelChoice,
-            effortLevel: effortLevel
-        )
+        process.currentDirectoryURL = workingDirectory
+        process.arguments = arguments
 
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = LoginShellEnvironment.resolvedPath
@@ -129,7 +171,7 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
         } catch {
             errorCapture.cancel()
             throw BuddyChatError.providerUnavailable(
-                providerName: userFacingName,
+                providerName: providerName,
                 underlyingDescription: error.localizedDescription
             )
         }
@@ -150,14 +192,11 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
         // turn quietly instead of reporting the killed process as a failure.
         if Task.isCancelled { throw CancellationError() }
 
-        return try Self.turn(
-            from: outcome,
+        return ProcessResult(
+            outcome: outcome,
             standardErrorText: standardErrorText,
             exitStatus: process.terminationStatus,
-            duration: Date().timeIntervalSince(startDate),
-            knownToolNames: Set(request.tools.map(\.name)),
-            exampleToolName: request.tools.first?.name,
-            providerName: userFacingName
+            duration: Date().timeIntervalSince(startDate)
         )
     }
 
@@ -170,10 +209,15 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
     /// and any project's settings and hooks, and `--no-session-persistence`
     /// keeps these turns out of the user's `claude` history. `--bare` is not
     /// used because it ignores the subscription login.
+    ///
+    /// A buddy that keeps its own session (`ClaudeCodeSessionProvider`) passes
+    /// `session`: the CLI then saves the conversation under the id Wisp chose
+    /// and picks it up again on the next call, with everything else still off.
     static func commandLineArguments(
         systemPrompt: String,
         modelChoice: AnthropicModelChoice,
-        effortLevel: AnthropicEffortLevel
+        effortLevel: AnthropicEffortLevel,
+        session: CLISession = .none
     ) -> [String] {
         var arguments = [
             "-p",
@@ -185,15 +229,39 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
             "--tools", "",
             "--strict-mcp-config",
             "--disable-slash-commands",
-            "--no-session-persistence",
             "--setting-sources", "",
             "--model", modelChoice.apiModelIdentifier,
         ]
+        switch session {
+        case .none:
+            arguments += ["--no-session-persistence"]
+        case .start(let sessionID):
+            arguments += ["--session-id", sessionID.uuidString.lowercased()]
+        case .resume(let sessionID):
+            arguments += ["--resume", sessionID.uuidString.lowercased()]
+        }
+        // By default the CLI records a session's system prompt on its first
+        // request and replays that record on every resume, ignoring the text
+        // passed later. Wisp's prompt changes per call (this turn's tools, the
+        // buddy's latest notes), so a kept session renders it fresh each time.
+        if session != .none {
+            arguments += ["--system-prompt-snapshot", "off"]
+        }
         // Haiku rejects an effort level, same as on the API.
         if modelChoice.usesAdaptiveThinkingAndEffort {
             arguments += ["--effort", effortLevel.rawValue]
         }
         return arguments
+    }
+
+    /// Whether a run keeps a CLI session, and which.
+    enum CLISession: Equatable, Sendable {
+        /// One-off: nothing is saved (the main companion's turns).
+        case none
+        /// A new session, saved under this id.
+        case start(UUID)
+        /// Carries on the session with this id.
+        case resume(UUID)
     }
 
     /// An empty folder to run in, so the CLI finds no CLAUDE.md or project
@@ -377,7 +445,7 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
 
     /// Delivers whatever bytes a pipe has as they arrive, finishing at end of
     /// file.
-    private static func chunkStream(from fileHandle: FileHandle) -> AsyncStream<Data> {
+    static func chunkStream(from fileHandle: FileHandle) -> AsyncStream<Data> {
         AsyncStream(bufferingPolicy: .unbounded) { continuation in
             fileHandle.readabilityHandler = { readableHandle in
                 let chunk = readableHandle.availableData

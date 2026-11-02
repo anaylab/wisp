@@ -91,6 +91,7 @@ final class BuddyGroupStore: ObservableObject {
         guard let group = group(withID: groupID) else { return }
         for memberID in group.memberIDs {
             BuddyThreadStore.shared.deleteSideThread(groupID, ofBuddyWithID: memberID)
+            BuddySessionStore.shared.forgetSession(for: BuddySessionKey(buddyID: memberID, conversationID: groupID))
         }
         groups.removeAll { $0.id == groupID }
         messagesByGroupID[groupID] = nil
@@ -115,6 +116,10 @@ final class BuddyGroupStore: ObservableObject {
 
     func clearMessages(ofGroupWithID groupID: UUID) {
         messagesByGroupID[groupID] = nil
+        // A member's kept session would still remember the cleared chat.
+        for memberID in group(withID: groupID)?.memberIDs ?? [] {
+            BuddySessionStore.shared.forgetSession(for: BuddySessionKey(buddyID: memberID, conversationID: groupID))
+        }
         save()
     }
 

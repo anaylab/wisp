@@ -35,6 +35,28 @@ import Foundation
         check("no effort for Haiku, which rejects it", !haikuArguments.contains("--effort"))
     }
 
+    section("Claude Code session: command line")
+    do {
+        let sessionID = UUID()
+        func arguments(_ session: ClaudeSubscriptionProvider.CLISession) -> [String] {
+            ClaudeSubscriptionProvider.commandLineArguments(
+                systemPrompt: "SYS", modelChoice: .haiku, effortLevel: .low, session: session
+            )
+        }
+        func value(after flag: String, in arguments: [String]) -> String? {
+            guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
+            return arguments[index + 1]
+        }
+        let startArguments = arguments(.start(sessionID))
+        let resumeArguments = arguments(.resume(sessionID))
+        check("a new session is saved under Wisp's id", value(after: "--session-id", in: startArguments) == sessionID.uuidString.lowercased())
+        check("a kept session is resumed by id", value(after: "--resume", in: resumeArguments) == sessionID.uuidString.lowercased())
+        check("a kept session is saved", !startArguments.contains("--no-session-persistence") && !resumeArguments.contains("--no-session-persistence"))
+        check("a kept session renders the system prompt fresh", value(after: "--system-prompt-snapshot", in: resumeArguments) == "off")
+        check("a kept session still has no CLI tools", value(after: "--tools", in: resumeArguments) == "" && resumeArguments.contains("--strict-mcp-config"))
+        check("a one-off run takes no snapshot flag", !arguments(.none).contains("--system-prompt-snapshot"))
+    }
+
     section("Claude subscription: stdin message")
     do {
         let screenshot = Data([0x89, 0x50, 0x4E, 0x47, 0x00, 0x01])
@@ -145,5 +167,80 @@ import Foundation
         } catch {
             check("live: no error", false, "\(error.localizedDescription)")
         }
+
+        section("Claude Code session: live (real claude CLI)")
+        let sessionStoreURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wisp-session-test-\(UUID().uuidString)/buddy-sessions.json")
+        let sessionStore = BuddySessionStore(fileURL: sessionStoreURL)
+        let buddyID = UUID()
+        let mainKey = BuddySessionKey(buddyID: buddyID, conversationID: nil)
+        let sessionProvider = ClaudeCodeSessionProvider(
+            modelChoice: .haiku, effortLevel: .low, sessionKey: mainKey, sessionStore: sessionStore
+        )
+        let systemPrompt = "You are Pip, a terse helper. Answer in one short line."
+        do {
+            let firstQuestion = BuddyChatMessage(role: .user, text: "Remember the word tangerine. Reply OK.")
+            let firstTurn = try await sessionProvider.streamTurn(
+                ModelRequest(systemPrompt: systemPrompt, messages: [firstQuestion]), onTextDelta: { _ in }
+            )
+            check("live session: a session was started", sessionStore.record(for: mainKey) != nil)
+
+            // The stored history no longer says the word: only the session can.
+            let secondTurn = try await sessionProvider.streamTurn(
+                ModelRequest(systemPrompt: systemPrompt, messages: [
+                    BuddyChatMessage(role: .user, text: "(earlier message)"),
+                    BuddyChatMessage(role: .assistant, text: firstTurn.text),
+                    BuddyChatMessage(role: .user, text: "Which word did I ask you to remember? Just the word."),
+                ]),
+                onTextDelta: { _ in }
+            )
+            check("live session: the resumed session remembers", secondTurn.text.lowercased().contains("tangerine"), secondTurn.text)
+            check("live session: the same session was kept", sessionStore.record(for: mainKey)?.answeredCallCount == 2)
+
+            let secretTool = BuddyToolDefinition(
+                name: "get_secret_number", description: "Returns the user's secret number.",
+                inputSchema: .object(["type": .string("object")]), metadata: .trivialAndReversible
+            )
+            let askForTool = BuddyChatMessage(role: .user, text: "Call get_secret_number, then tell me the number.")
+            let toolTurn = try await sessionProvider.streamTurn(
+                ModelRequest(systemPrompt: systemPrompt, messages: [askForTool], tools: [secretTool]), onTextDelta: { _ in }
+            )
+            check("live session: the tool is called as a [TOOL:] tag", toolTurn.toolUses.first?.name == "get_secret_number", toolTurn.text)
+            if let toolUse = toolTurn.toolUses.first {
+                let answerTurn = try await sessionProvider.streamTurn(
+                    ModelRequest(systemPrompt: systemPrompt, messages: [
+                        askForTool,
+                        BuddyChatMessage(role: .assistant, blocks: toolTurn.content),
+                        BuddyChatMessage(role: .user, blocks: [.toolResult(toolUseID: toolUse.id, toolName: toolUse.name, content: "4187", isError: false)]),
+                    ], tools: [secretTool]),
+                    onTextDelta: { _ in }
+                )
+                check("live session: the tool result reaches the session", answerTurn.text.contains("4187"), answerTurn.text)
+            }
+
+            // A record whose CLI session is gone starts a new one with the history.
+            let lostKey = BuddySessionKey(buddyID: buddyID, conversationID: UUID())
+            let lostSessionID = UUID()
+            sessionStore.noteAnsweredCall(in: lostKey, sessionID: lostSessionID)
+            let lostProvider = ClaudeCodeSessionProvider(
+                modelChoice: .haiku, effortLevel: .low, sessionKey: lostKey, sessionStore: sessionStore
+            )
+            let recoveredTurn = try await lostProvider.streamTurn(
+                ModelRequest(systemPrompt: systemPrompt, messages: [
+                    BuddyChatMessage(role: .user, text: "My cat is called Biscuit."),
+                    BuddyChatMessage(role: .assistant, text: "Noted."),
+                    BuddyChatMessage(role: .user, text: "What is my cat called? Just the name."),
+                ]),
+                onTextDelta: { _ in }
+            )
+            check("live session: a gone session is replaced", sessionStore.record(for: lostKey).map { $0.sessionID != lostSessionID } ?? false)
+            check("live session: the replacement got the history", recoveredTurn.text.lowercased().contains("biscuit"), recoveredTurn.text)
+        } catch {
+            check("live session: no error", false, "\(error.localizedDescription)")
+        }
+        // Removes the CLI's session files and the test buddy's workspace.
+        sessionStore.forgetSessions(ofBuddyWithID: buddyID)
+        BuddyWorkspace.deleteFolder(ofBuddyWithID: buddyID)
+        try? FileManager.default.removeItem(at: sessionStoreURL.deletingLastPathComponent())
     }
 }

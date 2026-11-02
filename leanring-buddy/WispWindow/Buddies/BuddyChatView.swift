@@ -184,6 +184,7 @@ struct BuddyChatView: View {
             Button("Delete Thread", role: .destructive) {
                 if let threadID = threadPendingDeletion {
                     threadStore.deleteSideThread(threadID, ofBuddyWithID: buddy.id)
+                    BuddySessionStore.shared.forgetSession(for: BuddySessionKey(buddyID: buddy.id, conversationID: threadID))
                     draftThreadIDs.removeAll { $0 == threadID }
                     if activeThreadID == threadID { activeThreadID = nil }
                 }
@@ -326,7 +327,7 @@ struct BuddyChatView: View {
                     .animation(WispMotion.smooth, value: mood)
             }
 
-            Text(buddy.modelChoice?.displayName ?? ActiveStackReadout.shared.chatModelName)
+            Text(buddy.runsOnLabel ?? ActiveStackReadout.shared.chatModelName)
                 .font(.system(size: 11.5))
                 .foregroundStyle(WispColor.textSecondary)
                 .lineLimit(1)
@@ -585,7 +586,7 @@ struct BuddyChatView: View {
             if advancedFeatures.isEnabled && !peers.isEmpty {
                 Menu {
                     ForEach(peers) { peer in
-                        Button(peer.modelChoice?.sendsDataOffThisMachine == true ? "\(peer.name) · cloud model" : peer.name) {
+                        Button(peer.runtimeKind == .claudeCodeSession || peer.modelChoice?.sendsDataOffThisMachine == true ? "\(peer.name) · cloud model" : peer.name) {
                             handOff(answer: text, from: buddy, to: peer)
                         }
                     }

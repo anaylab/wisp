@@ -209,6 +209,80 @@ struct BuddyModelEditor: View {
     }
 }
 
+// MARK: - Runtime editor
+
+/// "Runs on · Wisp ▾": whether the buddy runs in Wisp's own loop or keeps its
+/// own Claude Code session per conversation (`BuddyRuntimeKind`).
+struct BuddyRuntimeEditor: View {
+    let buddy: WispBuddy
+    @ObservedObject private var buddyStore = BuddyStore.shared
+    @State private var cliStatus: ClaudeSubscriptionStatus = .checking
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Runs on")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .fixedSize()
+                Picker("Runs on", selection: Binding(
+                    get: { buddy.runtimeKind },
+                    set: { buddyStore.updateRuntime(ofBuddyWithID: buddy.id, to: $0) }
+                )) {
+                    ForEach(BuddyRuntimeKind.allCases) { runtimeKind in
+                        Text(runtimeKind.sendsDataOffThisMachine ? "\(runtimeKind.displayName) · cloud" : runtimeKind.displayName)
+                            .tag(runtimeKind)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .pointerCursor()
+            }
+
+            if buddy.runtimeKind == .claudeCodeSession {
+                Text(noteText)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(noteIsWarning ? DS.Colors.warningText : DS.Colors.textTertiary)
+                    .frame(minWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Show Workspace in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([
+                        BuddyWorkspace.preparedFolderURL(forBuddyWithID: buddy.id)
+                    ])
+                }
+                .buttonStyle(WispPillButtonStyle(isProminent: false))
+                .controlSize(.small)
+                .pointerCursor()
+            }
+        }
+        .task(id: buddy.runtimeKind) {
+            guard buddy.runtimeKind == .claudeCodeSession else { return }
+            cliStatus = await ClaudeSubscriptionStatus.current()
+        }
+    }
+
+    private var noteIsWarning: Bool {
+        cliStatus == .notInstalled || cliStatus == .signedOut
+    }
+
+    private var noteText: String {
+        switch cliStatus {
+        case .notInstalled:
+            return "Install Claude Code and run `claude` once to sign in, or this buddy can't run."
+        case .signedOut:
+            return "Run `claude` in Terminal once to sign in with your subscription, or this buddy can't run."
+        case .checking, .signedIn:
+            let sessionCount = BuddySessionStore.shared.records(ofBuddyWithID: buddy.id).count
+            let sessionsText = sessionCount == 0
+                ? "Its first run starts a session."
+                : "\(sessionCount) conversation\(sessionCount == 1 ? "" : "s") kept."
+            return "Keeps one Claude Code session per conversation, on your Claude subscription. Its job, threads and notes go to Anthropic. Claude Code's own tools stay off, so whatever it does goes through Wisp and still asks first. "
+                + sessionsText
+        }
+    }
+}
+
 // MARK: - Tool access editor
 
 /// "Tools · All tools ▸": what this buddy may use, as switches per group.
@@ -503,7 +577,7 @@ struct BuddyDetailView: View {
                                 get: { buddy.toolAccess },
                                 set: { newToolAccess in buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: newToolAccess) }
                             ),
-                            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice)
+                            modelSendsDataOffThisMachine: buddy.sendsDataOffThisMachine
                         )
                         if threadTaskIDs.isEmpty {
                             Text(buddy.schedule.isRepeating

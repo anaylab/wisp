@@ -216,7 +216,7 @@ struct BuddyInspectorView: View {
 
     /// The model is chosen on the Look & personality page, so this row only reads it.
     private func modelRow(for buddy: WispBuddy) -> some View {
-        BuddyInspectorLinkRow(symbolName: "cpu", title: "Model", value: buddy.modelChoice?.displayName ?? "Follows Wisp") {
+        BuddyInspectorLinkRow(symbolName: "cpu", title: "Model", value: buddy.runsOnLabel ?? "Follows Wisp") {
             withAnimation(WispMotion.smooth) { openPage = .identity }
         }
     }
@@ -499,7 +499,7 @@ struct BuddyInspectorView: View {
                 get: { buddy.toolAccess },
                 set: { buddyStore.updateToolAccess(ofBuddyWithID: buddy.id, to: $0) }
             ),
-            modelSendsDataOffThisMachine: BuddyModelChoice.sendsDataOffThisMachine(buddy.modelChoice),
+            modelSendsDataOffThisMachine: buddy.sendsDataOffThisMachine,
             colorIndex: buddy.colorIndex
         )
     }
@@ -552,6 +552,7 @@ struct BuddyInspectorView: View {
                         get: { buddy.modelChoice },
                         set: { buddyStore.updateModelChoice(ofBuddyWithID: buddy.id, to: $0) }
                     ))
+                    BuddyRuntimeEditor(buddy: buddy)
                 }
             }
         }

@@ -162,6 +162,8 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     /// Tucked away in the sidebar's Hidden group. It still runs on its schedule;
     /// only the list changes.
     var isHidden: Bool?
+    /// What carries out its runs; nil is Wisp's own loop (`BuddyRuntimeKind`).
+    var runtime: BuddyRuntimeKind?
 
     /// The most runs a buddy remembers (older ones stay in History).
     static let maximumRememberedRuns = 20
@@ -170,6 +172,25 @@ struct WispBuddy: Codable, Identifiable, Equatable {
     var isPinnedInList: Bool { isPinned ?? false }
     var postsNotificationWhenFinished: Bool { notifiesWhenFinished ?? true }
     var isHiddenInList: Bool { isHidden ?? false }
+    var runtimeKind: BuddyRuntimeKind { runtime ?? .wispLoop }
+
+    /// Whether this buddy's runs leave the Mac: its runtime does, or the model
+    /// it runs on (its own choice, else Wisp's) does.
+    var sendsDataOffThisMachine: Bool {
+        runtimeKind.sendsDataOffThisMachine
+            || (modelChoice?.sendsDataOffThisMachine ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine)
+    }
+
+    /// The short "what does it run on" label for the chat header and settings,
+    /// or nil when it follows Wisp's model.
+    var runsOnLabel: String? {
+        switch runtimeKind {
+        case .claudeCodeSession:
+            return "Claude Code session · \(modelChoice?.claudeModel?.displayName ?? AnthropicModelSettings.selectedModel.displayName)"
+        case .wispLoop:
+            return modelChoice?.displayName
+        }
+    }
 }
 
 /// Names a buddy from its job: a subject from the instruction plus a role —
@@ -345,9 +366,7 @@ final class BuddyStore: ObservableObject {
             guard !buddyIDsWhoseSchedulesAreOwnedByAutomations.contains(buddy.id) else { continue }
             guard let nextScheduledRunAt = buddy.nextScheduledRunAt, nextScheduledRunAt <= now else { continue }
             // A cloud-model buddy can't do anything offline; hold its slot until the connection is back.
-            let buddySendsDataOffThisMachine = buddy.modelChoice?.sendsDataOffThisMachine
-                ?? BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine
-            if buddySendsDataOffThisMachine && !readinessMonitor.isNetworkReachable { continue }
+            if buddy.sendsDataOffThisMachine && !readinessMonitor.isNetworkReachable { continue }
             if isRunning(buddy) {
                 advanceSchedule(ofBuddyWithID: buddy.id, after: now)
                 continue
@@ -675,6 +694,16 @@ final class BuddyStore: ObservableObject {
         mutateBuddy(withID: buddyID) { $0.modelChoice = newModelChoice }
     }
 
+    /// Switches what carries out the buddy's runs. Any kept sessions are
+    /// dropped: switching back later starts fresh sessions that get the
+    /// thread as their handoff, rather than resuming one that missed what
+    /// happened in between.
+    func updateRuntime(ofBuddyWithID buddyID: UUID, to newRuntime: BuddyRuntimeKind) {
+        guard let buddy = buddy(withID: buddyID), buddy.runtimeKind != newRuntime else { return }
+        BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
+        mutateBuddy(withID: buddyID) { $0.runtime = newRuntime == .wispLoop ? nil : newRuntime }
+    }
+
     func updateSchedule(ofBuddyWithID buddyID: UUID, to newSchedule: BuddySchedule) {
         mutateBuddy(withID: buddyID) { buddy in
             buddy.schedule = newSchedule
@@ -740,7 +769,9 @@ final class BuddyStore: ObservableObject {
             toolAccess: originalBuddy.toolAccess,
             specialty: originalBuddy.specialty,
             personality: originalBuddy.personality,
-            notifiesWhenFinished: originalBuddy.notifiesWhenFinished
+            notifiesWhenFinished: originalBuddy.notifiesWhenFinished,
+            // The runtime is setup and is copied; its sessions are not.
+            runtime: originalBuddy.runtime
         )
         buddies.insert(duplicatedBuddy, at: 0)
         saveBuddies()
@@ -756,6 +787,7 @@ final class BuddyStore: ObservableObject {
         saveMessageQueue()
         stopRun(ofBuddyWithID: buddyID)
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
+        BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
         mutateBuddy(withID: buddyID) { buddy in
             buddy.runTaskIDs = []
             buddy.isMarkedUnread = nil
@@ -772,6 +804,8 @@ final class BuddyStore: ObservableObject {
         BuddyFileLibrary.shared.deleteLibrary(ofBuddyWithID: buddyID)
         BuddyComposerDraftStore().removeDrafts(ofBuddyWithID: buddyID)
         BuddyGroupStore.shared.removeBuddy(withID: buddyID)
+        BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
+        BuddyWorkspace.deleteFolder(ofBuddyWithID: buddyID)
         buddies.removeAll { $0.id == buddyID }
         saveBuddies()
     }

@@ -3226,8 +3226,22 @@ final class CompanionManager: ObservableObject {
     func startBuddyRun(_ buddy: WispBuddy, request: BuddyRunRequest) -> UUID? {
         // The buddy's own model if it picked one, else whatever Wisp uses. A
         // cloud buddy is checked against the cloud ceiling, not the local queue.
-        let buddyModelProvider: any ModelProvider = buddy.modelChoice.map(ModelProviderFactory.make)
-            ?? selectedModelProvider
+        let buddyModelProvider: any ModelProvider
+        switch buddy.runtimeKind {
+        case .wispLoop:
+            buddyModelProvider = buddy.modelChoice.map(ModelProviderFactory.make) ?? selectedModelProvider
+        case .claudeCodeSession:
+            // One kept session per conversation. The thread's history below is
+            // still passed; the session sends it only when it has to start over.
+            buddyModelProvider = ClaudeCodeSessionProvider(
+                modelChoice: buddy.modelChoice?.claudeModel ?? AnthropicModelSettings.selectedModel,
+                effortLevel: AnthropicModelSettings.effortLevel,
+                sessionKey: BuddySessionKey(
+                    buddyID: buddy.id,
+                    conversationID: BuddySessionPolicy.conversationID(threadID: request.threadID, groupID: request.groupID)
+                )
+            )
+        }
         let runsOffThisMachine = buddyModelProvider.deployment.sendsDataOffThisMachine
         guard BackgroundTaskLauncher.canStartAnotherTask(runsOffThisMachine: runsOffThisMachine) else { return nil }
 

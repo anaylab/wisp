@@ -396,6 +396,21 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   from the tool list and refused by name (`AgentRunToolkit`), and bypasses `ModelAccessGate` (no resident model to
   protect), so cloud buddies run in parallel with each other and with a live local turn. Capacity is
   `BackgroundTaskCapacityPolicy`: 2 local, 4 cloud, counted separately in `BackgroundTaskLauncher`.
+  **Runtime** (`Buddies/BuddyRuntime.swift`, `ClaudeCodeSessionProvider.swift`; phase 1 of `docs/openbot-buddies-plan.md`):
+  `WispBuddy.runtime: BuddyRuntimeKind?` (nil = `.wispLoop`, today's path). `.claudeCodeSession` gives the buddy **its own Claude Code
+  session per conversation** (main thread, each side thread, each group — `BuddySessionKey`, `BuddySessionPolicy.conversationID`) through
+  the user's signed-in `claude` CLI, the way OpenBot backs each agent with a CLI session. The first call starts it under an id Wisp
+  chose (`--session-id`) with the history as handoff; later calls `--resume` it and send only what follows the last assistant message
+  (`messagesNotYetInSession`), with `--system-prompt-snapshot off` because the CLI otherwise replays the first call's system prompt
+  (and so a stale tool list) on every resume. A gone session ("No conversation found…") is replaced by a new one with the history.
+  The CLI is still a bare model (no CLI tools/MCP/settings, `[TOOL:]` tags through the agent loop, so confirmations and
+  `ToolCallSafety` are unchanged) — OpenBot's full-access mode is deliberately not copied. Runs happen in
+  `~/Library/Application Support/Wisp/buddy-workspaces/<id>/` (0700); session ids live in `buddy-sessions.json` (0600,
+  `BuddySessionStore`, lock-guarded, off-main). Clearing, a side-thread/group delete, a runtime switch or deleting the buddy forgets the
+  sessions and removes the CLI's own `~/.claude/projects/…/<id>.jsonl` files (`ClaudeCodeSessionFiles`, only ids Wisp chose); deleting
+  also removes the workspace. Off this Mac (`WispBuddy.sendsDataOffThisMachine`, delegation sees it as `.claudeSubscription`); usage is
+  logged as a subscription turn. Picked with `BuddyRuntimeEditor` ("Runs on") under the buddy's Model (Advanced). Automations keep the
+  old path. Tested by `Tests/BuddyRuntime` and, live, `WISP_LIVE_CLAUDE=1 ./Tests/AgentRuntimeIntegration/run.sh`.
   **Message line** (`Buddies/BuddyMessageQueue.swift`, idea from OpenBot): a text message sent to a buddy that is mid-run (or whose line is paused,
   or already has messages waiting) joins a per-buddy FIFO instead of being refused — max 10 waiting, answered one run at a time in the order sent.
   `BuddyStore.drainMessageQueues` starts the front message when the buddy is free (on every task-registry change and on the minute tick); a message
@@ -1215,7 +1230,8 @@ Files are grouped by role; line counts are rough.
 | `OllamaProvider.swift` | ~294 | Presents `LocalOllamaAPI` as a `ModelProvider`; owns the `[TOOL:...]` text convention that fakes tool calls for the local model. |
 | `AnthropicProvider.swift` | ~680 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, adaptive thinking + `effort` (Opus/Sonnet 5.5), signed thinking and web blocks kept as `.providerReplay` and resent verbatim within a tool loop (`drop_block` for stale ones), prompt caching (system breakpoint + automatic), server-side `web_search`/`web_fetch` on tool-bearing turns (resumes `pause_turn`), `fallbacks: "default"` for refusals, no sampling params on models that reject them. |
 | `AnthropicModelSettings.swift` | ~140 | Claude's settings (UserDefaults): `AnthropicModelChoice` (Opus 5.5 default / Sonnet 5.5 / Haiku 4.5, with each model's API differences as data), `AnthropicEffortLevel` (low default), and the web-access switch. Edited in Settings → Model, read by `ModelProviderFactory`. |
-| `ClaudeSubscriptionProvider.swift` | ~430 | Claude over the user's own `claude` CLI (subscription, no key): per-turn stream-json process with all CLI tools off, inline screenshot, `[TOOL:]` text tags, failure-text → `BuddyChatError`, plus `ClaudeSubscriptionStatus` (`claude auth status`). Tested by `Tests/AgentRuntimeIntegration` (live round trip with `WISP_LIVE_CLAUDE=1`). |
+| `ClaudeSubscriptionProvider.swift` | ~560 | Claude over the user's own `claude` CLI (subscription, no key): per-turn stream-json process with all CLI tools off, inline screenshot, `[TOOL:]` text tags, failure-text → `BuddyChatError`, plus `ClaudeSubscriptionStatus` (`claude auth status`). `runCLI`, `systemPromptIncludingTools` and `commandLineArguments(session:)` are shared with the session provider. Tested by `Tests/AgentRuntimeIntegration` (live round trip with `WISP_LIVE_CLAUDE=1`). |
+| `ClaudeCodeSessionProvider.swift` | ~190 | A buddy's kept Claude Code session: start with `--session-id` + history handoff, `--resume` with only the new messages, replace a gone session. |
 | `OpenAIProvider.swift` | ~435 | GPT as a bring-your-own-key `ModelProvider` over Chat Completions: tool results become separate `role:"tool"` messages. |
 | `GeminiProvider.swift` | ~415 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. |
 | `AppleOnDeviceProvider.swift` | ~300 | Apple's on-device system model (FoundationModels) as a `ModelProvider`: history replayed as text, screenshot as an `Attachment` (macOS 27), snapshots diffed to deltas, `[TOOL:]` tags parsed with the echo guard, `GenerationError` → `BuddyChatError`, `unavailabilityDescription` for Settings. |
@@ -1544,6 +1560,7 @@ names forward here.
 | `Buddies/BuddyToolAccess.swift` | ~200 | `BuddyToolGroup`, `BuddyToolAccess` (the allow-list) and the pure `BuddyToolAccessPolicy` (`isPermitted`, server discovery, summaries). |
 | `Buddies/BuddyRunToolkit.swift` | ~120 | `BuddyRunToolPolicy` (tools a cloud buddy may not use) and `BuddyRunToolkitBuilder` (per-buddy memory tools + exclusions). |
 | `AgentRunToolkit.swift` | ~35 | Per-run tool changes for `AgentTurnRunner`: names to hide/refuse and run-only tools. |
+| `Buddies/BuddyRuntime.swift` | ~255 | `BuddyRuntimeKind`, `BuddySessionKey`/`Record`, pure `BuddySessionPolicy` (conversation id, what a kept session is sent, gone-session wording), `BuddySessionStore` (`buddy-sessions.json`), `BuddyWorkspace` and `ClaudeCodeSessionFiles`. Tested by `Tests/BuddyRuntime`. |
 | `Buddies/BuddyMessageQueue.swift` | ~100 | Pure per-buddy FIFO of waiting messages: enqueue (cap 10), front/removeFront (leaves only once its run started), pause, cancel, Codable. Tested by `Tests/BuddyMessageQueue`. |
 | `Buddies/BuddyThread.swift` | ~175 | A buddy's continuous thread: `BuddyThreadExchange` (job or user message + answer, keyed by run task id), `BuddyThreadPolicy` (pure: prompt history projection, caps, persona addendum) and the persisted `BuddyThreadStore`. Tested by `Tests/BuddyThread`. |
 | `Buddies/BuddyStore.swift` | ~580 | `BuddySchedule` (next run, summary, inference from wording), `WispBuddy` (incl. list state: pinned, last read, marked unread, notify when finished), `BuddyNameGenerator`, and the `BuddyStore` ObservableObject (persistence, minute schedule check, create/run/stop/rename/edit job/reschedule/pin/read state/duplicate/clear conversation/delete, `orderedBuddies`, `isUnread`). |
@@ -1612,6 +1629,7 @@ running):
 ./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
+./Tests/BuddyRuntime/run.sh              # buddy runtime: conversation keys, what a kept session is sent, gone sessions, session store file
 ./Tests/BuddyMessageQueue/run.sh         # buddy message line: FIFO order, cap, pause, cancel, codec
 ./Tests/BuddyGroup/run.sh                # group chats: @Name routing, handoff tag, shared history, codec
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
