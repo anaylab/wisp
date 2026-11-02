@@ -17,7 +17,7 @@ import Foundation
 final class BuddyGroupStore: ObservableObject {
     static let shared = BuddyGroupStore()
 
-    static let defaultFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddy-groups.json")
 
     @Published private(set) var groups: [BuddyGroup] = []

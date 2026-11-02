@@ -180,7 +180,7 @@ enum BuddyTemplateCatalog {
 final class BuddyTemplateStore: ObservableObject {
     static let shared = BuddyTemplateStore()
     static let maximumSavedTemplates = 50
-    static let defaultFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddy-templates.json")
 
     @Published private(set) var savedTemplates: [BuddyTemplate] = []

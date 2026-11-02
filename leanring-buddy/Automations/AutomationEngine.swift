@@ -415,6 +415,8 @@ final class AutomationEngine: ObservableObject {
 
     /// One pass of the clock. Internal so tests can drive it without a timer.
     func clockTick() {
+        // In demo mode nothing runs on its own; the sample automations are only for show.
+        guard !WispDemoMode.isOn else { return }
         mirrorJobsSwitchesIntoStore()
         runDueScheduledAutomations()
         Task { @MainActor [weak self] in await self?.pollMeetingTriggers() }

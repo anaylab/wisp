@@ -40,6 +40,8 @@ actor CalendarDataProvider: GlanceCardDataProvider {
     /// `accessDenied` if the user has refused, so the card can show a clear
     /// "grant access" state instead of a misleading empty list.
     func snapshot(now: Date = Date()) async throws -> CalendarSnapshot {
+        // Demo mode never reads the real calendar.
+        if WispDemoMode.isOn { return WispDemoSampleData.calendarSnapshot(now: now) }
         try await ensureAccess()
 
         // Look from now to a week ahead across every calendar the user has.
@@ -83,7 +85,7 @@ actor CalendarDataProvider: GlanceCardDataProvider {
         lookAheadInterval: TimeInterval,
         recentlyStartedInterval: TimeInterval
     ) -> CalendarGlanceEvent? {
-        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
+        guard !WispDemoMode.isOn, EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
 
         let predicate = eventStore.predicateForEvents(
             withStart: now.addingTimeInterval(-recentlyStartedInterval),

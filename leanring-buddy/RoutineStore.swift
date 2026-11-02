@@ -104,7 +104,7 @@ final class RoutineStore: ObservableObject {
     /// clears this.
     @Published var routineIDToOpenInEditor: UUID?
 
-    static let defaultRoutinesFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultRoutinesFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/routines.json")
 
     private let routinesFileURL: URL

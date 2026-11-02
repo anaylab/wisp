@@ -209,7 +209,7 @@ enum BuddyThreadPolicy {
 final class BuddyThreadStore: ObservableObject {
     static let shared = BuddyThreadStore()
 
-    static let defaultThreadsFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultThreadsFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddy-threads.json")
 
     /// Each buddy's exchanges, oldest first, keyed by the buddy's id.
@@ -246,11 +246,12 @@ final class BuddyThreadStore: ObservableObject {
         userText: String,
         requesterName: String? = nil,
         attachmentNames: [String] = [],
-        threadID: UUID? = nil
+        threadID: UUID? = nil,
+        startedAt: Date = Date()
     ) {
         let newExchange = BuddyThreadExchange(
             taskID: taskID,
-            startedAt: Date(),
+            startedAt: startedAt,
             origin: origin,
             userText: userText,
             answerText: nil,

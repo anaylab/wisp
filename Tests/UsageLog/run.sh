@@ -16,6 +16,7 @@ swiftc -target arm64-apple-macos14.0 \
   -default-isolation MainActor \
   -o "$BUILD_DIR/usage-log" \
   Tests/UsageLog/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   leanring-buddy/UsageTokenCounts.swift \
   leanring-buddy/ModelPricing.swift \
   leanring-buddy/UsageLogRecord.swift \

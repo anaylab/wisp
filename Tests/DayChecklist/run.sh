@@ -18,6 +18,7 @@ swiftc -target arm64-apple-macos26.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/day-checklist" \
   Tests/DayChecklist/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   leanring-buddy/Jobs/CanvasModels.swift \
   leanring-buddy/Jobs/ChecklistModels.swift \
   leanring-buddy/Jobs/DayChecklistBuilder.swift

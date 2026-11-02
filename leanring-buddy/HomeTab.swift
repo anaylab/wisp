@@ -1333,7 +1333,7 @@ struct HomeTab: View {
     /// refresh never triggers a permission prompt on its own.
     private func loadCalendar(requestingAccess: Bool) async {
         let authorizationStatus = EKEventStore.authorizationStatus(for: .event)
-        if authorizationStatus == .notDetermined && !requestingAccess {
+        if authorizationStatus == .notDetermined && !requestingAccess && !WispDemoMode.isOn {
             calendarState = .needsAccess
             return
         }

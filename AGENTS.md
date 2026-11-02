@@ -1155,6 +1155,20 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   is background priority through `ModelAccessGate`; switches live in `BrainPreferences`. UI: sidebar
   **Brain** with Pages (reader/editor, backlinks), Graph (force layout), Inbox (drop zone, jobs,
   notes import), Health, Log (undo), Settings.
+- **Demo mode** (`DemoMode/`, `scripts/demo.sh`): Wisp run on a sample day for screenshots and demos, so nothing personal is on
+  screen. A launch option, not a switch (every store reads its file once at launch): `scripts/demo.sh` quits Wisp and opens it with
+  `-WispDemoMode YES` (UserDefaults' argument domain, never saved); `--reset` starts from fresh sample data, `--off` goes back.
+  `WispDemoMode.dataHome` is the one place stores get their home from: the real home, or `~/Library/Application Support/Wisp Demo/home/`
+  in demo mode — every store of the user's data (buddies, threads, memory, groups, templates, files, sessions, workspaces, automations,
+  runs, routines, workflows, learned shortcuts, task history, conversation, usage log, study log, Canvas snapshot, Jobs state, memory.md
+  and the brain) goes through it, so a demo session never reads or writes the real data (checked by file times around a session). MCP
+  servers, skills, sources, keys and UserDefaults stay the real ones, so a model still answers; the starter-buddy flags use their own
+  suite (`com.gluepixel.wisp.demo`). Nothing runs on its own: buddy schedules, the automation clock, Canvas sync and the morning banner
+  are off, and the calendar (Today's Up next, glance cards, the notch countdown) shows `WispDemoSampleData` events. `WispDemoSeed` fills
+  an empty demo folder once through the stores' own methods: the starters, a pinned Briefer on a 9:00 schedule handing its brief to the
+  Writer, Planner/Inbox/Researcher chats, three gallery automations and three recent answers. The menu bar says "Demo mode". A buddy row
+  in the sidebar now falls back to the latest answer in its thread once History has let the run go (also true outside the demo).
+  Tested by `Tests/DemoMode`.
 - **Reliability guards** (fixes for problems users reported):
   - **One copy only**: `SingleInstanceGuard` runs first in `applicationDidFinishLaunching`. A second copy (another path, e.g. a
     DerivedData build beside an installed one) would install a second Talk event tap and answer everything twice. Instead it posts a
@@ -1636,6 +1650,9 @@ names forward here.
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
 | `Buddies/BuddyMemory.swift` | ~240 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete, which notes the buddy wrote, applying a review). |
 | `Buddies/BuddyFlow.swift` | ~250 | Pure buddy flows: `BuddyFlowLink`, `BuddyFlowGraph` (loops, reach, caps), `BuddyFlowRun` (who runs when, fan-in, skips, blocked links), `BuddyFlowPolicy` (hand-off message, wording). Tested by `Tests/BuddyFlow`. |
+| `DemoMode/WispDemoMode.swift` | ~50 | Whether this launch is a demo, and `dataHome`: the real home or the demo's stand-in, used by every store of the user's data. |
+| `DemoMode/WispDemoSampleData.swift` | ~120 | Pure sample day: checklist, calendar events (always ahead of now), the buddies' answers, recent answers. Tested by `Tests/DemoMode`. |
+| `DemoMode/WispDemoSeed.swift` | ~95 | Fills an empty demo folder once through the stores: starters, chats, the Briefer → Writer hand-off, automations, recent answers. |
 | `Buddies/BuddyFlowEngine.swift` | ~170 | Runs flows: starts hand-off runs, retries busy buddies for 30 minutes, records answers from the task registry, ends flows. |
 | `Buddies/BuddyBackupModels.swift` | ~190 | Backup models: `BuddyFailoverPolicy` (which errors switch, order, cleaning, privacy), `BuddyModelHolds` (10-minute pass-over) and `FailoverModelProvider`. Tested by `Tests/AgentRuntimeIntegration/BuddyFailoverTests.swift`. |
 | `Buddies/BuddyMemoryReview.swift` | ~290 | Pure memory-review rules: `BuddyMemoryReviewInterval`, triggers, prompt, lenient reply parsing, `checkedChanges` (the user's notes untouchable), secret check, summary. Tested by `Tests/BuddyMemoryReview`. |
@@ -1716,6 +1733,7 @@ running):
 ./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
+./Tests/DemoMode/run.sh                  # demo mode: off by default, the sample day stays believable at any hour
 ./Tests/BuddyFlow/run.sh                 # buddy flows: links, loops, fan-in waiting for all, failures skipping what follows, blocked links
 ./Tests/BuddyMemoryReview/run.sh         # buddy memory review: triggers, prompt, reply parsing, the checks that keep the user's notes untouched
 ./Tests/BuddyRunLanes/run.sh             # buddy lanes: one run per conversation, side-thread limit, why a message waits, steering hand-over

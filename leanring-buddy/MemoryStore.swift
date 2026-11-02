@@ -231,7 +231,7 @@ final class MemoryStore: ObservableObject {
     @Published private(set) var facts: [String] = []
 
     /// `~/.wisp/memory.md`, the pre-brain memory file.
-    static let legacyMemoryFileURL: URL = FileManager.default.homeDirectoryForCurrentUser
+    static let legacyMemoryFileURL: URL = WispDemoMode.dataHome
         .appendingPathComponent(".wisp", isDirectory: true)
         .appendingPathComponent("memory.md", isDirectory: false)
 

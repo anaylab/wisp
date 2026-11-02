@@ -16,6 +16,7 @@ swiftc -target arm64-apple-macos14.0 \
   -default-isolation MainActor \
   -o "$BUILD_DIR/buddy-runtime" \
   Tests/BuddyRuntime/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
   leanring-buddy/Buddies/BuddyRuntime.swift \
   leanring-buddy/BuddyChatTypes.swift \
   leanring-buddy/ToolMetadata.swift

@@ -164,7 +164,7 @@ nonisolated enum BuddySessionSummary {
 /// writes it runs off the main actor.
 nonisolated final class BuddySessionStore: @unchecked Sendable {
     static let shared = BuddySessionStore(
-        fileURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        fileURL: WispDemoMode.applicationSupportDirectory
             .appendingPathComponent("Wisp", isDirectory: true)
             .appendingPathComponent("buddy-sessions.json")
     )
@@ -281,7 +281,7 @@ nonisolated final class BuddySessionStore: @unchecked Sendable {
 /// (0700). The Claude Code session runs here.
 nonisolated enum BuddyWorkspace {
     static func folderURL(forBuddyWithID buddyID: UUID) -> URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        WispDemoMode.applicationSupportDirectory
             .appendingPathComponent("Wisp", isDirectory: true)
             .appendingPathComponent("buddy-workspaces", isDirectory: true)
             .appendingPathComponent(buddyID.uuidString, isDirectory: true)

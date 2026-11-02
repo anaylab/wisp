@@ -97,7 +97,7 @@ enum BuddyAttachmentPolicy {
 final class BuddyFileLibrary: ObservableObject {
     static let shared = BuddyFileLibrary()
 
-    static let defaultRootURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultRootURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddy-files")
 
     @Published private(set) var attachmentsByBuddyID: [UUID: [BuddyAttachment]] = [:]

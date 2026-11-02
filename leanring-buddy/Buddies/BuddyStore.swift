@@ -289,7 +289,7 @@ enum BuddyNameGenerator {
 final class BuddyStore: ObservableObject {
     static let shared = BuddyStore()
 
-    static let defaultBuddiesFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultBuddiesFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddies.json")
 
     private static let scheduleCheckIntervalSeconds: TimeInterval = 60
@@ -339,7 +339,12 @@ final class BuddyStore: ObservableObject {
         // First launch only (the flag is remembered): the rail is never empty.
         // Only the app's own store seeds; a store a test made on a temporary
         // file stays exactly as it was built.
-        if self === Self.shared { ensureStarterBuddies() }
+        if self === Self.shared {
+            // A demo session keeps its own flags, so its starters don't depend on the real ones.
+            ensureStarterBuddies(userDefaults: WispDemoMode.isOn
+                ? (UserDefaults(suiteName: WispDemoMode.demoUserDefaultsSuiteName) ?? .standard)
+                : .standard)
+        }
         // A run ending is what frees a buddy for the next waiting message. The
         // registry publishes before it changes, so the drain waits one turn.
         if taskRecordsObservation == nil {
@@ -373,6 +378,8 @@ final class BuddyStore: ObservableObject {
         BuddyMemoryReviewer.shared.checkQuietConversations()
         // Right after wake the network and connected apps are still coming back; a job started
         // then just fails. Leaving the due date alone means the next minute's check runs it.
+        // In demo mode nothing runs on its own; the sample schedules are only for show.
+        guard !WispDemoMode.isOn else { return }
         let readinessMonitor = SystemReadinessMonitor.shared
         guard readinessMonitor.isSettledAfterWake(now: now) else { return }
         for buddy in buddies {

@@ -402,7 +402,7 @@ final class StudySessionController: ObservableObject {
     }
 
     private static var logFileURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        WispDemoMode.applicationSupportDirectory
             .appendingPathComponent("Wisp", isDirectory: true)
             .appendingPathComponent("study-log.json")
     }

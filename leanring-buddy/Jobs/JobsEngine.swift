@@ -153,7 +153,7 @@ final class JobsEngine: ObservableObject {
         }
     }
 
-    var hasChecklist: Bool { !todayChecklist.isEmpty && isDailyChecklistEnabled }
+    var hasChecklist: Bool { !todayChecklist.isEmpty && (isDailyChecklistEnabled || WispDemoMode.isOn) }
     var hasCanvasFeed: Bool { dependencies.feedConfiguration.hasFeedURL() }
 
     // MARK: Constants
@@ -224,6 +224,11 @@ final class JobsEngine: ObservableObject {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        // Demo mode shows a sample checklist and never syncs (no feed, no writes).
+        if WispDemoMode.isOn {
+            todayChecklist = WispDemoSampleData.checklist(now: Date())
+            return
+        }
 
         let clockTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.clockTick() }

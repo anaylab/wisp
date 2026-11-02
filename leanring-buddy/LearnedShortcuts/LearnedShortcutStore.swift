@@ -19,7 +19,7 @@ import Foundation
 final class LearnedShortcutStore: ObservableObject {
     static let shared = LearnedShortcutStore()
 
-    static let defaultFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/learned-shortcuts.json")
 
     static let maximumShortcutCount = 200

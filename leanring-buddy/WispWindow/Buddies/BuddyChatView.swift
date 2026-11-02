@@ -538,7 +538,7 @@ struct BuddyChatView: View {
                 Text("From \(requesterName)")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(WispColor.textSecondary)
-                Text(message)
+                Text(BuddyAnswerFormatting.attributedAnswer(message))
                     .font(.system(size: 12.5))
                     .foregroundStyle(WispColor.textSecondary)
                     .lineLimit(6)

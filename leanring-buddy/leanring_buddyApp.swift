@@ -53,6 +53,13 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
 
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 0])
 
+        // Demo mode (launched by scripts/demo.sh): fill the demo folder with the
+        // sample day before any page reads it. Never touches the real data.
+        if WispDemoMode.isOn {
+            print("🎯 Wisp: demo mode, using \(WispDemoMode.demoHomeURL.path)")
+            WispDemoSeed.seedIfNeeded()
+        }
+
         // Before anything schedules work: automations and buddy jobs read it to wait for a Mac
         // that is awake and online.
         SystemReadinessMonitor.shared.start()

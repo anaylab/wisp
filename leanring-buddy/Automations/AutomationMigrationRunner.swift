@@ -21,7 +21,7 @@ import Foundation
 
 @MainActor
 enum AutomationMigrationRunner {
-    static let stateFileURL = FileManager.default.homeDirectoryForCurrentUser
+    static let stateFileURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/automation-migration.json")
 
     static func migrateIfNeeded(

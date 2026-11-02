@@ -19,6 +19,9 @@ swiftc -target arm64-apple-macos26.0 \
   -enable-upcoming-feature MemberImportVisibility \
   -o "$BUILD_DIR/jobs-engine" \
   Tests/JobsEngine/main.swift \
+  leanring-buddy/DemoMode/WispDemoMode.swift \
+  leanring-buddy/DemoMode/WispDemoSampleData.swift \
+  leanring-buddy/CalendarSnapshot.swift \
   leanring-buddy/Jobs/JobsEngine.swift \
   leanring-buddy/Jobs/CanvasModels.swift \
   leanring-buddy/Jobs/CanvasFeedParser.swift \

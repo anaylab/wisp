@@ -76,7 +76,7 @@ enum BuddyMemoryPolicy {
 final class BuddyMemoryStore: ObservableObject {
     static let shared = BuddyMemoryStore()
 
-    static let defaultMemoryDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultMemoryDirectoryURL = WispDemoMode.dataHome
         .appendingPathComponent("Library/Application Support/Wisp/buddy-memory")
 
     enum RememberOutcome: Equatable {
