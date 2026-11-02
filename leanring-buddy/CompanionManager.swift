@@ -3263,6 +3263,10 @@ final class CompanionManager: ObservableObject {
         // Group, workflow and peer runs answer someone else and never do. The
         // run's id is only known once it has started, hence the box.
         let steeringRunTaskIDBox = SteeringRunTaskIDBox()
+        // Only the user's own messages count toward a review of the buddy's
+        // notes (OpenBot leaves routine and channel turns out too).
+        let countsTowardMemoryReview = request.groupID == nil && request.origin == .message
+        let memoryReviewConversationID = request.threadID
         if request.groupID == nil && (request.origin == .message || request.origin == .job) {
             let steeringThreadID = request.threadID
             buddyToolkit.takeSteeringMessages = {
@@ -3300,6 +3304,9 @@ final class CompanionManager: ObservableObject {
                     // shows the model a [POINT:…] or [SAY:…] it would imitate.
                     answerText: AnswerDisplayText.cleaned(answerText)
                 )
+                if countsTowardMemoryReview {
+                    BuddyMemoryReviewer.shared.noteCompletedTurn(buddyID: buddyID, conversationID: memoryReviewConversationID)
+                }
             },
             // A peer's request is a step in that peer's run, not news of its own.
             completionNotification: buddy.postsNotificationWhenFinished && request.origin != .delegated && request.groupID == nil

@@ -140,7 +140,10 @@ enum BuddyRunToolkitBuilder {
                 guard case .object(let arguments) = input, case .string(let fact)? = arguments["fact"] else {
                     return "i need the note to save."
                 }
-                switch memoryStore.remember(fact, forBuddyWithID: buddyID) {
+                // The buddy's own note: its background review may tidy it later.
+                let outcome = memoryStore.remember(fact, forBuddyWithID: buddyID, writtenByBuddy: true)
+                BuddyMemoryReviewer.shared.noteBuddyChangedItsNotes(buddyID: buddyID)
+                switch outcome {
                 case .added(let savedFact): return "saved: \(savedFact)"
                 case .alreadyKnown: return "you already have that note."
                 case .nothingToRemember: return "there was nothing to save in that."
@@ -161,6 +164,7 @@ enum BuddyRunToolkitBuilder {
                 guard case .object(let arguments) = input, case .string(let query)? = arguments["fact"] else {
                     return "i need to know which note to delete."
                 }
+                BuddyMemoryReviewer.shared.noteBuddyChangedItsNotes(buddyID: buddyID)
                 switch memoryStore.forget(matching: query, forBuddyWithID: buddyID) {
                 case .removed(let removedFacts): return "deleted: " + removedFacts.joined(separator: "; ")
                 case .nothingMatched: return "none of your notes match \"\(query)\"."

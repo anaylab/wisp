@@ -361,6 +361,7 @@ final class BuddyStore: ObservableObject {
         // A waiting message whose run couldn't start earlier (the background
         // limit) gets another try on every tick.
         drainMessageQueues()
+        BuddyMemoryReviewer.shared.checkQuietConversations()
         // Right after wake the network and connected apps are still coming back; a job started
         // then just fails. Leaving the due date alone means the next minute's check runs it.
         let readinessMonitor = SystemReadinessMonitor.shared
@@ -862,6 +863,10 @@ final class BuddyStore: ObservableObject {
         messageQueue.removeAll(forBuddyWithID: buddyID)
         saveMessageQueue()
         stopRun(ofBuddyWithID: buddyID)
+        // Its notes outlive the conversation, so they get one last look at it first.
+        BuddyMemoryReviewer.shared.reviewBeforeClearing(
+            buddyID: buddyID, exchanges: BuddyThreadStore.shared.exchanges(ofBuddyWithID: buddyID)
+        )
         BuddyThreadStore.shared.deleteThread(ofBuddyWithID: buddyID)
         BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
         mutateBuddy(withID: buddyID) { buddy in
@@ -882,6 +887,7 @@ final class BuddyStore: ObservableObject {
         BuddyGroupStore.shared.removeBuddy(withID: buddyID)
         BuddySessionStore.shared.forgetSessions(ofBuddyWithID: buddyID)
         BuddyWorkspace.deleteFolder(ofBuddyWithID: buddyID)
+        BuddyMemoryReviewer.shared.forgetBuddy(buddyID: buddyID)
         buddies.removeAll { $0.id == buddyID }
         saveBuddies()
     }

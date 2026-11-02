@@ -368,6 +368,21 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   touch its own file), rendered into its system prompt (≤800 chars, newest first, framed as data not
   instructions since a model that read a web page wrote them), listed with a Forget button on its page.
   Kept out of the Brain on purpose (works with the brain off, never enters the main assistant's retrieval).
+  **Background memory review** (`Buddies/BuddyMemoryReview.swift` pure, `BuddyMemoryReviewer.swift` live; phase 5 of
+  `docs/openbot-buddies-plan.md`, OpenBot's memory review): `BuddyMemoryStore` now records which notes the buddy wrote itself
+  (`<id>.written-by-buddy.json` beside the .md; `remember(…, writtenByBuddy:)` — its tool and the review pass true, the Memory page's Add
+  memory doesn't). Everything else — the user's notes, hand edits, notes from before — is protected. A review starts after
+  `BuddyMemoryReviewInterval` of the user's messages (10/20/40/never, default 20, UserDefaults, global; picked on a buddy's Memory page), after
+  15 quiet minutes with ≥3 new messages (the minute tick), or just before Clear conversation; a buddy saving or forgetting a note itself
+  restarts the count. Only the user's own main/side-thread messages count (not jobs, peers, groups, workflows). One review at a time: one
+  text-only call (no tools, no images, temperature 0) on the buddy's own provider — local model at background priority through
+  `ModelAccessGate`, Claude (key, subscription or a Claude Code session buddy, outside its session) on Haiku — showing its notes as `n1 [user]` /
+  `n2 [assistant]` and the unreviewed exchanges (≤20) fenced as data. The JSON answer (`add` / `update {id,text}` / `forget [id]`) is read
+  leniently and checked strictly (`checkedChanges`): only the buddy's own notes, only while they still read as shown, one change per note,
+  ≤5 per kind, ≤200 chars, no duplicates, nothing credential- or key-like; `applyReviewChanges` re-checks against the file. Counts and reviewed
+  exchange ids are in memory only. The Memory page shows the interval, "Last tidied …: added 1, rewrote 1", and marks the user's notes "You".
+  Tested by `Tests/BuddyMemoryReview` and `Tests/AgentRuntimeIntegration/BuddyMemoryReviewTests.swift` (live with `WISP_LIVE_CLAUDE=1` on Haiku
+  and `WISP_LIVE_OLLAMA=1` on the local model: 7.4s, updated the due date, missed a preference Haiku caught).
 **Per-buddy tool allow-list** (`WispBuddy.toolAccess: BuddyToolAccess?`, nil = every tool, so existing
   buddies are unchanged): limited to *groups* — `BuddyToolGroup` (Browser, Screen, Messages & Contacts, Reminders,
   Shortcuts, Coding agent, Brain, Your memory) plus one `mcp:<server>` group per connected server — because the tool
@@ -1588,7 +1603,9 @@ names forward here.
 | `DynamicIsland/NotchWorkspaceView.swift` | ~725 | The notch's quick chat: `NotchWorkspacePage` (.chat), a sidebar of buddies and searchable conversations (Settings / Open Wisp buttons open the window), thread bubbles, the talk pill and a Type field → `askTypedQuestion`. |
 | `DynamicIsland/NotchIslandStyle.swift` | ~125 | `NotchIslandSurfaceStyle` (black default / Liquid Glass), the persisted `NotchIslandStylePreference`, the `wispNotchIslandSurface(in:style:)` modifier, and `WispIslandButtonStyle` (flat subtle fill / white prominent capsule). |
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
-| `Buddies/BuddyMemory.swift` | ~170 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete). |
+| `Buddies/BuddyMemory.swift` | ~240 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete, which notes the buddy wrote, applying a review). |
+| `Buddies/BuddyMemoryReview.swift` | ~290 | Pure memory-review rules: `BuddyMemoryReviewInterval`, triggers, prompt, lenient reply parsing, `checkedChanges` (the user's notes untouchable), secret check, summary. Tested by `Tests/BuddyMemoryReview`. |
+| `Buddies/BuddyMemoryReviewer.swift` | ~230 | Runs reviews: per-conversation counts, quiet/clear triggers, one at a time, the review model (local at background priority, Claude on Haiku), applying. |
 | `Buddies/BuddyModelChoice.swift` | ~75 | `BuddyModelChoice` (provider + optional Claude model, `allChoices`) and `BackgroundTaskCapacityPolicy` (local vs cloud concurrency). |
 | `Buddies/BuddyDelegation.swift` | ~480 | `ask_buddy` (one or several peers) plus `list_buddies`/`start_thread`/`create_buddy`: `BuddyDelegationPolicy` (pure: peer resolution, when to ask, the boundary note), `BuddyDelegationService` (approval, start, wait for all, listing, threads, creation; injectable) and the run-only tools. |
 | `Buddies/BuddyTeam.swift` | ~190 | Pure team rules: tool names, `BuddyPeerStatus`, `BuddyTeamPolicy` (peer listing, requested names, gathered answers, thread replies, new-buddy draft, caps, answer-handling rules). |
@@ -1665,6 +1682,7 @@ running):
 ./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
 ./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
+./Tests/BuddyMemoryReview/run.sh         # buddy memory review: triggers, prompt, reply parsing, the checks that keep the user's notes untouched
 ./Tests/BuddyRunLanes/run.sh             # buddy lanes: one run per conversation, side-thread limit, why a message waits, steering hand-over
 ./Tests/BuddyRuntime/run.sh              # buddy runtime: conversation keys, what a kept session is sent, gone/full sessions, fill, session store file
 ./Tests/BuddyMessageQueue/run.sh         # buddy message line: FIFO order, cap, pause, cancel, codec

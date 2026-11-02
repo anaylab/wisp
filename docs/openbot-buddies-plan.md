@@ -112,7 +112,9 @@ Each phase is its own `feature/…` branch with a `Tests/` suite for the pure pa
    was dropped: `ask_buddy` waits inside one tool call, so a caller could never use it, and the 5-minute timeout already
    stops a peer. Original plan: **Buddy tools.** `list_buddies`, `interrupt_buddy`, `start_thread`, `create_buddy`/`update_buddy`
    (each creation asks first), multi-recipient asks with gathered answers, and the blocker report format.
-5. **Memory review.** Background add/update/forget over `BuddyMemoryStore`, local model by default,
+5. **Memory review — built.** Notes now record who wrote them, and the review may only rewrite or remove the buddy's
+   own. It runs on the buddy's own provider (local model at background priority; Claude on Haiku), checked strictly
+   before anything is written. Tried live on Haiku and on the local 3B model. Original plan: **Memory review.** Background add/update/forget over `BuddyMemoryStore`, local model by default,
    `ModelAccessGate` background priority, with a setting (10/20/40/off).
 6. **Resilience.** Backup models and failover, plus hidden buddies that pause their routines and refuse new messages.
 7. **Routine flows.** A buddy's scheduled answer is handed to the next buddy, reusing the workflow engine.

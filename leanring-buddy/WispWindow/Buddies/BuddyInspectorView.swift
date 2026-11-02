@@ -54,6 +54,8 @@ struct BuddyInspectorView: View {
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     @ObservedObject private var memoryStore = BuddyMemoryStore.shared
+    @ObservedObject private var memoryReviewer = BuddyMemoryReviewer.shared
+    @State private var memoryReviewInterval = BuddyMemoryReviewInterval.current
     @ObservedObject private var fileLibrary = BuddyFileLibrary.shared
     @ObservedObject private var usageLog = UsageLogStore.shared
 
@@ -449,6 +451,7 @@ struct BuddyInspectorView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 30)
             } else {
+                memoryReviewRow(for: buddy)
                 HStack {
                     header("\(notes.count) saved")
                     Spacer()
@@ -470,16 +473,54 @@ struct BuddyInspectorView: View {
                         }
                     }
                 }
+                let buddyWrittenNotes = memoryStore.buddyWrittenFacts(ofBuddyWithID: buddy.id)
                 ForEach(notes, id: \.self) { note in
                     HStack(alignment: .top, spacing: 8) {
                         Text(note).font(.system(size: 13)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 4)
+                        // Yours: tidying never changes or removes it.
+                        if !buddyWrittenNotes.contains(note) {
+                            Text("You")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(WispColor.textTertiary)
+                                .nativeTooltip("You added this. Tidying never changes or removes it.")
+                        }
                         BuddyIconButton(symbolName: "trash", label: "Forget this", size: 22) {
                             withAnimation(WispMotion.smooth) { memoryStore.forgetExactFact(note, forBuddyWithID: buddy.id) }
                         }
                     }
                     .padding(.vertical, 2)
                 }
+            }
+        }
+    }
+
+    /// "Tidies its notes · Every 20 messages ▾" and how the last tidy went.
+    private func memoryReviewRow(for buddy: WispBuddy) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Tidies its notes")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(WispColor.textSecondary)
+                Picker("Tidies its notes", selection: Binding(
+                    get: { memoryReviewInterval },
+                    set: { newInterval in
+                        BuddyMemoryReviewInterval.current = newInterval
+                        memoryReviewInterval = newInterval
+                    }
+                )) {
+                    ForEach(BuddyMemoryReviewInterval.allCases) { reviewInterval in
+                        Text(reviewInterval.displayName).tag(reviewInterval)
+                    }
+                }
+                .labelsHidden().pickerStyle(.menu).fixedSize().pointerCursor()
+                .nativeTooltip("For every buddy: after this many of your messages, or a quiet spell, it rereads the chat and updates its own notes")
+            }
+            if memoryReviewer.reviewingBuddyID == buddy.id {
+                Text("Tidying its notes…").font(.system(size: 11)).foregroundStyle(WispColor.textTertiary)
+            } else if let lastSummary = memoryReviewer.lastSummaryByBuddyID[buddy.id] {
+                Text("Last tidied \(lastSummary.reviewedAt.formatted(.relative(presentation: .named))): \(lastSummary.displayText).")
+                    .font(.system(size: 11)).foregroundStyle(WispColor.textTertiary)
             }
         }
     }
