@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wisp: an AI that lives in your Mac's notch</title>
-<meta name="description" content="Hold ⌃⌥ and ask. Wisp sees your screen, points at what matters, and handles the busywork. Private, on-device, open source.">
+<title>Wisp: the AI in your notch that does the busywork</title>
+<meta name="description" content="Hold ⌃⌥ and say it. Wisp drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private, on-device, open source.">
 <meta name="theme-color" content="#0E1116">
 <link rel="canonical" href="https://anaylab.github.io/wisp/">
 <link rel="icon" href="assets/brand/mark-gradient.svg" type="image/svg+xml">
@@ -12,8 +12,8 @@
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://anaylab.github.io/wisp/">
-<meta property="og:title" content="Wisp: an AI that lives in your Mac's notch">
-<meta property="og:description" content="Hold ⌃⌥ and ask. Wisp sees your screen, points at what matters, and handles the busywork. Private, on-device, open source.">
+<meta property="og:title" content="Wisp: the AI in your notch that does the busywork">
+<meta property="og:description" content="Hold ⌃⌥ and say it. Wisp drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private, on-device, open source.">
 <meta property="og:image" content="https://anaylab.github.io/wisp/assets/brand/social-preview.jpg">
 <meta name="twitter:card" content="summary_large_image">
 
@@ -32,6 +32,7 @@
       <span>wisp</span>
     </a>
     <nav class="nav-links" aria-label="Primary">
+      <a href="#buddies">Buddies</a>
       <a href="#features">Features</a>
       <a href="#how">How it works</a>
       <a href="#privacy">Privacy</a>
@@ -53,8 +54,8 @@
   <div class="hero-glow" aria-hidden="true"></div>
   <div class="wrap hero-copy">
     <p class="eyebrow">For Mac · Free · Open source</p>
-    <h1>The AI that lives<br>in your <span class="grad">notch</span>.</h1>
-    <p class="lead">Hold <kbd>⌃</kbd><kbd>⌥</kbd> and ask. Wisp sees your screen, points at what matters, and handles the busywork. Everything runs on your Mac.</p>
+    <h1>The AI in your notch<br>that <span class="grad">does the busywork</span>.</h1>
+    <p class="lead">Hold <kbd>⌃</kbd><kbd>⌥</kbd> and say it. Wisp drafts the email, runs the browser errand, and keeps a team of buddies working on a schedule. All on your Mac, and it asks before anything leaves.</p>
     <div class="cta-row">
       <a class="btn btn-lg" href="#get">Get Wisp</a>
       <a class="btn btn-ghost btn-lg" href="https://github.com/anaylab/wisp">Star on GitHub</a>
@@ -69,16 +70,16 @@
         <span class="notch-text" id="notch-text"></span><span class="caret"></span>
       </div>
       <div class="stage-tabs" role="tablist" aria-label="See Wisp in action">
-        <button role="tab" aria-selected="true" data-i="0">Point</button>
-        <button role="tab" aria-selected="false" data-i="1">Guide</button>
-        <button role="tab" aria-selected="false" data-i="2">Solve</button>
+        <button role="tab" aria-selected="true" data-i="0">Draft</button>
+        <button role="tab" aria-selected="false" data-i="1">Automate</button>
+        <button role="tab" aria-selected="false" data-i="2">Browse</button>
         <button role="tab" aria-selected="false" data-i="3">Tile</button>
-        <button role="tab" aria-selected="false" data-i="4">Browse</button>
-        <button role="tab" aria-selected="false" data-i="5">Draft</button>
+        <button role="tab" aria-selected="false" data-i="4">Guide</button>
+        <button role="tab" aria-selected="false" data-i="5">Solve</button>
       </div>
       <figure class="stage-frame">
-        <img id="stage-img" src="assets/shots/feature-pointing.jpg" alt="A labelled marker on the pi button in Calculator" width="1500" height="1300">
-        <figcaption id="stage-cap">A marker lands on the exact control in about a tenth of a second.</figcaption>
+        <img id="stage-img" src="assets/shots/feature-email.jpg" alt="An editable email draft with Send and Discard" width="1500" height="843">
+        <figcaption id="stage-cap">A finished draft to the right person. Nothing is sent until you press Send.</figcaption>
       </figure>
     </div>
   </div>
@@ -89,8 +90,8 @@
   <div class="wrap pillars">
     <article>
       <span class="pill-num">~0.1s</span>
-      <h2>Instant, not clever</h2>
-      <p>Pointing, window layouts, timers, tab tidying and screen watchers are recognised and run directly. The model only handles what needs thinking.</p>
+      <h2>Instant for everyday jobs</h2>
+      <p>Texting, timers, window layouts, tab tidying, music and screen watchers are recognised and run directly. The model only handles what needs thinking.</p>
     </article>
     <article>
       <span class="pill-num">0</span>
@@ -109,52 +110,105 @@
 <section class="say" aria-label="Things you can say">
   <div class="marquee" aria-hidden="true">
     <ul class="marquee-track">
-      <li>“Where's the export button?”</li>
-      <li>“Put Safari on the left and Xcode on the right”</li>
+      <li>“Draft an email to Sam about moving Friday's meeting”</li>
+      <li>“Text mom I'm running late”</li>
+      <li>“Every weekday at 8, tell me what's due”</li>
       <li>“Tell me when the build finishes”</li>
-      <li>“Walk me through turning on FileVault”</li>
-      <li>“Solve this, step by step”</li>
       <li>“Organize my tabs”</li>
-      <li>“Draft an email to Sam about Friday”</li>
-      <li>“Every morning, summarise what's due today”</li>
-      <li>“Add this page to my brain”</li>
-      <li>“Where's the export button?”</li>
+      <li>“Close duplicate tabs”</li>
       <li>“Put Safari on the left and Xcode on the right”</li>
-      <li>“Tell me when the build finishes”</li>
-      <li>“Walk me through turning on FileVault”</li>
-      <li>“Solve this, step by step”</li>
-      <li>“Organize my tabs”</li>
-      <li>“Draft an email to Sam about Friday”</li>
-      <li>“Every morning, summarise what's due today”</li>
+      <li>“Set a timer for 25 minutes”</li>
       <li>“Add this page to my brain”</li>
+      <li>“Walk me through turning on FileVault”</li>
+      <li>“Draft an email to Sam about moving Friday's meeting”</li>
+      <li>“Text mom I'm running late”</li>
+      <li>“Every weekday at 8, tell me what's due”</li>
+      <li>“Tell me when the build finishes”</li>
+      <li>“Organize my tabs”</li>
+      <li>“Close duplicate tabs”</li>
+      <li>“Put Safari on the left and Xcode on the right”</li>
+      <li>“Set a timer for 25 minutes”</li>
+      <li>“Add this page to my brain”</li>
+      <li>“Walk me through turning on FileVault”</li>
     </ul>
   </div>
   <p class="say-note wrap">Just say it, or tap <kbd>⌃</kbd><kbd>⌥</kbd> to type. Many of these never touch a model at all.</p>
+</section>
+
+<!-- BUDDIES -->
+<section class="buddies" id="buddies">
+  <div class="wrap section-head">
+    <p class="eyebrow">While you're away</p>
+    <h2>A team of buddies<br>that works without you.</h2>
+    <p class="section-sub">Each buddy owns one job, with its own chat, memory, model and tools. They run on a schedule, hand their results to each other, and only interrupt you when something needs your OK.</p>
+  </div>
+  <div class="wrap flow" aria-label="An example hand-off">
+    <div class="node"><b>Briefer</b><span>Checks your calendar at 9:00 every morning</span></div>
+    <span class="arrow" aria-hidden="true">→</span>
+    <div class="node"><b>Writer</b><span>Gets the brief and starts on its own</span></div>
+    <span class="arrow" aria-hidden="true">→</span>
+    <div class="node"><b>You</b><span>Read one answer, approve what matters</span></div>
+  </div>
+  <div class="cards3 wrap">
+    <article><h3>Hand off the answer</h3><p>When one buddy finishes its job, the buddies you picked get the answer and start on their own. A buddy with several inputs waits for all of them.</p></article>
+    <article><h3>Ask the team</h3><p>A buddy can ask up to four teammates at once, split work into side threads, or draft a new teammate. Making one always needs your OK.</p></article>
+    <article><h3>Threads side by side</h3><p>Every chat with a buddy runs on its own. Send a message mid-job and it can steer the work in progress instead of waiting.</p></article>
+    <article><h3>Backup models</h3><p>If a model hits a limit or goes down before answering, the next one takes over. A backup that leaves your Mac is flagged as such.</p></article>
+    <article><h3>A session of its own</h3><p>Run a buddy on your Claude subscription with a kept Claude Code session per conversation, started fresh when it fills up.</p></article>
+    <article><h3>Tidies its own notes</h3><p>Every 20 messages a buddy reviews what it remembered and fixes it. Notes you wrote are never touched.</p></article>
+  </div>
+  <div class="wrap bento team-shots">
+    <figure class="bento-a"><img loading="lazy" src="assets/shots/automations.jpg" alt="The Automations list with a morning brief scheduled every day at 9:00" width="1500" height="919"><figcaption>Say it, “every weekday at 8, tell me what's due”, or pick a template. Scheduled runs only get tools that never prompt.</figcaption></figure>
+    <figure><img loading="lazy" src="assets/shots/buddy-team.jpg" alt="A buddy's settings: how it handles messages while busy, its model, backup models and what it runs on" width="1500" height="919"><figcaption>Each buddy picks its model, its backups, and what happens when you message it mid-job.</figcaption></figure>
+    <figure><img loading="lazy" src="assets/shots/buddies.jpg" alt="A buddy's page with its Tools panel" width="1500" height="919"><figcaption>Limit each buddy to the apps and abilities it needs.</figcaption></figure>
+  </div>
 </section>
 
 <!-- FEATURES -->
 <section class="features" id="features">
   <div class="wrap section-head">
     <p class="eyebrow">What it does</p>
-    <h2>Not a chatbot in a window.<br>A helper that works on your screen.</h2>
+    <h2>Not a chatbot in a window.<br>It finishes the job.</h2>
   </div>
 
   <div class="wrap feature">
     <div class="feature-copy">
-      <span class="tag">Point</span>
-      <h3>Find anything, instantly</h3>
-      <p>Ask where a control is and a pulsing, labelled marker lands on it. Wisp matches your words against the Accessibility tree and on-device OCR, so it works in native apps, terminals, images and remote desktops, on whichever monitor it is on.</p>
-      <ul class="ticks"><li>~0.1s, no vision model needed</li><li>A marker on every match, not a guess</li></ul>
+      <span class="tag">Write</span>
+      <h3>Drafts it. You send it.</h3>
+      <p>“Draft an email to Sam about moving Friday's meeting.” A finished draft opens with Sam's address from Contacts, and you can edit every word. “Text mom I'm running late” finds the right person and shows the message before Messages sends it.</p>
+      <ul class="ticks"><li>Nothing leaves your Mac until you press Send</li><li>Riskier actions show a card you can edit</li></ul>
     </div>
-    <figure class="feature-shot"><img loading="lazy" src="assets/shots/feature-pointing.jpg" alt="Marker on the pi button of Calculator with the notch saying Here's Pi" width="1500" height="1300"></figure>
+    <div class="feature-shot pair">
+      <img loading="lazy" src="assets/shots/feature-email.jpg" alt="An editable email draft with Send and Discard" width="1500" height="843">
+      <img loading="lazy" src="assets/shots/feature-approval.jpg" alt="An approval card to run a Shortcut with Cancel and Allow" width="1500" height="843">
+    </div>
+  </div>
+
+  <div class="wrap feature flip">
+    <div class="feature-copy">
+      <span class="tag">Browse</span>
+      <h3>Runs the errand in your real browser</h3>
+      <p>“Open Wikipedia and search for the Enigma machine.” Wisp works through the page itself, in its own tab (never the one you are reading), then tells you where it landed. “Organize my tabs” groups Chrome by site or topic and closes duplicates.</p>
+      <ul class="ticks"><li>Password and payment fields are refused outright</li><li>Irreversible clicks always ask first</li></ul>
+    </div>
+    <figure class="feature-shot"><img loading="lazy" src="assets/shots/feature-browser.jpg" alt="Chrome on the Enigma machine article with an accurate summary in the notch" width="1500" height="843"></figure>
+  </div>
+
+  <div class="wrap feature">
+    <div class="feature-copy">
+      <span class="tag">Arrange</span>
+      <h3>Tidy your desk by voice</h3>
+      <p>“Put Dictionary on the left and TextEdit on the right.” Halves, quarters, thirds, maximize, center and next display, with no model call and a one-line confirmation in the notch.</p>
+    </div>
+    <figure class="feature-shot"><img loading="lazy" src="assets/shots/feature-windows.jpg" alt="Dictionary tiled on the left and TextEdit on the right" width="1500" height="843"></figure>
   </div>
 
   <div class="wrap feature flip">
     <div class="feature-copy">
       <span class="tag">Guide</span>
-      <h3>Walk through any task, on your real screen</h3>
-      <p>Ask how to do something and Wisp turns the answer into numbered steps over your live screen. It finds each next control again as the screen changes, ticks steps off as you click, and can click for you.</p>
-      <ul class="ticks"><li>A checklist in the notch, a box on the control</li><li>“Do it for me” never touches anything irreversible</li></ul>
+      <h3>Walks you through it, then does it</h3>
+      <p>Ask how to do something and Wisp turns the answer into steps over your live screen. It finds each next control as the screen changes, ticks steps off as you click, and can click for you.</p>
+      <ul class="ticks"><li>“Do it for me” never touches anything irreversible</li><li>Works in any app, on any monitor</li></ul>
     </div>
     <div class="feature-shot pair">
       <img loading="lazy" src="assets/shots/feature-walkthrough.jpg" alt="Step 1: the Bold button is boxed" width="1500" height="873">
@@ -166,7 +220,7 @@
     <div class="feature-copy">
       <span class="tag">Teach</span>
       <h3>Shows its working, right on the page</h3>
-      <p>Point Wisp at a problem and it writes handwritten working beside it, one line at a time, then lets you step through. Save the finished page as a PNG with a Markdown summary.</p>
+      <p>Point Wisp at a problem and it writes the working beside it, one line at a time. Drag a box around one part, or say “explain option C”, and follow-ups stay about that part. Save the page as a PNG with a Markdown summary.</p>
       <ul class="ticks"><li>Math, diagrams, forms, anything on screen</li><li>Step through with a click or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>→</kbd></li></ul>
     </div>
     <div class="feature-shot pair">
@@ -175,88 +229,16 @@
     </div>
   </div>
 
-  <div class="wrap feature flip">
-    <div class="feature-copy">
-      <span class="tag">Focus</span>
-      <h3>Ask about just one part</h3>
-      <p>Drag a box around anything, or say “explain option C”. Wisp highlights exactly what you chose, and follow-ups like “why?” and “next step” stay about that region.</p>
-    </div>
-    <div class="feature-shot pair">
-      <img loading="lazy" src="assets/shots/feature-select-part.jpg" alt="A dimmed screen with a selection box around four buttons" width="1500" height="1300">
-      <img loading="lazy" src="assets/shots/feature-ask-part.jpg" alt="The composer with an About: selected part chip" width="1500" height="1300">
-    </div>
-  </div>
-
-  <div class="wrap feature">
-    <div class="feature-copy">
-      <span class="tag">Arrange</span>
-      <h3>Tidy your desk by voice</h3>
-      <p>“Put Dictionary on the left and TextEdit on the right.” Halves, quarters, thirds, maximize, center and next-display, with no model call and a one-line confirmation in the notch.</p>
-    </div>
-    <figure class="feature-shot"><img loading="lazy" src="assets/shots/feature-windows.jpg" alt="Dictionary tiled on the left and TextEdit on the right" width="1500" height="843"></figure>
-  </div>
-
-  <div class="wrap feature flip">
-    <div class="feature-copy">
-      <span class="tag">Browse</span>
-      <h3>Drives your real browser, politely</h3>
-      <p>“Open Wikipedia and search for the Enigma machine.” Wisp works through the page itself, in its own tab (never the one you are reading), then tells you where it landed.</p>
-      <ul class="ticks"><li>Password and payment fields are refused outright</li><li>Irreversible clicks always ask first</li></ul>
-    </div>
-    <figure class="feature-shot"><img loading="lazy" src="assets/shots/feature-browser.jpg" alt="Chrome on the Enigma machine article with an accurate summary in the notch" width="1500" height="843"></figure>
-  </div>
-
-  <div class="wrap feature">
-    <div class="feature-copy">
-      <span class="tag">Safe</span>
-      <h3>You approve anything that matters</h3>
-      <p>An email request opens an editable draft, and nothing leaves your Mac until you press Send. Riskier actions, like running a Shortcut, show a card with exactly what will happen and a countdown. Edit the wording right on the card.</p>
-    </div>
-    <div class="feature-shot pair">
-      <img loading="lazy" src="assets/shots/feature-email.jpg" alt="An editable email draft with Send and Discard" width="1500" height="843">
-      <img loading="lazy" src="assets/shots/feature-approval.jpg" alt="An approval card to run a Shortcut with Cancel and Allow" width="1500" height="843">
-    </div>
-  </div>
-</section>
-
-<!-- BUDDIES -->
-<section class="buddies">
-  <div class="wrap section-head">
-    <p class="eyebrow">While you're away</p>
-    <h2>Little agents that each own one job.</h2>
-    <p class="section-sub">Buddies have their own thread, memory, model and tool allow-list. Automations run on a schedule or when something happens, and only interrupt you when it matters.</p>
-  </div>
-  <div class="wrap bento">
-    <figure class="bento-a"><img loading="lazy" src="assets/shots/today.jpg" alt="The Today dashboard with buddies, next automations and upcoming events" width="1500" height="919"><figcaption>Today: your buddies, what runs next, what's coming up.</figcaption></figure>
-    <figure><img loading="lazy" src="assets/shots/buddies.jpg" alt="A buddy's page with its Tools panel" width="1500" height="919"><figcaption>Limit each buddy to the apps and abilities it needs.</figcaption></figure>
-    <figure><img loading="lazy" src="assets/shots/automations.jpg" alt="The Automations list" width="1500" height="919"><figcaption>Say it, pick a template, or save an answer as an automation.</figcaption></figure>
-  </div>
   <ul class="chips wrap" aria-label="Also included">
+    <li>Screen watchers: “tell me when it says Done”</li>
+    <li>Canvas deadlines into your calendar</li>
+    <li>A daily checklist in Reminders</li>
+    <li>Timers and music by voice</li>
     <li>Private local brain (Obsidian-compatible)</li>
     <li>500+ apps via MCP &amp; Composio</li>
     <li>Apple Shortcuts</li>
-    <li>Canvas calendar sync</li>
-    <li>Screen watchers</li>
     <li>Learned shortcuts</li>
-    <li>Themes, light &amp; dark</li>
   </ul>
-  <div class="wrap team">
-    <div class="team-head">
-      <p class="eyebrow">New</p>
-      <h3>Now they work as a team.</h3>
-    </div>
-    <div class="bento">
-      <figure class="bento-a"><img loading="lazy" src="assets/shots/buddy-team.jpg" alt="A buddy's settings: how it handles messages while busy, its model, backup models and what it runs on" width="1500" height="919"><figcaption>Each buddy picks its model, its backups, and what happens when you message it mid-job.</figcaption></figure>
-    </div>
-    <div class="cards3">
-      <article><h3>Hand off the answer</h3><p>When the Briefer finishes its morning brief, the Writer gets it and starts on its own. A buddy with several inputs waits for all of them.</p></article>
-      <article><h3>Ask the team</h3><p>A buddy can ask up to four teammates at once, split work into side threads, or draft a new teammate. Making one always needs your OK.</p></article>
-      <article><h3>Threads side by side</h3><p>Every chat with a buddy runs on its own. Send a message mid-job and it can steer the work in progress instead of waiting.</p></article>
-      <article><h3>Backup models</h3><p>If a model hits a limit or goes down before answering, the next one takes over. A backup that leaves your Mac is flagged as such.</p></article>
-      <article><h3>A session of its own</h3><p>Run a buddy on your Claude subscription with a kept Claude Code session per conversation, started fresh when it fills up.</p></article>
-      <article><h3>Tidies its own notes</h3><p>Every 20 messages a buddy reviews what it remembered and fixes it. Notes you wrote are never touched.</p></article>
-    </div>
-  </div>
 </section>
 
 <!-- HOW -->
@@ -279,7 +261,7 @@
     <li>
       <span class="step-n">3</span>
       <h3>It acts, and asks first</h3>
-      <p>Answers appear in the notch, markers land on screen, tools run. Anything irreversible waits for your OK.</p>
+      <p>Answers appear in the notch, drafts open, buddies and tools get to work. Anything irreversible waits for your OK.</p>
     </li>
   </ol>
 </section>
@@ -375,7 +357,7 @@ open leanring-buddy.xcodeproj
 <section class="closing">
   <div class="wrap">
     <img src="assets/brand/mark-gradient.svg" alt="" width="64" height="64">
-    <h2>Stop clicking around.<br>Just ask.</h2>
+    <h2>Stop doing the busywork.<br>Just ask.</h2>
     <div class="cta-row center">
       <a class="btn btn-lg" href="#get">Get Wisp</a>
       <a class="btn btn-ghost btn-lg" href="https://github.com/anaylab/wisp">Star on GitHub</a>
