@@ -157,6 +157,8 @@
   window.addEventListener("scroll", function () {
     if (!ticking) { ticking = true; window.requestAnimationFrame(updateProgress); }
   }, { passive: true });
+  // The first chapter is showing before any scroll, so start its clip now.
+  activate(activeIndex);
   updateProgress();
 })();
 
