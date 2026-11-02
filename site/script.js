@@ -101,3 +101,101 @@
     }
   });
 })();
+
+// A day with Wisp: the chapter in the middle of the screen picks the frame on the right,
+// a clip plays while its chapter is showing, and the bar fills as you scroll the day.
+(function () {
+  var chapters = Array.prototype.slice.call(document.querySelectorAll(".chapter"));
+  var shots = Array.prototype.slice.call(document.querySelectorAll(".story-shot"));
+  var list = document.querySelector(".chapters");
+  var fill = document.getElementById("story-progress-fill");
+  if (!chapters.length || !shots.length) return;
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function videoFor(shot) {
+    var existing = shot.querySelector("video");
+    if (existing || !shot.dataset.video) return existing;
+    var video = document.createElement("video");
+    video.muted = true; video.loop = true; video.playsInline = true; video.preload = "auto";
+    video.setAttribute("aria-hidden", "true");
+    video.src = shot.dataset.video;
+    video.addEventListener("error", function () { video.remove(); });
+    shot.appendChild(video);
+    return video;
+  }
+
+  function activate(index) {
+    chapters.forEach(function (c, k) { c.classList.toggle("is-active", k === index); });
+    shots.forEach(function (shot, k) {
+      var isActive = k === index;
+      shot.classList.toggle("is-active", isActive);
+      var video = isActive && !reduceMotion ? videoFor(shot) : shot.querySelector("video");
+      if (!video) return;
+      if (isActive && !reduceMotion) { video.currentTime = 0; video.play().catch(function () {}); }
+      else video.pause();
+    });
+  }
+
+  var activeIndex = 0;
+  var ticking = false;
+  function updateProgress() {
+    ticking = false;
+    var middle = window.innerHeight / 2;
+    // The chapter whose middle is nearest the middle of the screen is the one showing.
+    var nearestIndex = activeIndex, nearestDistance = Infinity;
+    chapters.forEach(function (c, k) {
+      var box = c.getBoundingClientRect();
+      var distance = Math.abs(box.top + box.height / 2 - middle);
+      if (distance < nearestDistance) { nearestDistance = distance; nearestIndex = k; }
+    });
+    if (nearestIndex !== activeIndex) { activeIndex = nearestIndex; activate(activeIndex); }
+    if (!fill || !list) return;
+    var listBox = list.getBoundingClientRect();
+    var done = (middle - listBox.top) / listBox.height;
+    fill.style.width = (Math.max(0, Math.min(1, done)) * 100).toFixed(1) + "%";
+  }
+  window.addEventListener("scroll", function () {
+    if (!ticking) { ticking = true; window.requestAnimationFrame(updateProgress); }
+  }, { passive: true });
+  updateProgress();
+})();
+
+// Sections rise in as they arrive; the feature cards follow one another.
+(function () {
+  var items = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+  if (!("IntersectionObserver" in window)) { items.forEach(function (el) { el.classList.add("is-in"); }); return; }
+  document.querySelectorAll(".cat-card").forEach(function (card, k) { card.style.setProperty("--reveal-order", k % 4); });
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("is-in");
+      observer.unobserve(entry.target);
+    });
+  }, { rootMargin: "0px 0px -8% 0px" });
+  items.forEach(function (el) { observer.observe(el); });
+})();
+
+// Feature filters, and a soft glow that follows the pointer over a card.
+(function () {
+  var buttons = Array.prototype.slice.call(document.querySelectorAll(".filters button"));
+  var cards = Array.prototype.slice.call(document.querySelectorAll(".cat-card"));
+  var grid = document.getElementById("cat-grid");
+  buttons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      var filter = button.dataset.filter;
+      buttons.forEach(function (b) { b.setAttribute("aria-pressed", b === button ? "true" : "false"); });
+      cards.forEach(function (card) {
+        card.hidden = filter !== "all" && card.dataset.cat !== filter;
+        card.classList.add("is-in");
+      });
+    });
+  });
+  if (!grid) return;
+  grid.addEventListener("pointermove", function (event) {
+    var card = event.target.closest(".cat-card");
+    if (!card) return;
+    var box = card.getBoundingClientRect();
+    card.style.setProperty("--glow-x", (event.clientX - box.left) + "px");
+    card.style.setProperty("--glow-y", (event.clientY - box.top) + "px");
+  });
+})();
