@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wisp: the AI in your notch that does the busywork</title>
 <meta name="description" content="Hold ⌃⌥ and say it. Wisp drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private, on-device, open source.">
-<meta name="theme-color" content="#0E1116">
+<meta name="theme-color" content="#F5F5F7">
 <link rel="canonical" href="https://anaylab.github.io/wisp/">
 <link rel="icon" href="assets/brand/mark-gradient.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/app-icon-256.png">
@@ -19,8 +19,8 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@300;400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=6">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=11">
 <script>document.documentElement.classList.add("js");</script>
 </head>
 <body>
@@ -29,14 +29,12 @@
 <header class="nav" id="top">
   <div class="wrap nav-inner">
     <a class="brand" href="#top" aria-label="Wisp home">
-      <img src="assets/brand/mark-gradient.svg" alt="" width="30" height="30">
+      <img src="assets/brand/mark-gradient.svg" alt="" width="26" height="26">
       <span>wisp</span>
     </a>
     <nav class="nav-links" aria-label="Primary">
       <a href="#day">A day</a>
-      <a href="#buddies">Buddies</a>
       <a href="#features">Features</a>
-      <a href="#how">How it works</a>
       <a href="#privacy">Privacy</a>
       <a href="#faq">FAQ</a>
     </nav>
@@ -51,170 +49,98 @@
 
 <main id="main">
 
-<!-- HERO -->
-<section class="hero">
-  <div class="hero-glow" aria-hidden="true"></div>
-  <div class="wrap hero-copy">
-    <p class="eyebrow">For Mac · Free · Open source</p>
-    <h1>The AI in your notch<br>that <span class="grad">does the busywork</span>.</h1>
-    <p class="lead">Hold <kbd>⌃</kbd><kbd>⌥</kbd> and say it. Wisp drafts the email, runs the browser errand, and keeps a team of buddies working on a schedule. All on your Mac, and it asks before anything leaves.</p>
-    <div class="cta-row">
-      <a class="btn btn-lg" href="#get">Get Wisp</a>
-      <a class="btn btn-ghost btn-lg" href="https://github.com/anaylab/wisp">Star on GitHub</a>
+<!-- HERO: the headline lifts away while the app rises and settles flat, playing the morning as you scroll -->
+<section class="scene hero" data-scene="hero" aria-label="Wisp">
+  <div class="sticky">
+    <div class="hero-copy" data-hero-copy>
+      <p class="eyebrow">Wisp for Mac · Free · Open source</p>
+      <h1>The busywork,<br><span class="ink-grad">handled.</span></h1>
+      <p class="lead">Wisp lives in your Mac's notch. Hold <kbd>⌃</kbd><kbd>⌥</kbd> and say it: it drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private by default.</p>
+      <div class="cta-row">
+        <a class="btn btn-lg" href="#get">Get Wisp</a>
+        <a class="btn btn-quiet btn-lg" href="#day">See a day with it <span aria-hidden="true">↓</span></a>
+      </div>
     </div>
-    <p class="trust">No account · No API key · No analytics · macOS 26+ on Apple silicon</p>
-  </div>
-
-  <div class="wrap stage-wrap">
-    <div class="stage" id="stage">
-      <div class="notch" aria-hidden="true">
-        <img src="assets/brand/mark-gradient.svg" alt="" width="20" height="20">
-        <span class="notch-text" id="notch-text"></span><span class="caret"></span>
-      </div>
-      <div class="stage-tabs" role="tablist" aria-label="See Wisp in action">
-        <button role="tab" aria-selected="true" data-i="0">Draft</button>
-        <button role="tab" aria-selected="false" data-i="1">Automate</button>
-        <button role="tab" aria-selected="false" data-i="2">Browse</button>
-        <button role="tab" aria-selected="false" data-i="3">Tile</button>
-        <button role="tab" aria-selected="false" data-i="4">Guide</button>
-        <button role="tab" aria-selected="false" data-i="5">Solve</button>
-      </div>
-      <figure class="stage-frame">
-        <img id="stage-img" src="assets/shots/feature-email.jpg" alt="An editable email draft with Send and Discard" width="1500" height="843">
-        <figcaption id="stage-cap">A finished draft to the right person. Nothing is sent until you press Send.</figcaption>
+    <div class="device-wrap" data-hero-device>
+      <figure class="device">
+        <img class="poster" src="assets/video/today-first.jpg" alt="Wisp's Today page: a checklist, buddies, what runs next and what's coming up" width="1280" height="789">
+        <video data-scrub muted playsinline preload="auto" src="assets/video/today.mp4" aria-hidden="true"></video>
       </figure>
     </div>
   </div>
 </section>
 
-<!-- PILLARS -->
-<section class="band">
-  <div class="wrap pillars reveal">
-    <article>
-      <span class="pill-num">~0.1s</span>
-      <h2>Instant for everyday jobs</h2>
-      <p>Texting, timers, window layouts, tab tidying, music and screen watchers are recognised and run directly. The model only handles what needs thinking.</p>
-    </article>
-    <article>
-      <span class="pill-num">0</span>
-      <h2>Accounts, keys or analytics</h2>
-      <p>Speech, voice and screen reading run on your Neural Engine. The default model runs locally. Nothing leaves your Mac unless you opt in.</p>
-    </article>
-    <article>
-      <span class="pill-num">Ask</span>
-      <h2>Before it acts</h2>
-      <p>Anything that sends, deletes, pays, posts or runs a command shows a card with exactly what will happen, even with auto-approve on.</p>
-    </article>
+<!-- STATEMENT: words light up as you read -->
+<section class="scene statement" data-scene="words" aria-label="What Wisp is">
+  <div class="sticky">
+    <p class="wrap reveal-words" data-words>Hold two keys and say what you need. Wisp reads your screen, drafts the email, runs the errand, tidies your desk and keeps a team of buddies working while you're away. All of it on your Mac, and it asks before anything leaves.</p>
   </div>
 </section>
 
-<!-- SAY IT -->
-<section class="say" aria-label="Things you can say">
-  <div class="marquee" aria-hidden="true">
-    <ul class="marquee-track">
-      <li>“Draft an email to Sam about moving Friday's meeting”</li>
-      <li>“Text mom I'm running late”</li>
-      <li>“Every weekday at 8, tell me what's due”</li>
-      <li>“Tell me when the build finishes”</li>
-      <li>“Organize my tabs”</li>
-      <li>“Close duplicate tabs”</li>
-      <li>“Put Safari on the left and Xcode on the right”</li>
-      <li>“Set a timer for 25 minutes”</li>
-      <li>“Add this page to my brain”</li>
-      <li>“Walk me through turning on FileVault”</li>
-      <li>“Draft an email to Sam about moving Friday's meeting”</li>
-      <li>“Text mom I'm running late”</li>
-      <li>“Every weekday at 8, tell me what's due”</li>
-      <li>“Tell me when the build finishes”</li>
-      <li>“Organize my tabs”</li>
-      <li>“Close duplicate tabs”</li>
-      <li>“Put Safari on the left and Xcode on the right”</li>
-      <li>“Set a timer for 25 minutes”</li>
-      <li>“Add this page to my brain”</li>
-      <li>“Walk me through turning on FileVault”</li>
-    </ul>
-  </div>
-  <p class="say-note wrap">Just say it, or tap <kbd>⌃</kbd><kbd>⌥</kbd> to type. Many of these never touch a model at all.</p>
-</section>
-
-<!-- A DAY WITH WISP -->
-<section class="story" id="day" aria-label="A day with Wisp">
-  <div class="wrap section-head reveal">
-    <p class="eyebrow">A day with Wisp</p>
-    <h2>From the first alarm<br>to the last assignment.</h2>
-    <p class="section-sub">Scroll through one ordinary day. Every screen is the real app.</p>
-  </div>
-  <div class="wrap story-grid">
-    <ol class="chapters">
-    <li class="chapter is-active" data-step="0">
-      <span class="chapter-time">7:30</span>
-      <h3>Your day, already planned</h3>
-      <p>Canvas deadlines and calendar events become one checklist in Reminders before you're up. Today shows it beside what your buddies are doing and what's coming next.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/shots/today-day.jpg" alt="Today: the checklist, buddies, what runs next and what's coming up" width="1500" height="919"></figure>
-    </li>
-    <li class="chapter" data-step="1">
-      <span class="chapter-time">9:00</span>
-      <h3>The Briefer reads your calendar</h3>
-      <p>A buddy on a schedule checks what's on today and writes three lines on what matters. No prompt, no tab to open.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/shots/buddy-handoff.jpg" alt="The Briefer's morning brief and its hand-off to the Writer" width="1500" height="919"></figure>
-    </li>
-    <li class="chapter" data-step="2">
-      <span class="chapter-time">9:01</span>
-      <h3>…and hands it to the Writer</h3>
-      <p>The Writer gets the brief on its own and turns the lab report into a plan you can follow between classes.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/shots/buddy-writer.jpg" alt="The Writer's chat: the brief from the Briefer, then a plan" width="1500" height="919"></figure>
-    </li>
-    <li class="chapter" data-step="3">
-      <span class="chapter-time">9:05</span>
-      <h3>Say it once. It runs every weekday.</h3>
-      <p>“Every weekday at 8, tell me what's due.” Wisp turns it into an automation card you can check before saving, and says plainly when something would leave your Mac.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/video/automate.jpg" alt="An automation draft card: every weekday at 8:00 AM, Canvas deadlines, to a notch card" width="1440" height="888"></figure>
-    </li>
-    <li class="chapter" data-step="4">
-      <span class="chapter-time">10:15</span>
-      <h3>An email, drafted</h3>
-      <p>“Draft an email to Sam about moving Thursday's session.” A finished draft opens, addressed from Contacts. Nothing leaves until you press Send.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/shots/feature-email.jpg" alt="An editable email draft with Send and Discard" width="1500" height="843"></figure>
-    </li>
-    <li class="chapter" data-step="5">
-      <span class="chapter-time">12:40</span>
-      <h3>An errand in your browser</h3>
-      <p>“Open Wikipedia and search for the Enigma machine.” Wisp works in its own tab, never yours, and tells you where it landed.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/shots/feature-browser.jpg" alt="Chrome on the Enigma machine article with a summary in the notch" width="1500" height="843"></figure>
-    </li>
-    <li class="chapter" data-step="6">
-      <span class="chapter-time">2:00</span>
-      <h3>Your desk, tidied by voice</h3>
-      <p>“Put Dictionary on the left and TextEdit on the right.” Done in a tenth of a second, with no model call.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/shots/feature-windows.jpg" alt="Dictionary tiled left and TextEdit right" width="1500" height="843"></figure>
-    </li>
-    <li class="chapter" data-step="7">
-      <span class="chapter-time">4:30</span>
-      <h3>Stuck? It walks you through</h3>
-      <p>Wisp turns how-to answers into steps on your real screen, ticks them off as you click, and can click for you.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/shots/feature-walkthrough.jpg" alt="A numbered checklist in the notch and a box on the Bold button" width="1500" height="873"></figure>
-    </li>
-    <li class="chapter" data-step="8">
-      <span class="chapter-time">8:00</span>
-      <h3>Homework, worked on the page</h3>
-      <p>Point it at a problem and it writes the working beside it, line by line, then lets you step through.</p>
-      <figure class="chapter-media"><img loading="lazy" src="assets/shots/feature-math.jpg" alt="Handwritten working beside 3x + 7 = 22, ending in x = 5" width="1500" height="843"></figure>
-    </li>
-    </ol>
-    <div class="story-stage" aria-hidden="true">
-      <div class="story-progress"><span id="story-progress-fill"></span></div>
-      <div class="story-frame">
-      <figure class="story-shot is-active" data-step="0" data-video="assets/video/today.mp4"><img src="assets/shots/today-day.jpg" alt="Today: the checklist, buddies, what runs next and what's coming up" width="1500" height="919"></figure>
-      <figure class="story-shot" data-step="1" data-video="assets/video/handoff.mp4"><img loading="lazy" src="assets/shots/buddy-handoff.jpg" alt="The Briefer's morning brief and its hand-off to the Writer" width="1500" height="919"></figure>
-      <figure class="story-shot" data-step="2"><img loading="lazy" src="assets/shots/buddy-writer.jpg" alt="The Writer's chat: the brief from the Briefer, then a plan" width="1500" height="919"></figure>
-      <figure class="story-shot" data-step="3" data-video="assets/video/automate.mp4"><img loading="lazy" src="assets/video/automate.jpg" alt="An automation draft card: every weekday at 8:00 AM, Canvas deadlines, to a notch card" width="1440" height="888"></figure>
-      <figure class="story-shot" data-step="4"><img loading="lazy" src="assets/shots/feature-email.jpg" alt="An editable email draft with Send and Discard" width="1500" height="843"></figure>
-      <figure class="story-shot" data-step="5"><img loading="lazy" src="assets/shots/feature-browser.jpg" alt="Chrome on the Enigma machine article with a summary in the notch" width="1500" height="843"></figure>
-      <figure class="story-shot" data-step="6"><img loading="lazy" src="assets/shots/feature-windows.jpg" alt="Dictionary tiled left and TextEdit right" width="1500" height="843"></figure>
-      <figure class="story-shot" data-step="7"><img loading="lazy" src="assets/shots/feature-walkthrough.jpg" alt="A numbered checklist in the notch and a box on the Bold button" width="1500" height="873"></figure>
-      <figure class="story-shot" data-step="8"><img loading="lazy" src="assets/shots/feature-math.jpg" alt="Handwritten working beside 3x + 7 = 22, ending in x = 5" width="1500" height="843"></figure>
+<!-- A DAY: cinematic black scenes, each clip scrubbed by scroll -->
+<div id="day" class="cinema">
+  <section class="scene film" data-scene="film" aria-label="The Briefer hands its brief to the Writer">
+    <div class="sticky">
+      <div class="film-head">
+        <span class="clock" data-clock>9:00 AM</span>
+        <div class="film-bar"><span data-bar></span></div>
       </div>
+      <figure class="device dark">
+        <img class="poster" src="assets/video/handoff-first.jpg" alt="The Briefer's morning brief, then the Writer's plan for the lab report" width="1280" height="789">
+        <video data-scrub muted playsinline preload="auto" src="assets/video/handoff.mp4" aria-hidden="true"></video>
+      </figure>
+      <ol class="captions" data-captions>
+        <li data-at="0" data-clock-text="9:00 AM"><h2>The Briefer reads your calendar.</h2><p>A buddy on a schedule writes three lines on what matters today. No prompt, no tab to open.</p></li>
+        <li data-at="0.38" data-clock-text="9:01 AM"><h2>Then it hands the brief on.</h2><p>Its answer goes to the Writer, who starts on its own.</p></li>
+        <li data-at="0.68" data-clock-text="9:01 AM"><h2>And you get a plan.</h2><p>The lab report, split into four steps that fit around your day.</p></li>
+      </ol>
     </div>
+  </section>
+
+  <section class="scene film" data-scene="film" aria-label="Saying an automation">
+    <div class="sticky">
+      <div class="film-head">
+        <span class="clock" data-clock>9:05 AM</span>
+        <div class="film-bar"><span data-bar></span></div>
+      </div>
+      <figure class="device dark">
+        <img class="poster" src="assets/video/automate-first.jpg" alt="Typing an automation and the draft card it becomes" width="1280" height="789">
+        <video data-scrub muted playsinline preload="auto" src="assets/video/automate.mp4" aria-hidden="true"></video>
+      </figure>
+      <ol class="captions" data-captions>
+        <li data-at="0" data-clock-text="9:05 AM"><h2>Say it once.</h2><p>“Every weekday at 8, tell me what's due.”</p></li>
+        <li data-at="0.45" data-clock-text="9:05 AM"><h2>It becomes a card you can check.</h2><p>When it runs, what it reads, where the answer goes and which buddy owns it.</p></li>
+        <li data-at="0.75" data-clock-text="9:05 AM"><h2>And it says what leaves your Mac.</h2><p>Nothing private goes to a cloud model until you allow it.</p></li>
+      </ol>
+    </div>
+  </section>
+</div>
+
+<!-- REEL: the everyday jobs slide past sideways as you scroll down -->
+<section class="scene reel" data-scene="reel" aria-label="Everyday jobs">
+  <div class="sticky">
+    <div class="wrap reel-head">
+      <p class="eyebrow">The rest of the day</p>
+      <h2>And the everyday jobs.</h2>
+    </div>
+    <div class="reel-track" data-track>
+      <figure class="reel-card"><div class="reel-media"><img loading="lazy" src="assets/video/reel-email.jpg" alt="An editable email draft with Send and Discard" width="1280" height="720"><video data-flow muted playsinline loop preload="none" src="assets/video/reel-email.mp4" aria-hidden="true"></video></div><figcaption><b>10:15 · Email, drafted.</b> Addressed from Contacts. Nothing sends until you press Send.</figcaption></figure>
+      <figure class="reel-card"><div class="reel-media"><img loading="lazy" src="assets/video/reel-browser.jpg" alt="Chrome on the Enigma machine article with a summary in the notch" width="1280" height="720"><video data-flow muted playsinline loop preload="none" src="assets/video/reel-browser.mp4" aria-hidden="true"></video></div><figcaption><b>12:40 · An errand in your browser.</b> In its own tab, never yours, and it says where it landed.</figcaption></figure>
+      <figure class="reel-card"><div class="reel-media"><img loading="lazy" src="assets/video/reel-windows.jpg" alt="Dictionary tiled left and TextEdit right" width="1280" height="720"><video data-flow muted playsinline loop preload="none" src="assets/video/reel-windows.mp4" aria-hidden="true"></video></div><figcaption><b>2:00 · Desk, tidied.</b> “Put Dictionary on the left and TextEdit on the right.”</figcaption></figure>
+      <figure class="reel-card"><div class="reel-media"><img loading="lazy" src="assets/video/reel-guide.jpg" alt="A numbered checklist in the notch and a box on the Bold button" width="1280" height="720"><video data-flow muted playsinline loop preload="none" src="assets/video/reel-guide.mp4" aria-hidden="true"></video></div><figcaption><b>4:30 · Walked through it.</b> Steps on your real screen, ticked off as you click.</figcaption></figure>
+      <figure class="reel-card"><div class="reel-media"><img loading="lazy" src="assets/video/reel-math.jpg" alt="Handwritten working beside 3x + 7 = 22, ending in x = 5" width="1280" height="720"><video data-flow muted playsinline loop preload="none" src="assets/video/reel-math.mp4" aria-hidden="true"></video></div><figcaption><b>8:00 · Homework, worked.</b> The working, written beside the problem line by line.</figcaption></figure>
+      <figure class="reel-card"><div class="reel-media"><img loading="lazy" src="assets/video/reel-approval.jpg" alt="An approval card to run a Shortcut with Cancel and Allow" width="1280" height="720"><video data-flow muted playsinline loop preload="none" src="assets/video/reel-approval.mp4" aria-hidden="true"></video></div><figcaption><b>Always · You approve what matters.</b> Sending, deleting and paying always show a card first.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- NUMBERS -->
+<section class="numbers" aria-label="Wisp in numbers">
+  <div class="wrap numbers-grid">
+    <div class="stat reveal"><span class="stat-n" data-count="34">34</span><span class="stat-l">things it does today</span></div>
+    <div class="stat reveal"><span class="stat-n">0.1<small>s</small></span><span class="stat-l">for window layouts, timers and tabs</span></div>
+    <div class="stat reveal"><span class="stat-n" data-count="0">0</span><span class="stat-l">accounts, keys or analytics</span></div>
+    <div class="stat reveal"><span class="stat-n" data-count="25">25</span><span class="stat-l">languages, heard on-device</span></div>
   </div>
 </section>
 
@@ -222,32 +148,24 @@
 <section class="buddies" id="buddies">
   <div class="wrap section-head reveal">
     <p class="eyebrow">While you're away</p>
-    <h2>A team of buddies<br>that works without you.</h2>
+    <h2>A team that works<br>without you.</h2>
     <p class="section-sub">Each buddy owns one job, with its own chat, memory, model and tools. They run on a schedule, hand their results to each other, and only interrupt you when something needs your OK.</p>
   </div>
-  <div class="wrap flow reveal" aria-label="An example hand-off">
-    <div class="node"><b>Briefer</b><span>Checks your calendar at 9:00 every morning</span></div>
-    <span class="arrow" aria-hidden="true">→</span>
-    <div class="node"><b>Writer</b><span>Gets the brief and starts on its own</span></div>
-    <span class="arrow" aria-hidden="true">→</span>
-    <div class="node"><b>You</b><span>Read one answer, approve what matters</span></div>
-  </div>
-  <div class="cards3 wrap reveal">
-    <article><h3>Hand off the answer</h3><p>When one buddy finishes its job, the buddies you picked get the answer and start on their own. A buddy with several inputs waits for all of them.</p></article>
-    <article><h3>Ask the team</h3><p>A buddy can ask up to four teammates at once, split work into side threads, or draft a new teammate. Making one always needs your OK.</p></article>
-    <article><h3>Threads side by side</h3><p>Every chat with a buddy runs on its own. Send a message mid-job and it can steer the work in progress instead of waiting.</p></article>
-    <article><h3>Backup models</h3><p>If a model hits a limit or goes down before answering, the next one takes over. A backup that leaves your Mac is flagged as such.</p></article>
-    <article><h3>A session of its own</h3><p>Run a buddy on your Claude subscription with a kept Claude Code session per conversation, started fresh when it fills up.</p></article>
-    <article><h3>Tidies its own notes</h3><p>Every 20 messages a buddy reviews what it remembered and fixes it. Notes you wrote are never touched.</p></article>
+  <div class="wrap bento reveal">
+    <article class="tile tile-wide"><h3>Hand off the answer</h3><p>When one buddy finishes its job, the buddies you picked get the answer and start on their own. A buddy with several inputs waits for all of them.</p></article>
+    <article class="tile"><h3>Ask the team</h3><p>Ask up to four teammates at once, split work into side threads, or draft a new teammate with your OK.</p></article>
+    <article class="tile"><h3>Threads side by side</h3><p>Every chat runs on its own. A message sent mid-job can steer the work in progress.</p></article>
+    <article class="tile"><h3>Backup models</h3><p>If a model hits a limit or goes down, the next one takes over.</p></article>
+    <article class="tile"><h3>A session of its own</h3><p>Run a buddy on your Claude subscription with a kept session per conversation.</p></article>
+    <article class="tile tile-wide"><h3>Tidies its own notes</h3><p>Every 20 messages a buddy reviews what it remembered and fixes it. Notes you wrote are never touched.</p></article>
   </div>
 </section>
 
 <!-- EVERYTHING -->
 <section class="everything" id="features">
   <div class="wrap section-head reveal">
-    <p class="eyebrow">What it does</p>
+    <p class="eyebrow">Everything it does</p>
     <h2>Not a chatbot in a window.<br>It finishes the job.</h2>
-    <p class="section-sub">34 things Wisp does today. Pick a kind to narrow it down.</p>
   </div>
   <div class="wrap">
     <div class="filters" role="group" aria-label="Filter features">
@@ -260,99 +178,64 @@
       <button type="button" aria-pressed="false" data-filter="connect">Connect</button>
     </div>
     <div class="cat-grid" id="cat-grid">
-    <article class="cat-card reveal" data-cat="do"><span class="cat-tag">Do</span><h3>Draft emails</h3><p>An editable draft, addressed from Contacts. Nothing sends until you press Send.</p></article>
-    <article class="cat-card reveal" data-cat="do"><span class="cat-tag">Do</span><h3>Text people</h3><p>“Text mom I'm running late” finds the right person and shows the message first.</p></article>
-    <article class="cat-card reveal" data-cat="do"><span class="cat-tag">Do</span><h3>Browser errands</h3><p>Works through pages in its own tab and asks before anything irreversible.</p></article>
-    <article class="cat-card reveal" data-cat="do"><span class="cat-tag">Do</span><h3>Tidy Chrome tabs</h3><p>Groups tabs by site or topic and closes duplicates.</p></article>
-    <article class="cat-card reveal" data-cat="do"><span class="cat-tag">Do</span><h3>Arrange windows</h3><p>Halves, quarters, thirds, maximize, next display. No model call.</p></article>
-    <article class="cat-card reveal" data-cat="do"><span class="cat-tag">Do</span><h3>Timers and music</h3><p>“Set a timer for 25 minutes.” “Pause the music.” Instantly.</p></article>
-    <article class="cat-card reveal" data-cat="do"><span class="cat-tag">Do</span><h3>Apple Shortcuts</h3><p>Runs your Shortcuts by name, always with your OK.</p></article>
-    <article class="cat-card reveal" data-cat="do"><span class="cat-tag">Do</span><h3>Native apps</h3><p>Clicks and types in Mac apps through cua-driver, with each action shown first.</p></article>
-    <article class="cat-card reveal" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Point at anything</h3><p>A labelled marker on the control you asked about, in about a tenth of a second.</p></article>
-    <article class="cat-card reveal" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Guided walkthroughs</h3><p>Steps on your live screen, ticked off as you click, or done for you.</p></article>
-    <article class="cat-card reveal" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Working on the page</h3><p>Handwritten steps beside a problem, one line at a time. Save it as a PNG.</p></article>
-    <article class="cat-card reveal" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Note cards</h3><p>Explanations on movable cards you can ask follow-ups on.</p></article>
-    <article class="cat-card reveal" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Ask about one part</h3><p>Drag a box around anything, or say “explain option C”.</p></article>
-    <article class="cat-card reveal" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Screen watchers</h3><p>“Tell me when the build finishes.” A notification when it does.</p></article>
-    <article class="cat-card reveal" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Glance cards</h3><p>Weather, places nearby, calendar, reminders and timers, right in the notch.</p></article>
-    <article class="cat-card reveal" data-cat="plan"><span class="cat-tag">Plan</span><h3>Canvas to calendar</h3><p>Your Canvas deadlines in a Wisp calendar, synced every hour.</p></article>
-    <article class="cat-card reveal" data-cat="plan"><span class="cat-tag">Plan</span><h3>Daily checklist</h3><p>Due dates and events in Reminders, with unfinished items rolled over.</p></article>
-    <article class="cat-card reveal" data-cat="plan"><span class="cat-tag">Plan</span><h3>Study blocks</h3><p>Focus time proposed in your free gaps. Nothing is written without your OK.</p></article>
-    <article class="cat-card reveal" data-cat="plan"><span class="cat-tag">Plan</span><h3>Study mode</h3><p>A focus timer in the notch that hides distracting apps and sites.</p></article>
-    <article class="cat-card reveal" data-cat="plan"><span class="cat-tag">Plan</span><h3>Automations</h3><p>Say it, pick a template, or save an answer. Runs on a schedule or an event.</p></article>
-    <article class="cat-card reveal" data-cat="team"><span class="cat-tag">Team</span><h3>Buddies</h3><p>Named agents with their own job, chat, memory, model and tools.</p></article>
-    <article class="cat-card reveal" data-cat="team"><span class="cat-tag">Team</span><h3>Hand-offs</h3><p>One buddy's finished answer starts the next.</p></article>
-    <article class="cat-card reveal" data-cat="team"><span class="cat-tag">Team</span><h3>Ask the team</h3><p>Ask several buddies at once, or split work into side threads.</p></article>
-    <article class="cat-card reveal" data-cat="team"><span class="cat-tag">Team</span><h3>Group chats</h3><p>Several buddies in one chat. @name picks who answers.</p></article>
-    <article class="cat-card reveal" data-cat="team"><span class="cat-tag">Team</span><h3>Workflows</h3><p>Draw buddies, conditions and approvals as a flow on a canvas.</p></article>
-    <article class="cat-card reveal" data-cat="team"><span class="cat-tag">Team</span><h3>Backup models</h3><p>If a model is down or out of credit, the next one takes over.</p></article>
-    <article class="cat-card reveal" data-cat="remember"><span class="cat-tag">Remember</span><h3>Private brain</h3><p>A local wiki in Obsidian format, built from your files and conversations.</p></article>
-    <article class="cat-card reveal" data-cat="remember"><span class="cat-tag">Remember</span><h3>Buddy memory</h3><p>Each buddy keeps its own notes and tidies them. Yours are never touched.</p></article>
-    <article class="cat-card reveal" data-cat="remember"><span class="cat-tag">Remember</span><h3>Learned shortcuts</h3><p>Save a finished task and replay it later without the model.</p></article>
-    <article class="cat-card reveal" data-cat="remember"><span class="cat-tag">Remember</span><h3>Usage log</h3><p>Tokens and cost per turn. Counts only, never content.</p></article>
-    <article class="cat-card reveal" data-cat="connect"><span class="cat-tag">Connect</span><h3>Any model</h3><p>Ollama, Apple on-device, Claude, GPT, Gemini, Grok or OpenRouter.</p></article>
-    <article class="cat-card reveal" data-cat="connect"><span class="cat-tag">Connect</span><h3>500+ apps</h3><p>MCP servers and Composio for Gmail, GitHub, Notion and more.</p></article>
-    <article class="cat-card reveal" data-cat="connect"><span class="cat-tag">Connect</span><h3>Dictation</h3><p>Hold <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⇧</kbd> to type by voice into any app, on-device.</p></article>
-    <article class="cat-card reveal" data-cat="connect"><span class="cat-tag">Connect</span><h3>Hands-free</h3><p>Double-tap <kbd>⌃</kbd> and talk without holding a key.</p></article>
+    <article class="cat-card" data-cat="do"><span class="cat-tag">Do</span><h3>Draft emails</h3><p>An editable draft, addressed from Contacts. Nothing sends until you press Send.</p></article>
+    <article class="cat-card" data-cat="do"><span class="cat-tag">Do</span><h3>Text people</h3><p>“Text mom I'm running late” finds the right person and shows the message first.</p></article>
+    <article class="cat-card" data-cat="do"><span class="cat-tag">Do</span><h3>Browser errands</h3><p>Works through pages in its own tab and asks before anything irreversible.</p></article>
+    <article class="cat-card" data-cat="do"><span class="cat-tag">Do</span><h3>Tidy Chrome tabs</h3><p>Groups tabs by site or topic and closes duplicates.</p></article>
+    <article class="cat-card" data-cat="do"><span class="cat-tag">Do</span><h3>Arrange windows</h3><p>Halves, quarters, thirds, maximize, next display. No model call.</p></article>
+    <article class="cat-card" data-cat="do"><span class="cat-tag">Do</span><h3>Timers and music</h3><p>“Set a timer for 25 minutes.” “Pause the music.” Instantly.</p></article>
+    <article class="cat-card" data-cat="do"><span class="cat-tag">Do</span><h3>Apple Shortcuts</h3><p>Runs your Shortcuts by name, always with your OK.</p></article>
+    <article class="cat-card" data-cat="do"><span class="cat-tag">Do</span><h3>Native apps</h3><p>Clicks and types in Mac apps through cua-driver, with each action shown first.</p></article>
+    <article class="cat-card" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Point at anything</h3><p>A labelled marker on the control you asked about, in about a tenth of a second.</p></article>
+    <article class="cat-card" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Guided walkthroughs</h3><p>Steps on your live screen, ticked off as you click, or done for you.</p></article>
+    <article class="cat-card" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Working on the page</h3><p>Handwritten steps beside a problem, one line at a time. Save it as a PNG.</p></article>
+    <article class="cat-card" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Note cards</h3><p>Explanations on movable cards you can ask follow-ups on.</p></article>
+    <article class="cat-card" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Ask about one part</h3><p>Drag a box around anything, or say “explain option C”.</p></article>
+    <article class="cat-card" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Screen watchers</h3><p>“Tell me when the build finishes.” A notification when it does.</p></article>
+    <article class="cat-card" data-cat="see"><span class="cat-tag">See &amp; show</span><h3>Glance cards</h3><p>Weather, places nearby, calendar, reminders and timers, right in the notch.</p></article>
+    <article class="cat-card" data-cat="plan"><span class="cat-tag">Plan</span><h3>Canvas to calendar</h3><p>Your Canvas deadlines in a Wisp calendar, synced every hour.</p></article>
+    <article class="cat-card" data-cat="plan"><span class="cat-tag">Plan</span><h3>Daily checklist</h3><p>Due dates and events in Reminders, with unfinished items rolled over.</p></article>
+    <article class="cat-card" data-cat="plan"><span class="cat-tag">Plan</span><h3>Study blocks</h3><p>Focus time proposed in your free gaps. Nothing is written without your OK.</p></article>
+    <article class="cat-card" data-cat="plan"><span class="cat-tag">Plan</span><h3>Study mode</h3><p>A focus timer in the notch that hides distracting apps and sites.</p></article>
+    <article class="cat-card" data-cat="plan"><span class="cat-tag">Plan</span><h3>Automations</h3><p>Say it, pick a template, or save an answer. Runs on a schedule or an event.</p></article>
+    <article class="cat-card" data-cat="team"><span class="cat-tag">Team</span><h3>Buddies</h3><p>Named agents with their own job, chat, memory, model and tools.</p></article>
+    <article class="cat-card" data-cat="team"><span class="cat-tag">Team</span><h3>Hand-offs</h3><p>One buddy's finished answer starts the next.</p></article>
+    <article class="cat-card" data-cat="team"><span class="cat-tag">Team</span><h3>Ask the team</h3><p>Ask several buddies at once, or split work into side threads.</p></article>
+    <article class="cat-card" data-cat="team"><span class="cat-tag">Team</span><h3>Group chats</h3><p>Several buddies in one chat. @name picks who answers.</p></article>
+    <article class="cat-card" data-cat="team"><span class="cat-tag">Team</span><h3>Workflows</h3><p>Draw buddies, conditions and approvals as a flow on a canvas.</p></article>
+    <article class="cat-card" data-cat="team"><span class="cat-tag">Team</span><h3>Backup models</h3><p>If a model is down or out of credit, the next one takes over.</p></article>
+    <article class="cat-card" data-cat="remember"><span class="cat-tag">Remember</span><h3>Private brain</h3><p>A local wiki in Obsidian format, built from your files and conversations.</p></article>
+    <article class="cat-card" data-cat="remember"><span class="cat-tag">Remember</span><h3>Buddy memory</h3><p>Each buddy keeps its own notes and tidies them. Yours are never touched.</p></article>
+    <article class="cat-card" data-cat="remember"><span class="cat-tag">Remember</span><h3>Learned shortcuts</h3><p>Save a finished task and replay it later without the model.</p></article>
+    <article class="cat-card" data-cat="remember"><span class="cat-tag">Remember</span><h3>Usage log</h3><p>Tokens and cost per turn. Counts only, never content.</p></article>
+    <article class="cat-card" data-cat="connect"><span class="cat-tag">Connect</span><h3>Any model</h3><p>Ollama, Apple on-device, Claude, GPT, Gemini, Grok or OpenRouter.</p></article>
+    <article class="cat-card" data-cat="connect"><span class="cat-tag">Connect</span><h3>500+ apps</h3><p>MCP servers and Composio for Gmail, GitHub, Notion and more.</p></article>
+    <article class="cat-card" data-cat="connect"><span class="cat-tag">Connect</span><h3>Dictation</h3><p>Hold <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⇧</kbd> to type by voice into any app, on-device.</p></article>
+    <article class="cat-card" data-cat="connect"><span class="cat-tag">Connect</span><h3>Hands-free</h3><p>Double-tap <kbd>⌃</kbd> and talk without holding a key.</p></article>
     </div>
   </div>
-</section>
-
-<!-- HOW -->
-<section class="how" id="how">
-  <div class="wrap section-head reveal">
-    <p class="eyebrow">How it works</p>
-    <h2>Hold. Speak. Done.</h2>
-  </div>
-  <ol class="wrap steps reveal">
-    <li>
-      <span class="step-n">1</span>
-      <h3>Hold <kbd>⌃</kbd><kbd>⌥</kbd> and talk</h3>
-      <p>From any app. Tap instead to type, or double-tap <kbd>⌃</kbd> for hands-free. Your words are transcribed on the Neural Engine, in 25 languages.</p>
-    </li>
-    <li>
-      <span class="step-n">2</span>
-      <h3>Wisp looks and decides</h3>
-      <p>Rigid requests run directly. Everything else goes to your model with a small screenshot, the Accessibility tree and on-screen text.</p>
-    </li>
-    <li>
-      <span class="step-n">3</span>
-      <h3>It acts, and asks first</h3>
-      <p>Answers appear in the notch, drafts open, buddies and tools get to work. Anything irreversible waits for your OK.</p>
-    </li>
-  </ol>
 </section>
 
 <!-- PRIVACY -->
 <section class="privacy" id="privacy">
   <div class="wrap section-head reveal">
     <p class="eyebrow">Privacy</p>
-    <h2>Your Mac is the whole pipeline.</h2>
+    <h2>Your Mac is the<br>whole pipeline.</h2>
     <p class="section-sub">By default, nothing about your screen, voice or words leaves this machine.</p>
   </div>
-  <div class="wrap flow" aria-label="Where data goes">
-    <div class="node"><b>Your voice</b><span>Parakeet, on the Neural Engine</span></div>
-    <span class="arrow" aria-hidden="true">→</span>
-    <div class="node"><b>Your screen</b><span>Accessibility + Vision OCR, on-device</span></div>
-    <span class="arrow" aria-hidden="true">→</span>
-    <div class="node"><b>Your model</b><span>Ollama on localhost</span></div>
-    <span class="arrow" aria-hidden="true">→</span>
-    <div class="node"><b>Your answer</b><span>Kokoro voice, on-device</span></div>
+  <div class="wrap pipeline" data-pipeline>
+    <div class="pipe-line"><span data-pipe-fill></span></div>
+    <div class="pipe-node"><b>Your voice</b><span>Parakeet, on the Neural Engine</span></div>
+    <div class="pipe-node"><b>Your screen</b><span>Accessibility and Vision OCR</span></div>
+    <div class="pipe-node"><b>Your model</b><span>Ollama on localhost</span></div>
+    <div class="pipe-node"><b>Your answer</b><span>Kokoro voice, on-device</span></div>
   </div>
-  <div class="wrap cards3">
+  <div class="wrap cards3 reveal">
     <article><h3>Local first</h3><p>The default model runs on your Mac through Ollama. Brain pages are plain markdown files on your disk.</p></article>
     <article><h3>Cloud is opt-in</h3><p>Claude, GPT and Gemini are bring-your-own-key, or use your Claude subscription. Wisp labels clearly when a screenshot would leave your Mac.</p></article>
     <article><h3>Nothing to track you</h3><p>No account, no analytics code, no telemetry. Keys and feed URLs live in your login Keychain. The usage log keeps counts, never content.</p></article>
   </div>
-</section>
-
-<!-- MODELS -->
-<section class="models">
-  <div class="wrap section-head reveal">
-    <p class="eyebrow">Your model, your call</p>
-    <h2>Run it local. Or bring your own.</h2>
-  </div>
-  <ul class="wrap provider-row">
+  <ul class="wrap provider-row reveal" aria-label="Models">
     <li><b>Ollama</b><span>Default · on your Mac</span></li>
     <li><b>Apple on-device</b><span>On your Mac</span></li>
     <li><b>Claude</b><span>Your key or subscription</span></li>
@@ -375,7 +258,7 @@
       </ul>
       <div class="cta-row">
         <a class="btn btn-lg" href="https://github.com/anaylab/wisp">View on GitHub</a>
-        <a class="btn btn-ghost btn-lg" href="https://github.com/anaylab/wisp#readme">Read the docs</a>
+        <a class="btn btn-quiet btn-lg" href="https://github.com/anaylab/wisp#readme">Read the docs</a>
       </div>
     </div>
     <div class="code" role="group" aria-label="Install commands">
@@ -412,12 +295,12 @@ open leanring-buddy.xcodeproj
 
 <!-- CLOSING -->
 <section class="closing">
-  <div class="wrap">
-    <img src="assets/brand/mark-gradient.svg" alt="" width="64" height="64">
-    <h2>Stop doing the busywork.<br>Just ask.</h2>
+  <div class="wrap reveal">
+    <img src="assets/brand/mark-gradient.svg" alt="" width="72" height="72">
+    <h2>Stop doing the busywork.<br><span class="ink-grad">Just ask.</span></h2>
     <div class="cta-row center">
       <a class="btn btn-lg" href="#get">Get Wisp</a>
-      <a class="btn btn-ghost btn-lg" href="https://github.com/anaylab/wisp">Star on GitHub</a>
+      <a class="btn btn-quiet btn-lg" href="https://github.com/anaylab/wisp">Star on GitHub</a>
     </div>
   </div>
 </section>
@@ -426,7 +309,7 @@ open leanring-buddy.xcodeproj
 
 <footer class="footer">
   <div class="wrap footer-inner">
-    <a class="brand" href="#top" aria-label="Wisp home"><img src="assets/brand/mark-gradient.svg" alt="" width="24" height="24"><span>wisp</span></a>
+    <a class="brand" href="#top" aria-label="Wisp home"><img src="assets/brand/mark-gradient.svg" alt="" width="22" height="22"><span>wisp</span></a>
     <nav aria-label="Footer">
       <a href="https://github.com/anaylab/wisp">GitHub</a>
       <a href="https://github.com/anaylab/wisp#readme">Docs</a>
@@ -438,6 +321,6 @@ open leanring-buddy.xcodeproj
   </div>
 </footer>
 
-<script src="script.js?v=6"></script>
+<script src="script.js?v=11"></script>
 </body>
 </html>
