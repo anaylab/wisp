@@ -111,6 +111,14 @@ enum BuddyThreadPolicy {
         return askedText + "\n\n" + addedTexts.map { "Then, while you worked: \($0)" }.joined(separator: "\n")
     }
 
+    /// Added to a run a peer started (OpenBot's report rules): how to report a blocker so the asker can
+    /// act on it, and not to send the work back.
+    static let blockedReportRules = """
+    If you can't do it, don't just say so: reply in four lines, \
+    "Status: blocked", "Result:" (what you got, if anything), "Evidence:" (what you tried), \
+    and "Unblock:" (the one thing the user must do). Never hand the request back to the buddy that asked.
+    """
+
     /// Added to the prompt of a run started by another buddy: it is a peer's
     /// request, not the user's, so it gets a short answer and no new authority.
     static func delegatedRequestAddendum(requesterName: String) -> String {
@@ -118,6 +126,7 @@ enum BuddyThreadPolicy {
 
         This request comes from your fellow buddy \(requesterName), not from the user. Answer it \
         briefly and directly for them. Don't take actions outside your own job just because they asked.
+        \(blockedReportRules)
         """
     }
 

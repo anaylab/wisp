@@ -42,13 +42,18 @@ enum BuddyRunToolkitBuilder {
         // `ask_buddy` is a run-only tool, so the allow-list is checked here
         // rather than by the registry filter. A run started by another buddy
         // passes no `delegation`, which is what stops chains and loops.
+        let mayWorkWithPeers = BuddyToolAccessPolicy.isPermitted(
+            toolNamed: BuddyDelegationToolNames.askBuddy,
+            access: toolAccess,
+            modelSendsDataOffThisMachine: modelSendsDataOffThisMachine
+        )
         let askBuddyTool: AgentRunTool? = delegation.flatMap { delegationContext in
-            BuddyToolAccessPolicy.isPermitted(
-                toolNamed: BuddyDelegationToolNames.askBuddy,
-                access: toolAccess,
-                modelSendsDataOffThisMachine: modelSendsDataOffThisMachine
-            ) ? BuddyDelegationToolBuilder.tool(for: delegationContext.caller, service: delegationContext.service) : nil
+            mayWorkWithPeers ? BuddyDelegationToolBuilder.tool(for: delegationContext.caller, service: delegationContext.service) : nil
         }
+        // list_buddies / start_thread / create_buddy ride on the same gate.
+        let teamTools: [AgentRunTool] = delegation.map { delegationContext in
+            mayWorkWithPeers ? BuddyDelegationToolBuilder.teamTools(for: delegationContext.caller, service: delegationContext.service) : []
+        } ?? []
         return AgentRunToolkit(
             excludedToolNames: BuddyRunToolPolicy.excludedToolNames(
                 modelSendsDataOffThisMachine: modelSendsDataOffThisMachine
@@ -70,6 +75,7 @@ enum BuddyRunToolkitBuilder {
             ]
             + (BuddyFileLibrary.shared.attachments(ofBuddyWithID: buddyID).isEmpty ? [] : [readMyFileTool(forBuddyWithID: buddyID)])
             + (askBuddyTool.map { [$0] } ?? [])
+            + teamTools
         )
     }
 

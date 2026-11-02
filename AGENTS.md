@@ -437,6 +437,21 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   composer with a pause/resume button and ✕ per message. Text only (files and pictures are read when sent, so they still need a free buddy);
   `ask_buddy` delegation still reports a busy peer instead of queueing. Saved beside buddies.json (`buddy-message-queue.json`, 0600), cleared with
   the buddy or its conversation. Tested by `Tests/BuddyMessageQueue`.
+  **Team tools** (`Buddies/BuddyTeam.swift` pure + `BuddyDelegationService`/`BuddyDelegationToolBuilder.teamTools`; phase 4 of
+  `docs/openbot-buddies-plan.md`, from OpenBot's `list_agents`/`start_task`/`create_agent`): offered beside `ask_buddy` under the same gate
+  (the user's own run, never one a peer started; the "Other buddies" group; Advanced on). `list_buddies` (read-only, only with a peer): each
+  visible peer's job (300 chars), free/working/waiting for ok, waiting messages, last activity. **`ask_buddy` takes `buddies: [..]`** (≤4)
+  besides `buddy`: one message to several peers, who run in their own lanes side by side; answers come back together in the order asked
+  (`askBuddies`), busy/unknown/timed-out peers named; crossings are asked on **one** card naming only the peers across a boundary, and
+  declining drops just those. `start_thread`: the buddy hands part of its own work to a new side thread of its own (≤8 open,
+  `BuddyTeamPolicy.maximumOpenSideThreads`), through `BuddyStore.sendMessage`, so it runs in its own lane or waits in the line; its answer lands
+  in that thread. `create_buddy`: always asks (`ToolCallSafety.alwaysAskBareToolNames`, "New Buddy" card: asked by, name, job, when it runs,
+  model, tools), ≤2 per run (`CreatedBuddyLedger`), schedule read from the job, and the new buddy gets **the creator's model, runtime and tool
+  limits, never more**. Report rules: a peer's run is told to answer a blocker in four lines (Status / Result / Evidence / Unblock,
+  `BuddyThreadPolicy.blockedReportRules`), and the teammate tools tell the asker to name the buddy and pass a blocker to the user instead of
+  asking again (`BuddyTeamPolicy.answerHandlingRules`). No `interrupt_buddy`: `ask_buddy` waits inside one tool call, so a caller could
+  never use it, and the 5-minute timeout already stops a peer. Tested by `Tests/AgentRuntimeIntegration/BuddyTeamTests.swift` (live
+  multi-ask with `WISP_LIVE_CLAUDE=1`).
   **Delegation** (`ask_buddy`, `Buddies/BuddyDelegation.swift`): a buddy can ask a peer for help; the peer answers in
   *its own* thread (origin `.delegated`, `BuddyThreadExchange.requesterName`, shown with a "From <buddy>" label and
   fed to the model as "<name> asked you: …"; the run's prompt says it's a peer's request, not the user's) and the
@@ -1575,7 +1590,8 @@ names forward here.
 | `DynamicIsland/NotchConversationSessions.swift` | ~125 | Pure grouping of `AgentTaskRecord` exchanges into sidebar conversations (a ≥30 min pause starts a new one; dictation/background excluded) + search, and `AnswerDisplayText` (machine-tag stripping for stored answers). |
 | `Buddies/BuddyMemory.swift` | ~170 | `BuddyMemoryPolicy` (pure: prompt block, 60-note cap) and `BuddyMemoryStore` (per-buddy markdown files, remember/forget/delete). |
 | `Buddies/BuddyModelChoice.swift` | ~75 | `BuddyModelChoice` (provider + optional Claude model, `allChoices`) and `BackgroundTaskCapacityPolicy` (local vs cloud concurrency). |
-| `Buddies/BuddyDelegation.swift` | ~230 | `ask_buddy`: `BuddyDelegationPolicy` (pure: peer resolution, when to ask, the boundary note), `BuddyDelegationService` (approval, start, wait, outcome; injectable) and the run-only tool. |
+| `Buddies/BuddyDelegation.swift` | ~480 | `ask_buddy` (one or several peers) plus `list_buddies`/`start_thread`/`create_buddy`: `BuddyDelegationPolicy` (pure: peer resolution, when to ask, the boundary note), `BuddyDelegationService` (approval, start, wait for all, listing, threads, creation; injectable) and the run-only tools. |
+| `Buddies/BuddyTeam.swift` | ~190 | Pure team rules: tool names, `BuddyPeerStatus`, `BuddyTeamPolicy` (peer listing, requested names, gathered answers, thread replies, new-buddy draft, caps, answer-handling rules). |
 | `Buddies/BuddyToolAccess.swift` | ~200 | `BuddyToolGroup`, `BuddyToolAccess` (the allow-list) and the pure `BuddyToolAccessPolicy` (`isPermitted`, server discovery, summaries). |
 | `Buddies/BuddyRunToolkit.swift` | ~120 | `BuddyRunToolPolicy` (tools a cloud buddy may not use) and `BuddyRunToolkitBuilder` (per-buddy memory tools + exclusions). |
 | `AgentRunToolkit.swift` | ~75 | Per-run changes for `AgentTurnRunner`: names to hide/refuse, run-only tools, and `takeSteeringMessages` (steer mode) with its wording, `AgentRunSteering`. |

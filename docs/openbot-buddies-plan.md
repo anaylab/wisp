@@ -107,7 +107,10 @@ Each phase is its own `feature/…` branch with a `Tests/` suite for the pure pa
    waiting message says why it waits, and steer mode hands waiting messages to the run at its next tool step (Wisp's
    loop has no native steering, so a run that answers straight away takes nothing and the message runs next).
    Original plan: **Queue upgrades.** Steer mode, parallel threads per buddy (default 2), and visible hold reasons.
-4. **Buddy tools.** `list_buddies`, `interrupt_buddy`, `start_thread`, `create_buddy`/`update_buddy`
+4. **Buddy tools — built.** `list_buddies`, `ask_buddy` to several buddies at once with gathered answers, `start_thread`,
+   `create_buddy` (always asks; the new buddy inherits the creator's limits) and the blocker report rules. `interrupt_buddy`
+   was dropped: `ask_buddy` waits inside one tool call, so a caller could never use it, and the 5-minute timeout already
+   stops a peer. Original plan: **Buddy tools.** `list_buddies`, `interrupt_buddy`, `start_thread`, `create_buddy`/`update_buddy`
    (each creation asks first), multi-recipient asks with gathered answers, and the blocker report format.
 5. **Memory review.** Background add/update/forget over `BuddyMemoryStore`, local model by default,
    `ModelAccessGate` background priority, with a setting (10/20/40/off).

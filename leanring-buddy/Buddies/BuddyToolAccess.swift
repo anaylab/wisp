@@ -108,7 +108,7 @@ enum BuddyToolGroup: String, CaseIterable, Identifiable {
             return .brain
         case "remember", "forget":
             return .memory
-        case BuddyDelegationToolNames.askBuddy:
+        case _ where BuddyTeamToolNames.all.contains(toolName):
             return .delegation
         default:
             return nil

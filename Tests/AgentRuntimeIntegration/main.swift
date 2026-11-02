@@ -880,6 +880,7 @@ func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
     await anthropicProviderSuite()
     await claudeSubscriptionProviderSuite()
     await buddySteeringSuite()
+    await buddyTeamSuite()
     composioConnectionsSuite()
     cuaToolRoutingSuite()
     await confirmationTimingSuite()
