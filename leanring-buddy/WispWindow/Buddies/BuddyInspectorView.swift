@@ -439,6 +439,8 @@ struct BuddyInspectorView: View {
     private func memoryTab(for buddy: WispBuddy) -> some View {
         let notes = memoryStore.facts(ofBuddyWithID: buddy.id)
         return VStack(alignment: .leading, spacing: 12) {
+            // Shown with or without notes: the setting decides whether any get tidied later.
+            memoryReviewRow(for: buddy)
             if notes.isEmpty && !isAddingMemory {
                 // OpenBot's empty state: say what memory is for, and offer to add one.
                 VStack(spacing: 6) {
@@ -453,7 +455,6 @@ struct BuddyInspectorView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 30)
             } else {
-                memoryReviewRow(for: buddy)
                 HStack {
                     header("\(notes.count) saved")
                     Spacer()
