@@ -109,12 +109,12 @@ Buddies are named agents that each own one job, with their own thread, memory, m
 
 <table>
 <tr>
-<td width="50%"><img src="docs/assets/screenshots/today.png" alt="The Today dashboard with buddies, next automations and upcoming events"></td>
-<td width="50%"><img src="docs/assets/screenshots/buddies.png" alt="A buddy's page with its Tools panel"></td>
+<td width="50%"><img src="docs/assets/screenshots/buddy-handoff.png" alt="The Briefer's morning brief, its daily 9:00 schedule, and its answer set to go to the Writer"></td>
+<td width="50%"><img src="docs/assets/screenshots/buddy-writer.png" alt="The Writer's chat: the brief from the Briefer, then a plan for the lab report"></td>
 </tr>
 <tr>
+<td width="50%"><img src="docs/assets/screenshots/today.png" alt="Today: the day's checklist, buddies, what runs next and what's coming up"></td>
 <td width="50%"><img src="docs/assets/screenshots/automations.png" alt="The Automations list"></td>
-<td width="50%"><img src="docs/assets/screenshots/canvas.png" alt="The Canvas page for calendar sync"></td>
 </tr>
 </table>
 
@@ -325,6 +325,7 @@ Almost everything lives in the Wisp window. Shipped defaults are in [`leanring-b
 # Unit tests: in Xcode, press ⌘U
 log stream --predicate 'process == "Wisp"'     # logs from a running copy
 ./Tests/FastPointing/run.sh                    # standalone suites: plain swiftc, no Xcode, no permission reset
+./scripts/demo.sh                              # run Wisp on sample data for screenshots (--reset, --off)
 ```
 
 <details>
@@ -344,9 +345,9 @@ leanring-buddy/           the app (Swift / SwiftUI + AppKit, ~350 files)
 ├── WindowManagement/     voice window layout
 ├── Email/                editable drafts and Mail sending
 └── …                     providers, dictation, screen capture + OCR, agent loop, tools, MCP
-Tests/                    36 standalone suites
+Tests/                    37 standalone suites
 chrome-extension/         Wisp Tabs extension for Chrome
-scripts/                  install and release scripts
+scripts/                  install, update, demo and release scripts
 docs/                     design docs and brand assets
 ```
 

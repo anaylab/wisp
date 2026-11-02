@@ -2,7 +2,7 @@
 (function () {
   var scenes = [
     { prompt: "Draft an email to Sam about moving Friday's review", src: "assets/shots/feature-email.jpg", alt: "An editable email draft with Send and Discard", cap: "A finished draft to the right person. Nothing is sent until you press Send." },
-    { prompt: "Every weekday at 8, tell me what's due", src: "assets/shots/automations.jpg", alt: "The Automations list with a morning brief scheduled every day at 9:00", cap: "Say it once. A buddy does it on schedule, and hands its answer on." },
+    { prompt: "Every weekday at 8, tell me what's due", src: "assets/shots/buddy-handoff.jpg", alt: "The Briefer's morning brief, its daily schedule and its hand-off to the Writer", cap: "Say it once. A buddy does it on schedule, and hands its answer on." },
     { prompt: "Open Wikipedia and search for the Enigma machine", src: "assets/shots/feature-browser.jpg", alt: "Chrome on the Enigma machine article", cap: "Your real browser, in its own tab, and an honest summary of where it landed." },
     { prompt: "Put Dictionary on the left and TextEdit on the right", src: "assets/shots/feature-windows.jpg", alt: "Two windows tiled side by side", cap: "Windows tiled by voice, with no model call." },
     { prompt: "Walk me through making this bold and centered", src: "assets/shots/feature-walkthrough.jpg", alt: "A numbered checklist in the notch and a box on the Bold button", cap: "Steps on your real screen, ticked off as you go. Or let Wisp click." },
