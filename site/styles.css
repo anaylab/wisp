@@ -73,7 +73,7 @@ kbd { font-family: var(--font-body); font-size: 0.8em; font-weight: 600; padding
 .sticky { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; }
 
 /* Hero */
-.hero { height: 240vh; }
+.hero { height: 340vh; }
 .hero .sticky { background: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(163, 91, 240, 0.12), transparent 70%), var(--bg); }
 .hero-copy { position: relative; z-index: 2; text-align: center; padding: clamp(64px, 11vh, 120px) 20px 0; will-change: transform, opacity; }
 .hero h1 { font-size: clamp(52px, 9vw, 128px); letter-spacing: -0.05em; }
