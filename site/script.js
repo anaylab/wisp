@@ -130,7 +130,7 @@
       var endY = Math.max(72, (viewportHeight - deviceHeight) / 2 + 18);
       heroDevice.style.transform = "translate(-50%, " + mix(startY, endY, rise).toFixed(1) + "px) perspective(1800px) rotateX(" +
         mix(16, 0, rise).toFixed(2) + "deg) scale(" + mix(0.86, 1, rise).toFixed(3) + ")";
-      if (scene.video) scrub(scene.video, clamp((progress - 0.12) / 0.86, 0, 1) * scene.video.duration);
+      if (window.WispPreview) window.WispPreview.setProgress(clamp((progress - 0.12) / 0.84, 0, 1));
     } else if (scene.kind === "words") {
       var lit = Math.round(clamp((progress - 0.08) / 0.78, 0, 1) * words.length);
       if (lit !== scene.litWords) {
