@@ -20,10 +20,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=16">
+<link rel="stylesheet" href="styles.css?v=18">
 <script>document.documentElement.classList.add("js");</script>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="glass-bend" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.006 0.012" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="22" xChannelSelector="R" yChannelSelector="G"/></filter></svg>
 <a class="skip-link" href="#main">Skip to content</a>
 
 <header class="nav" id="top">
@@ -61,7 +62,13 @@
         <a class="btn btn-quiet btn-lg" href="#day">See a day with it <span aria-hidden="true">↓</span></a>
       </div>
     </div>
+    <div class="hero-orbs" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="device-wrap" data-hero-device>
+      <div class="float-chips" aria-hidden="true">
+        <span class="glass-chip" style="--x:-7%;--y:12%;--depth:120px"><i class="chip-dot" style="--c1:#5E5CE6;--c2:#A35BF0"></i>Runs on your Mac</span>
+        <span class="glass-chip" style="--x:88%;--y:38%;--depth:200px"><i class="chip-dot" style="--c1:#F2668B;--c2:#F5A33A"></i>Asks before anything leaves</span>
+        <span class="glass-chip" style="--x:-4%;--y:70%;--depth:260px"><i class="chip-dot" style="--c1:#34C77B;--c2:#3D7CF6"></i>On-device speech</span>
+      </div>
       <figure class="device">
         <img class="poster" src="assets/video/today-first.jpg?c=2" alt="" width="1280" height="789">
         <div class="wapp" data-app role="img" aria-label="Wisp's Today page: you ask it to plan your afternoon, it adds a study block to your checklist and calendar, and the Writer buddy drafts your conclusion"></div>
@@ -321,7 +328,7 @@ open leanring-buddy.xcodeproj
   </div>
 </footer>
 
-<script src="app-preview.js?v=2"></script>
-<script src="script.js?v=14"></script>
+<script src="app-preview.js?v=3"></script>
+<script src="script.js?v=15"></script>
 </body>
 </html>

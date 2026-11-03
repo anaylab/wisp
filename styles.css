@@ -383,3 +383,84 @@ details p { padding: 0 26px 24px; color: var(--muted); }
 @keyframes wa-blink { 50% { opacity: 0; } }
 @keyframes wa-wave { 50% { height: 18px; } }
 @media (prefers-reduced-motion: reduce) { .wa *, .wa *::after { animation: none !important; } }
+
+/* ---------- Liquid glass ---------- */
+/* A rim of light: brightest on the top-left and bottom-right edges, like a curved pane. */
+.glass-rim::before, .wa-ask::before, .wa-island::before, .glass-chip::before, .nav-inner::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.08) 32%, rgba(255, 255, 255, 0) 55%, rgba(255, 255, 255, 0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+
+/* The nav floats as a glass pill. */
+.nav { background: transparent; border: 0; backdrop-filter: none; -webkit-backdrop-filter: none; padding-top: 12px; pointer-events: none; }
+.nav.on-dark { background: transparent; }
+.nav-inner { position: relative; pointer-events: auto; height: 52px; max-width: 1040px; padding: 0 10px 0 22px; border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.5));
+  backdrop-filter: blur(22px) saturate(190%); -webkit-backdrop-filter: blur(22px) saturate(190%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 10px 30px -10px rgba(40, 30, 90, 0.25);
+  transition: background 0.3s, box-shadow 0.3s; }
+.nav.on-dark .nav-inner { background: linear-gradient(180deg, rgba(40, 40, 46, 0.6), rgba(20, 20, 24, 0.5));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 10px 30px -10px rgba(0, 0, 0, 0.6); }
+.nav.on-dark .nav-inner::before { opacity: 0.4; }
+
+/* Soft colour behind the hero, so the glass has something to bend. */
+.hero-orbs { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.hero-orbs i { position: absolute; width: 46vw; height: 46vw; border-radius: 50%; filter: blur(70px); opacity: 0.55; animation: orb-drift 18s ease-in-out infinite alternate; }
+.hero-orbs i:nth-child(1) { left: -8vw; top: 30vh; background: radial-gradient(circle, #8E7CFF, transparent 65%); }
+.hero-orbs i:nth-child(2) { right: -10vw; top: 18vh; background: radial-gradient(circle, #FF8FB1, transparent 65%); animation-delay: -6s; }
+.hero-orbs i:nth-child(3) { left: 30vw; top: 62vh; background: radial-gradient(circle, #6FC3FF, transparent 65%); animation-delay: -12s; }
+@keyframes orb-drift { to { transform: translate(4vw, -5vh) scale(1.12); } }
+
+/* Glass chips that float around the hero window at different depths. */
+.float-chips { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.glass-chip { position: absolute; left: var(--x); top: var(--y); display: inline-flex; align-items: center; gap: 10px; padding: 12px 18px 12px 12px; border-radius: 999px;
+  font: 600 15px/1 var(--font-body); color: var(--ink); white-space: nowrap;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.3));
+  backdrop-filter: blur(16px) saturate(200%); -webkit-backdrop-filter: blur(16px) saturate(200%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -8px 16px rgba(255, 255, 255, 0.18), 0 18px 40px -14px rgba(50, 30, 120, 0.45);
+  transform: translateY(calc((1 - var(--rise, 1)) * var(--depth))); opacity: calc(var(--rise, 1) * 2 - 1); }
+.chip-dot { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.9), transparent 40%), linear-gradient(135deg, var(--c1), var(--c2));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18); }
+@media (max-width: 900px), (pointer: coarse) { .float-chips { display: none; } }
+
+/* Chromium can bend what's behind the glass, not just blur it. */
+.refracts .glass-chip, .refracts .nav-inner { backdrop-filter: url(#glass-bend) blur(16px) saturate(200%); }
+
+/* In the replica: the ask bar is a pane of dark glass. */
+.wa-ask { background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05)) !important;
+  backdrop-filter: blur(14px) saturate(180%); -webkit-backdrop-filter: blur(14px) saturate(180%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -10px 20px rgba(255, 255, 255, 0.04), 0 14px 34px rgba(0, 0, 0, 0.45) !important; }
+
+/* The notch island, in Wisp's Liquid Glass style. */
+.wa-island { position: absolute; left: 50%; top: 0; z-index: 5; width: 200px; height: 34px; transform: translateX(-50%); border-radius: 0 0 18px 18px; overflow: hidden;
+  background: linear-gradient(180deg, rgba(14, 14, 18, 0.92), rgba(30, 28, 40, 0.62));
+  backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.22), 0 12px 30px rgba(0, 0, 0, 0.4);
+  transition: width 0.55s cubic-bezier(.3, 1.3, .5, 1), height 0.55s cubic-bezier(.3, 1.2, .5, 1), border-radius 0.5s, box-shadow 0.4s; }
+.wa-island::before { opacity: 0; transition: opacity 0.4s; }
+.wa-notch { position: absolute; left: 50%; top: 0; width: 190px; height: 32px; transform: translateX(-50%); background: #000; border-radius: 0 0 14px 14px; }
+.wa-flank { position: absolute; top: 0; height: 34px; display: flex; align-items: center; opacity: 0; transition: opacity 0.3s; color: #C4B5FD; }
+.wa-flank-left { left: 16px; }
+.wa-flank-right { right: 16px; }
+.wa-island .wa-wave { display: flex; margin: 0; }
+.wa-island .wa-dots { display: none; gap: 4px; }
+.wa-dots i { width: 5px; height: 5px; border-radius: 50%; background: #C4B5FD; animation: wa-dot 1s ease-in-out infinite; }
+.wa-dots i:nth-child(2) { animation-delay: 0.15s; } .wa-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes wa-dot { 50% { opacity: 0.25; transform: translateY(-2px); } }
+.wa-island[data-state="listening"], .wa-island[data-state="thinking"] { width: 300px; box-shadow: inset 0 -1px 0 rgba(196, 181, 253, 0.6), 0 0 26px rgba(139, 92, 246, 0.45), 0 12px 30px rgba(0, 0, 0, 0.4); }
+.wa-island[data-state="listening"] .wa-flank, .wa-island[data-state="thinking"] .wa-flank { opacity: 1; }
+.wa-island[data-state="thinking"] .wa-wave { display: none; }
+.wa-island[data-state="thinking"] .wa-dots { display: flex; }
+.wa-island[data-state="approve"] { width: 430px; height: 172px; border-radius: 0 0 30px 30px; }
+.wa-island[data-state="reply"] { width: 430px; height: 100px; border-radius: 0 0 30px 30px; }
+.wa-island[data-state="approve"]::before, .wa-island[data-state="reply"]::before { opacity: 0.7; }
+.wa-island-card { position: absolute; left: 0; right: 0; top: 40px; padding: 0 24px; opacity: 0; transform: translateY(-8px); transition: opacity 0.3s, transform 0.4s; color: #EDEBFA; font-size: 13.5px; }
+.wa-island[data-state="approve"] .wa-approve, .wa-island[data-state="reply"] .wa-reply { opacity: 1; transform: none; transition-delay: 0.15s; }
+.wa-island-card p { margin: 0 0 6px; line-height: 1.4; }
+.wa-island-kicker { display: flex; align-items: center; gap: 8px; font-size: 11.5px !important; font-weight: 600; color: #C4B5FD; letter-spacing: 0.02em; }
+.wa-island-kicker svg { width: 16px; }
+.wa-island-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.wa-island-buttons span { padding: 7px 16px; border-radius: 999px; font-size: 12.5px; font-weight: 600; background: rgba(255, 255, 255, 0.12); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+.wa-island-buttons .wa-allow { background: linear-gradient(180deg, #fff, #E6E3F5); color: #16121F; transition: transform 0.15s, box-shadow 0.3s; }
+.wa-island.allowed .wa-allow { transform: scale(0.94); box-shadow: 0 0 0 4px rgba(196, 181, 253, 0.4); }

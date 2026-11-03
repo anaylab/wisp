@@ -8,6 +8,9 @@
   var smallOrTouch = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
   var isFlat = reduceMotion || smallOrTouch;
   if (isFlat) root.classList.add("flat");
+  // Only Chromium applies an SVG filter to what's behind an element; others keep plain blur.
+  var brands = navigator.userAgentData && navigator.userAgentData.brands;
+  if (brands && brands.some(function (brand) { return brand.brand === "Chromium"; })) root.classList.add("refracts");
 
   function clamp(value, low, high) { return Math.min(high, Math.max(low, value)); }
   function mix(from, to, amount) { return from + (to - from) * amount; }
@@ -125,6 +128,7 @@
       heroCopy.style.opacity = String(1 - copyFade);
       heroCopy.style.transform = "translateY(" + (-progress * 260).toFixed(1) + "px) scale(" + (1 - copyFade * 0.04).toFixed(3) + ")";
       var rise = easeOut(clamp(progress / 0.38, 0, 1));
+      heroDevice.style.setProperty("--rise", rise.toFixed(3));
       var deviceHeight = heroDevice.offsetHeight;
       var startY = viewportHeight * 0.64;
       var endY = Math.max(72, (viewportHeight - deviceHeight) / 2 + 18);
