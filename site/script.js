@@ -87,6 +87,7 @@
       element: element,
       kind: element.dataset.scene,
       video: element.querySelector("video[data-scrub]"),
+      live: element.querySelector("[data-live]"),
       device: element.querySelector(".device.dark"),
       bar: element.querySelector("[data-bar]"),
       clock: element.querySelector("[data-clock]"),
@@ -148,6 +149,7 @@
         scene.device.style.transform = "scale(" + mix(0.92, 1, arrive).toFixed(3) + ")";
       }
       if (scene.video) scrub(scene.video, clamp(progress / 0.96, 0, 1) * scene.video.duration);
+      if (scene.live && scene.live.setProgress) scene.live.setProgress(clamp(progress / 0.96, 0, 1));
       var active = 0;
       scene.captions.forEach(function (caption, index) {
         if (progress >= parseFloat(caption.dataset.at)) active = index;
