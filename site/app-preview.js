@@ -144,6 +144,20 @@
             '<strong data-pages>11</strong><span>pages</span><p data-brain-note>Wisp files lasting facts from your conversations here.</p></div>' +
         "</div>" +
       "</section>" +
+      '<div class="wa-island" data-island>' +
+        '<span class="wa-notch"></span>' +
+        '<span class="wa-flank wa-flank-left">' + RIBBON + "</span>" +
+        '<span class="wa-flank wa-flank-right"><span class="wa-wave"><i></i><i></i><i></i><i></i><i></i></span><span class="wa-dots"><i></i><i></i><i></i></span></span>' +
+        '<div class="wa-island-card wa-approve">' +
+          '<p class="wa-island-kicker">' + RIBBON + "Wisp needs your OK</p>" +
+          "<p><b>Add to Calendar</b><br>Study block: lab report · Today 2:00 – 3:00 PM</p>" +
+          '<div class="wa-island-buttons"><span>Cancel</span><span class="wa-allow">Allow</span></div>' +
+        "</div>" +
+        '<div class="wa-island-card wa-reply">' +
+          '<p class="wa-island-kicker">' + RIBBON + "Wisp</p>" +
+          "<p>Study block added for 2 PM. Writer is drafting your conclusion.</p>" +
+        "</div>" +
+      "</div>" +
     "</div>";
 
   var poster = host.parentElement.querySelector(".poster");
@@ -165,6 +179,7 @@
   var quiz = host.querySelector('[data-item="quiz"]');
   var study = host.querySelector('[data-item="study"]');
   var studyEvent = host.querySelector("[data-event]");
+  var island = host.querySelector("[data-island]");
 
   // Keep the window at its design size and scale it to whatever the frame is.
   // zoom lays the text out at its real size, so it stays sharp; transform is the fallback.
@@ -226,6 +241,13 @@
     setText(pages, brainUpdated ? "12" : "11");
     setText(brainNote, brainUpdated ? "New: BIO 201 lab report is due tonight at 11:59 PM." : "Wisp files lasting facts from your conversations here.");
     host.querySelector(".wa-brain").classList.toggle("fresh", brainUpdated);
+
+    // The notch island: wraps the notch while listening and thinking, asks before writing
+    // to the calendar (Allow is pressed), shows a short reply, then tucks away.
+    var islandState = isListening ? "listening" : isThinking ? "thinking" :
+      progress >= 0.44 && progress < 0.53 ? "approve" : progress >= 0.53 && progress < 0.68 ? "reply" : "idle";
+    if (island.dataset.state !== islandState) island.dataset.state = islandState;
+    island.classList.toggle("allowed", progress >= 0.5);
 
     var stateText = isListening ? "Listening" : isThinking ? "Thinking" : writerWorking ? "Working · 1" : "Ready";
     setText(status, stateText);
