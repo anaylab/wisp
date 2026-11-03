@@ -2,39 +2,121 @@
   <img src="docs/assets/brand/hero.png" alt="Wisp: a private AI companion that lives in your Mac's notch" width="100%">
 </p>
 
-<p align="center">
-  <a href="#quick-start"><img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-0E1116?style=for-the-badge&logo=apple&logoColor=white"></a>
-  <a href="#quick-start"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-6FE6D0?style=for-the-badge&logo=swift&logoColor=0E1116"></a>
-  <a href="#privacy"><img alt="Runs on-device" src="https://img.shields.io/badge/runs-on--device-9AA9FF?style=for-the-badge&logoColor=0E1116"></a>
-  <a href="#models"><img alt="Bring your own model" src="https://img.shields.io/badge/models-local%20or%20BYOK-1D2433?style=for-the-badge"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-1D2433?style=for-the-badge"></a>
-</p>
-
-<h3 align="center">Hold <kbd>⌃</kbd> <kbd>⌥</kbd>. Say what you want. Let go.</h3>
+<h1 align="center">The busywork, handled.</h1>
 
 <p align="center">
-  Wisp is an AI companion for macOS that lives in your notch.<br>
-  It drafts the email, runs the browser errand, and keeps a team of buddies working on a schedule.<br>
-  <b>No account. No API key. Nothing leaves your Mac.</b>
+  Wisp lives in your Mac's notch. Hold <kbd>⌃</kbd> <kbd>⌥</kbd> and say it:<br>
+  it drafts the email, runs the browser errand and keeps a team of buddies working on a schedule.<br>
+  <b>No account. No API key. Nothing leaves your Mac unless you say so.</b>
 </p>
 
 <p align="center">
-  <a href="https://anaylab.github.io/wisp/"><b>Website</b></a> ·
+  <a href="https://anaylab.github.io/wisp/"><img alt="Website" src="https://img.shields.io/badge/see_it_move-anaylab.github.io%2Fwisp-5E5CE6?style=for-the-badge"></a>
+  <a href="#quick-start"><img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-1D1D1F?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="#privacy"><img alt="Runs on-device" src="https://img.shields.io/badge/runs-on--device-A35BF0?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-1D1D1F?style=for-the-badge"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/motion/handoff.webp" alt="The Briefer's morning brief, handed to the Writer, who turns it into a plan" width="100%">
+  <br><sub>9:00 AM. The Briefer reads your calendar and hands its brief to the Writer, who turns it into a plan. Nobody asked.</sub>
+</p>
+
+<p align="center">
+  <a href="#a-day-with-wisp"><b>A day with Wisp</b></a> ·
   <a href="#quick-start">Quick start</a> ·
-  <a href="#what-it-does">What it does</a> ·
+  <a href="#everything-it-does">Everything it does</a> ·
   <a href="#say-it">Say it</a> ·
   <a href="#models">Models</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#privacy">Privacy</a> ·
-  <a href="#brand">Brand</a>
+  <a href="#privacy">Privacy</a>
 </p>
 
-<p align="center">
-  <img src="docs/assets/screenshots/feature-email.png" alt="An editable email draft Wisp wrote, with Send and Discard" width="100%">
-  <br><sub>"Draft an email to Sam about Friday." A finished draft opens, and nothing is sent until you press Send.</sub>
-</p>
+<br>
 
----
+## A day with Wisp
+
+<table>
+<tr>
+<td width="56%"><img src="docs/assets/motion/today.webp" alt="Wisp's Today page: the checklist, buddies, what runs next and what's coming up"></td>
+<td width="44%" valign="middle">
+
+<sub><b>7:30 AM</b></sub>
+### Your day, already planned
+Canvas deadlines and calendar events become one checklist in Reminders before you're up. **Today** shows it beside what your buddies are doing and what's coming next.
+
+</td>
+</tr>
+<tr>
+<td width="44%" valign="middle">
+
+<sub><b>9:05 AM</b></sub>
+### Say it once
+*"Every weekday at 8, tell me what's due."* It becomes an automation card you can check before saving, and it says plainly when something would leave your Mac.
+
+</td>
+<td width="56%"><img src="docs/assets/motion/automate.webp" alt="Typing an automation and the draft card it becomes"></td>
+</tr>
+<tr>
+<td width="56%"><img src="docs/assets/motion/email.webp" alt="An editable email draft with Send and Discard"></td>
+<td width="44%" valign="middle">
+
+<sub><b>10:15 AM</b></sub>
+### An email, drafted
+*"Draft an email to Sam about moving Thursday's session."* A finished draft opens, addressed from Contacts. Nothing leaves until you press **Send**.
+
+</td>
+</tr>
+<tr>
+<td width="44%" valign="middle">
+
+<sub><b>12:40 PM</b></sub>
+### An errand in your browser
+*"Open Wikipedia and search for the Enigma machine."* Wisp works in its own tab, never the one you're reading, and tells you where it landed.
+
+</td>
+<td width="56%"><img src="docs/assets/motion/browser.webp" alt="Chrome on the Enigma machine article with Wisp's summary in the notch"></td>
+</tr>
+<tr>
+<td width="56%"><img src="docs/assets/motion/windows.webp" alt="Dictionary tiled left and TextEdit right, with the notch confirming"></td>
+<td width="44%" valign="middle">
+
+<sub><b>2:00 PM</b></sub>
+### Your desk, tidied by voice
+*"Put Dictionary on the left and TextEdit on the right."* Done in a tenth of a second, with no model call.
+
+</td>
+</tr>
+<tr>
+<td width="44%" valign="middle">
+
+<sub><b>4:30 PM</b></sub>
+### Stuck? It walks you through
+How-to answers become steps on your real screen. Wisp ticks them off as you click, and can click for you, but never anything irreversible.
+
+</td>
+<td width="56%"><img src="docs/assets/motion/guide.webp" alt="A walkthrough: the Bold button boxed, then Align Center"></td>
+</tr>
+<tr>
+<td width="56%"><img src="docs/assets/motion/math.webp" alt="Handwritten working beside 3x + 7 = 22, ending in x = 5"></td>
+<td width="44%" valign="middle">
+
+<sub><b>8:00 PM</b></sub>
+### Homework, worked on the page
+Point it at a problem and it writes the working beside it, line by line. Save the finished page as a PNG with a Markdown summary.
+
+</td>
+</tr>
+<tr>
+<td width="44%" valign="middle">
+
+<sub><b>All day</b></sub>
+### You approve what matters
+Anything that sends, deletes, pays, posts or runs a command shows a card first, even with auto-approve on. Edit the wording right on the card.
+
+</td>
+<td width="56%"><img src="docs/assets/motion/approval.webp" alt="A Wisp needs your OK card to run a Shortcut, with Cancel and Allow"></td>
+</tr>
+</table>
 
 ## Why Wisp
 
@@ -43,19 +125,19 @@
 <td width="33%" valign="top">
 
 ### 🔒 Private by default
-Speech recognition, voice and screen reading run on your Mac's Neural Engine. The default model runs locally through Ollama. Cloud models are opt-in, bring-your-own-key, and labelled whenever they're on.
+Speech, voice and screen reading run on your Mac's Neural Engine. The default model runs locally through Ollama. Cloud models are opt-in, bring-your-own-key, and labelled whenever they're on.
 
 </td>
 <td width="33%" valign="top">
 
 ### ⚡ Instant for everyday jobs
-Texting, timers, window layouts, tab tidying, music and screen watchers are recognised and run in **~0.1s**, with no model call, so the model only does the hard parts.
+Texting, timers, window layouts, tab tidying, music and screen watchers run in **~0.1s** with no model call, so the model only does the hard parts.
 
 </td>
 <td width="33%" valign="top">
 
 ### 🛡️ Asks before it acts
-Anything that sends, deletes, pays, posts or runs a command shows a card with exactly what will happen, even with auto-approve on. You can edit the wording before you allow it.
+Anything irreversible shows a card with exactly what will happen, even with auto-approve on, and you can edit the wording before you allow it.
 
 </td>
 </tr>
@@ -88,92 +170,107 @@ Don't launch `Wisp.app/Contents/MacOS/Wisp` from a shell (speech recognition the
 
 </details>
 
-## What it does
+## A team that works without you
 
-
-### 🫧 Buddies and automations that work while you're away
-
-Buddies are named agents that each own one job, with their own thread, memory, model and tool allow-list. Automations follow **trigger → source → action → output → notify**, set up by saying it, picking a template, or saving an answer from History. Scheduled runs only get tools that never prompt, and pause themselves after three failures in a row.
-
-**Buddies now work as a team:**
-
-- **Hand off the answer.** When one buddy's job finishes, its answer goes to the buddies you chose. The Briefer's morning brief can start the Writer. A buddy with several inputs waits for all of them, and a link that would take the answer off your Mac asks first.
-- **Ask the team.** A buddy can list its teammates, ask up to four at once, split work into side threads of its own, or draft a new buddy (always with your OK, never with more access than its own).
-- **Threads side by side.** Each chat with a buddy runs on its own, with up to two side threads beside the main one. A message sent mid-job can wait its turn or steer the work in progress.
-- **Backup models.** If a buddy's model hits a limit or goes down before answering, a backup takes over and the failed model is passed over for 10 minutes. A cloud backup counts as leaving your Mac from the start.
-- **A session of its own.** Optionally run a buddy on your Claude subscription with a kept Claude Code session per conversation, started fresh when it gets close to full.
-- **Tidies its own notes.** Every 20 messages (or 10, 40, never) a buddy reviews what it remembered and fixes it. Notes you wrote are never touched.
-- **Hide to pause.** A hidden buddy stops running on its schedule and taking messages until you show it again.
-
-<p><img src="docs/assets/screenshots/buddy-team.png" alt="A buddy's settings: how it handles messages while busy, its model, backup models and what it runs on"></p>
+Buddies are named agents that each own one job, with their own chat, memory, model and tools. They run on a schedule, hand their results to each other, and only interrupt you when something needs your OK.
 
 <table>
 <tr>
 <td width="50%"><img src="docs/assets/screenshots/buddy-handoff.png" alt="The Briefer's morning brief, its daily 9:00 schedule, and its answer set to go to the Writer"></td>
 <td width="50%"><img src="docs/assets/screenshots/buddy-writer.png" alt="The Writer's chat: the brief from the Briefer, then a plan for the lab report"></td>
 </tr>
-<tr>
-<td width="50%"><img src="docs/assets/screenshots/today.png" alt="Today: the day's checklist, buddies, what runs next and what's coming up"></td>
-<td width="50%"><img src="docs/assets/screenshots/automations.png" alt="The Automations list"></td>
-</tr>
 </table>
 
-### ✉️ Drafts you review, actions you approve
+| | |
+|---|---|
+| **Hand off the answer** | When a buddy's job finishes, its answer goes to the buddies you chose. A buddy with several inputs waits for all of them, and a link that would leave your Mac asks first. |
+| **Ask the team** | List teammates, ask up to four at once, split work into side threads, or draft a new buddy, always with your OK and never with more access than its own. |
+| **Threads side by side** | Each chat runs on its own, with up to two side threads beside the main one. A message sent mid-job can wait or steer the work in progress. |
+| **Backup models** | If a model hits a limit or goes down before answering, a backup takes over. A cloud backup counts as leaving your Mac from the start. |
+| **A session of its own** | Run a buddy on your Claude subscription with a kept Claude Code session per conversation, started fresh when it gets close to full. |
+| **Tidies its own notes** | Every 20 messages a buddy reviews what it remembered and fixes it. Notes you wrote are never touched. |
+| **Automations** | Trigger → source → action → output → notify, set up by saying it, a template, or an answer from History. Scheduled runs only get tools that never prompt. |
 
-"Draft an email to Sam about moving Friday's meeting" opens a finished, editable draft addressed from Contacts, and "text mom I'm running late" shows the message before Messages sends it. No email leaves your Mac until you press **Send**. Anything riskier, like running a Shortcut, shows a card with exactly what will happen and a countdown.
+## Everything it does
 
 <table>
 <tr>
-<td width="50%"><img src="docs/assets/screenshots/feature-email.png" alt="An editable New email draft with Send and Discard"></td>
-<td width="50%"><img src="docs/assets/screenshots/feature-approval.png" alt="A Wisp needs your OK card to run a Shortcut, with Cancel and Allow"></td>
+<td width="33%" valign="top">
+
+**Do**
+- Draft emails, sent only by you
+- Text people through Messages
+- Browser errands in their own tab
+- Group and dedupe Chrome tabs
+- Arrange windows by voice
+- Timers and music, instantly
+- Apple Shortcuts, always with your OK
+- Click and type in native apps
+
+</td>
+<td width="33%" valign="top">
+
+**See & show**
+- Point at any control in ~0.1s
+- Walk you through, or do it for you
+- Handwritten working on the page
+- Note cards you can ask follow-ups on
+- Ask about one part of the screen
+- Screen watchers: *"tell me when it says Done"*
+- Glance cards for weather, places, calendar
+
+</td>
+<td width="33%" valign="top">
+
+**Plan**
+- Canvas deadlines into your calendar
+- A daily checklist in Reminders
+- Study blocks, written only after OK
+- Study mode that holds back distractions
+- Automations on a schedule or an event
+
+</td>
 </tr>
-</table>
-
-### 🌐 Drives your real browser
-
-"Open Wikipedia and search for the Enigma machine." Wisp works through the page itself, in its own tab (never the one you are reading), then tells you where it landed. Password and payment fields are refused outright, and irreversible clicks always ask.
-
-<p align="center">
-  <img src="docs/assets/screenshots/feature-browser.png" alt="Chrome on the Enigma machine article with Wisp's accurate summary in the notch" width="100%">
-</p>
-
-### 🪟 Rearrange your desk by voice
-
-"Put Dictionary on the left and TextEdit on the right." Halves, quarters, thirds, maximize, center and next-display, over Accessibility, with no model call.
-
-<p align="center">
-  <img src="docs/assets/screenshots/feature-windows.png" alt="Dictionary tiled left and TextEdit right, with the notch confirming" width="100%">
-</p>
-
-### 🧭 Guided walkthroughs
-
-Ask how to do something and Wisp turns the answer into numbered steps over your live screen. It finds each next control again as the screen changes, ticks steps off as you click, and can click for you with **Do it for me**, but never anything irreversible.
-
-<table>
 <tr>
-<td width="50%"><img src="docs/assets/screenshots/feature-walkthrough.png" alt="Walkthrough step 1: Bold button boxed"></td>
-<td width="50%"><img src="docs/assets/screenshots/feature-walkthrough-step2.png" alt="Walkthrough step 2: bold ticked off, align center boxed"></td>
+<td width="33%" valign="top">
+
+**Team**
+- Buddies with their own job and memory
+- Hand-offs between buddies
+- Group chats with `@name` routing
+- Workflows drawn on a canvas
+- Backup models
+
+</td>
+<td width="33%" valign="top">
+
+**Remember**
+- A private brain, Obsidian-compatible
+- Buddy memory that tidies itself
+- Learned shortcuts, replayed with no model
+- A usage log of counts, never content
+
+</td>
+<td width="33%" valign="top">
+
+**Connect**
+- Ollama, Apple on-device, Claude, GPT, Gemini, Grok, OpenRouter
+- 500+ apps through MCP and Composio
+- Dictation into any app, 25 languages
+- Hands-free with a double-tap of <kbd>⌃</kbd>
+
+</td>
 </tr>
 </table>
 
-### ✍️ Shows its working on the page
-
-Point Wisp at a problem and it writes handwritten working beside it, line by line, then lets you step through with **Next ›**. Save the finished page as a PNG with a Markdown summary.
-
-<table>
-<tr>
-<td width="50%"><img src="docs/assets/screenshots/feature-math-step1.png" alt="The first line of handwritten working beside 3x + 7 = 22"></td>
-<td width="50%"><img src="docs/assets/screenshots/feature-math.png" alt="The finished working down to x = 5"></td>
-</tr>
-</table>
+<details>
+<summary><b>Pointing, asking about a part, the brain and plug-ins, in more detail</b></summary>
 
 ### 🎯 Point at anything
 
-Ask "where is the pi button?" and a pulsing, labelled marker lands on the exact control in about a tenth of a second. Wisp matches your words against the app's Accessibility tree and on-device OCR, so it works in native apps, terminals, images and remote desktops, on whichever monitor the control is on.
+Ask "where is the pi button?" and a pulsing, labelled marker lands on the exact control in about a tenth of a second. Wisp matches your words against the app's Accessibility tree and on-device OCR, so it works in native apps, terminals, images and remote desktops.
 
-<p align="center">
-  <img src="docs/assets/screenshots/feature-pointing.png" alt="A labelled marker on the pi button of Calculator, with the notch saying Here's Pi" width="70%">
-</p>
+<p align="center"><img src="docs/assets/screenshots/feature-pointing.png" alt="A labelled marker on the pi button of Calculator, with the notch saying Here's Pi" width="70%"></p>
 
 ### ✂️ Ask about just a part
 
@@ -200,24 +297,6 @@ Install MCP servers from a built-in marketplace, connect 500+ apps through optio
 <td width="50%"><img src="docs/assets/screenshots/model.png" alt="Model provider settings with usage"></td>
 </tr>
 </table>
-
-<details>
-<summary><b>And more: the full feature list</b></summary>
-
-- **Voice in and out.** Push-to-talk from any app: hold to talk, tap to type, hold + <kbd>⇧</kbd> to dictate into the focused field, double-tap <kbd>⌃</kbd> for hands-free. Parakeet transcribes 25 languages on-device with live partials and your own dictionary. Kokoro speaks one short line per reply.
-- **Screen watchers.** "Tell me when it says Done": up to three at once, OCR every 3s, no model calls.
-- **Glance cards.** Weather, calendar, reminders, timers, now playing, nearby places and your own HTTPS sources, right in the notch.
-- **The notch island.** Wraps the physical notch, solid black like the real thing (Liquid Glass if you prefer), hover for the full panel, drop a file on it to add it to your brain.
-- **Quick add.** "Remind me…", "every…", "when…" open an editable automation card instead of a model turn.
-- **Routines.** Saved instructions on <kbd>⌃</kbd><kbd>⌥</kbd>+<kbd>1</kbd>…<kbd>9</kbd>, with `{blanks}` Wisp asks for first.
-- **Learned shortcuts.** Save a finished turn and replay it later with no model call.
-- **Canvas sync.** Paste your calendar feed once; Wisp keeps a "Wisp" calendar and a daily checklist in Reminders. Study blocks are only written after your approval.
-- **Messages and Contacts.** "Text mom I'm running late" resolves Mom through Contacts and always asks before sending.
-- **Chrome tabs.** The Wisp Tabs extension groups, dedupes, pins and mutes tabs on command.
-- **Morning briefing and quiet mode.** One-click suggestions each morning, and silence while you are on a call.
-- **Themes.** A theme gallery (Paper, Midnight, Aqua, Sage and more) in light and dark, contrast-checked, with Reduce Motion honoured.
-- **Hardware aware.** Falls back to the built-in mic with the lid closed, and puts a muted reply on the clipboard instead of speaking into silence.
-- **Usage log.** Token counts and estimated cost per provider, stored locally, content never kept.
 
 </details>
 
