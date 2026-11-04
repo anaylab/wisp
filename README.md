@@ -1,39 +1,42 @@
 <p align="center">
-  <img src="docs/assets/brand/hero.png" alt="Wisp: a private AI companion that lives in your Mac's notch" width="100%">
-</p>
-
-<h1 align="center">The busywork, handled.</h1>
-
-<p align="center">
-  Wisp lives in your Mac's notch. Hold <kbd>⌃</kbd> <kbd>⌥</kbd> and say it:<br>
-  it drafts the email, runs the browser errand and keeps a team of buddies working on a schedule.<br>
-  <b>No account. No API key. Nothing leaves your Mac unless you say so.</b>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/hero-dark.png">
+    <img src="docs/assets/readme/hero-light.png" alt="Wisp for Mac. The busywork, handled. Wisp lives in your Mac's notch: hold Control and Option and say it, and it drafts the email, runs the browser errand and keeps a team of buddies working on a schedule." width="100%">
+  </picture>
 </p>
 
 <p align="center">
-  <a href="https://anaylab.github.io/wisp/"><img alt="Website" src="https://img.shields.io/badge/see_it_move-anaylab.github.io%2Fwisp-5E5CE6?style=for-the-badge"></a>
-  <a href="#quick-start"><img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-1D1D1F?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://anaylab.github.io/wisp/"><img alt="See it move: anaylab.github.io/wisp" src="https://img.shields.io/badge/see_it_move-anaylab.github.io%2Fwisp-5E5CE6?style=for-the-badge"></a>
+  <a href="#get-wisp"><img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-1D1D1F?style=for-the-badge&logo=apple&logoColor=white"></a>
   <a href="#privacy"><img alt="Runs on-device" src="https://img.shields.io/badge/runs-on--device-A35BF0?style=for-the-badge"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-1D1D1F?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-F2668B?style=for-the-badge"></a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/motion/handoff.webp" alt="The Briefer's morning brief, handed to the Writer, who turns it into a plan" width="100%">
-  <br><sub>9:00 AM. The Briefer reads your calendar and hands its brief to the Writer, who turns it into a plan. Nobody asked.</sub>
-</p>
-
-<p align="center">
-  <a href="#a-day-with-wisp"><b>A day with Wisp</b></a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#everything-it-does">Everything it does</a> ·
-  <a href="#say-it">Say it</a> ·
-  <a href="#models">Models</a> ·
-  <a href="#privacy">Privacy</a>
+  <a href="#a-day-with-wisp"><b>A day</b></a> &nbsp;·&nbsp;
+  <a href="#a-team-that-works-without-you"><b>Buddies</b></a> &nbsp;·&nbsp;
+  <a href="#everything-it-does"><b>Features</b></a> &nbsp;·&nbsp;
+  <a href="#privacy"><b>Privacy</b></a> &nbsp;·&nbsp;
+  <a href="#get-wisp"><b>Get Wisp</b></a> &nbsp;·&nbsp;
+  <a href="#faq"><b>FAQ</b></a>
 </p>
 
 <br>
 
-## A day with Wisp
+<a id="a-day-with-wisp"></a>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/day-dark.png">
+    <img src="docs/assets/readme/day-light.png" alt="A day with Wisp. Watch a morning run itself." width="100%">
+  </picture>
+</p>
+
+<p align="center">
+  <img src="docs/assets/motion/handoff.webp" alt="The Briefer's morning brief, handed to the Writer, who turns it into a plan" width="100%">
+  <br><sub><b>9:00 AM.</b> The Briefer reads your calendar and hands its brief to the Writer, who turns it into a plan. Nobody asked.</sub>
+</p>
+
+<br>
 
 <table>
 <tr>
@@ -118,61 +121,24 @@ Anything that sends, deletes, pays, posts or runs a command shows a card first, 
 </tr>
 </table>
 
-## Why Wisp
+<br>
 
-<table>
-<tr>
-<td width="33%" valign="top">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/numbers-dark.png">
+    <img src="docs/assets/readme/numbers-light.png" alt="34 things it does today. 0.1 seconds for window layouts, timers and tabs. 0 accounts, keys or analytics. 25 languages, heard on-device." width="100%">
+  </picture>
+</p>
 
-### 🔒 Private by default
-Speech, voice and screen reading run on your Mac's Neural Engine. The default model runs locally through Ollama. Cloud models are opt-in, bring-your-own-key, and labelled whenever they're on.
+<br>
 
-</td>
-<td width="33%" valign="top">
-
-### ⚡ Instant for everyday jobs
-Texting, timers, window layouts, tab tidying, music and screen watchers run in **~0.1s** with no model call, so the model only does the hard parts.
-
-</td>
-<td width="33%" valign="top">
-
-### 🛡️ Asks before it acts
-Anything irreversible shows a card with exactly what will happen, even with auto-approve on, and you can edit the wording before you allow it.
-
-</td>
-</tr>
-</table>
-
-## Quick start
-
-You need an Apple-silicon Mac on **macOS 26+**, **Xcode 26**, and [Ollama](https://ollama.com/download).
-
-```bash
-ollama pull qwen2.5vl:3b
-git clone https://github.com/anaylab/wisp.git && cd wisp
-open leanring-buddy.xcodeproj      # pick the leanring-buddy scheme, press ⌘R
-```
-
-Wisp appears in the menu bar (there is no Dock icon) and opens on **Today** with a checklist of the permissions it needs. Grant them, hold <kbd>Control</kbd> + <kbd>Option</kbd>, and talk. The first launch downloads the on-device speech models once; until they are ready, Apple's built-in engines stand in.
-
-> [!NOTE]
-> The Xcode project and scheme keep their original `leanring-buddy` name, typo included. Only the app is called Wisp. Please don't rename them.
-
-<details>
-<summary><b>Install it in /Applications, and what not to do</b></summary>
-
-```bash
-./scripts/install.sh     # copies your Xcode build to /Applications without re-signing, so permissions survive
-open -a Wisp
-```
-
-Don't launch `Wisp.app/Contents/MacOS/Wisp` from a shell (speech recognition then crashes on the first push-to-talk), and don't build with `xcodebuild` from the terminal (it re-signs the app and resets its privacy permissions). Build in Xcode instead.
-
-</details>
-
-## A team that works without you
-
-Buddies are named agents that each own one job, with their own chat, memory, model and tools. They run on a schedule, hand their results to each other, and only interrupt you when something needs your OK.
+<a id="a-team-that-works-without-you"></a>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/team-dark.png">
+    <img src="docs/assets/readme/team-light.png" alt="While you're away: a team that works without you. Each buddy owns one job, with its own chat, memory, model and tools." width="100%">
+  </picture>
+</p>
 
 <table>
 <tr>
@@ -191,7 +157,15 @@ Buddies are named agents that each own one job, with their own chat, memory, mod
 | **Tidies its own notes** | Every 20 messages a buddy reviews what it remembered and fixes it. Notes you wrote are never touched. |
 | **Automations** | Trigger → source → action → output → notify, set up by saying it, a template, or an answer from History. Scheduled runs only get tools that never prompt. |
 
-## Everything it does
+<br>
+
+<a id="everything-it-does"></a>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/features-dark.png">
+    <img src="docs/assets/readme/features-light.png" alt="Everything it does. Not a chatbot in a window. It finishes the job." width="100%">
+  </picture>
+</p>
 
 <table>
 <tr>
@@ -300,6 +274,159 @@ Install MCP servers from a built-in marketplace, connect 500+ apps through optio
 
 </details>
 
+<br>
+
+<a id="privacy"></a>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/privacy-dark.png">
+    <img src="docs/assets/readme/privacy-light.png" alt="Privacy: your Mac is the whole pipeline. Your voice through Parakeet on the Neural Engine, your screen through Accessibility and Vision OCR, your model through Ollama on localhost, your answer through the Kokoro voice on-device." width="100%">
+  </picture>
+</p>
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### Local first
+The default model runs on your Mac through Ollama. Brain pages are plain markdown files on your disk.
+
+</td>
+<td width="33%" valign="top">
+
+### Cloud is opt-in
+Claude, GPT and Gemini are bring-your-own-key, or use your Claude subscription. Wisp labels clearly when a screenshot would leave your Mac.
+
+</td>
+<td width="33%" valign="top">
+
+### Nothing to track you
+No account, no analytics code, no telemetry. Keys and feed URLs live in your login Keychain. The usage log keeps counts, never content.
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary><b>What runs where, in detail</b></summary>
+
+| | Default | Opt-in |
+|---|---|---|
+| Speech to text | Parakeet on the Neural Engine, on-device | — |
+| Answers and vision | Ollama on `localhost:11434` | Apple on-device model, or your own Anthropic, OpenAI or Gemini key |
+| Voice | Kokoro on the Neural Engine, on-device | A local Chatterbox server |
+| Screen reading | Vision OCR + Accessibility, on-device | — |
+| Brain | Markdown on your disk | Activity feed (off by default, local model only) |
+| Network | `localhost`, a one-time speech-model download, and key-free weather/places lookups you can turn off | Only the provider, Canvas feed or source you enable |
+| Secrets | none needed | Keys and feed URLs live in your login Keychain |
+| Analytics | **none** | none |
+
+Images are never written to disk in conversation history. Weather and places cards send only a place name or query, never a screenshot. The usage log keeps token counts and timings, never content.
+
+Images are never written to disk in conversation history. Weather and places cards send only a place name or query, never a screenshot.
+
+</details>
+
+<br>
+
+<a id="get-wisp"></a>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/get-dark.png">
+    <img src="docs/assets/readme/get-light.png" alt="Get Wisp: up and running in a few minutes. Notarized downloads aren't published yet, so for now you build it once in Xcode. It's free and MIT licensed." width="100%">
+  </picture>
+</p>
+
+You need an Apple-silicon Mac on **macOS 26+**, **Xcode 26**, and [Ollama](https://ollama.com/download) for the default local model.
+
+```bash
+# 1. a local model
+ollama pull qwen2.5vl:3b
+
+# 2. get Wisp
+git clone https://github.com/anaylab/wisp.git && cd wisp
+open leanring-buddy.xcodeproj
+
+# 3. pick the leanring-buddy scheme and press ⌘R, then hold ⌃⌥ and talk
+```
+
+Wisp appears in the menu bar (there is no Dock icon) and opens on **Today** with a checklist of the permissions it needs. Grant them, hold <kbd>Control</kbd> + <kbd>Option</kbd>, and talk. The first launch downloads the on-device speech models once; until they are ready, Apple's built-in engines stand in.
+
+> [!NOTE]
+> The Xcode project and scheme keep their original `leanring-buddy` name, typo included. Only the app is called Wisp. Please don't rename them.
+
+<details>
+<summary><b>Install it in /Applications, and what not to do</b></summary>
+
+```bash
+./scripts/install.sh     # copies your Xcode build to /Applications without re-signing, so permissions survive
+open -a Wisp
+```
+
+Don't launch `Wisp.app/Contents/MacOS/Wisp` from a shell (speech recognition then crashes on the first push-to-talk), and don't build with `xcodebuild` from the terminal (it re-signs the app and resets its privacy permissions). Build in Xcode instead.
+
+</details>
+
+<br>
+
+<a id="faq"></a>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/faq-dark.png">
+    <img src="docs/assets/readme/faq-light.png" alt="Before you try it: questions, answered plainly." width="100%">
+  </picture>
+</p>
+
+<details><summary><b>Is it really free?</b></summary>
+
+Yes. Wisp is open source under the MIT license, and the default setup costs nothing to run because the model, speech and voice are all on your Mac. If you choose a cloud model, you pay that provider with your own key or subscription.
+
+</details>
+<details><summary><b>What leaves my Mac?</b></summary>
+
+By default, nothing. Speech to text, voice, OCR and the local model all run on-device. The only network use by default is a one-time download of the speech models and optional weather and places lookups, which send a place name or query, never a screenshot. If you pick a cloud model, your transcript and screenshots go to that provider, and Wisp says so.
+
+</details>
+<details><summary><b>Can it do something I didn't want?</b></summary>
+
+Anything that sends, deletes, pays, posts, invites or runs a command shows a card first, even if you turned on auto-approve, and you can edit the wording before you allow it. Password and payment fields in the browser are refused outright. Scheduled automations only get tools that never prompt.
+
+</details>
+<details><summary><b>Which Macs does it need?</b></summary>
+
+An Apple-silicon Mac on macOS 26 or later, since the notch uses Liquid Glass. 16 GB of memory is recommended for the local model. You need Xcode 26 to build it.
+
+</details>
+<details><summary><b>Does it work in my apps?</b></summary>
+
+Pointing, walkthroughs and screen reading work anywhere: native apps through Accessibility and everything else through on-device OCR. Browser control works with Chrome and Safari.
+
+</details>
+<details><summary><b>Why isn't there a download button?</b></summary>
+
+There is no notarized build published yet, and I'd rather say so than point you at something half-finished. Building it takes a few minutes in Xcode, and signed releases are on the way.
+
+</details>
+
+<br>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/closing-dark.png">
+    <img src="docs/assets/readme/closing-light.png" alt="Stop doing the busywork. Just ask." width="100%">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="#get-wisp"><b>Get Wisp</b></a> &nbsp;·&nbsp; <a href="https://anaylab.github.io/wisp/"><b>See it move</b></a> &nbsp;·&nbsp; <a href="https://github.com/anaylab/wisp/stargazers"><b>Star on GitHub</b></a>
+</p>
+
+<br>
+
+---
+
+<p align="center"><sub><b>UNDER THE HOOD</b></sub></p>
+
 ## Say it
 
 Hold <kbd>⌃</kbd><kbd>⌥</kbd> and talk, or tap it to type. The ⚡ rows never touch the model.
@@ -355,21 +482,6 @@ Small local models are slow at looking at pictures, so Wisp avoids asking them t
 | Screen text | Ask the model to read it | Vision OCR in **~170ms**, started while you're still talking |
 | Speech to text | Wait for the whole clip | Parakeet: **~120–300ms** from release to final transcript |
 | Speaking a reply | Synthesise the whole answer | Kokoro: first audio in **~300ms**, sentence by sentence |
-
-## Privacy
-
-| | Default | Opt-in |
-|---|---|---|
-| Speech to text | Parakeet on the Neural Engine, on-device | — |
-| Answers and vision | Ollama on `localhost:11434` | Apple on-device model, or your own Anthropic, OpenAI or Gemini key |
-| Voice | Kokoro on the Neural Engine, on-device | A local Chatterbox server |
-| Screen reading | Vision OCR + Accessibility, on-device | — |
-| Brain | Markdown on your disk | Activity feed (off by default, local model only) |
-| Network | `localhost`, a one-time speech-model download, and key-free weather/places lookups you can turn off | Only the provider, Canvas feed or source you enable |
-| Secrets | none needed | Keys and feed URLs live in your login Keychain |
-| Analytics | **none** | none |
-
-Images are never written to disk in conversation history. Weather and places cards send only a place name or query, never a screenshot. The usage log keeps token counts and timings, never content.
 
 <details>
 <summary><b>Configuration, files and optional extras</b></summary>
