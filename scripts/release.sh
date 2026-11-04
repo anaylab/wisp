@@ -2,28 +2,36 @@
 #
 # release.sh — build, notarize and publish a Wisp release.
 #
-#   ./scripts/release.sh                 bump automatically: 1.5 → 1.6, build 6 → 7
-#   ./scripts/release.sh 2.0             set the version, bump the build
-#   ./scripts/release.sh 2.0 10          set both
+#   ./scripts/release.sh                 bump automatically: 0.5 → 0.6, build 6 → 7
+#   ./scripts/release.sh 1.0             set the version, bump the build
+#   ./scripts/release.sh 1.0 10          set both
+#   ./scripts/release.sh --notes FILE    use FILE (Markdown) as the release notes
+#   ./scripts/release.sh --draft         stop at a draft GitHub Release: nobody is
+#                                        offered it until you publish it yourself
 #   ./scripts/release.sh --dry-run [...] run the checks and print every step
 #                                        without building, notarizing or publishing
 #
 # Order of work:
 #   1. choose the version and build number from the latest GitHub Release
 #   2. check every prerequisite up front
-#   3. archive the app into build/ (its own DerivedData)
+#   3. archive the app into build/ (its own DerivedData), with the update key in it
 #   4. export a Developer ID–signed Wisp.app
-#   5. wrap it in a drag-to-Applications DMG, then sign it
-#   6. notarize and staple the DMG
-#   7. create the GitHub Release on anaylab/wisp with the DMG attached
+#   5. notarize and staple the app
+#   6. wrap it in a drag-to-Applications DMG, sign, notarize and staple that
+#   7. zip the app as the update, and write and sign the update feed (appcast.xml)
+#   8. create a draft GitHub Release with the DMG, the zip and the feed attached
+#   9. after one more confirmation, publish it
 #
-# Wisp has no auto-updater (no Sparkle, no appcast): people get new versions by
-# downloading the DMG from GitHub Releases.
+# Automatic updates: installed copies read
+#   https://github.com/anaylab/wisp/releases/latest/download/appcast.xml
+# so the feed is an asset of the latest release. Publishing the draft is the one
+# moment a release and its feed both go live, and until then nobody is offered it.
 #
 # One-time setup is described in scripts/README.md: Xcode with a "Developer ID
 # Application" certificate for the team below, `brew install create-dmg gh`,
-# `gh auth login`, and a notarytool keychain profile (named AC_PASSWORD unless
-# WISP_NOTARY_PROFILE says otherwise).
+# `gh auth login`, a notarytool keychain profile (named AC_PASSWORD unless
+# WISP_NOTARY_PROFILE says otherwise), and an update signing key in your Keychain
+# whose public half is in scripts/sparkle-public-key.txt.
 #
 # Does releasing reset the permissions of your dev copy? No, but trying the
 # release copy does. The archive goes to build/DerivedData and build/export, never
@@ -49,6 +57,10 @@ readonly EXPECTED_BUNDLE_ID="com.gluepixel.wisp"
 readonly SIGNING_TEAM_ID="W2H2SA2F98"
 readonly GITHUB_REPOSITORY="anaylab/wisp"
 readonly NOTARY_PROFILE="${WISP_NOTARY_PROFILE:-AC_PASSWORD}"
+readonly WEBSITE_URL="https://anaylab.github.io/wisp/"
+# The Keychain entry of the update signing key. Named for Wisp rather than left at Sparkle's shared
+# default, so another Sparkle app on this Mac can't be confused with it.
+readonly UPDATE_KEY_ACCOUNT="com.gluepixel.wisp"
 
 readonly REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 readonly XCODE_PROJECT="${REPO_ROOT}/leanring-buddy.xcodeproj"
@@ -63,10 +75,18 @@ readonly DMG_BACKGROUND_IMAGE="${REPO_ROOT}/dmg-background.png"
 readonly DMG_NAME="${APP_NAME}.dmg"
 readonly DMG_FILE="${DMG_FOLDER}/${DMG_NAME}"
 readonly EXPORTED_APP="${EXPORT_FOLDER}/${APP_NAME}.app"
+readonly NOTARIZATION_ZIP="${OUT_DIR}/${APP_NAME}-for-notarization.zip"
+readonly UPDATE_FOLDER="${OUT_DIR}/update"
+readonly UPDATE_FEED_FILE="${UPDATE_FOLDER}/appcast.xml"
+readonly UPDATE_PUBLIC_KEY_FILE="${REPO_ROOT}/scripts/sparkle-public-key.txt"
+# Where the archive's own package checkout leaves Sparkle's tools, at the exact version it builds with.
+readonly BUILT_SPARKLE_TOOLS="${DERIVED_DATA}/SourcePackages/artifacts/sparkle/Sparkle/bin"
 
 dry_run=false
+stop_at_draft=false
 requested_version=""
 requested_build=""
+requested_notes_file=""
 
 # Filled in as the script learns them.
 missing_prerequisites=()
@@ -81,6 +101,9 @@ new_build=""
 release_tag=""
 release_title=""
 release_commit=""
+update_public_key=""
+update_zip_file=""
+release_notes_file=""
 
 # ── Small helpers ────────────────────────────────────────────────────────────
 
@@ -123,28 +146,37 @@ do_or_print_logged() {
 
 parse_arguments() {
     local positional=()
-    local argument
 
-    for argument in "$@"; do
-        case "$argument" in
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
             --dry-run)
                 dry_run=true
                 ;;
+            --draft)
+                stop_at_draft=true
+                ;;
+            --notes)
+                [ "$#" -ge 2 ] || fail "--notes needs a file"
+                requested_notes_file="$2"
+                [ -f "$requested_notes_file" ] || fail "Release notes file not found: ${requested_notes_file}"
+                shift
+                ;;
             -h|--help)
-                sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+                sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
                 exit 0
                 ;;
             -*)
-                fail "Unknown option: ${argument} (try --help)"
+                fail "Unknown option: ${1} (try --help)"
                 ;;
             *)
-                positional+=("$argument")
+                positional+=("$1")
                 ;;
         esac
+        shift
     done
 
     [ "${#positional[@]}" -le 2 ] \
-        || fail "Too many arguments. Usage: ./scripts/release.sh [--dry-run] [version] [build]"
+        || fail "Too many arguments. Usage: ./scripts/release.sh [--dry-run] [--draft] [--notes FILE] [version] [build]"
 
     requested_version="${positional[0]:-}"
     requested_build="${positional[1]:-}"
@@ -197,6 +229,8 @@ check_prerequisites() {
     xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
         || note_missing "notarytool keychain profile \"${NOTARY_PROFILE}\" is missing or can't sign in — run: xcrun notarytool store-credentials \"${NOTARY_PROFILE}\" --apple-id YOUR_APPLE_ID --team-id ${SIGNING_TEAM_ID}"
 
+    check_update_signing_key
+
     [ -f "$DMG_BACKGROUND_IMAGE" ] \
         || note_missing "DMG background not found at ${DMG_BACKGROUND_IMAGE}"
 
@@ -226,6 +260,31 @@ check_prerequisites() {
     done
     echo ""
     $dry_run || exit 1
+}
+
+# The app carries the public key and the feed is signed with the private one. A release built from a
+# mismatched pair would leave every copy unable to accept any later update, with no way to fix it from
+# here, so this is checked before anything is built.
+check_update_signing_key() {
+    update_public_key=$(tr -d '[:space:]' <"$UPDATE_PUBLIC_KEY_FILE" 2>/dev/null || true)
+
+    local sparkle_tools
+    sparkle_tools=$(ls -d "$HOME"/Library/Developer/Xcode/DerivedData/leanring-buddy-*/SourcePackages/artifacts/sparkle/Sparkle/bin 2>/dev/null | head -1 || true)
+    if [ -z "$sparkle_tools" ]; then
+        note_missing "Sparkle's tools not found — build once in Xcode (Cmd+B) so it downloads them"
+        return
+    fi
+
+    local keychain_public_key
+    keychain_public_key=$("${sparkle_tools}/generate_keys" --account "$UPDATE_KEY_ACCOUNT" -p 2>/dev/null || true)
+    # With no key, generate_keys prints its error on stdout, so only a real key's shape counts.
+    if [[ ! "$keychain_public_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+        note_missing "No update signing key in your Keychain — run: \"${sparkle_tools}/generate_keys\" --account ${UPDATE_KEY_ACCOUNT}   then put the public key it prints in scripts/sparkle-public-key.txt, commit that, and back up the private key (see scripts/README.md)"
+    elif [ -z "$update_public_key" ]; then
+        note_missing "scripts/sparkle-public-key.txt is empty — put this public key in it and commit: ${keychain_public_key}"
+    elif [ "$keychain_public_key" != "$update_public_key" ]; then
+        note_missing "scripts/sparkle-public-key.txt doesn't match the key in your Keychain (${keychain_public_key}). Shipping this would break updates for everyone on Wisp"
+    fi
 }
 
 # ── Version ──────────────────────────────────────────────────────────────────
@@ -259,13 +318,14 @@ read_latest_release() {
     echo "   Latest release: ${latest_tag} (build ${latest_build})"
 }
 
-# Bumps the minor number and rolls into the next major at 10: 1.5 → 1.6,
-# 1.9 → 2.0, 1.4.2 → 1.5. The very first release is 1.0, as in the Xcode project.
+# Bumps the minor number and rolls into the next major at 10: 0.5 → 0.6,
+# 0.9 → 1.0, 1.4.2 → 1.5. The very first release is 0.1: anything before 1.0 reads
+# as the public beta inside the app (WispUpdatePolicy.versionDescription).
 choose_version() {
     if [ -n "$requested_version" ]; then
         new_version="$requested_version"
     elif [ -z "$latest_version" ]; then
-        new_version="1.0"
+        new_version="0.1"
     elif [[ "$latest_version" =~ ^([0-9]+)\.([0-9]+) ]]; then
         local major="${BASH_REMATCH[1]}"
         local minor=$((10#${BASH_REMATCH[2]} + 1))
@@ -304,6 +364,7 @@ confirm_with_user() {
     echo "🚀 Releasing ${APP_NAME} v${new_version} (build ${new_build})"
     echo "   Previous: ${latest_tag:-none}"
     echo "   Commit:   ${release_commit:0:7} — $(git -C "$REPO_ROOT" log -1 --format=%s)"
+    $stop_at_draft && echo "   Stops at: a draft release, not published"
     echo ""
 
     $dry_run && return 0
@@ -324,12 +385,15 @@ prepare_build_folder() {
     # build/ is gitignored and holds nothing but this script's output.
     echo "🧹 Cleaning build directory..."
     do_or_print rm -rf "$OUT_DIR"
-    do_or_print mkdir -p "$OUT_DIR" "$EXPORT_FOLDER" "$DMG_FOLDER" "$LOG_FOLDER"
+    do_or_print mkdir -p "$OUT_DIR" "$EXPORT_FOLDER" "$DMG_FOLDER" "$LOG_FOLDER" "$UPDATE_FOLDER"
 }
 
 archive_app() {
     # -derivedDataPath keeps every intermediate inside build/, apart from the
     # DerivedData that Xcode and scripts/install.sh use for the dev copy.
+    # WISP_SPARKLE_PUBLIC_ED_KEY reaches SUPublicEDKey in Info.plist only here, which is what makes
+    # this copy, and no copy built in Xcode, able to update itself (see WispUpdatePolicy).
+    # ARCHS: Wisp needs Apple silicon, and the feed then declares that for Sparkle by itself.
     echo "📦 Archiving (Release configuration)..."
     do_or_print_logged "${LOG_FOLDER}/archive.log" \
         xcodebuild archive \
@@ -337,10 +401,13 @@ archive_app() {
         -scheme "$XCODE_SCHEME" \
         -configuration Release \
         -destination "generic/platform=macOS" \
+        ARCHS=arm64 \
         -archivePath "$ARCHIVE_FILE" \
         -derivedDataPath "$DERIVED_DATA" \
+        -allowProvisioningUpdates \
         MARKETING_VERSION="$new_version" \
-        CURRENT_PROJECT_VERSION="$new_build"
+        CURRENT_PROJECT_VERSION="$new_build" \
+        WISP_SPARKLE_PUBLIC_ED_KEY="$update_public_key"
     echo "✅ Archive created"
 }
 
@@ -381,7 +448,8 @@ export_signed_app() {
         xcodebuild -exportArchive \
         -archivePath "$ARCHIVE_FILE" \
         -exportPath "$EXPORT_FOLDER" \
-        -exportOptionsPlist "$EXPORT_OPTIONS_FILE"
+        -exportOptionsPlist "$EXPORT_OPTIONS_FILE" \
+        -allowProvisioningUpdates
 
     echo "🔍 Verifying the app's signature..."
     do_or_print codesign --verify --deep --strict "$EXPORTED_APP"
@@ -398,8 +466,68 @@ export_signed_app() {
             codesign -dv "$EXPORTED_APP" 2>&1 | grep Authority | sed 's/^/   /'
             exit 1
         fi
+
+        verify_exported_app_can_update
     fi
     echo "✅ Export complete (Developer ID signed)"
+}
+
+# What installed copies will need from this build for the next release to reach them.
+verify_exported_app_can_update() {
+    local info_plist="${EXPORTED_APP}/Contents/Info"
+
+    [ "$(defaults read "$info_plist" SUPublicEDKey)" = "$update_public_key" ] \
+        || fail "Exported app has the wrong SUPublicEDKey: it could never accept an update"
+    [ "$(defaults read "$info_plist" CFBundleShortVersionString)" = "$new_version" ] \
+        || fail "Exported app's version isn't ${new_version}"
+    [ "$(defaults read "$info_plist" CFBundleVersion)" = "$new_build" ] \
+        || fail "Exported app's build isn't ${new_build}"
+
+    # Sparkle's helpers run on their own, so each has to carry the same signature as the app.
+    local sparkle_framework="${EXPORTED_APP}/Contents/Frameworks/Sparkle.framework"
+    [ -d "$sparkle_framework" ] || fail "Sparkle.framework is missing from the exported app"
+    local sparkle_helper
+    for sparkle_helper in \
+        "${sparkle_framework}/Versions/B/Autoupdate" \
+        "${sparkle_framework}/Versions/B/Updater.app" \
+        "${sparkle_framework}/Versions/B/XPCServices/Installer.xpc"; do
+        codesign -dv "$sparkle_helper" 2>&1 | grep -q "Authority=Developer ID Application" \
+            || fail "${sparkle_helper} isn't signed with Developer ID"
+    done
+}
+
+# Submits one file to Apple and waits. notarytool can exit 0 for a rejected submission, so its answer
+# is read rather than trusted; a rejection prints the command that says why.
+notarize_file() {
+    local file_to_notarize="$1"
+    local log_file="$2"
+
+    if $dry_run; then
+        do_or_print xcrun notarytool submit "$file_to_notarize" --keychain-profile "$NOTARY_PROFILE" --wait
+        return
+    fi
+
+    xcrun notarytool submit "$file_to_notarize" --keychain-profile "$NOTARY_PROFILE" --wait | tee "$log_file"
+    if ! grep -q "status: Accepted" "$log_file"; then
+        local submission_id
+        submission_id=$(grep -m1 "^  id:" "$log_file" | awk '{print $2}')
+        fail "Apple rejected ${file_to_notarize}. To see why: xcrun notarytool log ${submission_id} --keychain-profile ${NOTARY_PROFILE}"
+    fi
+}
+
+notarize_app() {
+    # The DMG's ticket doesn't cover an update, which arrives as a zip of the app alone. So the app
+    # gets its own ticket, stapled to it, and the DMG and the update are both made from that copy.
+    echo "🔏 Notarizing the app with Apple (this may take a few minutes)..."
+    do_or_print ditto -c -k --keepParent "$EXPORTED_APP" "$NOTARIZATION_ZIP"
+    notarize_file "$NOTARIZATION_ZIP" "${LOG_FOLDER}/notarize-app.log"
+
+    echo "📎 Stapling notarization ticket to the app..."
+    do_or_print xcrun stapler staple "$EXPORTED_APP"
+    do_or_print xcrun stapler validate "$EXPORTED_APP"
+    do_or_print spctl --assess --type execute --verbose "$EXPORTED_APP"
+    do_or_print rm -f "$NOTARIZATION_ZIP"
+    echo "✅ App notarized and stapled"
 }
 
 build_dmg() {
@@ -425,10 +553,10 @@ build_dmg() {
 }
 
 notarize_dmg() {
-    # Apple scans the DMG and everything in it. Stapling attaches the ticket to
-    # the DMG so Gatekeeper can verify it without a network round trip.
+    # Stapling attaches the ticket to the DMG so Gatekeeper can verify it without
+    # a network round trip.
     echo "🔏 Notarizing DMG with Apple (this may take a few minutes)..."
-    do_or_print xcrun notarytool submit "$DMG_FILE" --keychain-profile "$NOTARY_PROFILE" --wait
+    notarize_file "$DMG_FILE" "${LOG_FOLDER}/notarize-dmg.log"
 
     echo "📎 Stapling notarization ticket to DMG..."
     do_or_print xcrun stapler staple "$DMG_FILE"
@@ -437,16 +565,114 @@ notarize_dmg() {
     echo "✅ DMG notarized and stapled"
 }
 
-publish_github_release() {
-    # The tag goes on the commit that was built; GitHub writes the notes from
-    # the merged PRs since the previous release.
-    echo "🏷️  Creating GitHub Release ${release_tag}..."
-    do_or_print gh release create "$release_tag" "$DMG_FILE" \
+write_release_notes() {
+    release_notes_file="${update_zip_file%.zip}.md"
+
+    if $dry_run; then
+        echo "   would write release notes: ${release_notes_file}"
+    elif [ -n "$requested_notes_file" ]; then
+        cp "$requested_notes_file" "$release_notes_file"
+    elif [ -z "$latest_tag" ]; then
+        # GitHub's generated notes for a first release would list every PR the repo has ever had,
+        # and they are shown in the update window.
+        echo "The first public beta of Wisp." >"$release_notes_file"
+    else
+        gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$release_tag" \
+            -f target_commitish="$release_commit" \
+            -f previous_tag_name="$latest_tag" \
+            --jq '.body' >"$release_notes_file"
+    fi
+}
+
+build_update() {
+    # A zip keeps Sparkle.framework's symlinks only when made with ditto. Sparkle's generate_appcast
+    # reads the app inside, signs the zip and the feed with the Keychain key, and embeds the notes in
+    # the feed, so the update window shows them without loading a web page.
+    echo "📦 Building the update and its feed..."
+    update_zip_file="${UPDATE_FOLDER}/${APP_NAME}-${new_version}-${new_build}.zip"
+    do_or_print ditto -c -k --keepParent "$EXPORTED_APP" "$update_zip_file"
+    write_release_notes
+
+    do_or_print_logged "${LOG_FOLDER}/generate-appcast.log" \
+        "${BUILT_SPARKLE_TOOLS}/generate_appcast" \
+        --account "$UPDATE_KEY_ACCOUNT" \
+        --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/" \
+        --embed-release-notes \
+        --link "$WEBSITE_URL" \
+        --maximum-deltas 0 \
+        "$UPDATE_FOLDER"
+
+    $dry_run || verify_update_feed
+    echo "✅ Update ready: ${update_zip_file}"
+}
+
+# Reads back what installed copies will read: the right version and address, and a signature that really
+# is over this zip by the key the app trusts.
+verify_update_feed() {
+    local feed_version feed_short_version feed_url feed_signature
+    feed_version=$(xmllint --xpath 'string(//item[1]/*[local-name()="version"])' "$UPDATE_FEED_FILE")
+    feed_short_version=$(xmllint --xpath 'string(//item[1]/*[local-name()="shortVersionString"])' "$UPDATE_FEED_FILE")
+    feed_url=$(xmllint --xpath 'string(//item[1]/enclosure/@url)' "$UPDATE_FEED_FILE")
+    feed_signature=$(xmllint --xpath 'string(//item[1]/enclosure/@*[local-name()="edSignature"])' "$UPDATE_FEED_FILE")
+
+    [ "$feed_version" = "$new_build" ] || fail "The feed says build ${feed_version}, expected ${new_build}"
+    [ "$feed_short_version" = "$new_version" ] || fail "The feed says version ${feed_short_version}, expected ${new_version}"
+    [ "$feed_url" = "https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/$(basename "$update_zip_file")" ] \
+        || fail "The feed points at the wrong download: ${feed_url}"
+    [ -n "$feed_signature" ] || fail "The update in the feed has no signature"
+    "${BUILT_SPARKLE_TOOLS}/sign_update" --account "$UPDATE_KEY_ACCOUNT" --verify "$update_zip_file" "$feed_signature" >/dev/null \
+        || fail "The feed's signature doesn't verify against the zip"
+    "${BUILT_SPARKLE_TOOLS}/sign_update" --account "$UPDATE_KEY_ACCOUNT" --verify "$UPDATE_FEED_FILE" >/dev/null \
+        || fail "The feed itself isn't signed, and installed copies require that"
+}
+
+upload_draft_release() {
+    # The draft holds the files, but isn't public and doesn't count as "latest", so nobody is
+    # offered it yet. The tag is only created on the built commit when the draft is published.
+    echo "🏷️  Creating draft GitHub Release ${release_tag}..."
+    do_or_print gh release create "$release_tag" "$DMG_FILE" "$update_zip_file" "$UPDATE_FEED_FILE" \
         --repo "$GITHUB_REPOSITORY" \
         --target "$release_commit" \
         --title "$release_title" \
-        --generate-notes \
-        --latest
+        --notes-file "$release_notes_file" \
+        --draft
+}
+
+publish_release() {
+    if $stop_at_draft; then
+        echo "📝 Left as a draft. To go live: gh release edit ${release_tag} --repo ${GITHUB_REPOSITORY} --draft=false --latest"
+        return
+    fi
+
+    if ! $dry_run; then
+        echo ""
+        echo "   Publishing makes ${release_tag} the download for new people, and every installed"
+        echo "   copy of Wisp will pick it up within a day. It can't be recalled from those copies."
+        local answer
+        read -p "   Publish now? (y/N) " -n 1 -r answer
+        echo ""
+        if [[ ! $answer =~ ^[Yy]$ ]]; then
+            stop_at_draft=true
+            echo "📝 Left as a draft. To go live: gh release edit ${release_tag} --repo ${GITHUB_REPOSITORY} --draft=false --latest"
+            return
+        fi
+    fi
+
+    echo "🚀 Publishing ${release_tag}..."
+    do_or_print gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+    verify_published_feed
+}
+
+# What installed copies will actually fetch.
+verify_published_feed() {
+    local feed_address="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/appcast.xml"
+    if $dry_run; then
+        echo "   would check the feed serves build ${new_build}: ${feed_address}"
+        return
+    fi
+    curl -fsSL "$feed_address" | grep -q "<sparkle:version>${new_build}</sparkle:version>" \
+        || echo "⚠️  ${feed_address} isn't serving build ${new_build} yet. Check it before announcing."
 }
 
 print_summary() {
@@ -455,11 +681,14 @@ print_summary() {
     echo "$rule"
     if $dry_run; then
         echo "🧪 Dry run complete — v${new_version} (build ${new_build}) was not released."
+    elif $stop_at_draft; then
+        echo "📝 v${new_version} (build ${new_build}) is a draft: nobody can see it or update to it yet."
     else
         echo "✅ Release v${new_version} (build ${new_build}) complete!"
     fi
     echo ""
     echo "   DMG:      ${DMG_FILE}"
+    echo "   Update:   ${update_zip_file}"
     echo "   Release:  https://github.com/${GITHUB_REPOSITORY}/releases/tag/${release_tag}"
     echo ""
     echo "   Link that always serves the newest build:"
@@ -483,9 +712,12 @@ main() {
     prepare_build_folder
     archive_app
     export_signed_app
+    notarize_app
     build_dmg
     notarize_dmg
-    publish_github_release
+    build_update
+    upload_draft_release
+    publish_release
     print_summary
 }
 

@@ -19,7 +19,10 @@ Parakeet/Kokoro model files are downloaded from HuggingFace once, on first launc
 text never leave the Mac. The only other default
 network use is live glance-card data (weather, places, configured sources), gated by
 `GlanceCardDataPreference`, which sends a place name or search query (plus, for places, the
-location to Apple Maps), never a screenshot. The model backend is now *selectable*: a user
+location to Apple Maps), never a screenshot. A **release build** also checks for updates: once a day it fetches
+`https://github.com/anaylab/wisp/releases/latest/download/appcast.xml` from GitHub, which sees the IP address and Wisp's
+version and nothing else (Sparkle's system profile is off). It can be turned off in Settings → General → Updates, and a
+copy built in Xcode has no update key, so it never contacts the feed. The model backend is now *selectable*: a user
 can opt in, in Settings → Model, to a bring-your-own-key cloud provider (`ModelProviderFactory` /
 `BuddyChatProviderSelection`, key in the Keychain via `ProviderKeychainStore`), which sends
 screenshots and the transcript off this machine and is labelled as such. Local remains the
@@ -42,7 +45,7 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
 - **Surfaces (notch-first layout)**: the **notch** is where Wisp is *used* (answers, cards, quick
   panel, quick chat); the **Wisp window** is where it's *managed*; the **menu bar item** is a plain
   native `NSMenu` (`MenuBarMenuController`: status, Ask Wisp…, Ask About a Part…, Save Worked Solution… (enabled only while the drawings hold a note or circle), Open Wisp, Chat, Buddies, Pause
-  Listening / Speak Replies / Sound Cues checkmarks, Settings…, Quit — rebuilt in `menuNeedsUpdate`).
+  Listening / Speak Replies / Sound Cues checkmarks, Check for Updates… (release builds only), Settings…, Quit — rebuilt in `menuNeedsUpdate`).
   **Pause listening** (`CompanionManager.isListeningPaused` / `setListeningPaused`) drops every talk
   gesture and routine digit at the shortcut sinks (cancelling a hold in progress); typed questions
   still work. It isn't persisted, dims the menu bar icon (`appearsDisabled`), and shows a Resume
@@ -177,6 +180,19 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   tag (`SpokenLineParser`) — only that short line is synthesised, at the end of the turn; a
   reply with no tag stays silent. The old incremental sentence-streaming of the whole reply
   is retired. Confirmation/failure speech is unaffected.
+- **Automatic updates** (`Updates/`, `scripts/release.sh`, `docs/public-beta.md`): Sparkle 2 (SwiftPM, pinned 2.9.0). `WispUpdater` wraps
+  `SPUStandardUpdaterController` and starts only if `WispUpdatePolicy.availability` says this copy may update: it needs a usable `SUPublicEDKey`,
+  an https feed, no demo mode, and not running from a disk image or a translocated copy. **Only `release.sh` sets the key**, through the build
+  setting `WISP_SPARKLE_PUBLIC_ED_KEY` that `Info.plist` reads from (the value is in `scripts/sparkle-public-key.txt`), so a copy built in Xcode has
+  none. Otherwise a dev copy, signed Apple Development, would replace itself with a Developer ID release and lose its TCC grants. The feed
+  (`SUFeedURL`) is an asset of the latest GitHub Release, so a release and its feed go live in one step when its draft is published. Daily checks,
+  silent download and install on quit are the defaults (`SUEnableAutomaticChecks`, `SUAutomaticallyUpdate`), with switches in Settings → General →
+  Updates (`UpdatesSettingsCard`). Checks are quiet ("gentle reminders"): Sparkle's alert never opens by itself over the user's work. A held update
+  shows as "Update to Wisp 0.2…" in the menu bar plus one notification per version (none in quiet mode); pressing either menu item or Check Now is
+  a normal user-initiated check, which Sparkle shows itself. `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` are on, so a
+  tampered zip or feed is refused (proved by `Tests/AppUpdates/live-update.sh`). The private key lives only in the release Mac's Keychain, account
+  `com.gluepixel.wisp`; losing it strands every installed copy. No separate beta channel: versions below 1.0 read as beta. The swiftc suites stub Sparkle
+  (`Tests/AgentRuntimeIntegration/SparkleStub.swift`).
 - **Deployment target**: macOS 26 (raised from 14.2) so the notch HUD can use real SwiftUI
   **Liquid Glass** (`.glassEffect` / `GlassEffectContainer`), dark-tinted for legibility
   (`WispColor.OnGlass.tint`, `View.wispNotchGlassSurface(in:)`).
@@ -1326,6 +1342,13 @@ Files are grouped by role; line counts are rough.
 | `ScreenshotReuseCache.swift` | ~125 | Resends the previous screenshot's exact bytes when the screen hasn't perceptibly changed, so Ollama's image cache hits instead of re-encoding. |
 | `CompanionScreenCaptureUtility.swift` | ~150 | Multi-monitor capture via ScreenCaptureKit, downscaled to 896px. Starts OCR (`ScreenTextRecognizer`) on each captured frame. |
 
+### Automatic updates
+| File | Approx. lines | What it does |
+|---|---|---|
+| `Updates/WispUpdatePolicy.swift` | ~115 | Pure: whether this copy may update (key, feed, demo mode, where it's running from), the version line ("Wisp 0.3 beta (build 12)"), when a waiting update notifies. Tested by `Tests/AppUpdates`. |
+| `Updates/WispUpdater.swift` | ~165 | The Sparkle wrapper: starts the updater only if allowed, Check for Updates, the two automatic switches, gentle reminders → `pendingUpdateVersion` + one notification. |
+| `WispWindow/UpdatesSettingsCard.swift` | ~90 | Settings → General → Updates: version, Check Now, the two switches, or why this copy doesn't update. |
+
 ### Local model stack
 | File | Approx. lines | What it does |
 |---|---|---|
@@ -1722,11 +1745,19 @@ it isn't, the failure is in attribution. Use `open -a <path-to>/Wisp.app` and fo
 **Never run `xcodebuild` in the terminal.** It resets the app's TCC permissions, so screen
 recording, accessibility and the rest have to be granted again.
 
+**Releasing** is `./scripts/release.sh` (`--dry-run` first; `--draft` stops short of publishing; `scripts/README.md` has the one-time setup). It is
+the one place `xcodebuild` is run from a terminal: it archives into `build/`, away from Xcode's DerivedData and `/Applications/Wisp.app`. Running the
+release copy on this Mac does move TCC grants to its signature (see the script's header), so try releases on a second user account or Mac. It signs the
+Developer ID app, notarizes and staples the app and the DMG, zips the app as the update, writes the signed feed, and publishes a draft GitHub Release
+after a second confirmation. Publishing reaches every installed copy within a day and can't be recalled.
+
 **Standalone test suites** (plain `swiftc`, no Xcode build, no TCC reset; nothing needs to be
 running):
 
 ```bash
 ./Tests/ModelProviderContract/run.sh     # provider layer, ~10s
+./Tests/AppUpdates/run.sh                # update rules: which copies may update, version wording, when a waiting update notifies
+./Tests/AppUpdates/live-update.sh        # a real update on localhost with a throwaway key (real Sparkle): good update installs; swapped zip, edited or unsigned feed refused. Needs Sparkle from an Xcode build
 ./Tests/AgentRuntimeIntegration/run.sh   # agent loop, slower (compiles the whole app)
 ./Tests/HostileProviderAttack/run.sh     # adversarial provider vs the real agent loop; lists known defects
 ./Tests/AgentCursorMotion/run.sh         # agent cursor moves: endpoints, timing, bow, playback by time
@@ -1782,7 +1813,7 @@ WISP_LIVE_CUA_DRIVER=1 ./Tests/MCPStructuredContent/run.sh   # + read-only live 
 `ModelProviderContract` compiles a hand-maintained `SOURCES` list — when a listed file gains a
 dependency on another source file, add that file to the list or the suite stops compiling.
 `AgentRuntimeIntegration` compiles every `.swift` file under `leanring-buddy/` (recursively,
-minus the `@main` entry point) with FluidAudio stubbed, because the agent runtime
+minus the `@main` entry point) with FluidAudio and Sparkle stubbed, because the agent runtime
 reaches `CompanionManager` and through it most of the app; a new third-party import needs a stub
 there. The FluidAudio stub (`Tests/AgentRuntimeIntegration/FluidAudioStub.swift`, also used by
 `HostileProviderAttack`) declares only the API `FluidAudioSpeechModels.swift` uses — calling
