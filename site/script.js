@@ -8,6 +8,9 @@
   var smallOrTouch = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
   var isFlat = reduceMotion || smallOrTouch;
   if (isFlat) root.classList.add("flat");
+  // Only Chromium applies an SVG filter to what's behind an element; others keep plain blur.
+  var brands = navigator.userAgentData && navigator.userAgentData.brands;
+  if (brands && brands.some(function (brand) { return brand.brand === "Chromium"; })) root.classList.add("refracts");
 
   function clamp(value, low, high) { return Math.min(high, Math.max(low, value)); }
   function mix(from, to, amount) { return from + (to - from) * amount; }
@@ -84,6 +87,7 @@
       element: element,
       kind: element.dataset.scene,
       video: element.querySelector("video[data-scrub]"),
+      live: element.querySelector("[data-live]"),
       device: element.querySelector(".device.dark"),
       bar: element.querySelector("[data-bar]"),
       clock: element.querySelector("[data-clock]"),
@@ -125,6 +129,7 @@
       heroCopy.style.opacity = String(1 - copyFade);
       heroCopy.style.transform = "translateY(" + (-progress * 260).toFixed(1) + "px) scale(" + (1 - copyFade * 0.04).toFixed(3) + ")";
       var rise = easeOut(clamp(progress / 0.38, 0, 1));
+      heroDevice.style.setProperty("--rise", rise.toFixed(3));
       var deviceHeight = heroDevice.offsetHeight;
       var startY = viewportHeight * 0.64;
       var endY = Math.max(72, (viewportHeight - deviceHeight) / 2 + 18);
@@ -144,6 +149,7 @@
         scene.device.style.transform = "scale(" + mix(0.92, 1, arrive).toFixed(3) + ")";
       }
       if (scene.video) scrub(scene.video, clamp(progress / 0.96, 0, 1) * scene.video.duration);
+      if (scene.live && scene.live.setProgress) scene.live.setProgress(clamp(progress / 0.96, 0, 1));
       var active = 0;
       scene.captions.forEach(function (caption, index) {
         if (progress >= parseFloat(caption.dataset.at)) active = index;
