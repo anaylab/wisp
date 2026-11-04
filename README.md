@@ -317,7 +317,7 @@ No account, no analytics code, no telemetry. Keys and feed URLs live in your log
 | Voice | Kokoro on the Neural Engine, on-device | A local Chatterbox server |
 | Screen reading | Vision OCR + Accessibility, on-device | — |
 | Brain | Markdown on your disk | Activity feed (off by default, local model only) |
-| Network | `localhost`, a one-time speech-model download, and key-free weather/places lookups you can turn off | Only the provider, Canvas feed or source you enable |
+| Network | `localhost`, a one-time speech-model download, key-free weather/places lookups and a daily update check, each of which you can turn off | Only the provider, Canvas feed or source you enable |
 | Secrets | none needed | Keys and feed URLs live in your login Keychain |
 | Analytics | **none** | none |
 
@@ -384,7 +384,7 @@ Yes. Wisp is open source under the MIT license, and the default setup costs noth
 </details>
 <details><summary><b>What leaves my Mac?</b></summary>
 
-By default, nothing. Speech to text, voice, OCR and the local model all run on-device. The only network use by default is a one-time download of the speech models and optional weather and places lookups, which send a place name or query, never a screenshot. If you pick a cloud model, your transcript and screenshots go to that provider, and Wisp says so.
+By default, nothing you say or see. Speech to text, voice, OCR and the local model all run on-device. The only network use by default is a one-time download of the speech models, optional weather and places lookups, which send a place name or query, never a screenshot, and, in downloaded builds, a daily update check that tells GitHub your IP address and Wisp's version. If you pick a cloud model, your transcript and screenshots go to that provider, and Wisp says so.
 
 </details>
 <details><summary><b>Can it do something I didn't want?</b></summary>

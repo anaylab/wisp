@@ -10,3 +10,6 @@ build/
 .claude/
 coding-plans/
 releases/
+
+# The update signing key backup from scripts/README.md, if exported inside the repo
+wisp-update-key-backup*
