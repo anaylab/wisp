@@ -227,6 +227,10 @@ private struct ModelProviderCard: View {
                     ClaudeSubscriptionStatusRow()
                 }
 
+                if selectedProviderKind == .chatGPTSubscription {
+                    ChatGPTSubscriptionStatusRow()
+                }
+
                 if selectedProviderKind == .anthropic || selectedProviderKind == .claudeSubscription {
                     ClaudeModelOptions(
                         companionManager: companionManager,
@@ -389,6 +393,7 @@ private extension BuddyChatProviderKind {
         case .appleOnDevice: return "Private. Apple's built-in model, no download."
         case .anthropic: return "Claude with your Anthropic API key."
         case .claudeSubscription: return "Claude through your signed-in claude CLI."
+        case .chatGPTSubscription: return "ChatGPT through your signed-in codex CLI."
         case .openAI: return "GPT with your OpenAI API key."
         case .gemini: return "Gemini with your Google API key."
         case .grok: return "Grok with your xAI API key."
@@ -402,7 +407,7 @@ private extension BuddyChatProviderKind {
         case .localOllama: return "desktopcomputer"
         case .appleOnDevice: return "apple.logo"
         case .anthropic, .claudeSubscription: return "sparkle"
-        case .openAI: return "circle.hexagongrid"
+        case .openAI, .chatGPTSubscription: return "circle.hexagongrid"
         case .gemini: return "star.circle"
         case .grok: return "bolt"
         case .openRouter: return "arrow.triangle.branch"
@@ -524,6 +529,55 @@ private struct ClaudeSubscriptionStatusRow: View {
     private func refresh() async {
         status = .checking
         status = await ClaudeSubscriptionStatus.current()
+    }
+}
+
+/// Whether the `codex` CLI is installed and signed in with a ChatGPT account —
+/// the only setup the ChatGPT subscription provider needs. Checked by asking
+/// the CLI, never by reading its credentials.
+private struct ChatGPTSubscriptionStatusRow: View {
+    @State private var status: ChatGPTSubscriptionStatus = .checking
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: isReady ? "checkmark.circle.fill" : "circle.dashed")
+                .font(.system(size: 10))
+                .foregroundStyle(isReady ? DS.Colors.success : DS.Colors.textTertiary)
+            Text(message)
+                .font(.system(size: 10))
+                .foregroundStyle(isReady ? DS.Colors.textSecondary : DS.Colors.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Check again") {
+                Task { await refresh() }
+            }
+            .buttonStyle(WispPillButtonStyle(isProminent: false))
+            .controlSize(.small)
+            .pointerCursor()
+        }
+        .task { await refresh() }
+    }
+
+    private var isReady: Bool { status == .signedIn }
+
+    private var message: String {
+        switch status {
+        case .checking:
+            return "Checking the Codex command line tool…"
+        case .notInstalled:
+            return "The Codex command line tool isn't installed. Install it (`brew install codex` or `npm install -g @openai/codex`), then run `codex login` in Terminal to sign in with ChatGPT."
+        case .signedOut:
+            return "Not signed in. Run `codex login` in Terminal and sign in with your ChatGPT account."
+        case .signedInWithoutChatGPT:
+            return "Codex is signed in with an API key, not ChatGPT. Run `codex logout`, then `codex login` and choose Sign in with ChatGPT."
+        case .signedIn:
+            return "Signed in with ChatGPT. Replies take a few seconds longer and count against your plan's Codex limits."
+        }
+    }
+
+    private func refresh() async {
+        status = .checking
+        status = await ChatGPTSubscriptionStatus.current()
     }
 }
 

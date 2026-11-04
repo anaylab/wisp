@@ -96,9 +96,11 @@ enum UsageCostEstimator {
     /// its figure is shown as what the API would have charged.
     static func costLabel(providerKind: BuddyChatProviderKind, estimatedCostUSD: Double?) -> String {
         if providerKind == .localOllama || providerKind == .appleOnDevice { return "free (runs on this Mac)" }
+        // The Codex CLI reports no cost and the model it picks isn't priced.
+        if providerKind == .chatGPTSubscription, estimatedCostUSD == nil { return "included in subscription" }
         guard let estimatedCostUSD else { return "cost unknown" }
         let amount = formattedDollars(estimatedCostUSD)
-        if providerKind == .claudeSubscription {
+        if providerKind == .claudeSubscription || providerKind == .chatGPTSubscription {
             return "included in subscription (≈ API cost \(amount))"
         }
         return "≈ \(amount)"

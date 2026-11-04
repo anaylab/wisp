@@ -53,6 +53,9 @@ enum ModelProviderFactory {
                 effortLevel: AnthropicModelSettings.effortLevel
             )
 
+        case .chatGPTSubscription:
+            return ChatGPTSubscriptionProvider()
+
         case .openAI:
             return OpenAIProvider(apiKey: ProviderKeychainStore.apiKey(for: .openAI))
 

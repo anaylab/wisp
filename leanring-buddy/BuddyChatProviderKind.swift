@@ -35,6 +35,10 @@ enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codabl
     /// driving their own signed-in `claude` command line tool. No API key.
     case claudeSubscription
 
+    /// OpenAI's ChatGPT, paid for by the user's ChatGPT subscription by
+    /// driving their own signed-in `codex` command line tool. No API key.
+    case chatGPTSubscription
+
     /// OpenAI's GPT, over the network, with a user-supplied API key.
     case openAI
 
@@ -57,6 +61,7 @@ enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codabl
         case .appleOnDevice: return "Apple on-device"
         case .anthropic:  return "Claude (Anthropic)"
         case .claudeSubscription: return "Claude (your subscription)"
+        case .chatGPTSubscription: return "ChatGPT (your subscription)"
         case .openAI:      return "GPT (OpenAI)"
         case .gemini:      return "Gemini (Google)"
         case .grok:        return "Grok (xAI)"
@@ -77,11 +82,12 @@ enum BuddyChatProviderKind: String, CaseIterable, Identifiable, Sendable, Codabl
 
     /// Whether this provider needs a user-supplied API key before it can run.
     ///
-    /// Only the local provider and the subscription provider (which uses the
-    /// `claude` CLI's own sign-in) work without one. A cloud provider selected
+    /// Only the local providers and the subscription providers (which use the
+    /// `claude` or `codex` CLI's own sign-in) work without one. A cloud provider selected
     /// without a stored key is a configuration error the UI must surface rather
     /// than a request that silently fails.
     var requiresAPIKey: Bool {
-        self != .localOllama && self != .appleOnDevice && self != .claudeSubscription
+        self != .localOllama && self != .appleOnDevice
+            && self != .claudeSubscription && self != .chatGPTSubscription
     }
 }

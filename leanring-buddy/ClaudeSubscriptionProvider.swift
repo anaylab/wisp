@@ -334,7 +334,7 @@ final class ClaudeSubscriptionProvider: ModelProvider, @unchecked Sendable {
         return line
     }
 
-    private static func renderedText(of message: BuddyChatMessage) -> String {
+    static func renderedText(of message: BuddyChatMessage) -> String {
         var parts: [String] = []
         for block in message.blocks {
             switch block {
