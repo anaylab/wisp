@@ -5,8 +5,9 @@
 //  The ChatGPT subscription provider's pure parts: the `codex exec` command
 //  line that switches the CLI's own agent off, the TOML escaping of Wisp's
 //  system prompt, the stdin prompt, the JSONL event stream, failure wording,
-//  and `codex login status` parsing. No live round trip (it would need a
-//  signed-in ChatGPT account and spend it).
+//  and `codex login status` parsing. A live round trip through the real
+//  `codex` CLI runs only when WISP_LIVE_CODEX=1, since it needs a ChatGPT
+//  sign-in and spends the plan's limits.
 //
 
 import Foundation
@@ -72,19 +73,23 @@ import Foundation
         let lines = [
             #"{"type":"thread.started","thread_id":"t"}"#,
             #"{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"thinking"}}"#,
-            #"{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Opening it. [TOOL:open_app:{\"name\":\"Notes\"}]"}}"#,
+            #"{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Opening Notes now."}}"#,
+            #"{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"[TOOL:open_app:{\"name\":\"Notes\"}]"}}"#,
             #"{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":800,"output_tokens":40}}"#,
         ]
         let (stream, continuation) = AsyncStream<Data>.makeStream()
         continuation.yield(Data((lines.joined(separator: "\n") + "\n").utf8))
         continuation.finish()
-        let outcome = await ChatGPTSubscriptionProvider.readEventStream(from: stream, onTextDelta: { _ in })
-        check("only agent messages are the reply", outcome.agentMessages.count == 1)
+        let streamed = Deltas()
+        let outcome = await ChatGPTSubscriptionProvider.readEventStream(from: stream, onTextDelta: { streamed.values.append($0) })
+        check("reasoning isn't a message", outcome.agentMessages.count == 2)
+        check("only the final message is streamed, once", streamed.values == [#"[TOOL:open_app:{"name":"Notes"}]"#], "\(streamed.values)")
         check("usage is read", outcome.promptTokens == 1200 && outcome.cachedInputTokens == 800 && outcome.outputTokens == 40)
         let turn = try? ChatGPTSubscriptionProvider.turn(
             from: outcome, standardErrorText: "", exitStatus: 0, duration: 1,
             knownToolNames: ["open_app"], providerName: "ChatGPT")
         check("a [TOOL:] tag becomes a tool call", turn?.stopReason == .toolUse && turn?.toolUses.first?.name == "open_app")
+        check("the preamble isn't part of the reply", !(turn?.text.contains("Opening Notes now") ?? true))
 
         let failed = ChatGPTSubscriptionProvider.StreamOutcome(failureMessage: "You've hit your usage limit. Try again later.")
         do {
@@ -109,5 +114,70 @@ import Foundation
               && BuddyChatProviderKind.chatGPTSubscription.sendsScreenshotsOffThisMachine)
         check("usage log reads its identifier",
               UsageProviderIdentifier.parse(ChatGPTSubscriptionProvider().identifier)?.providerKind == .chatGPTSubscription)
+    }
+
+    if ProcessInfo.processInfo.environment["WISP_LIVE_CODEX"] == "1" {
+        section("ChatGPT subscription: live round trip (real codex CLI)")
+        let provider = ChatGPTSubscriptionProvider()
+        let status = await ChatGPTSubscriptionStatus.current()
+        check("live: codex is signed in with ChatGPT", status == .signedIn, "\(status)")
+        let systemPrompt = "You are Wisp, a helpful companion on the user's Mac. Be brief."
+        do {
+            let deltas = Deltas()
+            let turn = try await provider.streamTurn(
+                ModelRequest(systemPrompt: systemPrompt, messages: [BuddyChatMessage(role: .user, text: "Reply with exactly the word: pong")]),
+                onTextDelta: { deltas.values.append($0) }
+            )
+            check("live: answered", turn.text.lowercased().contains("pong"), turn.text)
+            check("live: the reply was delivered", deltas.values.joined() == turn.text)
+            check("live: usage reported", (turn.promptTokens ?? 0) > 0 && (turn.outputTokens ?? 0) > 0)
+
+            // A real screenshot of this Mac, like a push-to-talk turn sends.
+            let screenshotURL = FileManager.default.temporaryDirectory.appendingPathComponent("wisp-live-\(UUID().uuidString).jpg")
+            let capture = Process()
+            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-t", "jpg", screenshotURL.path]
+            try? capture.run(); capture.waitUntilExit()
+            if let screenshot = try? Data(contentsOf: screenshotURL) {
+                let visionTurn = try await provider.streamTurn(
+                    ModelRequest(systemPrompt: systemPrompt, messages: [BuddyChatMessage(role: .user, blocks: [
+                        .image(data: screenshot, label: "screen1"),
+                        .text("In a few words, what is on this screen?"),
+                    ])]),
+                    onTextDelta: { _ in }
+                )
+                check("live: describes the screenshot", !visionTurn.text.isEmpty && !visionTurn.text.lowercased().contains("can't see"), visionTurn.text)
+                try? FileManager.default.removeItem(at: screenshotURL)
+            }
+
+            let secretTool = BuddyToolDefinition(
+                name: "get_secret_number", description: "Returns the user's secret number.",
+                inputSchema: .object(["type": .string("object")]), metadata: .trivialAndReversible
+            )
+            let askForTool = BuddyChatMessage(role: .user, text: "Call get_secret_number, then tell me the number.")
+            let toolTurn = try await provider.streamTurn(
+                ModelRequest(systemPrompt: systemPrompt, messages: [askForTool], tools: [secretTool]), onTextDelta: { _ in }
+            )
+            check("live: the tool is called as a [TOOL:] tag", toolTurn.toolUses.first?.name == "get_secret_number", toolTurn.text)
+            if let toolUse = toolTurn.toolUses.first {
+                let answerTurn = try await provider.streamTurn(
+                    ModelRequest(systemPrompt: systemPrompt, messages: [
+                        askForTool,
+                        BuddyChatMessage(role: .assistant, blocks: toolTurn.content),
+                        BuddyChatMessage(role: .user, blocks: [.toolResult(toolUseID: toolUse.id, toolName: toolUse.name, content: "4187", isError: false)]),
+                    ], tools: [secretTool]),
+                    onTextDelta: { _ in }
+                )
+                check("live: the tool result is used", answerTurn.text.contains("4187"), answerTurn.text)
+            }
+
+            let shellTurn = try await provider.streamTurn(
+                ModelRequest(systemPrompt: systemPrompt, messages: [BuddyChatMessage(role: .user, text: "Run `ls ~` in a shell and paste the output.")]),
+                onTextDelta: { _ in }
+            )
+            check("live: the CLI can't run commands itself", !shellTurn.text.contains("Downloads") && !shellTurn.text.contains("Library"), shellTurn.text)
+        } catch {
+            check("live: no error", false, "\(error.localizedDescription)")
+        }
     }
 }

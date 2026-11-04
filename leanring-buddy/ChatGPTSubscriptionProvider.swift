@@ -27,7 +27,9 @@
 //
 //  The screenshot goes as an `--image` file in a per-turn temporary folder that
 //  is deleted when the turn ends. `codex exec --json` reports each finished
-//  message rather than token deltas, so the reply arrives in one piece.
+//  message rather than token deltas, and often sends a short preamble
+//  ("Opening Notes now.") before its answer, so only the last message is the
+//  reply and it is handed on in one piece once the turn completes.
 //
 
 import Foundation
@@ -315,7 +317,8 @@ final class ChatGPTSubscriptionProvider: ModelProvider, @unchecked Sendable {
 
     /// What `codex exec --json`'s events added up to.
     struct StreamOutcome: Sendable {
-        /// Every finished `agent_message`, in order.
+        /// Every finished `agent_message`, in order. The last is the reply;
+        /// earlier ones are the CLI's preambles.
         var agentMessages: [String] = []
         var failureMessage: String?
         var promptTokens: Int?
@@ -340,12 +343,14 @@ final class ChatGPTSubscriptionProvider: ModelProvider, @unchecked Sendable {
                 guard let item = event["item"] as? [String: Any],
                       item["type"] as? String == "agent_message",
                       let messageText = item["text"] as? String, !messageText.isEmpty else { return }
-                // Deltas are new text only; a second message is a new paragraph.
-                let delta = outcome.agentMessages.isEmpty ? messageText : "\n\n" + messageText
+                // Not shown yet: a later message may replace it (see header),
+                // and deltas can't be taken back.
                 outcome.agentMessages.append(messageText)
-                await onTextDelta(delta)
 
             case "turn.completed":
+                if let replyText = outcome.agentMessages.last {
+                    await onTextDelta(replyText)
+                }
                 if let usage = event["usage"] as? [String: Any] {
                     // `input_tokens` already includes the cached part.
                     outcome.promptTokens = usage["input_tokens"] as? Int
@@ -391,7 +396,7 @@ final class ChatGPTSubscriptionProvider: ModelProvider, @unchecked Sendable {
         exampleToolName: String? = nil,
         providerName: String
     ) throws -> BuddyChatTurn {
-        let replyText = outcome.agentMessages.joined(separator: "\n\n")
+        let replyText = outcome.agentMessages.last ?? ""
 
         if replyText.isEmpty {
             let failureText = outcome.failureMessage

@@ -110,10 +110,10 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   `view_image`, web search and MCP servers, `forced_login_method="chatgpt"`, and Wisp's system prompt as TOML-escaped
   `developer_instructions`. The prompt (history as a transcript) goes on stdin (`-`), the screenshot as a temp `--image` file
   deleted after the turn, tools as `[TOOL:]` tags; `OPENAI_API_KEY`/`CODEX_API_KEY` are stripped from the child env. The JSONL
-  stream gives whole `agent_message` items (no token deltas) and `turn.completed` usage; no cost is reported, so the usage log
+  stream gives whole `agent_message` items (no token deltas; Codex often sends a short preamble first, so only the **last** message is the reply, delivered at `turn.completed`) and its usage; no cost is reported, so the usage log
   says "included in subscription". The model is the CLI's default (`chatgpt-subscription/codex-default`). Settings → Model
   checks `codex login status` (`ChatGPTSubscriptionStatus`). Tested by `Tests/AgentRuntimeIntegration/ChatGPTSubscriptionProviderTests.swift`
-  (no live round trip yet). The Info.plist `ChatProvider` key is now only a
+  (live with `WISP_LIVE_CODEX=1`: text, screenshot, a `[TOOL:]` call and its result, and a shell request refused; checked on codex-cli 0.166.0). The Info.plist `ChatProvider` key is now only a
   shipped-default hint — the live selection lives in `BuddyChatProviderSelection`.
 - **On-device speech models (FluidAudio)**: the FluidAudio SwiftPM package (Apache-2.0,
   pinned 0.15.6 in `Package.resolved`) runs Parakeet and Kokoro as CoreML on the Apple
