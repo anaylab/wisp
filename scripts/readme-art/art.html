@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Inter:wght@400;500;600&display=block" rel="stylesheet">
+<style>
+  :root { --bg:#F5F5F7; --surface:#fff; --ink:#1D1D1F; --muted:#6E6E73; --line:rgba(0,0,0,.08); --accent:#5E5CE6;
+          --grad:linear-gradient(92deg,#5E5CE6 0%,#A35BF0 52%,#F2668B 100%); --orb:.55; }
+  .dark { --bg:#000; --surface:#111113; --ink:#F5F5F7; --muted:#86868B; --line:rgba(255,255,255,.12); --accent:#8E8CFF; --orb:.38; }
+  html, body { margin:0; background:transparent; }
+  body { font-family:Inter, system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .card { position:relative; overflow:hidden; background:var(--bg); color:var(--ink); border-radius:28px; text-align:center;
+          box-sizing:border-box; width:1600px; }
+  h1, h2 { font-family:"Inter Tight", Inter, sans-serif; font-weight:700; letter-spacing:-.045em; line-height:1.0; margin:0; }
+  .grad { background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .eyebrow { font-size:26px; font-weight:600; color:var(--accent); margin:0 0 26px; letter-spacing:-.01em; }
+  .sub { font-size:30px; line-height:1.45; color:var(--muted); max-width:1080px; margin:34px auto 0; }
+  kbd { font-family:Inter; font-size:.8em; font-weight:600; padding:1px 12px; margin:0 3px; border-radius:11px; border:1.5px solid var(--line);
+        border-bottom-width:3px; background:var(--surface); color:var(--ink); }
+  .orb { position:absolute; border-radius:50%; filter:blur(90px); opacity:var(--orb); }
+  .mark { width:84px; height:84px; margin-bottom:30px; }
+
+  /* hero */
+  .hero { padding:120px 80px 130px; }
+  .hero h1 { font-size:176px; }
+  /* section openers */
+  .head { padding:84px 80px 90px; }
+  .head h2 { font-size:104px; }
+  /* numbers */
+  .numbers { display:grid; grid-template-columns:repeat(4,1fr); padding:70px 40px; text-align:left; }
+  .stat { padding:0 40px; border-left:1.5px solid var(--line); }
+  .stat:first-child { border-left:0; }
+  .stat b { display:block; font-family:"Inter Tight"; font-weight:700; font-size:110px; letter-spacing:-.05em; line-height:1; }
+  .stat b small { font-size:.5em; }
+  .stat span { display:block; margin-top:16px; font-size:26px; color:var(--muted); line-height:1.35; }
+  /* privacy pipeline */
+  .pipe { padding:84px 80px 96px; }
+  .pipe h2 { font-size:104px; }
+  .nodes { position:relative; display:grid; grid-template-columns:repeat(4,1fr); gap:28px; margin-top:76px; text-align:left; }
+  .nodes:before { content:""; position:absolute; left:40px; right:40px; top:28px; height:4px; border-radius:4px; background:var(--grad); }
+  .node { position:relative; padding-top:76px; }
+  .node:before { content:""; position:absolute; top:12px; left:0; width:36px; height:36px; border-radius:50%; background:var(--surface);
+                 border:4px solid #A35BF0; box-sizing:border-box; }
+  .node b { display:block; font-family:"Inter Tight"; font-size:38px; letter-spacing:-.03em; }
+  .node span { display:block; margin-top:10px; font-size:24px; color:var(--muted); }
+  /* closing */
+  .closing { padding:110px 80px 120px; }
+  .closing h2 { font-size:128px; }
+</style>
+<body>
+<div id="root"></div>
+<script>
+  var params = new URLSearchParams(location.search);
+  var theme = params.get("theme") || "light";
+  var name = params.get("name");
+  var orbs = '<i class="orb" style="width:620px;height:620px;left:-180px;top:260px;background:#7C6CF6"></i>' +
+             '<i class="orb" style="width:640px;height:640px;right:-200px;top:180px;background:#F2668B"></i>' +
+             '<i class="orb" style="width:520px;height:420px;left:520px;top:-300px;background:#A35BF0"></i>';
+  var softOrbs = '<i class="orb" style="width:520px;height:360px;left:-200px;top:-140px;background:#7C6CF6;opacity:calc(var(--orb)*.55)"></i>' +
+                 '<i class="orb" style="width:520px;height:360px;right:-220px;bottom:-200px;background:#F2668B;opacity:calc(var(--orb)*.5)"></i>';
+  function head(eyebrow, title, sub) {
+    return '<div class="card head">' + softOrbs + '<p class="eyebrow">' + eyebrow + '</p><h2>' + title + '</h2>' +
+           (sub ? '<p class="sub">' + sub + '</p>' : '') + '</div>';
+  }
+  var art = {
+    hero: '<div class="card hero">' + orbs +
+      '<p class="eyebrow">Wisp for Mac · Free · Open source</p>' +
+      '<h1>The busywork,<br><span class="grad">handled.</span></h1>' +
+      '<p class="sub">Wisp lives in your Mac\'s notch. Hold <kbd>⌃</kbd><kbd>⌥</kbd> and say it: it drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private by default.</p></div>',
+    day: head("A day with Wisp", 'Watch a morning<br><span class="grad">run itself.</span>'),
+    team: head("While you're away", 'A team that works<br>without you.',
+      "Each buddy owns one job, with its own chat, memory, model and tools. They run on a schedule, hand their results to each other, and only interrupt you when something needs your OK."),
+    features: head("Everything it does", 'Not a chatbot in a window.<br><span class="grad">It finishes the job.</span>'),
+    get: head("Get Wisp", 'Up and running<br>in a few minutes.',
+      "Notarized downloads aren't published yet, so for now you build it once in Xcode. It's free and MIT licensed."),
+    faq: head("Before you try it", 'Questions,<br>answered plainly.'),
+    numbers: '<div class="card numbers">' + softOrbs +
+      '<div class="stat"><b>34</b><span>things it does today</span></div>' +
+      '<div class="stat"><b>0.1<small>s</small></b><span>for window layouts, timers and tabs</span></div>' +
+      '<div class="stat"><b>0</b><span>accounts, keys or analytics</span></div>' +
+      '<div class="stat"><b>25</b><span>languages, heard on-device</span></div></div>',
+    privacy: '<div class="card pipe">' + softOrbs +
+      '<p class="eyebrow">Privacy</p><h2>Your Mac is the<br><span class="grad">whole pipeline.</span></h2>' +
+      '<p class="sub">By default, nothing about your screen, voice or words leaves this machine.</p>' +
+      '<div class="nodes">' +
+      '<div class="node"><b>Your voice</b><span>Parakeet, on the Neural Engine</span></div>' +
+      '<div class="node"><b>Your screen</b><span>Accessibility and Vision OCR</span></div>' +
+      '<div class="node"><b>Your model</b><span>Ollama on localhost</span></div>' +
+      '<div class="node"><b>Your answer</b><span>Kokoro voice, on-device</span></div></div></div>',
+    closing: '<div class="card closing">' + orbs +
+      '<img class="mark" src="../../docs/assets/brand/mark-gradient.svg" alt=""><h2>Stop doing the busywork.<br><span class="grad">Just ask.</span></h2></div>'
+  };
+  document.body.className = theme;
+  document.getElementById("root").innerHTML = art[name];
+  // Report the card's height so the screenshot can be cut to it.
+  document.fonts.ready.then(function () {
+    document.title = String(document.querySelector(".card").getBoundingClientRect().height);
+  });
+</script>
+</body>
