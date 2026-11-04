@@ -879,6 +879,7 @@ func messageShape(_ messages: [BuddyChatMessage]) -> [String] {
 
     await anthropicProviderSuite()
     await claudeSubscriptionProviderSuite()
+    await chatGPTSubscriptionProviderSuite()
     await buddySteeringSuite()
     await buddyTeamSuite()
     await buddyMemoryReviewSuite()

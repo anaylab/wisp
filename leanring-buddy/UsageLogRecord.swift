@@ -78,6 +78,7 @@ enum UsageProviderIdentifier {
             ("apple/", .appleOnDevice),
             ("anthropic/", .anthropic),
             ("claude-subscription/", .claudeSubscription),
+            ("chatgpt-subscription/", .chatGPTSubscription),
             ("openai/", .openAI),
             ("gemini/", .gemini),
             ("grok/", .grok),

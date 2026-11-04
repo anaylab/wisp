@@ -79,6 +79,8 @@ final class ActiveStackReadout: ObservableObject {
             return "Apple system model"
         case .anthropic, .claudeSubscription:
             return AnthropicModelSettings.selectedModel.displayName
+        case .chatGPTSubscription:
+            return ChatGPTSubscriptionProvider.userFacingModelName
         case .openAI:
             return OpenAIProvider.defaultModelName
         case .gemini:

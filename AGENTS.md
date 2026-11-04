@@ -103,7 +103,17 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are stripped from the child env so it can't bill a key. Wisp never
   reads or forwards the CLI's credentials (extracting a subscription login for a separate app isn't allowed);
   Settings → Model shows install/sign-in state via `claude auth status` (`ClaudeSubscriptionStatus`). ~4s per
-  reply of CLI start-up; counts against subscription limits; labelled off-machine. The Info.plist `ChatProvider` key is now only a
+  reply of CLI start-up; counts against subscription limits; labelled off-machine. **ChatGPT (your subscription)**
+  (`ChatGPTSubscriptionProvider`, `.chatGPTSubscription`, no API key) is the same idea for a ChatGPT plan: it runs the user's
+  own signed-in `codex` CLI (`codex login` with ChatGPT) once per turn as `codex exec --json --ephemeral --ignore-user-config
+  --ignore-rules --sandbox read-only` in an empty per-turn folder, with `-c` overrides turning off the shell, `unified_exec`,
+  `view_image`, web search and MCP servers, `forced_login_method="chatgpt"`, and Wisp's system prompt as TOML-escaped
+  `developer_instructions`. The prompt (history as a transcript) goes on stdin (`-`), the screenshot as a temp `--image` file
+  deleted after the turn, tools as `[TOOL:]` tags; `OPENAI_API_KEY`/`CODEX_API_KEY` are stripped from the child env. The JSONL
+  stream gives whole `agent_message` items (no token deltas; Codex often sends a short preamble first, so only the **last** message is the reply, delivered at `turn.completed`) and its usage; no cost is reported, so the usage log
+  says "included in subscription". The model is the CLI's default (`chatgpt-subscription/codex-default`). Settings → Model
+  checks `codex login status` (`ChatGPTSubscriptionStatus`). Tested by `Tests/AgentRuntimeIntegration/ChatGPTSubscriptionProviderTests.swift`
+  (live with `WISP_LIVE_CODEX=1`: text, screenshot, a `[TOOL:]` call and its result, and a shell request refused; checked on codex-cli 0.166.0). The Info.plist `ChatProvider` key is now only a
   shipped-default hint — the live selection lives in `BuddyChatProviderSelection`.
 - **On-device speech models (FluidAudio)**: the FluidAudio SwiftPM package (Apache-2.0,
   pinned 0.15.6 in `Package.resolved`) runs Parakeet and Kokoro as CoreML on the Apple
@@ -1325,6 +1335,7 @@ Files are grouped by role; line counts are rough.
 | `AnthropicProvider.swift` | ~680 | Claude as a bring-your-own-key `ModelProvider` over the raw Messages API: SSE streaming, native `tool_use`, adaptive thinking + `effort` (Opus/Sonnet 5.5), signed thinking and web blocks kept as `.providerReplay` and resent verbatim within a tool loop (`drop_block` for stale ones), prompt caching (system breakpoint + automatic), server-side `web_search`/`web_fetch` on tool-bearing turns (resumes `pause_turn`), `fallbacks: "default"` for refusals, no sampling params on models that reject them. |
 | `AnthropicModelSettings.swift` | ~140 | Claude's settings (UserDefaults): `AnthropicModelChoice` (Opus 5.5 default / Sonnet 5.5 / Haiku 4.5, with each model's API differences as data), `AnthropicEffortLevel` (low default), and the web-access switch. Edited in Settings → Model, read by `ModelProviderFactory`. |
 | `ClaudeSubscriptionProvider.swift` | ~560 | Claude over the user's own `claude` CLI (subscription, no key): per-turn stream-json process with all CLI tools off, inline screenshot, `[TOOL:]` text tags, failure-text → `BuddyChatError`, plus `ClaudeSubscriptionStatus` (`claude auth status`). `runCLI`, `systemPromptIncludingTools` and `commandLineArguments(session:)` are shared with the session provider. Tested by `Tests/AgentRuntimeIntegration` (live round trip with `WISP_LIVE_CLAUDE=1`). |
+| `ChatGPTSubscriptionProvider.swift` | ~430 | ChatGPT over the user's own `codex` CLI (subscription, no key): `codex exec --json` with its tools, config and MCP off, Wisp's prompt as developer instructions, screenshot as a temp `--image` file, `[TOOL:]` text tags, JSONL → `BuddyChatTurn`, failure text → `BuddyChatError`, plus `ChatGPTSubscriptionStatus` (`codex login status`). |
 | `ClaudeCodeSessionProvider.swift` | ~225 | A buddy's kept Claude Code session: start with `--session-id` + history handoff, `--resume` with only the new messages, replace a gone, overflowing or ≥95%-full session, record the fill. |
 | `OpenAIProvider.swift` | ~435 | GPT as a bring-your-own-key `ModelProvider` over Chat Completions: tool results become separate `role:"tool"` messages. |
 | `GeminiProvider.swift` | ~415 | Google Gemini as a `ModelProvider`: SSE streaming, native function calls, API key in a request header. |
