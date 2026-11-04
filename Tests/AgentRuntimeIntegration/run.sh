@@ -4,7 +4,7 @@
 #
 # Links the real application sources — everything except the @main entry point,
 # which would clash with the suite's own main.swift. The third-party imports
-# (FluidAudio) are stubbed, so this needs no SwiftPM checkout and,
+# (FluidAudio, Sparkle) are stubbed, so this needs no SwiftPM checkout and,
 # critically, never invokes xcodebuild (which would invalidate the app's TCC
 # permissions — see CLAUDE.md).
 #
@@ -25,6 +25,15 @@ swiftc -emit-module -module-name FluidAudio -target arm64-apple-macos26.0 \
 swiftc -c -parse-as-library -module-name FluidAudio -target arm64-apple-macos26.0 \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
   Tests/AgentRuntimeIntegration/FluidAudioStub.swift -o "$BUILD_DIR/stub/FluidAudio.o"
+
+# Sparkle (automatic updates) is stubbed the same way.
+swiftc -emit-module -module-name Sparkle -target arm64-apple-macos26.0 \
+  -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+  Tests/AgentRuntimeIntegration/SparkleStub.swift \
+  -emit-module-path "$BUILD_DIR/stub/Sparkle.swiftmodule"
+swiftc -c -parse-as-library -module-name Sparkle -target arm64-apple-macos26.0 \
+  -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+  Tests/AgentRuntimeIntegration/SparkleStub.swift -o "$BUILD_DIR/stub/Sparkle.o"
 
 # Every Swift file under leanring-buddy/, subfolders included (DesignSystem/,
 # Components/, DynamicIsland/, WispWindow/, …). The agent runtime reaches
@@ -65,6 +74,7 @@ swiftc -target arm64-apple-macos26.0 \
   Tests/AgentRuntimeIntegration/CuaToolRoutingTests.swift \
   Tests/AgentRuntimeIntegration/ConfirmationTimingTests.swift \
   "${APP_SOURCES[@]}" \
-  "$BUILD_DIR/stub/FluidAudio.o"
+  "$BUILD_DIR/stub/FluidAudio.o" \
+  "$BUILD_DIR/stub/Sparkle.o"
 
 "$BUILD_DIR/integration"

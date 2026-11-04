@@ -84,6 +84,12 @@ swiftc -emit-module -module-name FluidAudio "${SWIFTFLAGS[@]:0:4}" \
   -emit-module-path "$BUILD_DIR/stub/FluidAudio.swiftmodule"
 swiftc -c -parse-as-library -module-name FluidAudio "${SWIFTFLAGS[@]:0:4}" \
   Tests/AgentRuntimeIntegration/FluidAudioStub.swift -o "$BUILD_DIR/stub/FluidAudio.o"
+# Sparkle (automatic updates), stubbed the same way.
+swiftc -emit-module -module-name Sparkle "${SWIFTFLAGS[@]:0:4}" \
+  Tests/AgentRuntimeIntegration/SparkleStub.swift \
+  -emit-module-path "$BUILD_DIR/stub/Sparkle.swiftmodule"
+swiftc -c -parse-as-library -module-name Sparkle "${SWIFTFLAGS[@]:0:4}" \
+  Tests/AgentRuntimeIntegration/SparkleStub.swift -o "$BUILD_DIR/stub/Sparkle.o"
 
 APP_SOURCES=()
 # Every Swift file under leanring-buddy/, subfolders included, as in
@@ -98,6 +104,6 @@ swiftc "${SWIFTFLAGS[@]}" \
   -o "$BUILD_DIR/attack" \
   Tests/HostileProviderAttack/main.swift \
   "${APP_SOURCES[@]}" \
-  "$BUILD_DIR/stub/FluidAudio.o" || { echo "COMPILE FAILED"; exit 1; }
+  "$BUILD_DIR/stub/FluidAudio.o" "$BUILD_DIR/stub/Sparkle.o" || { echo "COMPILE FAILED"; exit 1; }
 
 "$BUILD_DIR/attack"

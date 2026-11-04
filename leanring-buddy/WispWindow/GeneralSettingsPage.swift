@@ -33,6 +33,7 @@ struct GeneralSettingsPage: View {
                 islandCard
                 voiceCard
                 advancedCard
+                UpdatesSettingsCard()
                 DashboardCard(title: "Setup") { FirstRunSetupAgainRow() }
             }
             .padding(20)
