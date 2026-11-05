@@ -30,6 +30,7 @@ struct leanring_buddyApp: App {
 final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarMenuController: MenuBarMenuController?
     private var notchWindowController: NotchWindowController?
+    private var replyPanelWindowController: ReplyPanelWindowController?
     private let companionManager = CompanionManager()
     private var wispWindowController: WispWindowController?
     /// Set when another copy was already running and this one is quitting without starting:
@@ -70,6 +71,8 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         // stays put.
         notchWindowController = NotchWindowController(companionManager: companionManager)
         notchWindowController?.show()
+        replyPanelWindowController = ReplyPanelWindowController(companionManager: companionManager)
+        replyPanelWindowController?.start()
 
         // Reached through `WispWindowNavigator.open(_:)`.
         wispWindowController = WispWindowController(companionManager: companionManager)

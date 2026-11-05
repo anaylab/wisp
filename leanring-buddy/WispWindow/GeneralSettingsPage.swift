@@ -18,6 +18,7 @@ struct GeneralSettingsPage: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
+    @ObservedObject private var replyPanelPreference = ReplyPanelPreference.shared
     @ObservedObject private var soundPreference = WispSoundPreference.shared
     @ObservedObject private var cursorAppearance = CursorAppearanceStore.shared
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
@@ -113,9 +114,19 @@ struct GeneralSettingsPage: View {
             VStack(alignment: .leading, spacing: 12) {
                 SettingRow(
                     title: "Speak replies",
-                    detail: "Wisp says a short line out loud when it helps. Off: answers appear only in the notch."
+                    detail: "Wisp says a short line out loud when it helps. Off: answers appear only on screen."
                 ) {
                     Toggle("Speak replies", isOn: $voiceOutputPreference.isReplySpeechEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .pointerCursor()
+                }
+                Divider()
+                SettingRow(
+                    title: "Answers in a side panel",
+                    detail: "Replies open as a card at the right edge of the screen. Off: they drop from the notch."
+                ) {
+                    Toggle("Answers in a side panel", isOn: $replyPanelPreference.isEnabled)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .pointerCursor()

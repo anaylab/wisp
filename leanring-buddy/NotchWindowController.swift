@@ -286,6 +286,8 @@ final class NotchWindowController {
                 guard !trimmed.isEmpty else { return }
                 // The open workspace's chat already shows the answer as it lands.
                 guard self?.viewModel.isWorkspaceOpen == false else { return }
+                // Answers live in the on-screen reply panel, not the island.
+                guard !ReplyPanelPreference.shared.isEnabled else { return }
                 self?.autoPresentAnswer(readingLength: trimmed.count)
             }
 
@@ -295,6 +297,7 @@ final class NotchWindowController {
             .sink { [weak self] resolvedGlanceCard in
                 guard resolvedGlanceCard != nil else { return }
                 guard self?.viewModel.isWorkspaceOpen == false else { return }
+                guard !ReplyPanelPreference.shared.isEnabled else { return }
                 self?.autoPresentAnswer(readingLength: 0)
             }
 
@@ -655,6 +658,11 @@ final class NotchWindowController {
         let hasReplyText = !companionManager.currentReplyText
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAnswer = hasReplyText || companionManager.resolvedGlanceCard != nil
+        // The reply panel keeps its own answer until closed or replaced.
+        guard !ReplyPanelPreference.shared.isEnabled else {
+            answerLingeringSinceDate = nil
+            return
+        }
         let isAnswerOutOfSight = hasAnswer
             && !viewModel.isExpanded
             && companionManager.voiceState == .idle
@@ -734,7 +742,8 @@ final class NotchWindowController {
     private func collapsedHotZone(_ geometry: NotchGeometry) -> CGRect {
         let width = geometry.collapsedPillSize.width + 24
         let isIslandShowingBelowNotch = geometry.hasNotch
-            && (companionManager.voiceState != .idle || !companionManager.currentReplyText.isEmpty)
+            && (companionManager.voiceState != .idle
+                || (!ReplyPanelPreference.shared.isEnabled && !companionManager.currentReplyText.isEmpty))
         let hangingBarReach: CGFloat = isIslandShowingBelowNotch ? 48 : 0
         let height = max(geometry.collapsedPillSize.height + hangingBarReach, 34)
         let originX = geometry.screenFrame.midX - width / 2

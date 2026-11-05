@@ -27,6 +27,7 @@ struct NotchHUDView: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var voiceOutputPreference = VoiceOutputPreference.shared
     @ObservedObject private var islandStylePreference = NotchIslandStylePreference.shared
+    @ObservedObject private var replyPanelPreference = ReplyPanelPreference.shared
     /// Observed so background work starting or finishing re-renders the
     /// island's ambient state — `islandState` reads the registry, but a computed
     /// property can't tell SwiftUI that on its own.
@@ -344,7 +345,7 @@ struct NotchHUDView: View {
             || viewModel.isExpanded
             || companionManager.voiceState != .idle
             || companionManager.islandFlash != nil
-            || hasAnswer
+            || (hasAnswer && !replyPanelPreference.isEnabled)
             || hasAmbientActivity
     }
 
