@@ -26,6 +26,7 @@
 //     "Click “Send” button · Mail" instead of showing the token.
 //
 
+import CoreGraphics
 import Foundation
 
 enum CuaDriverToolNames {
@@ -287,6 +288,50 @@ struct CuaDriverElementDescription: Equatable {
     let roleName: String?
     let label: String?
     let appName: String?
+    /// Where the element's centre was on screen when it was read, in global
+    /// top-left points (the space `list_windows` bounds use). Nil when the
+    /// driver gave no usable frame. Only used to fly the agent cursor there.
+    var screenCenterInGlobalTopLeftPoints: CGPoint? = nil
+}
+
+/// Turns a cua-driver element frame into a point on screen, so Wisp's agent
+/// cursor can show where a background action lands (the way Aside's does).
+///
+/// The driver documents `frame: {x,y,w,h}` without naming the space, so this
+/// accepts both plausible ones: a frame that sits inside the window's own size
+/// is window-local (the window's origin is added); anything else is taken as
+/// already global. A one-pixel-tall frame is the driver's marker for a
+/// virtualized, off-screen row, and gets no point.
+enum CuaDriverElementGeometry {
+
+    /// A rectangle from `{x, y, w|width, h|height}`.
+    static func rectangle(from value: JSONValue?) -> CGRect? {
+        guard case .object(let fields)? = value else { return nil }
+        func number(_ keys: [String]) -> Double? {
+            for key in keys {
+                if case .number(let numberValue)? = fields[key] { return numberValue }
+            }
+            return nil
+        }
+        guard let originX = number(["x"]), let originY = number(["y"]),
+              let width = number(["w", "width"]), let height = number(["h", "height"]) else { return nil }
+        return CGRect(x: originX, y: originY, width: width, height: height)
+    }
+
+    static func globalCenter(ofElementFrame elementFrame: CGRect, windowBounds: CGRect?) -> CGPoint? {
+        guard elementFrame.width > 1, elementFrame.height > 1 else { return nil }
+        let slackInPoints = 4.0
+        if let windowBounds,
+           elementFrame.minX >= -slackInPoints, elementFrame.minY >= -slackInPoints,
+           elementFrame.maxX <= windowBounds.width + slackInPoints,
+           elementFrame.maxY <= windowBounds.height + slackInPoints {
+            return CGPoint(
+                x: windowBounds.minX + elementFrame.midX,
+                y: windowBounds.minY + elementFrame.midY
+            )
+        }
+        return CGPoint(x: elementFrame.midX, y: elementFrame.midY)
+    }
 }
 
 /// Remembers the elements of the last few cua-driver snapshots, token →
@@ -312,6 +357,8 @@ final class CuaDriverElementCache {
 
         let appName = MCPToolResultRendering.firstScalarText(forAnyOf: ["app_name", "application", "app"], in: topLevelFields)
 
+        let windowBounds = CuaDriverElementGeometry.rectangle(from: topLevelFields["window_bounds"])
+
         var elementsByToken: [String: CuaDriverElementDescription] = [:]
         for elementFields in elements {
             guard let elementToken = MCPToolResultRendering.firstScalarText(
@@ -329,7 +376,10 @@ final class CuaDriverElementCache {
             elementsByToken[elementToken] = CuaDriverElementDescription(
                 roleName: roleName,
                 label: (label?.isEmpty ?? true) ? nil : label,
-                appName: appName
+                appName: appName,
+                screenCenterInGlobalTopLeftPoints: CuaDriverElementGeometry.rectangle(from: elementFields["frame"]).flatMap {
+                    CuaDriverElementGeometry.globalCenter(ofElementFrame: $0, windowBounds: windowBounds)
+                }
             )
         }
         guard !elementsByToken.isEmpty else { return }

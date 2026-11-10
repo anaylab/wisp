@@ -9,7 +9,7 @@
   <a href="https://anaylab.github.io/wisp/"><img alt="See it move: anaylab.github.io/wisp" src="https://img.shields.io/badge/see_it_move-anaylab.github.io%2Fwisp-5E5CE6?style=for-the-badge"></a>
   <a href="#get-wisp"><img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-1D1D1F?style=for-the-badge&logo=apple&logoColor=white"></a>
   <a href="#privacy"><img alt="Runs on-device" src="https://img.shields.io/badge/runs-on--device-A35BF0?style=for-the-badge"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-F2668B?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="AGPL-3.0 License" src="https://img.shields.io/badge/license-AGPL--3.0-F2668B?style=for-the-badge"></a>
 </p>
 
 <p align="center">
@@ -333,7 +333,7 @@ Images are never written to disk in conversation history. Weather and places car
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/get-dark.png">
-    <img src="docs/assets/readme/get-light.png" alt="Get Wisp: up and running in a few minutes. Notarized downloads aren't published yet, so for now you build it once in Xcode. It's free and MIT licensed." width="100%">
+    <img src="docs/assets/readme/get-light.png" alt="Get Wisp: up and running in a few minutes. Notarized downloads aren't published yet, so for now you build it once in Xcode. It's free and AGPL-3.0 licensed." width="100%">
   </picture>
 </p>
 
@@ -379,7 +379,7 @@ Don't launch `Wisp.app/Contents/MacOS/Wisp` from a shell (speech recognition the
 
 <details><summary><b>Is it really free?</b></summary>
 
-Yes. Wisp is open source under the MIT license, and the default setup costs nothing to run because the model, speech and voice are all on your Mac. If you choose a cloud model, you pay that provider with your own key or subscription.
+Yes. Wisp is open source under the AGPL-3.0 license, and the default setup costs nothing to run because the model, speech and voice are all on your Mac. If you choose a cloud model, you pay that provider with your own key or subscription.
 
 </details>
 <details><summary><b>What leaves my Mac?</b></summary>
@@ -588,7 +588,7 @@ Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 
 ## License
 
-MIT. See [LICENSE](LICENSE) for the copyright notices.
+AGPL-3.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for the copyright notices and the Sentient OS attribution.
 
 <p align="center">
   <img src="docs/assets/brand/mark-gradient.svg" alt="" width="40" height="40"><br>

@@ -161,6 +161,9 @@ final class NotchWindowController {
         }
         positionWindow()
         panel?.orderFrontRegardless()
+        // Opt-in: keeps the notch fixed during the 3-finger Spaces swipe (see NotchSpace).
+        // Checked first so the private SkyLight space is never created unless asked for.
+        if NotchSpace.isEnabled, let panel { NotchSpace.shared?.pin(panel) }
         startHoverTracking()
         // Feeds the island's ambient next-meeting countdown.
         UpcomingEventMonitor.shared.start()

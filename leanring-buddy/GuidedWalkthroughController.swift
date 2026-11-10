@@ -418,7 +418,14 @@ extension CompanionManager {
         completeGuidedWalkthroughStep()
 
         // The overlay ignores mouse events, so the click lands on the app below.
+        // The agent cursor flies to the target first, so the click is seen to
+        // land where it went. It is cleared directly rather than through
+        // `endCursorGuidance`, which would also wipe the walkthrough's drawings.
+        let agentCursorAppKitPoint = CGPoint(x: clickPoint.x, y: primaryDisplayHeight - clickPoint.y)
+        let agentCursorDisplayFrame = targetLocation.displayFrameInAppKitCoordinates
+        let agentCursorActionText = "Click \u{201C}\(String((targetLocation.label ?? currentStep.instruction).prefix(28)))\u{201D}"
         Task {
+            await guideCursor(to: agentCursorAppKitPoint, on: agentCursorDisplayFrame, actionText: agentCursorActionText)
             for eventType in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
                 CGEvent(
                     mouseEventSource: nil,
@@ -428,6 +435,9 @@ extension CompanionManager {
                 )?.post(tap: .cghidEventTap)
                 try? await Task.sleep(nanoseconds: 60_000_000)
             }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            agentCursorTargetByDisplayFrame.removeAll()
+            agentCursorLastPlacement = nil
         }
     }
 

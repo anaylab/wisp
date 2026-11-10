@@ -1,0 +1,20 @@
+Wisp
+Copyright (c) 2026 Wisp contributors
+
+Wisp is licensed under the GNU Affero General Public License v3.0 (see LICENSE).
+
+Code that was released before this relicensing was published under the MIT License; its
+original notice is kept in LICENSE.MIT-previous.
+
+Portions of Wisp are adapted from Sentient OS
+(https://github.com/Sentient-OS-Labs/sentient-os), which is licensed under AGPL-3.0:
+
+  - leanring-buddy/Proofread/  (selection capture and safe replacement, result panel,
+    strict correction decoding, input-activity guard)
+  - leanring-buddy/Summarize/  (accessibility document reader, PDF reader, request fencing,
+    summary panel)
+  - leanring-buddy/DoubleTap/  (reply-box detection prompt, NOT_A_MESSAGE verdict parsing,
+    paste-then-restore-clipboard flow)
+  - leanring-buddy/NotchSpace.swift  (fixed window-server space for the notch overlay)
+
+Because of this, the combined work is distributed under AGPL-3.0.

@@ -280,6 +280,12 @@ final class MCPManager: ObservableObject {
             ),
             preparingInputWith: cuaDriverInputPreparer
         ) { input in
+            // Show where a background action is about to land, so Wisp
+            // works in another app the way Aside does: its own cursor and
+            // a label, while the user's pointer and focus stay untouched.
+            if isCuaDriverServer {
+                await CuaDriverAgentCursor.guide(beforeBareToolName: tool.name, toolInput: input)
+            }
             let toolCallContent = try await connection.callToolReturningContent(name: tool.name, arguments: input)
             // cua-driver's action calls name their target only by an element
             // token; remembering what each token was lets the confirmation
