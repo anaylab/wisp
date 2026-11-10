@@ -8,17 +8,20 @@ owner (accounts, money, your own words); the rest is ready to paste. Delete this
 Product Hunt visitors click "Visit" and expect to try the product in minutes. A launch with a broken or
 missing download wastes the one day that counts. Postponing a week costs nothing.
 
-- [ ] **A notarized download exists.** A Developer ID signed, notarized, stapled `Wisp.dmg` on GitHub Releases.
-  Needs the paid Apple Developer Program, a Developer ID Application certificate and notarization credentials
-  **[you]** (steps in `docs/public-beta.md`, on `feature/public-beta-updates`, PR #64).
+- [ ] **A downloadable build exists.** The terminal installer (`site/install.sh`, no Apple account needed) is
+  built and tested; what's left is the release itself. Make the signing certificate once
+  (`scripts/make-signing-identity.sh`), build with `scripts/build-terminal-release.sh --publish v0.1` **[you]**,
+  then run the install command on a second Mac. Details in `docs/terminal-install.md`. A notarized `Wisp.dmg`
+  (paid Apple Developer Program, PR #64) can replace this later.
 - [ ] **Updates work.** Cut 0.1, then 0.2, and watch 0.1 update itself on a clean user account. Nothing else
   can stand in for this test.
 - [ ] **First run works for a stranger without Xcode or a terminal.** Today the default model is Ollama, which a
   stranger won't have. See "Gaps for a stranger" in `docs/public-beta.md`: the model check, the first-run flow,
   "Move to Applications", the login item, the default agent folder and a Send Feedback item.
-- [ ] **The site and README say "Download".** Replace the "Notarized downloads aren't published yet" wording in
-  `README.md`, `docs/assets/readme/get-*.png` and `site/index.html` (the Get section and the "Why isn't there a
-  download button?" answer). Download link: `https://github.com/anaylab/wisp/releases/latest/download/Wisp.dmg`.
+- [ ] **The site and README show the install command, once a release exists.** Replace the "Notarized downloads
+  aren't published yet" wording in `README.md`, `docs/assets/readme/get-*.png` and `site/index.html` (the Get
+  section and the "Why isn't there a download button?" answer) with:
+  `curl -fsSL https://anaylab.github.io/wisp/install.sh | bash`.
 - [ ] **5 to 10 real people have run it** on Macs that aren't yours, and their problems are fixed. Their honest
   words, with permission, are your first testimonials. Don't invent any.
 - [ ] **You can answer for the whole day.** Block the day. Fast, human replies are the single biggest factor.
