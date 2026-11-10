@@ -138,3 +138,14 @@
   window.WispUI = { SHAPES: SHAPES, buddy: buddy, icon: icon, RIBBON: RIBBON, sidebarRow: sidebarRow, rail: rail, POINTER: POINTER,
     clamp: clamp, between: between, smooth: smooth, along: along, fitCanvas: fitCanvas, streamed: streamed };
 })();
+
+// Runs work after the page has loaded and the browser is idle, so heavy setup (building the
+// live app replicas) never delays the first paint. Falls back to a timeout where there is no idle callback.
+window.wispWhenIdle = function (work) {
+  function schedule() {
+    if ("requestIdleCallback" in window) window.requestIdleCallback(work, { timeout: 2000 });
+    else window.setTimeout(work, 50);
+  }
+  if (document.readyState === "complete") schedule();
+  else window.addEventListener("load", schedule);
+};

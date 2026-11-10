@@ -2,7 +2,7 @@
 // scrubbed by the scroll) and the six reel cards (a Mac desktop with Wisp's notch island,
 // looping while the card is on screen). Like the hero, each scene draws everything from one
 // progress value between 0 and 1, so scrolling back rewinds it and nothing drifts.
-(function () {
+function wispScenesStart() {
   var UI = window.WispUI;
   if (!UI) return;
   var buddy = UI.buddy, icon = UI.icon, RIBBON = UI.RIBBON, between = UI.between, along = UI.along;
@@ -433,7 +433,7 @@
 
   function browserScene(canvas) {
     var article = '<div class="wk" data-page><div class="wk-top"><span class="wk-logo">Wikipedia</span><span class="wk-search">Search</span></div>' +
-      '<h4>Enigma machine</h4><p class="wk-tabs"><b>Article</b><span>Talk</span><em>Read</em><em>Edit</em><em>View history</em></p>' +
+      '<h4 role="presentation">Enigma machine</h4><p class="wk-tabs"><b>Article</b><span>Talk</span><em>Read</em><em>Edit</em><em>View history</em></p>' +
       '<div class="wk-cols"><div><p>The <b>Enigma machine</b> is a cipher device developed in the early twentieth century and used to protect military and diplomatic messages.</p>' +
       "<p>Each key press sent current through a set of rotating wheels, so the same letter came out differently every time. Operators set the wheels each day from a shared key sheet.</p>" +
       "<p>Codebreakers in Poland and later at Bletchley Park found weaknesses in how it was used, and reading its traffic shaped the course of the Second World War.</p></div>" +
@@ -655,4 +655,6 @@
     // The films follow the scroll on the pinned page (script.js); everything else loops.
     if (host.dataset.scrub === undefined || isFlat) loopWhileVisible(host, host.setProgress, parseFloat(host.dataset.seconds) || 9);
   });
-})();
+}
+window.wispWhenIdle(wispScenesStart);
+
