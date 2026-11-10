@@ -18,7 +18,29 @@ enum ProofreadInference {
     text unchanged. Reply with JSON of the form {"corrected_text": "..."} and nothing else.
     """
 
+    /// Longest passage proofread line by line; each line is one model call.
+    nonisolated static let maximumLines = 12
+
+    /// A small model tends to join lines, and the strict decode below rejects any change to the
+    /// line breaks. So each non-blank line is corrected on its own and the original separators
+    /// are put back, which preserves the structure by construction.
     static func correct(_ text: String) async throws -> String {
+        let lines = text.components(separatedBy: "\n")
+        guard lines.count > 1 else { return try await correctSingleLine(text) }
+        guard lines.filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }).count <= maximumLines else { throw Failure.tooLarge }
+        var correctedLines: [String] = []
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                correctedLines.append(line)
+            } else {
+                try Task.checkCancellation()
+                correctedLines.append(try await correctSingleLine(line))
+            }
+        }
+        return correctedLines.joined(separator: "\n")
+    }
+
+    private static func correctSingleLine(_ text: String) async throws -> String {
         let baseURLString = AppBundleConfiguration.stringValue(forKey: "OllamaBaseURL") ?? "http://localhost:11434"
         let modelName = AppBundleConfiguration.stringValue(forKey: "OllamaModel") ?? "qwen2.5vl:3b"
         guard let baseURL = URL(string: baseURLString) else { throw Failure.unavailable }

@@ -1399,7 +1399,7 @@ Select text in any app, press ⌃⌥P (Talk chord + P) or choose "Proofread Sele
 |---|---|---|
 | `Proofread/Proofread.swift` | ~120 | One run at a time: capture, correct, apply or present; deadline and cancel. |
 | `Proofread/ProofreadSelection.swift` | ~220 | Accessibility capture of the exact selection, guarded paste-over, clipboard snapshot and restore. |
-| `Proofread/ProofreadInference.swift` | ~95 | Ollama `/api/chat` call with a JSON-schema answer, strict decode that keeps line breaks and edge whitespace. Not `LocalOllamaAPI.streamChat`, which adds a spoken-reply brevity rule. |
+| `Proofread/ProofreadInference.swift` | ~115 | Ollama `/api/chat` call with a JSON-schema answer, strict decode that keeps line breaks and edge whitespace. Multi-line text is corrected one line per call (max 12 lines), because the 3B model joins lines and the decode rejects that. Not `LocalOllamaAPI.streamChat`, which adds a spoken-reply brevity rule. |
 | `Proofread/ProofreadInputActivity.swift` | ~25 | Counts keys, clicks and scrolls so a correction is never pasted after the user moved on. |
 | `Proofread/ProofreadResultPanel.swift` | ~110 | Floating copy-the-correction panel for when automatic replacement is unsafe. |
 The hotkey is fixed at P (`GlobalPushToTalkShortcutMonitor.proofreadKeyCode`); it is not yet in `ShortcutBindingStore` or the Shortcuts tab.
@@ -1415,7 +1415,7 @@ Press ⌃⌥U (Talk chord + U) or choose "Summarize This Window" in the menu bar
 The hotkey is fixed at U (`GlobalPushToTalkShortcutMonitor.summarizeKeyCode`), not yet in `ShortcutBindingStore`.
 
 ### Double Tap reply (adapted from Sentient OS, AGPL-3.0; see `NOTICE`)
-Put the cursor in an email or chat reply box and press ⌃⌥D (Talk chord + D) or choose "Draft Reply in Focused Box". Wisp screenshots the display under the pointer, asks the local vision model for a reply using the Brain "about you" notes (`MemoryStore.promptInstructions()`), and pastes it as an unsent draft (pasteboard + ⌘V, clipboard restored). A non-reply field pastes nothing. The island shows thinking, then success or error. Not ported: caret light, vault and writing-style samples, other providers, the right-⌘ double-tap gesture.
+Put the cursor in an email or chat reply box and press ⌃⌥D (Talk chord + D) or choose "Draft Reply in Focused Box". Wisp screenshots the display under the pointer, asks the local vision model for a reply using the Brain "about you" notes (`MemoryStore.promptInstructions()`), and pastes it as an unsent draft (pasteboard + ⌘V, clipboard restored). Only runs in messaging, email and browser apps (`DoubleTap.replyCapableBundleIdentifiers`): tested with the 3B model, it answered a code-editor screenshot with a reply instead of `NOT_A_MESSAGE`, and pasted a copy of the document into TextEdit, so the app allowlist is the real guard and the sentinel is only a second check. In a browser it can still paste a junk draft into a non-reply field. The island shows thinking, then success or error. Not ported: caret light, vault and writing-style samples, other providers, the right-⌘ double-tap gesture.
 | File | Approx. lines | What it does |
 |---|---|---|
 | `DoubleTap/DoubleTap.swift` | ~105 | One run at a time: capture cursor display, draft, verify the same app is frontmost, paste, restore clipboard. |

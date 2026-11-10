@@ -21,6 +21,16 @@ final class DoubleTap {
     private var task: Task<Void, Never>?
     private static let deadline: Duration = .seconds(60)
 
+    /// Apps where a reply box is plausible: messaging, email and browsers (webmail, web chat).
+    /// The small local model cannot reliably tell a reply box from, say, a document, so the
+    /// check starts with the app. TextEdit, editors and terminals never get a pasted draft.
+    static let replyCapableBundleIdentifiers: Set<String> = [
+        "com.apple.MobileSMS", "com.apple.mail", "net.whatsapp.WhatsApp", "ru.keepcoder.Telegram",
+        "com.tinyspeck.slackmacgap", "com.hnc.Discord", "com.microsoft.Outlook", "com.microsoft.teams2",
+        "com.readdle.smartemail-Mac", "com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser",
+        "com.microsoft.edgemac", "org.mozilla.firefox", "com.brave.Browser", "company.thebrowser.dia",
+    ]
+
     /// True from the shortcut until the paste has settled. A second press meanwhile is ignored.
     var isDrafting: Bool { task != nil }
 
@@ -49,6 +59,10 @@ final class DoubleTap {
     private func perform(frontmostProcessID: pid_t?) async -> Result {
         guard AXIsProcessTrusted() else { return .failed("Wisp needs Accessibility to paste a draft.") }
         guard let frontmostProcessID else { return .stopped }
+        let frontmostBundleIdentifier = NSRunningApplication(processIdentifier: frontmostProcessID)?.bundleIdentifier ?? ""
+        guard Self.replyCapableBundleIdentifiers.contains(frontmostBundleIdentifier) else {
+            return .failed("Draft Reply only works in messaging, email and browser apps.")
+        }
 
         let captures: [CompanionScreenCapture]
         do { captures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG() }

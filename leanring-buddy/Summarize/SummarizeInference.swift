@@ -12,7 +12,8 @@ enum SummarizeInference {
     private static let systemPrompt = """
     You summarize the document the user shares. Lead with one sentence saying what it is, then \
     give the key points as short bullets. Be faithful to the text: do not add facts, opinions or \
-    advice. If the text was abbreviated, summarize what you were given without guessing the rest. \
+    advice. Never mention the application, the title, the scope or how the text was captured: \
+    describe only what the document itself says. If the text was abbreviated, summarize what you were given without guessing the rest. \
     Reply in the same language as the document unless the user's preference says otherwise.
     """
 
@@ -62,7 +63,7 @@ enum SummarizeInference {
         request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        var userMessage = "Application: \(source.application)\nTitle: \(source.title)\nScope: \(source.scope)\n"
+        var userMessage = source.title.isEmpty ? "" : "Document title: \(source.title)\n"
         if source.truncated { userMessage += "Note: the text below was abbreviated to fit.\n" }
         if !preference.isEmpty { userMessage += "Preference: \(preference)\n" }
         userMessage += "\n--- Document text ---\n\(source.text)"
