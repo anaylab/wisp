@@ -590,6 +590,8 @@ Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 
 AGPL-3.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for the copyright notices and the Sentient OS attribution.
 
+Created by [Anay Parwal](https://anayparwal.pages.dev/), a student developer in New Jersey. Read the [Wisp case study](https://anayparwal.pages.dev/wisp/).
+
 <p align="center">
   <img src="docs/assets/brand/mark-gradient.svg" alt="" width="40" height="40"><br>
   <sub>Made to stay out of your way.</sub>

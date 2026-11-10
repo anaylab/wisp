@@ -3,25 +3,112 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wisp: the AI in your notch that does the busywork</title>
-<meta name="description" content="Hold ⌃⌥ and say it. Wisp drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private, on-device, open source.">
+<title>Wisp for Mac: the AI in your notch that does the busywork</title>
+<meta name="description" content="Hold ⌃⌥ and say it. Wisp for Mac drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private, on-device, free and open source.">
 <meta name="theme-color" content="#F5F5F7">
+<meta name="author" content="Anay Parwal">
+<meta name="application-name" content="Wisp">
+<meta name="robots" content="index, follow, max-image-preview:large">
 <link rel="canonical" href="https://anaylab.github.io/wisp/">
 <link rel="icon" href="assets/brand/mark-gradient.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/app-icon-256.png">
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://anaylab.github.io/wisp/">
-<meta property="og:title" content="Wisp: the AI in your notch that does the busywork">
-<meta property="og:description" content="Hold ⌃⌥ and say it. Wisp drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private, on-device, open source.">
+<meta property="og:title" content="Wisp for Mac: the AI in your notch that does the busywork">
+<meta property="og:description" content="Hold ⌃⌥ and say it. Wisp for Mac drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private, on-device, free and open source.">
 <meta property="og:image" content="https://anaylab.github.io/wisp/assets/brand/social-preview.jpg">
+<meta property="og:site_name" content="Wisp for Mac">
+<meta property="og:locale" content="en_US">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="Wisp for Mac: the busywork, handled. An AI that lives in your Mac's notch.">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Wisp for Mac: the AI in your notch that does the busywork">
+<meta name="twitter:description" content="Hold ⌃⌥ and say it. Wisp for Mac drafts the email, runs the browser errand and keeps a team of buddies working on a schedule. Private, on-device, free and open source.">
+<meta name="twitter:image" content="https://anaylab.github.io/wisp/assets/brand/social-preview.jpg">
+<meta name="twitter:image:alt" content="Wisp for Mac: the busywork, handled.">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&display=swap"></noscript>
+<link rel="preload" as="image" href="assets/video/today-first.jpg?c=2" fetchpriority="high">
 <link rel="stylesheet" href="styles.css?v=23">
-<script>document.documentElement.classList.add("js");</script>
+<script>
+(function () {
+  // Decide the flat (phone / touch / reduced-motion) layout before the first paint, so the page
+  // never renders the pinned desktop layout and then jumps. Same rule as script.js.
+  var root = document.documentElement;
+  root.classList.add("js");
+  var query = window.matchMedia;
+  if (query("(prefers-reduced-motion: reduce)").matches || query("(max-width: 900px), (pointer: coarse)").matches) root.classList.add("flat");
+})();
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://anaylab.github.io/wisp/#app",
+      "name": "Wisp for Mac",
+      "alternateName": "Wisp",
+      "description": "A private, local-first AI companion that lives in your Mac's notch. Hold a key and say it: it drafts the email, runs the browser errand, tidies your windows and keeps a team of buddies working on a schedule. Speech, voice and the model run on your Mac by default.",
+      "url": "https://anaylab.github.io/wisp/",
+      "applicationCategory": "ProductivityApplication",
+      "applicationSubCategory": "AI assistant",
+      "operatingSystem": "macOS 26 or later",
+      "softwareRequirements": "Apple-silicon Mac running macOS 26 or later",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "license": "https://opensource.org/license/mit",
+      "codeRepository": "https://github.com/anaylab/wisp",
+      "sameAs": [
+        "https://github.com/anaylab/wisp"
+      ],
+      "image": "https://anaylab.github.io/wisp/assets/brand/social-preview.jpg",
+      "screenshot": [
+        "https://anaylab.github.io/wisp/assets/shots/today-day.jpg",
+        "https://anaylab.github.io/wisp/assets/shots/buddy-handoff.jpg",
+        "https://anaylab.github.io/wisp/assets/shots/feature-approval.jpg",
+        "https://anaylab.github.io/wisp/assets/shots/feature-pointing.jpg",
+        "https://anaylab.github.io/wisp/assets/shots/feature-email.jpg",
+        "https://anaylab.github.io/wisp/assets/shots/feature-browser.jpg"
+      ],
+      "featureList": [
+        "Push-to-talk voice assistant in the Mac's notch",
+        "On-device speech recognition and voice",
+        "Local model by default, bring-your-own-key cloud models optional",
+        "Points at and walks through what is on your screen",
+        "Drafts email and runs browser errands in its own tab",
+        "Buddies that work on a schedule",
+        "Approval card before anything is sent, deleted or paid"
+      ],
+      "author": {
+        "@type": "Person",
+        "@id": "https://anayparwal.pages.dev/#anay",
+        "name": "Anay Parwal",
+        "url": "https://anayparwal.pages.dev/"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://anaylab.github.io/wisp/#website",
+      "url": "https://anaylab.github.io/wisp/",
+      "name": "Wisp for Mac",
+      "inLanguage": "en",
+      "publisher": {
+        "@id": "https://anayparwal.pages.dev/#anay"
+      }
+    }
+  ]
+}
+</script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="glass-bend" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.006 0.012" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="22" xChannelSelector="R" yChannelSelector="G"/></filter></svg>
@@ -71,7 +158,7 @@
         <span class="glass-chip" style="--x:-4%;--y:70%;--depth:260px"><i class="chip-dot" style="--c1:#34C77B;--c2:#3D7CF6"></i>On-device speech</span>
       </div>
       <figure class="device">
-        <img class="poster" src="assets/video/today-first.jpg?c=2" alt="" width="1280" height="789">
+        <img class="poster" src="assets/video/today-first.jpg?c=2" alt="" width="1280" height="789" fetchpriority="high" decoding="async">
         <div class="wapp" data-app role="img" aria-label="Wisp's Today page: you ask it to plan your afternoon, it adds a study block to your checklist and calendar, and the Writer buddy drafts your conclusion"></div>
       </figure>
     </div>
@@ -356,6 +443,7 @@ open leanring-buddy.xcodeproj
       <a href="https://github.com/anaylab/wisp/blob/main/CONTRIBUTING.md">Contribute</a>
       <a href="https://github.com/anaylab/wisp/blob/main/SECURITY.md">Security</a>
       <a href="https://github.com/anaylab/wisp/blob/main/LICENSE">MIT License</a>
+      <a href="https://anayparwal.pages.dev/wisp/">Built by Anay</a>
     </nav>
     <p>Made to stay out of your way.</p>
   </div>
