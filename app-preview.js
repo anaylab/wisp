@@ -4,7 +4,7 @@
 // to work. Everything on screen is a function of one progress value (0–1), so scrolling
 // back rewinds it. On the pinned page script.js sets the progress from the scroll; on the
 // flat page (phones, touch) the story plays on its own while it's on screen.
-(function () {
+function wispPreviewStart() {
   var host = document.querySelector("[data-app]");
   if (!host) return;
 
@@ -51,7 +51,7 @@
         '<div class="wa-hero">' +
           '<div class="wa-mascot">' + buddy("drop", 70, "big") + "</div>" +
           '<div class="wa-ask"><span class="wa-mic">' + icon("mic", 17) + '</span><span class="wa-ask-text" data-ask></span><span class="wa-caret"></span><span class="wa-wave"><i></i><i></i><i></i><i></i><i></i></span></div>' +
-          "<h3>Good afternoon. What did we learn today?</h3>" +
+          "<h3 role='presentation'>Good afternoon. What did we learn today?</h3>" +
           '<p class="wa-hint" data-hint>Hold <kbd>ctrl</kbd> <kbd>option</kbd> and tell me what to take off your plate</p>' +
           '<p class="wa-answer" data-answer></p>' +
           '<span class="wa-speaker">' + icon("speaker", 15) + "</span>" +
@@ -208,4 +208,6 @@
   } else {
     setProgress(1);
   }
-})();
+}
+window.wispWhenIdle(wispPreviewStart);
+
