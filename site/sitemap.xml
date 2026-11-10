@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>https://anaylab.github.io/wisp/</loc>
+    <lastmod>2026-11-10</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <image:image><image:loc>https://anaylab.github.io/wisp/assets/brand/social-preview.jpg</image:loc><image:title>Wisp for Mac: the AI in your notch</image:title></image:image>
+    <image:image><image:loc>https://anaylab.github.io/wisp/assets/shots/today-day.jpg</image:loc><image:title>Wisp's Today page</image:title></image:image>
+  </url>
+</urlset>
