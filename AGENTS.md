@@ -1425,6 +1425,9 @@ Hotkey fixed at D (`GlobalPushToTalkShortcutMonitor.draftReplyKeyCode`); not in 
 ### Notch fixed space (adapted from Sentient OS, AGPL-3.0; see `NOTICE`)
 `NotchSpace.swift` (~65 lines) pins the notch panel into a top-level SkyLight space so it stays put during the 3-finger Spaces swipe. Private API, so it is OFF by default and fails quietly if a symbol is missing. Enable with `defaults write com.gluepixel.wisp wisp.notch.pinToFixedSpace -bool true` and relaunch; call site is `NotchWindowController.show()`. Not verified by a build: check the swipe by hand before turning it on for good.
 
+### Morning suggestions from your notes
+When the morning banner is built, `BrainMorningSuggestions` (`DynamicIsland/BrainMorningSuggestions.swift`, ~190 lines) shows the local model the Brain pages updated in the last 7 days (about 9k characters) and asks for at most 3 follow-ups, each with a quote from the notes. Code drops any follow-up whose quote is not really in the text the model saw (case, spacing and markdown emphasis ignored), so paraphrased or invented items never appear. Survivors become `brain-…` rows in `MorningBriefingController.buildAndPresentBriefing`, placed after the calendar and reminder rows and before routines; clicking one is an ordinary typed question, so anything that sends or changes something still asks first. A call slower than 30 s, an unreachable Ollama, the Brain being off, or too little material adds nothing. Switch it off in the dashboard's Agent tab ("Follow-ups from your notes", under the morning notch switch; backed by `AnnouncementPreferences.areBrainSuggestionsEnabled`, key `wisp.announcements.brainSuggestionsEnabled`). Idea borrowed from Sentient OS's Proactive judge; no Sentient code is copied. Test: `./Tests/BrainMorningSuggestions/run.sh` (23 checks, pure logic only; the model call is not exercised).
+
 ### Agent, tools and MCP
 | File | Approx. lines | What it does |
 |---|---|---|

@@ -303,6 +303,27 @@ final class MorningBriefingController: ObservableObject {
         presentationSequenceNumber += 1
     }
 
+    /// Evidence-checked follow-ups from the Brain pages updated this week (see
+    /// `BrainMorningSuggestions`). Empty when the Brain or the feature is off, there is too
+    /// little material, the model is unreachable, or it takes longer than the time limit.
+    private func recentNotesSuggestions(now: Date) async -> [MorningSuggestion] {
+        guard BrainMorningSuggestions.isEnabled, BrainPreferences.shared.isBrainEnabled else { return [] }
+        let material = BrainMorningSuggestions.material(pages: BrainStore.shared.pages, now: now)
+        guard material.count >= BrainMorningSuggestions.minimumMaterialCharacters else { return [] }
+
+        let candidates: [BrainSuggestionCandidate] = await withTaskGroup(of: [BrainSuggestionCandidate]?.self) { group in
+            group.addTask { try? await BrainMorningSuggestions.judge(material: material) }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(30))
+                return nil
+            }
+            let firstFinished = await group.next() ?? nil
+            group.cancelAll()
+            return firstFinished ?? []
+        }
+        return candidates.map(BrainMorningSuggestions.suggestionRow(for:))
+    }
+
     private func buildAndPresentBriefing() async {
         // Presented on demand ("Show now") still defers to a real checklist.
         guard AnnouncementPreferences.shared.areMorningSuggestionsEnabled,
@@ -330,9 +351,17 @@ final class MorningBriefingController: ObservableObject {
             canOfferCalendarConnection: EKEventStore.authorizationStatus(for: .event) == .notDetermined,
             now: now
         )
-        guard !suggestions.isEmpty else { return }
+        // Follow-ups from the user's recent notes go after the calendar and reminder rows and
+        // before the routines. A slow or failed model call simply adds nothing.
+        let brainSuggestions = await recentNotesSuggestions(now: now)
+        let routineSuggestions = suggestions.filter { $0.id.hasPrefix("routine-") }
+        let otherSuggestions = suggestions.filter { !$0.id.hasPrefix("routine-") }
+        let combinedSuggestions = Array(
+            (otherSuggestions + brainSuggestions + routineSuggestions).prefix(MorningSuggestionBuilder.maximumSuggestions)
+        )
+        guard !combinedSuggestions.isEmpty else { return }
 
-        pendingSuggestions = suggestions
+        pendingSuggestions = combinedSuggestions
         presentationSequenceNumber += 1
     }
 }

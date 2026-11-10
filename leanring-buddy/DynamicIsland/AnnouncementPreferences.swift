@@ -27,6 +27,15 @@ final class AnnouncementPreferences: ObservableObject {
         }
     }
 
+    /// Whether the morning suggestions may include follow-ups the local model finds in the
+    /// user's recent Brain notes. Shares its key with `BrainMorningSuggestions.isEnabled`,
+    /// which reads it from a nonisolated context.
+    @Published var areBrainSuggestionsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(areBrainSuggestionsEnabled, forKey: BrainMorningSuggestions.enabledUserDefaultsKey)
+        }
+    }
+
     /// Whether Wisp holds back its unprompted announcements while the user is on
     /// a call (another app using the microphone, or a camera on).
     @Published var isQuietDuringCallsEnabled: Bool {
@@ -37,6 +46,7 @@ final class AnnouncementPreferences: ObservableObject {
 
     private init() {
         areMorningSuggestionsEnabled = Self.readBool(Self.morningSuggestionsEnabledUserDefaultsKey, defaultValue: true)
+        areBrainSuggestionsEnabled = Self.readBool(BrainMorningSuggestions.enabledUserDefaultsKey, defaultValue: true)
         isQuietDuringCallsEnabled = Self.readBool(Self.quietDuringCallsEnabledUserDefaultsKey, defaultValue: true)
     }
 
