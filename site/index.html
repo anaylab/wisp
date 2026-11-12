@@ -375,29 +375,24 @@
     <div>
       <p class="eyebrow">Get Wisp</p>
       <h2>Up and running in a few minutes.</h2>
-      <p class="section-sub">Notarized downloads aren't published yet, so for now you build it once in Xcode. It's free and MIT licensed.</p>
+      <p class="section-sub">One command installs it, or drag it in from a .dmg. It's free and AGPL-3.0 licensed.</p>
       <ul class="reqs">
         <li>Apple-silicon Mac on macOS 26 or later</li>
-        <li>Xcode 26</li>
-        <li><a href="https://ollama.com/download">Ollama</a> for the default local model</li>
+        <li>No Apple ID or sudo needed</li>
+        <li>Offers to set up <a href="https://ollama.com/download">Ollama</a> for the default local model</li>
       </ul>
       <div class="cta-row">
-        <a class="btn btn-lg" href="https://github.com/anaylab/wisp">View on GitHub</a>
-        <a class="btn btn-quiet btn-lg" href="https://github.com/anaylab/wisp#readme">Read the docs</a>
+        <a class="btn btn-lg" href="https://github.com/anaylab/wisp/releases/latest/download/Wisp.dmg">Download .dmg</a>
+        <a class="btn btn-quiet btn-lg" href="https://github.com/anaylab/wisp">View on GitHub</a>
       </div>
     </div>
     <div class="code" role="group" aria-label="Install commands">
       <div class="code-bar"><span></span><span></span><span></span><button class="copy" id="copy" type="button">Copy</button></div>
-<pre id="code"><code><span class="c"># 1. a local model</span>
-ollama pull qwen2.5vl:3b
+<pre id="code"><code><span class="c"># paste in Terminal</span>
+curl -fsSL https://anaylab.github.io/wisp/install.sh | bash
 
-<span class="c"># 2. get Wisp</span>
-git clone https://github.com/anaylab/wisp.git
-cd wisp
-open leanring-buddy.xcodeproj
-
-<span class="c"># 3. pick the leanring-buddy scheme and press ⌘R,
-#    then hold ⌃⌥ and talk</span></code></pre>
+<span class="c"># then hold ⌃⌥ and talk.
+# Update later by running it again.</span></code></pre>
     </div>
   </div>
 </section>
@@ -413,10 +408,10 @@ open leanring-buddy.xcodeproj
     <details><summary>What leaves my Mac?</summary><p>By default, nothing. Speech to text, voice, OCR and the local model all run on-device. The only network use by default is a one-time download of the speech models and optional weather and places lookups, which send a place name or query, never a screenshot. If you pick a cloud model, your transcript and screenshots go to that provider, and Wisp says so.</p></details>
     <details><summary>Can it do something I didn't want?</summary><p>Anything that sends, deletes, pays, posts, invites or runs a command shows a card first, even if you turned on auto-approve, and you can edit the wording before you allow it. Password and payment fields in the browser are refused outright. Scheduled automations only get tools that never prompt.</p></details>
     <h3 class="faq-group">Using Wisp</h3>
-    <details><summary>Is it really free?</summary><p>Yes. Wisp is open source under the MIT license, and the default setup costs nothing to run because the model, speech and voice are all on your Mac. If you choose a cloud model, you pay that provider with your own key or subscription.</p></details>
-    <details><summary>Which Macs does it need?</summary><p>An Apple-silicon Mac on macOS 26 or later, since the notch uses Liquid Glass. 16 GB of memory is recommended for the local model. You need Xcode 26 to build it.</p></details>
+    <details><summary>Is it really free?</summary><p>Yes. Wisp is open source under the AGPL-3.0 license, and the default setup costs nothing to run because the model, speech and voice are all on your Mac. If you choose a cloud model, you pay that provider with your own key or subscription.</p></details>
+    <details><summary>Which Macs does it need?</summary><p>An Apple-silicon Mac on macOS 26 or later, since the notch uses Liquid Glass. 16 GB of memory is recommended for the local model.</p></details>
     <details><summary>Does it work in my apps?</summary><p>Pointing, walkthroughs and screen reading work anywhere: native apps through Accessibility and everything else through on-device OCR. Browser control works with Chrome and Safari.</p></details>
-    <details><summary>Why isn't there a download button?</summary><p>There is no notarized build published yet, and I'd rather say so than point you at something half-finished. Building it takes a few minutes in Xcode, and signed releases are on the way.</p></details>
+    <details><summary>Why isn't this notarized?</summary><p>Notarizing needs Apple's paid developer program. The install command downloads with curl, which macOS doesn't flag, and checks a checksum and signature first. The .dmg works too, after one right-click approval the first time. A notarized build may come later.</p></details>
   </div>
 </section>
 
@@ -442,7 +437,7 @@ open leanring-buddy.xcodeproj
       <a href="https://github.com/anaylab/wisp#readme">Docs</a>
       <a href="https://github.com/anaylab/wisp/blob/main/CONTRIBUTING.md">Contribute</a>
       <a href="https://github.com/anaylab/wisp/blob/main/SECURITY.md">Security</a>
-      <a href="https://github.com/anaylab/wisp/blob/main/LICENSE">MIT License</a>
+      <a href="https://github.com/anaylab/wisp/blob/main/LICENSE">AGPL-3.0 License</a>
       <a href="https://anayparwal.pages.dev/wisp/">Built by Anay</a>
     </nav>
     <p>Made to stay out of your way.</p>
