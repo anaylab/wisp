@@ -7,6 +7,13 @@ curl -fsSL https://anaylab.github.io/wisp/install.sh | bash
 Needs an Apple-silicon Mac on macOS 26 or later. No sudo, no Apple ID. Re-run the same command to update.
 Options (pass after `bash -s --`): `--yes`, `--no-ollama`, `--version v0.1`, `--uninstall`, `--help`.
 
+## Drag-and-drop dmg
+
+The same build also produces `Wisp.dmg` (with `Wisp.dmg.sha256`), attached to the release. Open it and drag Wisp
+to Applications. Because it isn't notarized, a dmg downloaded in a browser is blocked once: right-click Wisp in
+Applications and choose Open, or approve it in System Settings > Privacy & Security > Open Anyway. The curl
+command avoids that prompt, so keep it as the main path until the app is notarized.
+
 ## What it does
 
 `site/install.sh` checks the Mac, downloads `Wisp.zip` and `Wisp.zip.sha256` from the latest GitHub Release,

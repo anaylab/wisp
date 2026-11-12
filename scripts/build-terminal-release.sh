@@ -8,6 +8,10 @@
 #   scripts/build-terminal-release.sh                 build into ./build/terminal-release
 #   scripts/build-terminal-release.sh --publish v0.1  also create the GitHub Release v0.1
 #
+# Also builds Wisp.dmg (drag-to-Applications window; uses create-dmg if installed, else hdiutil).
+# The dmg is self-signed, not notarized: opened from a browser download, macOS asks the user to approve it
+# once (right-click > Open, or System Settings > Privacy & Security > Open Anyway).
+#
 # Options:
 #   --version X.Y    marketing version (default: read from the project)
 #   --identity NAME  signing identity (default: "Wisp Release")
@@ -93,16 +97,35 @@ zip_path="$(pwd)/${OUT_DIR}/Wisp.zip"
 ( cd "${archive_path}/Products/Applications" && ditto -c -k --keepParent Wisp.app "$zip_path" )
 ( cd "$OUT_DIR" && shasum -a 256 Wisp.zip > Wisp.zip.sha256 && cat Wisp.zip.sha256 )
 
+echo "==> Building Wisp.dmg"
+dmg_path="$(pwd)/${OUT_DIR}/Wisp.dmg"
+dmg_source="${OUT_DIR}/dmg-source"
+mkdir -p "$dmg_source"
+ditto "$app_path" "${dmg_source}/Wisp.app"
+if command -v create-dmg >/dev/null 2>&1; then
+    # Window and icon positions match dmg-background.png (660x400), as in scripts/release.sh.
+    create-dmg --volname "Wisp" --window-pos 200 120 --window-size 660 400 --icon-size 100 \
+        --icon "Wisp.app" 160 195 --hide-extension "Wisp.app" --app-drop-link 500 195 \
+        --background "dmg-background.png" "$dmg_path" "$dmg_source" >/dev/null
+else
+    echo "(create-dmg not installed; making a plain dmg. brew install create-dmg for the styled window.)"
+    ln -s /Applications "${dmg_source}/Applications"
+    hdiutil create -quiet -volname "Wisp" -srcfolder "$dmg_source" -ov -format UDZO "$dmg_path"
+fi
+codesign --sign "$IDENTITY" "$dmg_path"
+rm -rf "$dmg_source"
+( cd "$OUT_DIR" && shasum -a 256 Wisp.dmg > Wisp.dmg.sha256 && cat Wisp.dmg.sha256 )
+
 echo
 echo "Built ${OUT_DIR}/Wisp.zip ($(du -h "${OUT_DIR}/Wisp.zip" | cut -f1)), version ${version}."
 
 if [ -n "$publish_tag" ]; then
-    printf 'Create GitHub Release %s on %s with these two files? [y/N] ' "$publish_tag" "$REPOSITORY"
+    printf 'Create GitHub Release %s on %s with the zip, dmg and checksums? [y/N] ' "$publish_tag" "$REPOSITORY"
     read -r answer
     case "$answer" in y|Y|yes) ;; *) echo "Not published."; exit 0 ;; esac
     gh release create "$publish_tag" \
         --repo "$REPOSITORY" \
         --title "Wisp ${version}" \
         --notes "Install: \`curl -fsSL https://anaylab.github.io/wisp/install.sh | bash\`" \
-        "${OUT_DIR}/Wisp.zip" "${OUT_DIR}/Wisp.zip.sha256"
+        "${OUT_DIR}/Wisp.zip" "${OUT_DIR}/Wisp.zip.sha256" "${OUT_DIR}/Wisp.dmg" "${OUT_DIR}/Wisp.dmg.sha256"
 fi
