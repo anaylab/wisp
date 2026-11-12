@@ -328,8 +328,28 @@ nonisolated enum BrainChatExportParser {
 // MARK: - Import planning
 
 nonisolated struct BrainChatImportState: Codable, Equatable, Sendable {
-    /// "chatGPT:<id>" / "claude:<id>" → hash of the transcript last queued.
+    /// A chat handed to the ingest queue but not yet read into pages.
+    struct PendingChat: Codable, Equatable, Sendable {
+        var conversationKey: String
+        var transcriptHash: String
+    }
+
+    /// "chatGPT:<id>" / "claude:<id>" → hash of the transcript last *read*
+    /// into the brain. A chat counts as imported only once its ingest job
+    /// finished, so one that failed (the model was rate limited) is queued
+    /// again by the next import instead of being skipped as "unchanged".
     var transcriptHashesByConversationKey: [String: String] = [:]
+    /// Transcript file path → the chat it holds, while its job is queued.
+    /// Optional so state files from before it existed still decode.
+    var pendingChatsByTranscriptPath: [String: PendingChat]? = nil
+
+    /// The queue finished reading this transcript: the chat is imported.
+    mutating func confirmRead(transcriptPath: String) -> Bool {
+        guard let pendingChat = pendingChatsByTranscriptPath?[transcriptPath] else { return false }
+        transcriptHashesByConversationKey[pendingChat.conversationKey] = pendingChat.transcriptHash
+        pendingChatsByTranscriptPath?[transcriptPath] = nil
+        return true
+    }
 
     static func conversationKey(for chat: BrainImportedChat) -> String {
         "\(chat.provider.rawValue):\(chat.conversationID.isEmpty ? chat.title : chat.conversationID)"

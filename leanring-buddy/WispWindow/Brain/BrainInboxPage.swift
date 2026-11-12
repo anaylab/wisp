@@ -271,6 +271,20 @@ struct BrainInboxPage: View {
             }
             .padding(.leading, 2)
 
+            if let modelPauseMessage = ingestQueue.modelPauseMessage {
+                HStack(spacing: 8) {
+                    Label(modelPauseMessage, systemImage: "pause.circle")
+                        .font(.caption)
+                        .foregroundStyle(WispColor.warningText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button("Try Now") { ingestQueue.resumeAfterModelPause() }
+                        .buttonStyle(.link)
+                        .pointerCursor()
+                }
+                .padding(.leading, 2)
+            }
+
             if ingestQueue.jobs.isEmpty {
                 Text("Nothing added this session. Items show up here while Wisp reads them, one at a time.")
                     .font(.callout)

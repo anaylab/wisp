@@ -100,6 +100,8 @@ final class BrainStore: ObservableObject {
     /// Comparable name (title/alias/slug file name) → slug.
     private var slugsByComparableName: [String: String] = [:]
     private var cachedSearchIndex: BrainSearchIndex?
+    private var cachedRelations: [BrainRelation]?
+    private var cachedLinkedSlugsBySlug: [String: Set<String>]?
     /// Fingerprint of `wiki/` at the last read (file count + newest mtime).
     private var lastWikiFingerprint: String = ""
 
@@ -207,9 +209,51 @@ final class BrainStore: ObservableObject {
         searchIndex.search(query, limit: limit, kinds: kinds)
     }
 
+    /// Every typed relation between pages (explicit `relation:: [[X]]` lines
+    /// and short linked facts), rebuilt when the pages change.
+    var relations: [BrainRelation] {
+        reloadIfChanged()
+        if let cachedRelations { return cachedRelations }
+        let builtRelations = BrainRelationGraph.relations(pages: pages, resolver: BrainLinkResolver(pages: pages))
+        cachedRelations = builtRelations
+        return builtRelations
+    }
+
+    private var linkedSlugsBySlug: [String: Set<String>] {
+        if let cachedLinkedSlugsBySlug { return cachedLinkedSlugsBySlug }
+        let builtLinks = BrainRecallPlanner.linkedSlugsBySlug(pages: pages, resolver: BrainLinkResolver(pages: pages))
+        cachedLinkedSlugsBySlug = builtLinks
+        return builtLinks
+    }
+
+    /// Graph-aware recall: keyword and meaning matches fused, then their
+    /// relations followed one step (see `BrainRecallPlanner`).
+    func recall(_ query: String, limit: Int = 8, excludedKinds: Set<BrainPageKind> = []) -> [BrainRecallHit] {
+        let keywordResults = searchIndex.search(query, limit: BrainRecallPlanner.candidatesPerSignal)
+        return BrainRecallPlanner.recall(
+            pages: pages,
+            keywordResults: keywordResults,
+            meaningMatchesBySlug: BrainSemanticIndex.shared.meaningMatches(for: query),
+            relations: relations,
+            linkedSlugsBySlug: linkedSlugsBySlug,
+            limit: limit,
+            excludedKinds: excludedKinds
+        )
+    }
+
     /// Relevant-pages block for a turn's user message ("" when nothing is relevant).
     func promptContext(forRequest request: String) -> String {
-        BrainPromptContext.promptText(for: request, index: searchIndex)
+        let keywordResults = searchIndex.search(request, limit: BrainRecallPlanner.candidatesPerSignal)
+        let recallHits = BrainRecallPlanner.recall(
+            pages: pages,
+            keywordResults: keywordResults,
+            meaningMatchesBySlug: BrainSemanticIndex.shared.meaningMatches(for: request),
+            relations: relations,
+            linkedSlugsBySlug: linkedSlugsBySlug,
+            limit: BrainPromptContext.maximumPagesPerTurn * 2,
+            excludedKinds: [.me]
+        )
+        return BrainPromptContext.promptText(recallHits: recallHits, keywordResults: keywordResults)
     }
 
     func fileURL(forSlug slug: String) -> URL {
@@ -514,6 +558,8 @@ final class BrainStore: ObservableObject {
         pagesBySlug = newPagesBySlug
         slugsByComparableName = newSlugsByComparableName
         cachedSearchIndex = nil
+        cachedRelations = nil
+        cachedLinkedSlugsBySlug = nil
         if pages != sortedPages { pages = sortedPages }
     }
 

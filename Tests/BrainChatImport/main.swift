@@ -141,6 +141,20 @@ var stateAfterFirstImport = BrainChatImportState()
 for plannedChat in firstPlan.chatsToImport {
     stateAfterFirstImport.transcriptHashesByConversationKey[plannedChat.conversationKey] = plannedChat.transcriptHash
 }
+// Queued but not yet read: still planned next time (a failed job comes back).
+var stateWithPendingChats = BrainChatImportState()
+stateWithPendingChats.pendingChatsByTranscriptPath = [:]
+for plannedChat in firstPlan.chatsToImport {
+    stateWithPendingChats.pendingChatsByTranscriptPath?["/raw/chats/\(plannedChat.fileName)"] = .init(conversationKey: plannedChat.conversationKey, transcriptHash: plannedChat.transcriptHash)
+}
+check(BrainChatImportPlanner.plan(chats: allChats, state: stateWithPendingChats).chatsToImport.count == 2, "a chat that was only queued is planned again")
+let confirmedPath = "/raw/chats/\(firstPlan.chatsToImport[0].fileName)"
+check(stateWithPendingChats.confirmRead(transcriptPath: confirmedPath), "a finished job confirms its chat")
+check(!stateWithPendingChats.confirmRead(transcriptPath: confirmedPath), "a chat is confirmed once")
+check(BrainChatImportPlanner.plan(chats: allChats, state: stateWithPendingChats).chatsToImport.count == 1, "a confirmed chat is skipped next time")
+let oldStateData = Data(#"{"transcriptHashesByConversationKey":{"claude:x":"abc"}}"#.utf8)
+check((try? JSONDecoder().decode(BrainChatImportState.self, from: oldStateData))?.transcriptHashesByConversationKey["claude:x"] == "abc", "a state file from before pending chats still loads")
+
 let secondPlan = BrainChatImportPlanner.plan(chats: allChats, state: stateAfterFirstImport)
 check(secondPlan.chatsToImport.isEmpty && secondPlan.unchangedChatCount == 2, "re-importing the same export brings nothing")
 

@@ -39,6 +39,10 @@ swiftc -target arm64-apple-macos26.0 \
   leanring-buddy/Brain/BrainCommandRouter.swift \
   leanring-buddy/Brain/BrainReview.swift \
   leanring-buddy/Brain/BrainLock.swift \
+  leanring-buddy/Brain/BrainRelations.swift \
+  leanring-buddy/Brain/BrainRecall.swift \
+  leanring-buddy/Brain/BrainSemanticIndex.swift \
+  leanring-buddy/WispWindow/Brain/BrainGraphLayout.swift \
   leanring-buddy/FrontmostAppTracker.swift \
   leanring-buddy/MemoryStore.swift \
   "$BUILD_DIR/BrainAgentToolsPure.swift"

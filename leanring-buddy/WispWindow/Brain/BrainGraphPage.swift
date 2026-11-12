@@ -31,6 +31,9 @@ final class BrainGraphSimulation: ObservableObject {
     private(set) var layout = BrainGraphLayout.empty
     /// Clusters of the current layout, recomputed only when it is rebuilt.
     private(set) var spaceAssignment = BrainGraphSpaceAssignment.empty
+    /// "lower-higher" node indices → the relation drawn on that edge when a
+    /// dot is hovered ("works at"), from `BrainRelationGraph`.
+    private(set) var relationLabelByEdgeKey: [String: String] = [:]
     @Published private(set) var isSettled = true
     /// Labels drawn even when zoomed out.
     private(set) var alwaysLabelledNodeIndices = Set<Int>()
@@ -56,6 +59,7 @@ final class BrainGraphSimulation: ObservableObject {
         newLayout.adoptPositions(from: layout)
         layout = newLayout
         spaceAssignment = BrainGraphSpaces.detect(in: newLayout)
+        relationLabelByEdgeKey = Self.relationLabels(pages: pages, layout: newLayout)
         alwaysLabelledNodeIndices = newLayout.mostConnectedNodeIndices(limit: 14)
         setSettled(layout.isSettled)
     }
@@ -104,6 +108,24 @@ final class BrainGraphSimulation: ObservableObject {
 
     private func setSettled(_ newValue: Bool) {
         if isSettled != newValue { isSettled = newValue }
+    }
+
+    static func edgeKey(_ firstIndex: Int, _ secondIndex: Int) -> String {
+        "\(min(firstIndex, secondIndex))-\(max(firstIndex, secondIndex))"
+    }
+
+    private static func relationLabels(pages: [BrainPage], layout: BrainGraphLayout) -> [String: String] {
+        var nodeIndexBySlug: [String: Int] = [:]
+        for (nodeIndex, node) in layout.nodes.enumerated() { nodeIndexBySlug[node.slug] = nodeIndex }
+        var labels: [String: String] = [:]
+        for relation in BrainRelationGraph.relations(pages: pages, resolver: BrainLinkResolver(pages: pages)) {
+            guard let sourceIndex = nodeIndexBySlug[relation.sourceSlug],
+                  let targetIndex = nodeIndexBySlug[relation.targetSlug] else { continue }
+            let key = edgeKey(sourceIndex, targetIndex)
+            // An explicit relation names the edge over a derived one.
+            if labels[key] == nil || relation.isExplicit { labels[key] = relation.predicate }
+        }
+        return labels
     }
 
     /// Pages, their links and the filter — the layout is rebuilt only when
@@ -288,6 +310,27 @@ struct BrainGraphPage: View {
             )
         }
         graphicsContext.stroke(focusedEdgesPath, with: .color(WispColor.accentText.opacity(0.8)), lineWidth: 1.5)
+
+        // Name the hovered dot's relationships at the middle of each line.
+        if let focusedNodeIndex {
+            for edge in layout.edges where edge.sourceIndex == focusedNodeIndex || edge.targetIndex == focusedNodeIndex {
+                guard let relationLabel = simulation.relationLabelByEdgeKey[BrainGraphSimulation.edgeKey(edge.sourceIndex, edge.targetIndex)] else { continue }
+                let sourcePoint = viewPoint(layout.nodes[edge.sourceIndex].position)
+                let targetPoint = viewPoint(layout.nodes[edge.targetIndex].position)
+                let middlePoint = CGPoint(x: (sourcePoint.x + targetPoint.x) / 2, y: (sourcePoint.y + targetPoint.y) / 2)
+                let labelText = Text(relationLabel)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(WispColor.accentText)
+                let resolvedLabel = graphicsContext.resolve(labelText)
+                let labelSize = resolvedLabel.measure(in: CGSize(width: 200, height: 40))
+                let labelBackground = CGRect(
+                    x: middlePoint.x - labelSize.width / 2 - 4, y: middlePoint.y - labelSize.height / 2 - 2,
+                    width: labelSize.width + 8, height: labelSize.height + 4
+                )
+                graphicsContext.fill(Path(roundedRect: labelBackground, cornerRadius: 4), with: .color(WispColor.windowBackground.opacity(0.9)))
+                graphicsContext.draw(resolvedLabel, at: middlePoint, anchor: .center)
+            }
+        }
 
         let showsAllLabels = zoomScale >= Self.zoomScaleShowingAllLabels
         for nodeIndex in layout.nodes.indices {

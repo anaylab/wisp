@@ -30,6 +30,12 @@ final class BrainIngestQueue: ObservableObject {
     @Published private(set) var jobs: [BrainIngestJob] = []
     /// True while jobs are waiting only because the brain is switched off.
     @Published private(set) var isPausedBecauseBrainIsOff = false
+    /// Set while the queue waits for the model to come back (rate limited,
+    /// provider down): what happened and when it tries again.
+    @Published private(set) var modelPauseMessage: String?
+    private var modelPausedUntilDate: Date?
+    private var consecutiveModelPauseCount = 0
+    private var modelPauseWakeTask: Task<Void, Never>?
 
     var activeJob: BrainIngestJob? { jobs.first { !$0.state.isFinal && $0.state != .queued } }
     var pendingJobCount: Int { jobs.filter { !$0.state.isFinal }.count }
@@ -205,6 +211,7 @@ final class BrainIngestQueue: ObservableObject {
             return
         }
         isPausedBecauseBrainIsOff = false
+        if let modelPausedUntilDate, modelPausedUntilDate > Date() { return }
 
         // Oldest queued first.
         guard let nextJob = jobs.filter({ $0.state == .queued }).min(by: { $0.createdDate < $1.createdDate }) else {
@@ -236,7 +243,7 @@ final class BrainIngestQueue: ObservableObject {
             try Task.checkCancellation()
             updateState(of: jobID, to: .reading(progress: 0))
 
-            let modelProvider = ModelProviderFactory.make()
+            let modelProvider = ModelProviderFactory.make(BrainPreferences.shared.readingModelProviderKind)
             let proposals = try await BrainKnowledgeExtractor.proposeEdits(
                 for: material,
                 modelProvider: modelProvider,
@@ -274,12 +281,23 @@ final class BrainIngestQueue: ObservableObject {
                 isError: false
             )
             finishHistoryTask(historyTaskID, forJobID: jobID, status: .succeeded, finalText: resultText)
+            consecutiveModelPauseCount = 0
+            modelPauseMessage = nil
         } catch is CancellationError {
             updateState(of: jobID, to: .cancelled)
             finishHistoryTask(historyTaskID, forJobID: jobID, status: .cancelled, finalText: nil)
         } catch {
             let failureDescription = error.localizedDescription
             let wasCancelled = self.job(withID: jobID)?.state == .cancelled
+            if !wasCancelled && BuddyFailoverPolicy.isFailoverError(error) {
+                // The model will be back: keep the job and wait, rather than
+                // failing it and every job behind it.
+                forceState(of: jobID, to: .queued)
+                pauseForModel(reason: failureDescription)
+                finishHistoryTask(historyTaskID, forJobID: jobID, status: .cancelled, finalText: modelPauseMessage)
+                scheduleSave()
+                return
+            }
             if wasCancelled {
                 finishHistoryTask(historyTaskID, forJobID: jobID, status: .cancelled, finalText: nil)
             } else {
@@ -299,6 +317,32 @@ final class BrainIngestQueue: ObservableObject {
             endedJobIDsSinceLastDrain.append(jobID)
         }
         scheduleSave()
+    }
+
+    // MARK: Waiting for the model
+
+    private func pauseForModel(reason: String) {
+        let pauseSeconds = BrainIngestRetryPolicy.pauseSeconds(afterConsecutivePauses: consecutiveModelPauseCount)
+        consecutiveModelPauseCount += 1
+        let resumeDate = Date().addingTimeInterval(pauseSeconds)
+        modelPausedUntilDate = resumeDate
+        modelPauseMessage = BrainIngestRetryPolicy.pauseMessage(reason: reason, resumeDate: resumeDate)
+        print("🧠 Brain ingest: \(modelPauseMessage ?? "")")
+        modelPauseWakeTask?.cancel()
+        modelPauseWakeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(pauseSeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.modelPausedUntilDate = nil
+            self.processNextJobIfPossible()
+        }
+    }
+
+    /// "Try now" from the Inbox: end the wait early.
+    func resumeAfterModelPause() {
+        modelPauseWakeTask?.cancel()
+        modelPausedUntilDate = nil
+        modelPauseMessage = nil
+        processNextJobIfPossible()
     }
 
     // MARK: Material
@@ -615,5 +659,13 @@ final class BrainIngestQueue: ObservableObject {
         } catch {
             print("⚠️ Brain ingest: couldn't save the queue: \(error.localizedDescription)")
         }
+    }
+}
+
+extension BrainPreferences {
+    /// The model every brain writer reads with (here rather than in
+    /// BrainPreferences.swift, which test suites compile on its own).
+    var readingModelProviderKind: BuddyChatProviderKind {
+        readsWithLocalModel ? .localOllama : BuddyChatProviderSelection.current
     }
 }

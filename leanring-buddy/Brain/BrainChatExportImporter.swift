@@ -15,7 +15,9 @@
 //
 //  Imports are incremental: `.brain/imported-chats.json` keeps a content hash
 //  per conversation id, so importing a newer export only reads the chats that
-//  are new or that grew since.
+//  are new or that grew since. A chat is recorded there only once the queue
+//  has read it (`startWatchingQueue`); until then it is "pending", and a chat
+//  whose job failed is queued again by the next import.
 //
 
 import Combine
@@ -43,7 +45,30 @@ final class BrainChatExportImporter: ObservableObject {
             .appendingPathComponent("imported-chats.json")
     }
 
+    private var queueSubscription: AnyCancellable?
+
     private init() {}
+
+    /// Confirms chats as imported when the queue finishes reading them.
+    /// Started with the brain's services at launch, so jobs left queued by a
+    /// quit are confirmed when they finish after the relaunch.
+    func startWatchingQueue() {
+        guard queueSubscription == nil else { return }
+        queueSubscription = BrainIngestQueue.shared.$jobs
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] jobs in self?.confirmFinishedChats(in: jobs) }
+    }
+
+    private func confirmFinishedChats(in jobs: [BrainIngestJob]) {
+        var importState = loadState()
+        guard let pendingPaths = importState.pendingChatsByTranscriptPath, !pendingPaths.isEmpty else { return }
+        var didConfirmAny = false
+        for job in jobs {
+            guard case .finished = job.state, case .file(let fileURL) = job.source else { continue }
+            if importState.confirmRead(transcriptPath: fileURL.standardizedFileURL.path) { didConfirmAny = true }
+        }
+        if didConfirmAny { saveState(importState) }
+    }
 
     /// Imports from a `conversations.json`, an unzipped export folder, or the
     /// export's .zip.
@@ -99,7 +124,11 @@ final class BrainChatExportImporter: ObservableObject {
                     subfolder: "chats/\(providerName)"
                 )
                 BrainIngestQueue.shared.enqueue(fileURL: savedTranscriptURL, origin: .notesImport)
-                updatedState.transcriptHashesByConversationKey[chatToImport.conversationKey] = chatToImport.transcriptHash
+                if updatedState.pendingChatsByTranscriptPath == nil { updatedState.pendingChatsByTranscriptPath = [:] }
+                updatedState.pendingChatsByTranscriptPath?[savedTranscriptURL.standardizedFileURL.path] = BrainChatImportState.PendingChat(
+                    conversationKey: chatToImport.conversationKey,
+                    transcriptHash: chatToImport.transcriptHash
+                )
                 queuedChatCount += 1
             } catch {
                 print("⚠️ Brain chats: couldn't save \(chatToImport.fileName): \(error.localizedDescription)")

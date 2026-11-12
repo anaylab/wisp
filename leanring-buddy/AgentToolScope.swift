@@ -76,7 +76,7 @@ enum AgentToolScope: String, CaseIterable {
             // brain. Not "remember": that routes to the memory tools.
             return ["my brain", "in my brain", "to my brain", "wiki", "my notes on", "my notes about",
                     "what do i know about", "what do you know about", "what have i saved",
-                    "what did i save", "ingest"]
+                    "what did i save", "ingest", "recall", "what's connected to", "from my brain"]
         case .general:
             return []
         }

@@ -118,6 +118,8 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         BrainConversationDigester.shared.start()
         BrainActivityRecorder.shared.start()
         BrainMaintenance.shared.start()
+        BrainSemanticIndex.shared.start()
+        BrainChatExportImporter.shared.startWatchingQueue()
     }
 
     /// Makes Wisp start at login. SMAppService lists it under System Settings >

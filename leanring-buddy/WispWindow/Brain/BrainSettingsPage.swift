@@ -74,6 +74,17 @@ struct BrainSettingsPage: View {
                         .disabled(!brainPreferences.isBrainEnabled)
                         .pointerCursor(isEnabled: brainPreferences.isBrainEnabled)
                 }
+                Divider()
+                SettingRow(
+                    title: "Read with the local model",
+                    detail: "Files, links, imports and conversations are read into pages on this Mac, whatever model Wisp chats with. Off, they're read by the model selected in Settings → Model."
+                ) {
+                    Toggle("Read with the local model", isOn: $brainPreferences.readsWithLocalModel)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(!brainPreferences.isBrainEnabled)
+                        .pointerCursor(isEnabled: brainPreferences.isBrainEnabled)
+                }
             }
         }
     }

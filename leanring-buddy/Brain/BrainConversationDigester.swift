@@ -154,7 +154,7 @@ final class BrainConversationDigester: ObservableObject {
             do {
                 proposals = try await BrainKnowledgeExtractor.proposeEdits(
                     for: sourceMaterial,
-                    modelProvider: ModelProviderFactory.make()
+                    modelProvider: ModelProviderFactory.make(BrainPreferences.shared.readingModelProviderKind)
                 )
             } catch {
                 let didGiveUp = digestState.recordFailedAttempt(sessionID: session.id, lastExchangeDate: session.lastActivityAt)

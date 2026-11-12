@@ -88,6 +88,15 @@ enum BrainIngestProposalMerger {
             mergedProposals[existingIndex] = mergedProposal
         }
 
+        // Drop filler facts ("- A topic") before anything is written; an
+        // append left with nothing to say goes, so no page is made for it.
+        mergedProposals = mergedProposals.compactMap { mergedProposal in
+            guard mergedProposal.operation == .append else { return mergedProposal }
+            var filteredProposal = mergedProposal
+            filteredProposal.content = substantiveLines(of: mergedProposal.content, pageTitle: mergedProposal.pageTitle).joined(separator: "\n")
+            return filteredProposal.content.isEmpty ? nil : filteredProposal
+        }
+
         // Unify kinds and put the page's summary on its first proposal only.
         var pageKeysGivenSummary = Set<String>()
         return mergedProposals.map { mergedProposal in
@@ -143,6 +152,30 @@ enum BrainIngestProposalMerger {
             with: "",
             options: [.regularExpression, .caseInsensitive]
         )
+    }
+
+    /// Words that say what kind of page something is, not anything about it.
+    static let kindWords: Set<String> = [
+        "topic", "person", "people", "project", "organization", "organisation", "place", "event",
+        "source", "note", "page", "thing", "user", "work", "works", "working", "related", "involved"
+    ]
+
+    /// The local 3B model pads pages with facts that say nothing — "A topic"
+    /// on a topic, "A person" on a person, "Works on projects" on Me
+    /// (measured on a real chat import). A bullet needs two words of its own
+    /// beyond stop words, kind words and the page's own name; a fact with a
+    /// [[link]] or a number keeps a lower bar of one. Headings and other
+    /// non-bullet lines pass through.
+    static func substantiveLines(of content: String, pageTitle: String) -> [String] {
+        let pageTitleWords = Set(BrainSearchTokenizer.tokens(in: pageTitle))
+        return content.components(separatedBy: "\n").filter { line in
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            guard ["- ", "* ", "+ "].contains(where: { trimmedLine.hasPrefix($0) }) else { return !trimmedLine.isEmpty }
+            let contentWords = BrainSearchTokenizer.tokens(in: trimmedLine.replacingOccurrences(of: "[[", with: " ").replacingOccurrences(of: "]]", with: " "))
+                .filter { !kindWords.contains($0) && !pageTitleWords.contains($0) }
+            let carriesLinkOrNumber = trimmedLine.contains("[[") || trimmedLine.rangeOfCharacter(from: .decimalDigits) != nil
+            return Set(contentWords).count >= (carriesLinkOrNumber ? 1 : 2)
+        }
     }
 
     static func comparableLine(_ line: String) -> String {

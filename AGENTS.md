@@ -1145,18 +1145,33 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   anything; locked pages are never changed. `BrainStore.apply` versions every overwritten page under
   `.brain/versions/<change>/` and records a `BrainChangeRecord`, so every batch is one Undo in
   Brain → Log (conflict-checked by content hash; `deletingSlugs:` makes a merge one record).
-  **Reading**: `BrainSearch` is BM25 with field weights (no embedding model — residency); each turn
-  the ≤4 relevant page summaries (`BrainPromptContext`, score bar, ~700 chars) join the per-turn
-  screen-context block on the **user message** and are stripped from history like `a`/`t` ids.
-  Agent tools (`.brain` scope): `search_brain`, `read_brain_page` (read-only), `add_to_brain`,
-  `ingest_into_brain` (ask). `BrainCommandRouter` sends "add this page/file to my brain" straight to
+  **Reading** (cognee-style graph-aware recall, `BrainRecall` pure + `BrainSemanticIndex` live):
+  `BrainSearch` BM25 (field weights) is fused by reciprocal rank with **meaning** — every page's
+  facts embedded with Apple's on-device `NLEmbedding.sentenceEmbedding` (no download, no resident
+  LLM; vectors cached by fact hash in `.brain/fact-vectors.json`, embedded off-main), a page scored
+  by its best fact (page-level vectors were measured useless) — then the top 3 seeds' **typed
+  relations** (`BrainRelations`: explicit `relation:: [[X]]` lines under `## Relations`, plus
+  relations derived from short linked facts like `- Runs design at [[Orbit]]`) and plain links are
+  followed one step. Each turn the ≤4 pages (`BrainPromptContext.promptText(recallHits:)`, ~700
+  chars) join the per-turn screen-context block on the **user message** and are stripped from
+  history like `a`/`t` ids; a page rides the turn only if the request names it, words *and* meaning
+  agree (≥half the words, ≥0.4), meaning alone is ≥0.65, or a typed relation ties it to one of
+  those — so "what's the weather like" adds nothing. Agent tools (`.brain` scope): `recall`,
+  `search_brain`, `read_brain_page` (read-only), `add_to_brain`, `ingest_into_brain`,
+  `forget_from_brain` (removes ≤3 matching bullets from one page as a user edit; ask). The graph
+  labels a hovered dot's edges with their relation. `BrainCommandRouter` sends "add this page/file to my brain" straight to
   the queue (front browser tab or Finder selection), no model. **Feeds**: `BrainIngestQueue`
   (serial, persisted, resumable; `BrainTextExtractor` md/txt/PDF/HTML/RTF/DOCX + user-requested URL
   fetch, `BrainTextChunker` ~2500-char chunks, `BrainKnowledgeExtractor` one call per chunk + a
   `source` page per material, `BrainInboxWatcher` polls `raw/inbox/`); `BrainConversationDigester`
   (ended sessions ≥30 min idle, user words + answers only, substantive-only heuristic, ≤3 per
   pass); `BrainNotesImporter` (folder/Obsidian, hash-deduped, 500 per run; Apple Notes via
-  AppleScript); `BrainActivityRecorder` (**opt-in, off by default**: app/window title/URL-without-
+  AppleScript). Every brain reader uses `BrainPreferences.readingModelProviderKind`: the **local
+  model by default** (`readsWithLocalModel`, Brain → Settings), whatever Wisp chats with. A
+  temporary model failure (rate limited, provider down, offline — `BuddyFailoverPolicy.isFailoverError`)
+  re-queues the job and pauses the queue (`BrainIngestRetryPolicy`: 5 min doubling to 1 h, "Try now"
+  in the Inbox) instead of failing every job behind it. The merger drops filler facts the 3B model
+  pads pages with ("- A topic"; `substantiveLines`). `BrainActivityRecorder` (**opt-in, off by default**: app/window title/URL-without-
   query once a minute while present and not on a call, built-in + user exclusions, Chrome incognito
   skipped, reuses existing OCR text only, never screenshots, 30-day retention, daily digest of a
   compact summary **always on the local model**). `BrainMaintenance` lints (broken links → stub
@@ -1526,7 +1541,8 @@ When the morning banner is built, `BrainMorningSuggestions` (`DynamicIsland/Brai
 | `Brain/BrainIngestProposalMerger.swift / BrainIngestFileRules.swift / BrainInboxWatcher.swift` | ~405/~125/~115 | Cross-chunk merge + batch fitting + source page; supported types and inbox stability rules; `raw/inbox/` poller. |
 | `Brain/BrainConversationDigester.swift / BrainConversationDigestPlanning.swift` | ~225/~410 | Periodic digest of ended conversation sessions; pure exchange filtering, substance heuristic, material + state. |
 | `Brain/BrainNotesImporter.swift / BrainNotesImportPlanning.swift / BrainNotesImportAppleNotes.swift` | ~370/~255/~185 | Folder/Obsidian import (hash-deduped, capped) and Apple Notes export via a parameterised AppleScript. |
-| `Brain/BrainChatExportParsing.swift / BrainChatExportImporter.swift` | ~370/~175 | AI chat import: ChatGPT (`mapping` tree, current branch only) and Claude (`chat_messages`) `conversations.json` → transcripts that mark the user's own lines; per-conversation hash plan (too short / unchanged / grown / capped); importer takes the .json, the export folder or the .zip (`ditto`), writes `raw/chats/<provider>/`, enqueues as `.notesImport`. |
+| `Brain/BrainChatExportParsing.swift / BrainChatExportImporter.swift` | ~370/~175 | AI chat import: ChatGPT (`mapping` tree, current branch only) and Claude (`chat_messages`, current branch via `parent_message_uuid`, tool placeholders dropped) `conversations.json` → transcripts that mark the user's own lines; per-conversation hash plan (too short / unchanged / grown / capped); importer takes the .json, the export folder or the .zip (`ditto`), writes `raw/chats/<provider>/`, enqueues as `.notesImport`, and counts a chat imported only once its job finished (pending until then, so a failed one is re-queued by the next import). |
+| `Brain/BrainRelations.swift / BrainRecall.swift / BrainSemanticIndex.swift` | ~170/~290/~210 | Typed relations (explicit `relation:: [[X]]` + derived from short linked facts) and the relation graph; graph-aware recall (BM25 + on-device fact embeddings by reciprocal rank fusion, one-step relation/link expansion, tool text, facts to embed); the live `NLEmbedding` fact-vector index, cached in `.brain/fact-vectors.json`. |
 | `Brain/BrainReview.swift` | ~170 | Brain → Review policy: agent-touched pages (not yours, undone, deleted or >30 days old) once each with their newest change; reviewed-through date per page in `.brain/review-state.json`; tag parsing. |
 | `Brain/BrainLock.swift` | ~150 | Optional Touch ID / password lock for the Brain pages (`LAContext` `.deviceOwnerAuthentication`): starts locked at launch, relocks after N minutes away (`BrainLockPolicy`), toggling it needs the owner. |
 | `Brain/BrainActivityRecorder.swift / BrainActivitySampler.swift / BrainActivityLog.swift / BrainActivitySummary.swift / BrainActivityExclusions.swift` | ~360/~230/~245/~420/~205 | Opt-in activity feed: sampling, exclusions, day spans (0600 files, 30-day retention), summaries, daily local-model digest. |
@@ -1784,7 +1800,7 @@ running):
 ./Tests/PartSelection/run.sh            # voice selection of a part: spoken-target parser, OCR list/ordinal resolver, pixels→region round trip
 ./Tests/UsageLog/run.sh                  # usage log: cost estimator, aggregation windows, retention, codec, no content fields, store file
 ./Tests/GuidedWalkthrough/run.sh         # guided walkthrough plan stepping, instruction → label, click-on-target matching
-./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration, review policy, lock timing
+./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration, review policy, lock timing, relations, recall
 ./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec
 ./Tests/BrainDigest/run.sh               # conversation digest + notes import policy
 ./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries

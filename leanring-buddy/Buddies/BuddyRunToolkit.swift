@@ -18,6 +18,8 @@ enum BuddyRunToolPolicy {
         BrainToolNames.readBrainPage,
         BrainToolNames.addToBrain,
         BrainToolNames.ingestIntoBrain,
+        BrainToolNames.recall,
+        BrainToolNames.forgetFromBrain,
         "remember",
         "forget",
     ]

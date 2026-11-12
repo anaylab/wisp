@@ -2,8 +2,10 @@
 //  BrainAgentTools.swift
 //  leanring-buddy
 //
-//  The agent's brain tools: read-only `search_brain` and `read_brain_page`,
-//  and the confirmation-gated `add_to_brain` and `ingest_into_brain`.
+//  The agent's brain tools: read-only `search_brain`, `read_brain_page` and
+//  `recall` (graph-aware, cognee-style: words + meaning + relations), and the
+//  confirmation-gated `add_to_brain`, `ingest_into_brain` and
+//  `forget_from_brain`.
 //
 //  Reads are free: they only look at the user's own wiki on this Mac. Writes
 //  ask, because a page the model files feeds later prompts (per-turn brain
@@ -24,11 +26,13 @@ enum BrainToolNames {
     static let readBrainPage = "read_brain_page"
     static let addToBrain = "add_to_brain"
     static let ingestIntoBrain = "ingest_into_brain"
+    static let recall = "recall"
+    static let forgetFromBrain = "forget_from_brain"
 
-    static let all: Set<String> = [searchBrain, readBrainPage, addToBrain, ingestIntoBrain]
-    /// The two that answer "what do I know about X" — boosted when a request
+    static let all: Set<String> = [searchBrain, readBrainPage, addToBrain, ingestIntoBrain, recall, forgetFromBrain]
+    /// The ones that answer "what do I know about X" — boosted when a request
     /// names a page.
-    static let reading: Set<String> = [searchBrain, readBrainPage]
+    static let reading: Set<String> = [recall, readBrainPage]
 }
 
 // MARK: - Pure helpers
@@ -118,6 +122,37 @@ enum BrainAgentToolFormatting {
     }
 }
 
+/// `forget_from_brain`'s choice of lines: the bullets on a page holding every
+/// word the model gave (case, punctuation and link brackets ignored).
+enum BrainFactRemoval {
+    /// More matches than this means the description was too vague to act on.
+    static let maximumLinesPerRemoval = 3
+
+    static func matchingBulletLines(in body: String, describedBy description: String) -> [String] {
+        let wantedWords = Set(BrainSearchTokenizer.tokens(in: description))
+        guard !wantedWords.isEmpty else { return [] }
+        return body.components(separatedBy: "\n").filter { line in
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            guard ["- ", "* ", "+ "].contains(where: { trimmedLine.hasPrefix($0) }) else { return false }
+            let lineWords = Set(BrainSearchTokenizer.tokens(in: BrainSemanticFacts.plainText(trimmedLine)))
+            return wantedWords.isSubset(of: lineWords)
+        }
+    }
+
+    /// The body without those lines (each removed once, in place).
+    static func body(_ body: String, removing removedLines: [String]) -> String {
+        var remainingRemovals = removedLines
+        let keptLines = body.components(separatedBy: "\n").filter { line in
+            if let removalIndex = remainingRemovals.firstIndex(of: line) {
+                remainingRemovals.remove(at: removalIndex)
+                return false
+            }
+            return true
+        }
+        return keptLines.joined(separator: "\n")
+    }
+}
+
 /// What `ingest_into_brain` was handed.
 enum BrainIngestSourceParser {
     enum Source: Equatable {
@@ -178,7 +213,7 @@ enum BrainToolRouting {
 
 extension AgentToolRegistry {
 
-    /// Registers the four brain tools.
+    /// Registers the six brain tools.
     func registerBrainTools() {
         register(
             BuddyToolDefinition(
@@ -254,7 +289,7 @@ extension AgentToolRegistry {
                         ]),
                         "note": .object([
                             "type": .string("string"),
-                            "description": .string("What to add: short facts, one per line, with [[links]] to other pages")
+                            "description": .string("What to add: short facts, one per line, with [[links]] to other pages. A relationship can be one line as \"relation:: [[Other page]]\", e.g. \"works at:: [[Orbit]]\"")
                         ]),
                         "section": .object([
                             "type": .string("string"),
@@ -296,6 +331,80 @@ extension AgentToolRegistry {
                 return "couldn't add that: " + applyResult.refusals.joined(separator: "; ") + "."
             }
             return "that's already in the user's brain."
+        }
+
+        register(
+            BuddyToolDefinition(
+                name: BrainToolNames.recall,
+                description: "Recall what the user's brain (their personal wiki) holds about something: finds pages by words and by meaning, then follows how they're related (\"works at\", \"part of\"…) to bring connected pages along. Use for \"what do I know about…\", \"what was that…\", or any question their notes might answer.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object(["query": .object([
+                        "type": .string("string"),
+                        "description": .string("The question or topic in plain words, e.g. \"my wind turbine project\"")
+                    ])]),
+                    "required": .array([.string("query")])
+                ]),
+                metadata: .reading(.localMachine)
+            )
+        ) { input in
+            guard BrainPreferences.shared.isBrainEnabled else { return Self.brainIsOffResult }
+            guard case .object(let arguments) = input,
+                  case .string(let query)? = arguments["query"],
+                  !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return "i need something to recall."
+            }
+            let recallHits = BrainStore.shared.recall(query, limit: BrainAgentToolFormatting.maximumSearchResults)
+            return BrainRecallPlanner.toolText(for: recallHits, query: query)
+        }
+
+        register(
+            BuddyToolDefinition(
+                name: BrainToolNames.forgetFromBrain,
+                description: "Remove a fact from one page of the user's brain (their personal wiki) when they ask you to forget or delete it. Describe the fact with a few words that appear in it. The user is asked first, and it can be undone in the Brain's log.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "page": .object([
+                            "type": .string("string"),
+                            "description": .string("The page's title, e.g. \"Sarah Chen\"")
+                        ]),
+                        "fact": .object([
+                            "type": .string("string"),
+                            "description": .string("Words from the fact to remove, e.g. \"moved to berlin\"")
+                        ])
+                    ]),
+                    "required": .array([.string("page"), .string("fact")])
+                ]),
+                // Deletes text the user may have written; undoable from the log.
+                metadata: ToolMetadata(readOnly: false, destructive: true, dataSource: .localMachine)
+            )
+        ) { input in
+            guard BrainPreferences.shared.isBrainEnabled else { return Self.brainIsOffResult }
+            guard case .object(let arguments) = input,
+                  case .string(let pageName)? = arguments["page"],
+                  case .string(let factDescription)? = arguments["fact"] else {
+                return "i need the page and the fact to forget."
+            }
+            let brainStore = BrainStore.shared
+            guard let page = brainStore.resolvePage(named: pageName) else {
+                return "there's no page called \"\(pageName)\" in the user's brain."
+            }
+            guard !page.isLocked else { return "\(page.title) is locked — the user can edit it by hand in the Brain page." }
+            let matchingLines = BrainFactRemoval.matchingBulletLines(in: page.body, describedBy: factDescription)
+            if matchingLines.isEmpty {
+                return "nothing on \(page.title) matches \"\(factDescription)\"."
+            }
+            if matchingLines.count > BrainFactRemoval.maximumLinesPerRemoval {
+                return "that matches \(matchingLines.count) facts on \(page.title) — ask the user which one they mean."
+            }
+            var editedPage = page
+            editedPage.body = BrainFactRemoval.body(page.body, removing: matchingLines)
+            // The user approved this exact removal on the confirmation card,
+            // so it is saved as their edit: versioned and undoable.
+            brainStore.savePageEditedByUser(editedPage)
+            let removedFacts = matchingLines.map { $0.trimmingCharacters(in: .whitespaces) }
+            return "removed from \(page.title): " + removedFacts.joined(separator: "; ")
         }
 
         register(
