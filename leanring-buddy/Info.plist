@@ -20,6 +20,22 @@
 	<string>qwen2.5vl:3b</string>
 	<key>OllamaBaseURL</key>
 	<string>http://localhost:11434</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/anaylab/wisp/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>$(WISP_SPARKLE_PUBLIC_ED_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUEnableSystemProfiling</key>
+	<false/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SURequireSignedFeed</key>
+	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Wisp listens while you hold the hotkey so you can talk to it. Your voice is transcribed on this Mac and never leaves it.</string>
 	<key>NSScreenCaptureUsageDescription</key>

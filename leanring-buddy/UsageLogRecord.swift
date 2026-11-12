@@ -146,13 +146,19 @@ enum UsageAggregator {
             if record.timestamp >= startOfToday { today.add(record) }
         }
 
-        let breakdown = totalsByProvider
-            .map { UsageProviderBreakdown(providerKind: $0.key, totals: $0.value) }
-            .sorted { first, second in
-                first.totals.turnCount != second.totals.turnCount
-                    ? first.totals.turnCount > second.totals.turnCount
-                    : first.providerKind.rawValue < second.providerKind.rawValue
+        // Split up and spelled out on purpose: as one chained expression with a
+        // ternary in the closure, this was the slowest expression in the app to
+        // type-check, which can fail outright on other compiler versions.
+        let unsortedBreakdown: [UsageProviderBreakdown] = totalsByProvider.map { providerEntry in
+            UsageProviderBreakdown(providerKind: providerEntry.key, totals: providerEntry.value)
+        }
+        let breakdown: [UsageProviderBreakdown] = unsortedBreakdown.sorted {
+            (first: UsageProviderBreakdown, second: UsageProviderBreakdown) -> Bool in
+            if first.totals.turnCount != second.totals.turnCount {
+                return first.totals.turnCount > second.totals.turnCount
             }
+            return first.providerKind.rawValue < second.providerKind.rawValue
+        }
         return UsageSummary(today: today, lastSevenDays: lastSevenDays,
                             lastThirtyDays: lastThirtyDays, providerBreakdown: breakdown)
     }

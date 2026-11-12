@@ -80,6 +80,8 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         // recogniser and synthesizer stand in, so launch never waits on them.
         FluidAudioSpeechModels.shared.preloadConfiguredModelsInBackground()
         startBrainServicesIfEnabled()
+        // Off unless this is a release build; a copy built in Xcode never contacts the feed.
+        WispUpdater.shared.startIfAvailable()
         // Open the window only when the user still needs to do something, which
         // means one of the permissions is missing; Today leads with the checklist.
         if !companionManager.allPermissionsGranted {

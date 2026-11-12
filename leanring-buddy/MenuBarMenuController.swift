@@ -149,6 +149,15 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         menu.addItem(listenAfterRepliesItem)
         menu.addItem(.separator())
 
+        if WispUpdater.shared.availability == .available {
+            let updater = WispUpdater.shared
+            let updateItem = actionItem(
+                title: updater.pendingUpdateVersion.map(WispUpdatePolicy.installMenuTitle(pendingVersion:)) ?? "Check for Updates…",
+                action: #selector(checkForUpdates)
+            )
+            updateItem.isEnabled = updater.canCheckForUpdates
+            menu.addItem(updateItem)
+        }
         menu.addItem(actionItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(actionItem(title: "Quit Wisp", action: #selector(quitWisp), keyEquivalent: "q"))
     }
@@ -225,6 +234,10 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
     /// The Inbox page is where files, links and text are dropped or picked.
     @objc private func addToBrain() {
         WispWindowNavigator.open(.brainInbox)
+    }
+
+    @objc private func checkForUpdates() {
+        WispUpdater.shared.checkForUpdates()
     }
 
     @objc private func openSettings() {
