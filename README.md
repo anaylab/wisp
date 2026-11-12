@@ -333,22 +333,30 @@ Images are never written to disk in conversation history. Weather and places car
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/get-dark.png">
-    <img src="docs/assets/readme/get-light.png" alt="Get Wisp: up and running in a few minutes. Notarized downloads aren't published yet, so for now you build it once in Xcode. It's free and MIT licensed." width="100%">
+    <img src="docs/assets/readme/get-light.png" alt="Get Wisp: up and running in a few minutes. One command installs it, or drag it in from a .dmg. Free and MIT licensed." width="100%">
   </picture>
 </p>
 
-You need an Apple-silicon Mac on **macOS 26+**, **Xcode 26**, and [Ollama](https://ollama.com/download) for the default local model.
+You need an Apple-silicon Mac on **macOS 26+**. Paste this in Terminal:
 
 ```bash
-# 1. a local model
-ollama pull qwen2.5vl:3b
+curl -fsSL https://anaylab.github.io/wisp/install.sh | bash
+```
 
-# 2. get Wisp
+It checks the download's checksum and signature, puts Wisp in Applications, and offers to set up [Ollama](https://ollama.com/download) and the default local model. Run it again to update. [Read the script first](site/install.sh) if you like; it never uses sudo.
+
+Prefer dragging? Download [Wisp.dmg](https://github.com/anaylab/wisp/releases/latest/download/Wisp.dmg) and drag Wisp to Applications. It isn't notarized yet, so macOS asks for one approval the first time: right-click Wisp, choose Open. More in [docs/terminal-install.md](docs/terminal-install.md).
+
+<details><summary>Build it yourself in Xcode (needs Xcode 26)</summary>
+
+```bash
+ollama pull qwen2.5vl:3b
 git clone https://github.com/anaylab/wisp.git && cd wisp
 open leanring-buddy.xcodeproj
-
-# 3. pick the leanring-buddy scheme and press ⌘R, then hold ⌃⌥ and talk
+# pick the leanring-buddy scheme and press ⌘R
 ```
+
+</details>
 
 Wisp appears in the menu bar (there is no Dock icon) and opens on **Today** with a checklist of the permissions it needs. Grant them, hold <kbd>Control</kbd> + <kbd>Option</kbd>, and talk. The first launch downloads the on-device speech models once; until they are ready, Apple's built-in engines stand in.
 
@@ -394,7 +402,7 @@ Anything that sends, deletes, pays, posts, invites or runs a command shows a car
 </details>
 <details><summary><b>Which Macs does it need?</b></summary>
 
-An Apple-silicon Mac on macOS 26 or later, since the notch uses Liquid Glass. 16 GB of memory is recommended for the local model. You need Xcode 26 to build it.
+An Apple-silicon Mac on macOS 26 or later, since the notch uses Liquid Glass. 16 GB of memory is recommended for the local model.
 
 </details>
 <details><summary><b>Does it work in my apps?</b></summary>
@@ -402,9 +410,9 @@ An Apple-silicon Mac on macOS 26 or later, since the notch uses Liquid Glass. 16
 Pointing, walkthroughs and screen reading work anywhere: native apps through Accessibility and everything else through on-device OCR. Browser control works with Chrome and Safari.
 
 </details>
-<details><summary><b>Why isn't there a download button?</b></summary>
+<details><summary><b>Why isn't this notarized?</b></summary>
 
-There is no notarized build published yet, and I'd rather say so than point you at something half-finished. Building it takes a few minutes in Xcode, and signed releases are on the way.
+Notarizing needs Apple's paid developer program, and I'd rather ship now and say so. The install command downloads with curl, which macOS doesn't flag, and checks a checksum and signature first. The .dmg works too after one right-click approval. A notarized build may come later.
 
 </details>
 
