@@ -83,7 +83,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         // What Wisp knows, how it got there, and how to steer it. The old
         // History → Memory page (memory.md facts + conversation history) folded
         // into Brain: the user's page is Pages → Me, history lives in Settings.
-        case .brain: return [.brainPages, .brainGraph, .brainInbox, .brainHealth, .brainLog, .brainSettings]
+        case .brain: return [.brainPages, .brainGraph, .brainReview, .brainInbox, .brainHealth, .brainLog, .brainSettings]
         case .routines: return [.routines]
         case .history: return [.timeline]
         case .connections: return [.marketplace, .tools, .sources]
@@ -128,6 +128,8 @@ enum WispPage: String, CaseIterable, Identifiable {
     case routines
     case brainPages
     case brainGraph
+    /// What Wisp filed on its own, waiting for a quick check.
+    case brainReview
     case brainInbox
     case brainHealth
     case brainLog
@@ -163,7 +165,7 @@ enum WispPage: String, CaseIterable, Identifiable {
     /// first-class.
     var isHiddenWhenAdvancedIsOff: Bool {
         switch self {
-        case .brainPages, .brainGraph, .brainInbox, .brainHealth, .brainLog, .brainSettings:
+        case .brainPages, .brainGraph, .brainReview, .brainInbox, .brainHealth, .brainLog, .brainSettings:
             return true
         default:
             return false
@@ -183,6 +185,7 @@ enum WispPage: String, CaseIterable, Identifiable {
         case .routines: return "Routines"
         case .brainPages: return "Pages"
         case .brainGraph: return "Graph"
+        case .brainReview: return "Review"
         case .brainInbox: return "Inbox"
         case .brainHealth: return "Health"
         case .brainLog: return "Log"

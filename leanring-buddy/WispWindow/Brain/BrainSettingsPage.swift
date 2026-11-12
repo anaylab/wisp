@@ -32,6 +32,7 @@ struct BrainSettingsPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 brainCard
+                BrainLockSettingsCard()
                 conversationsCard
                 inboxCard
                 screenActivityCard

@@ -44,7 +44,9 @@ struct WispWindowView: View {
                     // Each page gets its own identity so switching pages crossfades
                     // with a small lift instead of swapping in place.
                     ZStack {
-                        pageContent(router.selectedPage)
+                        BrainLockGate(page: router.selectedPage) {
+                            pageContent(router.selectedPage)
+                        }
                             .id(router.selectedPage)
                             .transition(pageTransition)
                     }
@@ -122,6 +124,8 @@ struct WispWindowView: View {
             BrainPagesPage()
         case .brainGraph:
             BrainGraphPage()
+        case .brainReview:
+            BrainReviewPage()
         case .brainInbox:
             BrainInboxPage()
         case .brainHealth:

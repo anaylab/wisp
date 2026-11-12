@@ -695,6 +695,7 @@ struct WispSidebar: View {
         case .routines: return "bolt.circle"
         case .brainPages: return "doc.text"
         case .brainGraph: return "point.3.connected.trianglepath.dotted"
+        case .brainReview: return "checkmark.seal"
         case .brainInbox: return "tray"
         case .brainHealth: return "stethoscope"
         case .brainLog: return "list.bullet.rectangle"

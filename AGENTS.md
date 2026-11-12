@@ -1162,8 +1162,13 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   compact summary **always on the local model**). `BrainMaintenance` lints (broken links → stub
   pages, likely duplicates → merge + relink, oversized → split, missing summaries). All model work
   is background priority through `ModelAccessGate`; switches live in `BrainPreferences`. UI: sidebar
-  **Brain** with Pages (reader/editor, backlinks), Graph (force layout), Inbox (drop zone, jobs,
-  notes import), Health, Log (undo), Settings.
+  **Brain** with Pages (reader/editor, backlinks), Graph (force layout, coloured by **Spaces** —
+  link clusters from `BrainGraphSpaces`, no model — or kind), **Review** (pages the agents filed,
+  `BrainReviewPlanner`; fixes are user edits), Inbox (drop zone, jobs, notes import, **AI chat
+  import** — ChatGPT/Claude exports into `raw/chats/`, `.notesImport` provenance, the transcript
+  header says only the user's lines are about the user), Health, Log (undo), Settings (incl. the
+  opt-in **Touch ID lock**, `BrainLock`, which covers the window's Brain pages only — the vault
+  stays plain files and answers still use it).
 - **Demo mode** (`DemoMode/`, `scripts/demo.sh`): Wisp run on a sample day for screenshots and demos, so nothing personal is on
   screen. A launch option, not a switch (every store reads its file once at launch): `scripts/demo.sh` quits Wisp and opens it with
   `-WispDemoMode YES` (UserDefaults' argument domain, never saved); `--reset` starts from fresh sample data, `--off` goes back.
@@ -1521,10 +1526,15 @@ When the morning banner is built, `BrainMorningSuggestions` (`DynamicIsland/Brai
 | `Brain/BrainIngestProposalMerger.swift / BrainIngestFileRules.swift / BrainInboxWatcher.swift` | ~405/~125/~115 | Cross-chunk merge + batch fitting + source page; supported types and inbox stability rules; `raw/inbox/` poller. |
 | `Brain/BrainConversationDigester.swift / BrainConversationDigestPlanning.swift` | ~225/~410 | Periodic digest of ended conversation sessions; pure exchange filtering, substance heuristic, material + state. |
 | `Brain/BrainNotesImporter.swift / BrainNotesImportPlanning.swift / BrainNotesImportAppleNotes.swift` | ~370/~255/~185 | Folder/Obsidian import (hash-deduped, capped) and Apple Notes export via a parameterised AppleScript. |
+| `Brain/BrainChatExportParsing.swift / BrainChatExportImporter.swift` | ~370/~175 | AI chat import: ChatGPT (`mapping` tree, current branch only) and Claude (`chat_messages`) `conversations.json` → transcripts that mark the user's own lines; per-conversation hash plan (too short / unchanged / grown / capped); importer takes the .json, the export folder or the .zip (`ditto`), writes `raw/chats/<provider>/`, enqueues as `.notesImport`. |
+| `Brain/BrainReview.swift` | ~170 | Brain → Review policy: agent-touched pages (not yours, undone, deleted or >30 days old) once each with their newest change; reviewed-through date per page in `.brain/review-state.json`; tag parsing. |
+| `Brain/BrainLock.swift` | ~150 | Optional Touch ID / password lock for the Brain pages (`LAContext` `.deviceOwnerAuthentication`): starts locked at launch, relocks after N minutes away (`BrainLockPolicy`), toggling it needs the owner. |
 | `Brain/BrainActivityRecorder.swift / BrainActivitySampler.swift / BrainActivityLog.swift / BrainActivitySummary.swift / BrainActivityExclusions.swift` | ~360/~230/~245/~420/~205 | Opt-in activity feed: sampling, exclusions, day spans (0600 files, 30-day retention), summaries, daily local-model digest. |
 | `Brain/BrainLinter.swift / BrainLintChecks.swift / BrainPageMerger.swift / BrainPageSplitter.swift` | ~230/~595/~255/~190 | `BrainMaintenance` (periodic lint + fixes) and the pure checks, duplicate merge with relinking, and oversized-page split. |
 | `WispWindow/Brain/BrainPagesPage.swift / BrainPageReaderView.swift / BrainPageEditorView.swift` | ~445/~390/~155 | Brain → Pages: search/grouped list, markdown reader with in-app `[[links]]`, chips, backlinks, back/forward; raw-markdown editor with rename. |
-| `WispWindow/Brain/BrainGraphPage.swift / BrainGraphLayout.swift` | ~465/~340 | Brain → Graph: Canvas force-directed graph (clock stops when settled/hidden) and the pure layout + fast link resolver. |
+| `WispWindow/Brain/BrainGraphPage.swift / BrainGraphLayout.swift` | ~680/~340 | Brain → Graph: Canvas force-directed graph (clock stops when settled/hidden), coloured by Space (default) or kind, with a clickable spaces legend and a 26-week pages-added sparkline; and the pure layout + fast link resolver. |
+| `WispWindow/Brain/BrainGraphSpaces.swift` | ~220 | Pure Spaces: greedy modularity moves over the link graph (Me left out), clusters named after their hub page, warm→cool hues by size, past 11 folded into Other, linkless pages Unlinked; weekly counts for the sparkline. |
+| `WispWindow/Brain/BrainReviewPage.swift / BrainLockViews.swift` | ~270/~130 | Brain → Review (Looks right, edit tags, Move to another kind, Undo — fixes are `savePageEditedByUser`) and the lock's gate (wraps `pageContent` in `WispWindowView`), locked screen and Settings card. |
 | `WispWindow/Brain/BrainInboxPage.swift / BrainHealthPage.swift / BrainLogPage.swift / BrainSettingsPage.swift` | ~675/~370/~270/~610 | Inbox (drop zone, jobs, notes import), Health (overview + fixes), Log (undo), Settings (switches, activity privacy, vault, conversation history). |
 | `WispWindow/Brain/BrainSharedViews.swift / BrainMarkdownRendering.swift` | ~495/~330 | Shared navigation state, chips, markdown view; pure markdown block parser and `wisp-brain://` link rewriting. |
 
@@ -1774,12 +1784,13 @@ running):
 ./Tests/PartSelection/run.sh            # voice selection of a part: spoken-target parser, OCR list/ordinal resolver, pixels→region round trip
 ./Tests/UsageLog/run.sh                  # usage log: cost estimator, aggregation windows, retention, codec, no content fields, store file
 ./Tests/GuidedWalkthrough/run.sh         # guided walkthrough plan stepping, instruction → label, click-on-target matching
-./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
+./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration, review policy, lock timing
 ./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec
 ./Tests/BrainDigest/run.sh               # conversation digest + notes import policy
 ./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
-./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
+./Tests/BrainUI/run.sh                   # markdown rendering, graph layout, spaces, sparkline counts
+./Tests/BrainChatImport/run.sh           # ChatGPT/Claude export parsing, transcripts, file names, import plan
 ./Tests/DemoMode/run.sh                  # demo mode: off by default, the sample day stays believable at any hour
 ./Tests/BuddyFlow/run.sh                 # buddy flows: links, loops, fan-in waiting for all, failures skipping what follows, blocked links
 ./Tests/BuddyMemoryReview/run.sh         # buddy memory review: triggers, prompt, reply parsing, the checks that keep the user's notes untouched

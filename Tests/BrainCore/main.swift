@@ -474,5 +474,63 @@ check(BrainCommandRouter.normalized("  Hey Wisp,  Please ADD this… page!! than
 check(BrainCommandRouter.queuedReply(forTitles: ["Atlas spec"]) == "adding “Atlas spec” to your brain.", "one-title reply")
 check(BrainCommandRouter.queuedReply(forTitles: ["a", "b", "c"]) == "adding 3 things to your brain.", "many reply")
 
+// MARK: - Review
+
+func makeChangeRecord(
+    date: Date,
+    origin: BrainEditProvenance.Origin,
+    created: [String] = [],
+    modified: [String] = [],
+    isUndone: Bool = false
+) -> BrainChangeRecord {
+    BrainChangeRecord(
+        id: UUID(), date: date,
+        provenance: BrainEditProvenance(origin: origin, label: "test", trust: origin == .user ? .userAuthored : .derivedFromUser),
+        changeDescriptions: ["did a thing"], refusals: [],
+        createdSlugs: created, modifiedSlugs: modified, deletedSlugs: [],
+        resultingContentHashes: [:], isUndone: isUndone
+    )
+}
+
+let reviewNow = Date(timeIntervalSince1970: 1_800_000_000)
+let reviewRecords = [
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-3_600), origin: .conversation, created: ["topics/running"]),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-1_800), origin: .notesImport, modified: ["topics/running", "people/sam"]),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-900), origin: .user, modified: ["projects/thesis"]),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-600), origin: .ingest, created: ["sources/gone"]),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-300), origin: .agent, created: ["notes/undone"], isUndone: true),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-40 * 86_400), origin: .conversation, created: ["topics/old"])
+]
+let reviewExistingSlugs: Set<String> = ["topics/running", "people/sam", "projects/thesis", "notes/undone", "topics/old"]
+let reviewItems = BrainReviewPlanner.items(changeRecords: reviewRecords, existingSlugs: reviewExistingSlugs, state: BrainReviewState(), now: reviewNow)
+check(reviewItems.map(\.slug).sorted() == ["people/sam", "topics/running"], "review lists agent-touched pages only (not yours, deleted, undone or old)")
+let runningReviewItem = reviewItems.first { $0.slug == "topics/running" }
+check(runningReviewItem?.unreviewedChangeCount == 2, "two changes to one page show as one item")
+check(runningReviewItem?.latestOrigin == .notesImport, "the item shows the newest change")
+check(runningReviewItem?.wasCreatedByAgent == false, "newest change modified, not created")
+
+let reviewedState = BrainReviewPlanner.markingReviewed(BrainReviewState(), slug: "topics/running", through: reviewNow.addingTimeInterval(-1_800))
+let itemsAfterReview = BrainReviewPlanner.items(changeRecords: reviewRecords, existingSlugs: reviewExistingSlugs, state: reviewedState, now: reviewNow)
+check(!itemsAfterReview.contains { $0.slug == "topics/running" }, "a reviewed page leaves the list")
+let laterRecords = reviewRecords + [makeChangeRecord(date: reviewNow.addingTimeInterval(-60), origin: .conversation, modified: ["topics/running"])]
+let itemsAfterLaterChange = BrainReviewPlanner.items(changeRecords: laterRecords, existingSlugs: reviewExistingSlugs, state: reviewedState, now: reviewNow)
+check(itemsAfterLaterChange.first { $0.slug == "topics/running" }?.unreviewedChangeCount == 1, "a later agent change brings it back, counting only the new change")
+check(itemsAfterLaterChange.first?.slug == "topics/running", "newest first")
+let stateMarkedEarlier = BrainReviewPlanner.markingReviewed(reviewedState, slug: "topics/running", through: .distantPast)
+check(stateMarkedEarlier.reviewedThroughDateBySlug["topics/running"] == reviewNow.addingTimeInterval(-1_800), "marking never moves the date backwards")
+check(BrainReviewPlanner.pruned(reviewedState, existingSlugs: []).reviewedThroughDateBySlug.isEmpty, "deleted pages are pruned from the state")
+
+check(BrainReviewPlanner.parsedTags(from: "running, health,  #sleep, Running,,") == ["running", "health", "sleep"], "typed tags are trimmed, de-hashed and de-duplicated")
+check(BrainReviewPlanner.parsedTags(from: "  ").isEmpty, "blank tags give none")
+
+// MARK: - Lock
+
+let lockNow = Date(timeIntervalSince1970: 1_800_000_000)
+check(!BrainLockPolicy.shouldRelock(leftWispDate: nil, now: lockNow, autoLockMinutes: 1), "never relocks while Wisp is active")
+check(!BrainLockPolicy.shouldRelock(leftWispDate: lockNow.addingTimeInterval(-59), now: lockNow, autoLockMinutes: 1), "not before the delay")
+check(BrainLockPolicy.shouldRelock(leftWispDate: lockNow.addingTimeInterval(-60), now: lockNow, autoLockMinutes: 1), "relocks once the delay passes")
+check(!BrainLockPolicy.shouldRelock(leftWispDate: lockNow.addingTimeInterval(-86_400), now: lockNow, autoLockMinutes: 0), "0 minutes means only on quit")
+check(BrainLockPolicy.autoLockMinuteChoices.allSatisfy { !BrainLockPolicy.autoLockChoiceTitle(minutes: $0).isEmpty }, "every auto-lock choice has a title")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed, \(knownIssueCount) known core issues")
 exit(failureCount == 0 ? 0 : 1)

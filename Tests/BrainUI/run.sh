@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Runs the Brain UI suite: the reader's markdown blocks and [[link]] rendering,
-# backlink context lines, link resolution, and the graph's layout step.
+# backlink context lines, link resolution, the graph's layout step, and its
+# spaces (link clusters) and weekly sparkline counts.
 #
 # Standalone (plain swiftc, no xcodebuild — see CLAUDE.md). The rendering and
 # layout halves of the Brain UI are pure, so this compiles just those files and
@@ -22,6 +23,7 @@ swiftc -target arm64-apple-macos26.0 \
   Tests/BrainUI/main.swift \
   leanring-buddy/Brain/BrainPage.swift \
   leanring-buddy/WispWindow/Brain/BrainMarkdownRendering.swift \
-  leanring-buddy/WispWindow/Brain/BrainGraphLayout.swift
+  leanring-buddy/WispWindow/Brain/BrainGraphLayout.swift \
+  leanring-buddy/WispWindow/Brain/BrainGraphSpaces.swift
 
 "$BUILD_DIR/brain-ui"
