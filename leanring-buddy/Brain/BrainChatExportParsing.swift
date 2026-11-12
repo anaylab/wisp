@@ -13,6 +13,8 @@
 //    last saw it is the path from `current_node` up through `parent` links.
 //  - Claude: each conversation has a flat `chat_messages` array with
 //    `sender` "human" / "assistant" and either `text` or `content` blocks.
+//    Edits and retries branch it too (`parent_message_uuid`), so only the
+//    path back from the newest message is kept.
 //
 //  Only the user's and the assistant's visible text is kept — system
 //  prompts, tool calls and hidden messages are dropped. The transcript says
@@ -172,7 +174,8 @@ nonisolated enum BrainChatExportParser {
     // MARK: - Claude
 
     static func parseClaudeConversation(_ conversationObject: [String: Any]) -> BrainImportedChat? {
-        guard let messageObjects = conversationObject["chat_messages"] as? [[String: Any]] else { return nil }
+        guard let allMessageObjects = conversationObject["chat_messages"] as? [[String: Any]] else { return nil }
+        let messageObjects = claudeMessagesOnCurrentBranch(allMessageObjects)
         var messages: [BrainImportedChatMessage] = []
         for messageObject in messageObjects {
             let speaker: BrainImportedChatMessage.Speaker
@@ -189,6 +192,7 @@ nonisolated enum BrainChatExportParser {
                     .joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }
+            messageText = withoutClaudePlaceholderBlocks(messageText)
             guard !messageText.isEmpty else { continue }
             messages.append(BrainImportedChatMessage(speaker: speaker, text: messageText))
         }
@@ -200,6 +204,50 @@ nonisolated enum BrainChatExportParser {
             updatedDate: dateFromISO8601(conversationObject["updated_at"]),
             messages: messages
         )
+    }
+
+    /// Where a tool ran, Claude's `text` holds a fenced stand-in ("This block
+    /// is not supported on your current device yet.") instead of the call.
+    /// It says nothing, so it is dropped (keeping the title of anything it
+    /// stood in for), and the blank lines it leaves are closed up.
+    static let claudePlaceholderBlockText = "This block is not supported on your current device yet."
+
+    static func withoutClaudePlaceholderBlocks(_ messageText: String) -> String {
+        let escapedPlaceholder = NSRegularExpression.escapedPattern(for: claudePlaceholderBlockText)
+        // A block made for the user (a widget, a document) carries its title on
+        // the line above the stand-in; the title is kept as "[title]".
+        let titledPlaceholderBlockPattern = "```[a-zA-Z]*[ \\t]*\\n[ \\t]*([^\\n`]+?)[ \\t]*\\n[ \\t]*" + escapedPlaceholder + "\\s*```"
+        let barePlaceholderBlockPattern = "```[a-zA-Z]*\\s*" + escapedPlaceholder + "\\s*```"
+        var cleanedText = messageText.replacingOccurrences(of: titledPlaceholderBlockPattern, with: "[$1]", options: .regularExpression)
+        cleanedText = cleanedText.replacingOccurrences(of: barePlaceholderBlockPattern, with: "", options: .regularExpression)
+        cleanedText = cleanedText.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
+        return cleanedText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Claude keeps every branch of a chat (an edited message or a retried
+    /// answer starts a new one) in one flat list, linked by
+    /// `parent_message_uuid`. The chat as the user last saw it is the path
+    /// from the newest message back to the root; anything off it was
+    /// abandoned. An export without the links is taken as it is.
+    static func claudeMessagesOnCurrentBranch(_ messageObjects: [[String: Any]]) -> [[String: Any]] {
+        var messageObjectsByID: [String: [String: Any]] = [:]
+        for messageObject in messageObjects {
+            if let messageID = messageObject["uuid"] as? String { messageObjectsByID[messageID] = messageObject }
+        }
+        guard let newestMessageID = messageObjects.last?["uuid"] as? String,
+              messageObjectsByID.count == messageObjects.count,
+              messageObjects.contains(where: { $0["parent_message_uuid"] is String }) else {
+            return messageObjects
+        }
+        var branchMessageObjects: [[String: Any]] = []
+        var visitedMessageIDs = Set<String>()
+        var walkingMessageID: String? = newestMessageID
+        while let messageID = walkingMessageID, !visitedMessageIDs.contains(messageID), let messageObject = messageObjectsByID[messageID] {
+            visitedMessageIDs.insert(messageID)
+            branchMessageObjects.append(messageObject)
+            walkingMessageID = messageObject["parent_message_uuid"] as? String
+        }
+        return branchMessageObjects.reversed()
     }
 
     // MARK: - Choosing and rendering
@@ -234,7 +282,7 @@ nonisolated enum BrainChatExportParser {
             // The end of a long chat is usually where it landed.
             bodyText = "…\n\n" + String(bodyText.suffix(maximumTranscriptCharacterCount))
         }
-        return lines.joined(separator: "\n") + bodyText
+        return lines.joined(separator: "\n") + "\n" + bodyText
     }
 
     /// `2024-03-02 Sourdough starter help.md` — dated so the folder sorts by

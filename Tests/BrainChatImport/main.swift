@@ -82,6 +82,24 @@ check(grantChat.messages.last?.text == "Start with the microscope lease.", "text
 check(grantChat.createdDate != nil, "fractional-second ISO date parsed")
 check(parsedClaude.chats[1].title == "Untitled chat", "empty title gets a fallback")
 
+// Branches: an edited first message left an abandoned branch behind.
+let branchedClaudeExport = """
+[{"uuid": "branchy", "name": "Branched", "created_at": "2025-07-01T10:00:00Z", "chat_messages": [
+  {"uuid": "m1", "parent_message_uuid": "00000000-0000-4000-8000-000000000000", "sender": "human", "text": "OLD QUESTION that I later edited away"},
+  {"uuid": "m2", "parent_message_uuid": "m1", "sender": "assistant", "text": "OLD ANSWER"},
+  {"uuid": "m3", "parent_message_uuid": "00000000-0000-4000-8000-000000000000", "sender": "human", "text": "The question I actually kept asking about turbines"},
+  {"uuid": "m4", "parent_message_uuid": "m3", "sender": "assistant", "text": "Kept answer."}
+]}]
+"""
+let branchedChat = try! BrainChatExportParser.parse(Data(branchedClaudeExport.utf8)).chats[0]
+check(branchedChat.messages.map(\.text) == ["The question I actually kept asking about turbines", "Kept answer."], "only the current branch of a Claude chat is kept")
+
+let placeholderText = "I'll check.\n```\nThis block is not supported on your current device yet.\n```\n\n\n\n```\nThis block is not supported on your current device yet.\n```\nNothing came through."
+check(BrainChatExportParser.withoutClaudePlaceholderBlocks(placeholderText) == "I'll check.\n\nNothing came through.", "Claude's tool placeholder blocks are dropped")
+check(BrainChatExportParser.withoutClaudePlaceholderBlocks("```\nThis block is not supported on your current device yet.\n```") == "", "a reply that was only placeholders becomes empty")
+
+check(BrainChatExportParser.withoutClaudePlaceholderBlocks("Here:\n```\nBuild path for a leaderboard site\nThis block is not supported on your current device yet.\n```\nDone.") == "Here:\n[Build path for a leaderboard site]\nDone.", "a titled placeholder keeps its title")
+
 // MARK: - Errors
 
 check((try? BrainChatExportParser.parse(Data("not json".utf8))) == nil, "non-JSON refused")
@@ -98,7 +116,7 @@ check((try? BrainChatExportParser.parse(Data("[]".utf8)))?.chats.isEmpty == true
 let sourdoughTranscript = BrainChatExportParser.transcriptMarkdown(for: sourdoughChat)
 check(sourdoughTranscript.hasPrefix("# Sourdough starter help\n"), "transcript starts with the title")
 check(sourdoughTranscript.contains("only the user's lines say anything about the user"), "transcript tells the model whose words are whose")
-check(sourdoughTranscript.contains("**You:** My starter smells"), "user line marked You")
+check(sourdoughTranscript.contains("about the user.\n\n**You:** My starter smells"), "a blank line separates the header from the first message")
 check(sourdoughTranscript.contains("**ChatGPT:** That acetone"), "assistant line marked with the provider")
 
 var longChat = grantChat

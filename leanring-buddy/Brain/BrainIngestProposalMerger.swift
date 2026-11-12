@@ -121,7 +121,8 @@ enum BrainIngestProposalMerger {
         var seenComparableLines = Set<String>()
         var lines: [String] = []
         for content in contents {
-            for line in content.replacingOccurrences(of: "\r", with: "").components(separatedBy: "\n") {
+            for rawLine in content.replacingOccurrences(of: "\r", with: "").components(separatedBy: "\n") {
+                let line = withoutChunkLabel(rawLine)
                 let comparable = comparableLine(line)
                 guard !comparable.isEmpty, seenComparableLines.insert(comparable).inserted else { continue }
                 var keptLine = line
@@ -130,6 +131,18 @@ enum BrainIngestProposalMerger {
             }
         }
         return lines
+    }
+
+    /// The chunk prompt names its place in the material ("— part 2 of 7"),
+    /// and the local model was seen copying that onto facts ("Annotating
+    /// Speak (part 2 of 7)"), which also stopped the same fact from two
+    /// chunks being recognised as one. The label is never part of a fact.
+    static func withoutChunkLabel(_ line: String) -> String {
+        line.replacingOccurrences(
+            of: "[ \\t]*(?:[(\\[][ \\t]*part \\d+ of \\d+[ \\t]*[)\\]]|[—–-][ \\t]*part \\d+ of \\d+)[ \\t]*$",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
     }
 
     static func comparableLine(_ line: String) -> String {

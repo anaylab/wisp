@@ -431,5 +431,11 @@ do {
     check(sanitized.text == "Atlas books hiking trips.\nMarcus owns offline maps.", "the rest of the source survives")
 }
 
+// Chunk labels the model copied onto facts are dropped, so copies from two chunks merge.
+check(BrainIngestProposalMerger.uniqueLines(of: ["- Annotating [[Speak]] by [[Laurie Halse Anderson]] (part 2 of 7)", "- Annotating [[Speak]] by [[Laurie Halse Anderson]] (part 6 of 7)"]) == ["- Annotating [[Speak]] by [[Laurie Halse Anderson]]"], "chunk labels stripped and the copies merged")
+check(BrainIngestProposalMerger.withoutChunkLabel("- Read chapter 3 — part 1 of 4") == "- Read chapter 3", "dash-form chunk label stripped")
+check(BrainIngestProposalMerger.withoutChunkLabel("- Read part 2 of 3 for class") == "- Read part 2 of 3 for class" && BrainIngestProposalMerger.withoutChunkLabel("- Read part 2 of 3") == "- Read part 2 of 3", "an unbracketed part number in a fact is kept")
+check(BrainIngestProposalMerger.withoutChunkLabel("- Finished part 2 of the essay") == "- Finished part 2 of the essay", "a fact that mentions a part is left alone")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)
