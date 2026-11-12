@@ -76,13 +76,14 @@ xcodebuild archive \
     -archivePath "$archive_path" \
     -derivedDataPath "${OUT_DIR}/DerivedData" \
     ${version_arguments[@]+"${version_arguments[@]}"} \
+    ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
     CODE_SIGN_STYLE=Manual \
     CODE_SIGN_IDENTITY="$IDENTITY" \
     DEVELOPMENT_TEAM="" \
     OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
-    | tail -5
+    > "${OUT_DIR}/archive.log" 2>&1 || { grep -E "error:" "${OUT_DIR}/archive.log" | sort -u | head; echo "Archive failed; full log: ${OUT_DIR}/archive.log" >&2; exit 1; }
 
-app_path="${archive_path}/Products/Applications/Wisp.app"
+app_path="$(pwd)/${archive_path}/Products/Applications/Wisp.app"
 [ -d "$app_path" ] || { echo "The archive has no Wisp.app at $app_path" >&2; exit 1; }
 
 echo "==> Checking the signature"
