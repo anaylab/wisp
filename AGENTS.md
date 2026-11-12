@@ -915,8 +915,7 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   with an arrival ring and the action text. The step's wait is the glide time + 250ms (min 350ms) instead of a fixed
   0.6s. Motion constants follow cua-driver's `adaptive` trajectory (trycua/cua, MIT), reimplemented, not copied from
   OpenBot. It does not cross displays (a move to another display appears there). A calm, static **window rim** (`AgentWindowRimView`, accent tint falling inward, no motion, no hit-testing) marks the browser window
-  Wisp works in for the whole task: the frame comes from `BrowserController.windowFrameOnScreen()` on the first step. Not yet used for cua-driver
-  actions or "Do it for me" clicks (and the rim does not cut out windows in front). Tested by `Tests/AgentCursorMotion`. Element
+  Wisp works in for the whole task: the frame comes from `BrowserController.windowFrameOnScreen()` on the first step. Cua-driver element actions now also fly it (`CuaDriverAgentCursor`, from the element's `frame` + `window_bounds`; lingers 2.5s, no-op when no frame is known), and so do "Do it for me" clicks (the cursor glides to the target, then the click lands) (and the rim does not cut out windows in front). Tested by `Tests/AgentCursorMotion`. Element
   screen coordinates come from `BrowserController.screenPoint(ofElementID:)`.
 - **Messages & Contacts** (Siri-style texting): "text mom i'm running late" is recognised by
   `MessageCommandParser` (checked in `sendTranscriptToClaudeWithScreenshot` right after
@@ -1394,6 +1393,41 @@ Files are grouped by role; line counts are rough.
 | `AnnotationClickTarget.swift` | ~210 | Pure: which annotations are clickable, a note's measured size (cached), hit-testing, pointer → overlay coordinates, clicked rect → focused region, and `AnnotationNoteLayout` (nudges overlapping notes apart). |
 | `AnnotationClickRouter.swift` | ~140 | Mouse-moved/scroll monitors (running only while something is drawn or selected) that flip the overlay to take the mouse over a clickable note, consume the click, and drop annotations when other content scrolls. |
 
+### Proofread (adapted from Sentient OS, AGPL-3.0; see `NOTICE`)
+Select text in any app, press ⌃⌥P (Talk chord + P) or choose "Proofread Selection" in the menu bar, and Wisp fixes spelling and grammar with the local Ollama model, then pastes the correction over the selection only if the field, range and user input are unchanged. Otherwise a small panel shows the correction to copy.
+| File | Approx. lines | What it does |
+|---|---|---|
+| `Proofread/Proofread.swift` | ~120 | One run at a time: capture, correct, apply or present; deadline and cancel. |
+| `Proofread/ProofreadSelection.swift` | ~220 | Accessibility capture of the exact selection, guarded paste-over, clipboard snapshot and restore. |
+| `Proofread/ProofreadInference.swift` | ~115 | Ollama `/api/chat` call with a JSON-schema answer, strict decode that keeps line breaks and edge whitespace. Multi-line text is corrected one line per call (max 12 lines), because the 3B model joins lines and the decode rejects that. Not `LocalOllamaAPI.streamChat`, which adds a spoken-reply brevity rule. |
+| `Proofread/ProofreadInputActivity.swift` | ~25 | Counts keys, clicks and scrolls so a correction is never pasted after the user moved on. |
+| `Proofread/ProofreadResultPanel.swift` | ~110 | Floating copy-the-correction panel for when automatic replacement is unsafe. |
+The hotkey is fixed at P (`GlobalPushToTalkShortcutMonitor.proofreadKeyCode`); it is not yet in `ShortcutBindingStore` or the Shortcuts tab.
+
+### Summarize (adapted from Sentient OS, AGPL-3.0; see `NOTICE`)
+Press ⌃⌥U (Talk chord + U) or choose "Summarize This Window" in the menu bar. Wisp reads the frontmost window's text through accessibility (PDFs through PDFKit), streams a summary from the local Ollama model and shows it in a floating panel with Copy and Try again. Text only: no screenshot, chat-app profiles or YouTube transcripts from the original.
+| File | Approx. lines | What it does |
+|---|---|---|
+| `Summarize/Summarize.swift` | ~115 | One request at a time, fenced by `requestID`; read, stream, fail, retry on the same text; deadline. |
+| `Summarize/SummarySource.swift` | ~210 | `SummaryAccessibility`: bounded AX tree walk and PDF read, 16 KB text budget (fits the 8k-token window). |
+| `Summarize/SummarizeInference.swift` | ~95 | Streaming Ollama `/api/chat` call; a stream that ends without `done` is an error. Not `streamChat` (spoken-reply brevity rule). |
+| `Summarize/SummaryPanelController.swift` | ~125 | Floating panel with the streaming text; closing it dismisses the request. |
+The hotkey is fixed at U (`GlobalPushToTalkShortcutMonitor.summarizeKeyCode`), not yet in `ShortcutBindingStore`.
+
+### Double Tap reply (adapted from Sentient OS, AGPL-3.0; see `NOTICE`)
+Put the cursor in an email or chat reply box and press ⌃⌥D (Talk chord + D) or choose "Draft Reply in Focused Box". Wisp screenshots the display under the pointer, asks the local vision model for a reply using the Brain "about you" notes (`MemoryStore.promptInstructions()`), and pastes it as an unsent draft (pasteboard + ⌘V, clipboard restored). Only runs in messaging, email and browser apps (`DoubleTap.replyCapableBundleIdentifiers`): tested with the 3B model, it answered a code-editor screenshot with a reply instead of `NOT_A_MESSAGE`, and pasted a copy of the document into TextEdit, so the app allowlist is the real guard and the sentinel is only a second check. In a browser it can still paste a junk draft into a non-reply field. The island shows thinking, then success or error. Not ported: caret light, vault and writing-style samples, other providers, the right-⌘ double-tap gesture.
+| File | Approx. lines | What it does |
+|---|---|---|
+| `DoubleTap/DoubleTap.swift` | ~105 | One run at a time: capture cursor display, draft, verify the same app is frontmost, paste, restore clipboard. |
+| `DoubleTap/DoubleTapInference.swift` | ~95 | Ollama vision call; `NOT_A_MESSAGE` verdict parser; reply length cap. |
+Hotkey fixed at D (`GlobalPushToTalkShortcutMonitor.draftReplyKeyCode`); not in `ShortcutBindingStore`. The screenshot is 896 px on its long side (Wisp's model limit), so small chat text may be misread.
+
+### Notch fixed space (adapted from Sentient OS, AGPL-3.0; see `NOTICE`)
+`NotchSpace.swift` (~65 lines) pins the notch panel into a top-level SkyLight space so it stays put during the 3-finger Spaces swipe. Private API, so it is OFF by default and fails quietly if a symbol is missing. Enable with `defaults write com.gluepixel.wisp wisp.notch.pinToFixedSpace -bool true` and relaunch; call site is `NotchWindowController.show()`. Not verified by a build: check the swipe by hand before turning it on for good.
+
+### Morning suggestions from your notes
+When the morning banner is built, `BrainMorningSuggestions` (`DynamicIsland/BrainMorningSuggestions.swift`, ~190 lines) shows the local model the Brain pages updated in the last 7 days (about 9k characters) and asks for at most 3 follow-ups, each with a quote from the notes. Code drops any follow-up whose quote is not really in the text the model saw (case, spacing and markdown emphasis ignored), so paraphrased or invented items never appear. Survivors become `brain-…` rows in `MorningBriefingController.buildAndPresentBriefing`, placed after the calendar and reminder rows and before routines; clicking one is an ordinary typed question, so anything that sends or changes something still asks first. A call slower than 30 s, an unreachable Ollama, the Brain being off, or too little material adds nothing. Switch it off in the dashboard's Agent tab ("Follow-ups from your notes", under the morning notch switch; backed by `AnnouncementPreferences.areBrainSuggestionsEnabled`, key `wisp.announcements.brainSuggestionsEnabled`). Idea borrowed from Sentient OS's Proactive judge; no Sentient code is copied. Test: `./Tests/BrainMorningSuggestions/run.sh` (23 checks, pure logic only; the model call is not exercised).
+
 ### Agent, tools and MCP
 | File | Approx. lines | What it does |
 |---|---|---|
@@ -1430,6 +1464,7 @@ Files are grouped by role; line counts are rough.
 | `StructuredTextToolProtocol.swift` | ~330 | `[TOOL:name:{json}]` prompt generation and lenient parsing, with an anti-echo guard. |
 | `MCPClient.swift` | ~445 | `MCPServerConnection`: transport-agnostic JSON-RPC 2.0 framing, timeouts, and the MCP handshake. Picks a transport via `makeTransport(for:)`. `MCPStartupTimeoutPolicy` gives a package runner's `initialize` a long first-run budget. `callToolReturningContent` keeps a result's text blocks and `structuredContent` apart; `callTool` returns the text only. |
 | `MCPToolResultRendering.swift` | ~290 | Pure: an MCP result → the model's text. Element lists (token + role) as one line each under a scalar-field header, other structured content as sorted compact JSON, 4000/5000-char caps, duplicate-JSON text dropped; no `structuredContent` → unchanged. Tested by `Tests/MCPStructuredContent`. |
+| `CuaDriverAgentCursor.swift` | ~60 | Flies the agent cursor (via `BrowserCursorGuide`) to the element a cua-driver click/type/set_value/scroll targets before it runs, labelled "Click “Send” in Mail", then fades after 2.5s. Position from `CuaDriverElementGeometry` (window-local or global frame, both accepted). |
 | `CuaDriverSupport.swift` | ~215 | cua-driver specifics: `CuaDriverToolNames` (server-namespace match, read-only allow-list, `mustAlwaysAsk`, which tools skip the card, model-facing descriptions, misaddressed-call refusal), `CuaDriverToolRouting` (when a request is about operating a native app, so its tools are offered) and `CuaDriverElementCache` (token → role/label/app from the last 4 element lists, fed by `MCPManager`, read by the confirmation card). |
 | `MCPTransport.swift` | ~55 | The `MCPTransport` protocol: start/send/incomingMessages/recentDiagnostics/close. Isolates byte transport + framing from JSON-RPC. |
 | `MCPStdioTransport.swift` | ~300 | Stdio transport: child process over stdin/stdout as NDJSON (pipes read via `readabilityHandler`, framed by the pure `NewlineDelimitedLineBuffer`), login-shell PATH resolution (`LoginShellEnvironment`), stderr ring buffer. |
@@ -1628,6 +1663,7 @@ Files are grouped by role; line counts are rough.
 | `NotchWindowController.swift` | ~620 | Hosts the notch HUD in a borderless non-activating `NotchPanel`. Polls `NSEvent.mouseLocation` against fixed hot-zones (with hysteresis) to expand/collapse, and toggles `ignoresMouseEvents` so the window is click-through while collapsed. Force-collapses on `.wispDismissPanel` (so it's out of the way of a skill launch or push-to-talk capture) — except while the workspace is open — and reloads skills when the panel opens. `setWorkspacePage` grows/shrinks the window for the chat/settings workspace and toggles `NotchPanel.allowsBecomingKey`. Owns `NotchViewModel`. |
 | `NotchHUDView.swift` | ~1425 | The notch HUD's SwiftUI content: collapsed pill (the liquid `WispMark` + live state dot) and the hover-expanded quick-panel — shortcuts cheat-sheet, a **SKILLS grid of one-click launcher chips** (each runs its skill via `CompanionManager.runSkill`), active integrations, and a dock-cursor toggle in the header. Pins `.colorScheme(.dark)`; mark/dot/label are driven by `companionManager.islandState`. `DS.*` throughout. |
 | `NotchFileDrop.swift` | ~75 | Drop a file on the notch to add it to the brain: `NotchFileDropView` (a transparent `hitTest`-nil sibling above the hosting view; wrapping it, registering it, or SwiftUI `.onDrop` all failed to receive drags) and `NotchFileDragDetector` (drag-pasteboard change count + held button, so window drags never misfire). `NotchWindowController.updateFileDragState` opens the island under a file drag (brain on only) and `addDroppedFilesToBrain` enqueues supported files on `BrainIngestQueue`, showing the result via `viewModel.fileDropFeedback`. |
+| `ReplyPanelWindowController.swift` | ~300 | Where answers appear by default: a non-activating, never-key card at the top-right of the menu bar screen (`ReplyPanelView`: reply text via `NotchReplyText`, glance card, Copy / Open chat, ✕), sized to its content, shown when `currentReplyText` or `resolvedGlanceCard` is set and hidden on ✕ or `.wispDismissPanel`. `ReplyPanelPreference` (UserDefaults `wisp.replyPanel.isEnabled`, default on; Settings → General → Voice & sound) turns it off, which restores the notch's auto-presented message card. While on, the notch no longer auto-presents or lingers for an answer (hover still shows it) and the 20s lingering-answer expiry is skipped. |
 | `NotchGeometry.swift` | ~85 | Resolves collapsed/expanded window frames from `NSScreen.safeAreaInsets` + `auxiliaryTop{Left,Right}Area`, with a floating-pill fallback on non-notch Macs. |
 | `DesignSystem.swift` | ~480 | The legacy `DS.*` token **facade**: `DS.Colors`, `DS.Spacing`, `DS.CornerRadius`, `DS.Animation` now forward to the `Wisp*` tokens in `DesignSystem/`, so all existing call sites reskin from one place and `DS.Colors.*` are now adaptive. Also the shared Liquid Glass helpers: `wispNotchGlassSurface(in:)` (fixed dark, notch), `wispGlassSurface(cornerRadius:interactive:)` and `wispGlassCard(cornerRadius:)` (adaptive glass tint, panel + dashboard). |
 | `PerfMetricsRecorder.swift` | ~158 | Per-phase turn timings, medians split by whether a screenshot was attached. |

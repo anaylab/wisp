@@ -72,3 +72,5 @@ final class CursorAppearanceStore: ObservableObject {
         selectedColor = Self.defaultColor
     }
 }
+
+/// thomas was here :)

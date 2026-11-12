@@ -109,6 +109,9 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
         menu.addItem(actionItem(title: "Ask Wisp…", action: #selector(askWisp)))
         menu.addItem(actionItem(title: "New Automation…", action: #selector(newAutomation)))
         menu.addItem(actionItem(title: "Ask About a Part…", action: #selector(askAboutPart)))
+        menu.addItem(actionItem(title: "Proofread Selection", action: #selector(proofreadSelection)))
+        menu.addItem(actionItem(title: "Summarize This Window", action: #selector(summarizeWindow)))
+        menu.addItem(actionItem(title: "Draft Reply in Focused Box", action: #selector(draftReply)))
         let saveWorkedSolutionItem = actionItem(title: "Save Worked Solution…", action: #selector(saveWorkedSolution))
         // Only a drawing with a handwritten note or a circle is a worked solution.
         saveWorkedSolutionItem.isEnabled = companionManager.canSaveWorkedSolution
@@ -191,6 +194,18 @@ final class MenuBarMenuController: NSObject, NSMenuDelegate {
 
     @objc private func askAboutPart() {
         companionManager.beginAskAboutRegion()
+    }
+
+    @objc private func draftReply() {
+        companionManager.draftReplyInFocusedBox()
+    }
+
+    @objc private func summarizeWindow() {
+        Summarize.shared.start()
+    }
+
+    @objc private func proofreadSelection() {
+        Proofread.shared.run()
     }
 
     @objc private func saveWorkedSolution() {

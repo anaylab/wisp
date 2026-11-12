@@ -607,6 +607,9 @@ final class CompanionManager: ObservableObject {
     private var askAboutPartShortcutCancellable: AnyCancellable?
     private var saveWorkedSolutionShortcutCancellable: AnyCancellable?
     private var radialMenuShortcutCancellable: AnyCancellable?
+    private var proofreadShortcutCancellable: AnyCancellable?
+    private var summarizeShortcutCancellable: AnyCancellable?
+    private var draftReplyShortcutCancellable: AnyCancellable?
     private let radialMenuController = RadialMenuController()
     /// The capture / save-panel round trip of "Save Worked Solution…", kept so
     /// a second request while one is open is ignored.
@@ -689,6 +692,30 @@ final class CompanionManager: ObservableObject {
                 guard let self, !self.isListeningPaused else { return }
                 self.abandonRecordingStartedByHeldChord()
                 self.beginAskAboutRegion()
+            }
+
+        draftReplyShortcutCancellable = monitor.draftReplyShortcutPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self, !self.isListeningPaused else { return }
+                self.abandonRecordingStartedByHeldChord()
+                self.draftReplyInFocusedBox()
+            }
+
+        summarizeShortcutCancellable = monitor.summarizeShortcutPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self, !self.isListeningPaused else { return }
+                self.abandonRecordingStartedByHeldChord()
+                Summarize.shared.start()
+            }
+
+        proofreadShortcutCancellable = monitor.proofreadShortcutPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self, !self.isListeningPaused else { return }
+                self.abandonRecordingStartedByHeldChord()
+                Proofread.shared.run()
             }
 
         radialMenuShortcutCancellable = monitor.radialMenuShortcutPublisher
@@ -4060,6 +4087,27 @@ extension CompanionManager {
             if hasReply || resolvedGlanceCard != nil { return .preview }
             // Work the user started earlier is still going in the background.
             return AgentTaskRegistry.shared.backgroundRunningCount > 0 ? .processing : .idle
+        }
+    }
+
+    /// Drafts a reply into the focused reply box (⌃⌥D / menu bar). The island shows thinking
+    /// while the model works, then a success or error moment.
+    func draftReplyInFocusedBox() {
+        guard !DoubleTap.shared.isDrafting else { return }
+        flashIsland(.thinking, for: 70)
+        DoubleTap.shared.start { [weak self] result in
+            switch result {
+            case .pasted:
+                self?.flashIsland(.success)
+            case .notAMessage:
+                self?.flashIsland(.error)
+                print("✍️ Draft reply: the focused field isn't an email or message reply box")
+            case .stopped:
+                self?.flashIsland(.idle, for: 0.1)
+            case .failed(let message):
+                self?.flashIsland(.error)
+                print("✍️ Draft reply failed: \(message)")
+            }
         }
     }
 

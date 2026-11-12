@@ -41,6 +41,28 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     /// quick menu around the pointer. Another gesture layered on the hold.
     let radialMenuShortcutPublisher = PassthroughSubject<Void, Never>()
 
+    /// Fires when P is pressed while the Talk chord is held — ⌃⌥P proofreads the
+    /// text selected in the frontmost app. Another gesture layered on the hold.
+    let proofreadShortcutPublisher = PassthroughSubject<Void, Never>()
+
+    /// Fires when U is pressed while the Talk chord is held — ⌃⌥U summarizes the
+    /// document in the frontmost window. Another gesture layered on the hold.
+    let summarizeShortcutPublisher = PassthroughSubject<Void, Never>()
+
+    /// Fires when D is pressed while the Talk chord is held — ⌃⌥D drafts a reply
+    /// in the focused reply box. Another gesture layered on the hold.
+    let draftReplyShortcutPublisher = PassthroughSubject<Void, Never>()
+
+    /// The key pressed with the Talk chord to draft a reply (ANSI D). Fixed for now.
+    nonisolated(unsafe) static var draftReplyKeyCode: UInt16 = 2
+
+    /// The key pressed with the Talk chord to summarize the window (ANSI U). Fixed for now.
+    nonisolated(unsafe) static var summarizeKeyCode: UInt16 = 32
+
+    /// The key pressed with the Talk chord to proofread the selection (ANSI P).
+    /// Fixed for now; a letter already bound to Ask, Save or the radial menu stays theirs.
+    nonisolated(unsafe) static var proofreadKeyCode: UInt16 = 35
+
     /// The key pressed with the Talk chord for the radial quick menu (ANSI R).
     nonisolated(unsafe) static var radialMenuKeyCode: UInt16 = 15
 
@@ -256,6 +278,15 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
             // A letter already bound to Ask or Save stays theirs (checked above).
             didFireRoutineShortcutDuringCurrentHold = true
             radialMenuShortcutPublisher.send()
+        } else if keyCode == Self.proofreadKeyCode {
+            didFireRoutineShortcutDuringCurrentHold = true
+            proofreadShortcutPublisher.send()
+        } else if keyCode == Self.summarizeKeyCode {
+            didFireRoutineShortcutDuringCurrentHold = true
+            summarizeShortcutPublisher.send()
+        } else if keyCode == Self.draftReplyKeyCode {
+            didFireRoutineShortcutDuringCurrentHold = true
+            draftReplyShortcutPublisher.send()
         }
     }
 

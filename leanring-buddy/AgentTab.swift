@@ -224,7 +224,7 @@ struct AgentTab: View {
                         Text("Morning suggestions")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(DS.Colors.textPrimary)
-                        Text("The first time you're at your Mac each day, the notch offers today's meetings, what's due and your routines. Built on this Mac, no model call.")
+                        Text("The first time you're at your Mac each day, the notch offers today's meetings, what's due and your routines. Built on this Mac.")
                             .font(.system(size: 11))
                             .foregroundStyle(DS.Colors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -258,6 +258,24 @@ struct AgentTab: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .pointerCursor()
+                }
+
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Follow-ups from your notes")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Text("Adds up to three follow-ups the local model finds in your recent Brain notes. Each one must quote your notes word for word, and nothing leaves this Mac. Needs the Brain and the morning notch on.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Toggle("", isOn: $announcementPreferences.areBrainSuggestionsEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(!announcementPreferences.areMorningSuggestionsEnabled)
+                        .pointerCursor(isEnabled: announcementPreferences.areMorningSuggestionsEnabled)
                 }
 
                 HStack(alignment: .top, spacing: 8) {

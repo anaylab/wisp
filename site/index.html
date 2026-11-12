@@ -34,7 +34,7 @@
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&display=swap"></noscript>
 <link rel="preload" as="image" href="assets/video/today-first.jpg?c=2" fetchpriority="high">
-<link rel="stylesheet" href="styles.css?v=22">
+<link rel="stylesheet" href="styles.css?v=23">
 <script>
 (function () {
   // Decide the flat (phone / touch / reduced-motion) layout before the first paint, so the page
@@ -121,6 +121,7 @@
       <span>wisp</span>
     </a>
     <nav class="nav-links" aria-label="Primary">
+      <a href="#how">How it works</a>
       <a href="#day">A day</a>
       <a href="#features">Features</a>
       <a href="#privacy">Privacy</a>
@@ -228,6 +229,26 @@
   </div>
 </section>
 
+<!-- HOW IT WORKS -->
+<section class="how" id="how">
+  <div class="wrap section-head reveal">
+    <p class="eyebrow">How it works</p>
+    <h2>Say it. Check it.<br>Done.</h2>
+    <p class="section-sub">Three steps, and you stay in charge of every one.</p>
+  </div>
+  <ol class="wrap how-steps">
+    <li class="how-step reveal"><span class="how-n">1</span><h3>Hold two keys and ask</h3><p>Hold <kbd>⌃</kbd><kbd>⌥</kbd> and speak, or type from the notch. Wisp hears you on-device and reads your screen.</p></li>
+    <li class="how-step reveal"><span class="how-n">2</span><h3>It does the legwork</h3><p>It drafts the email, works through the page in its own tab, tidies your windows or points at the button you were hunting for.</p></li>
+    <li class="how-step reveal"><span class="how-n">3</span><h3>You approve what matters</h3><p>Anything that sends, deletes, pays, posts or runs a command shows a card first. Nothing leaves until you say so.</p></li>
+  </ol>
+  <div class="wrap worksw reveal" aria-label="Works with">
+    <p class="worksw-label">Works with the apps you already use</p>
+    <ul class="worksw-row">
+      <li>Mail</li><li>Messages</li><li>Calendar</li><li>Reminders</li><li>Chrome</li><li>Shortcuts</li><li>Obsidian</li><li>Canvas</li><li>Gmail</li><li>GitHub</li><li>Notion</li><li>Ollama</li>
+    </ul>
+  </div>
+</section>
+
 <!-- NUMBERS -->
 <section class="numbers" aria-label="Wisp in numbers">
   <div class="wrap numbers-grid">
@@ -329,6 +350,16 @@
     <article><h3>Cloud is opt-in</h3><p>Claude, GPT and Gemini are bring-your-own-key, or use your Claude subscription. Wisp labels clearly when a screenshot would leave your Mac.</p></article>
     <article><h3>Nothing to track you</h3><p>No account, no analytics code, no telemetry. Keys and feed URLs live in your login Keychain. The usage log keeps counts, never content.</p></article>
   </div>
+  <div class="wrap leaves reveal">
+    <div class="leaves-col leaves-default">
+      <h3>By default, stays on your Mac</h3>
+      <ul><li>Your voice and speech-to-text</li><li>Your screen, read by Accessibility and OCR</li><li>The model's replies, through Ollama</li><li>Your brain pages and buddy memory</li><li>Your keys, in your login Keychain</li></ul>
+    </div>
+    <div class="leaves-col leaves-optin">
+      <h3>Only if you opt in</h3>
+      <ul><li>Prompts to Claude, GPT or Gemini with your own key</li><li>A screenshot, and Wisp labels it clearly first</li><li>Apps you connect through MCP or Composio</li><li>Nothing else. No account, no analytics, no telemetry</li></ul>
+    </div>
+  </div>
   <ul class="wrap provider-row reveal" aria-label="Models">
     <li><b>Ollama</b><span>Default · on your Mac</span></li>
     <li><b>Apple on-device</b><span>On your Mac</span></li>
@@ -344,7 +375,7 @@
     <div>
       <p class="eyebrow">Get Wisp</p>
       <h2>Up and running in a few minutes.</h2>
-      <p class="section-sub">One command installs it, or drag it in from a .dmg. It's free and MIT licensed.</p>
+      <p class="section-sub">One command installs it, or drag it in from a .dmg. It's free and AGPL-3.0 licensed.</p>
       <ul class="reqs">
         <li>Apple-silicon Mac on macOS 26 or later</li>
         <li>No Apple ID or sudo needed</li>
@@ -373,9 +404,11 @@ curl -fsSL https://anaylab.github.io/wisp/install.sh | bash
     <h2>Questions, answered plainly.</h2>
   </div>
   <div class="wrap faq-list">
-    <details><summary>Is it really free?</summary><p>Yes. Wisp is open source under the MIT license, and the default setup costs nothing to run because the model, speech and voice are all on your Mac. If you choose a cloud model, you pay that provider with your own key or subscription.</p></details>
+    <h3 class="faq-group">Privacy &amp; control</h3>
     <details><summary>What leaves my Mac?</summary><p>By default, nothing. Speech to text, voice, OCR and the local model all run on-device. The only network use by default is a one-time download of the speech models and optional weather and places lookups, which send a place name or query, never a screenshot. If you pick a cloud model, your transcript and screenshots go to that provider, and Wisp says so.</p></details>
     <details><summary>Can it do something I didn't want?</summary><p>Anything that sends, deletes, pays, posts, invites or runs a command shows a card first, even if you turned on auto-approve, and you can edit the wording before you allow it. Password and payment fields in the browser are refused outright. Scheduled automations only get tools that never prompt.</p></details>
+    <h3 class="faq-group">Using Wisp</h3>
+    <details><summary>Is it really free?</summary><p>Yes. Wisp is open source under the AGPL-3.0 license, and the default setup costs nothing to run because the model, speech and voice are all on your Mac. If you choose a cloud model, you pay that provider with your own key or subscription.</p></details>
     <details><summary>Which Macs does it need?</summary><p>An Apple-silicon Mac on macOS 26 or later, since the notch uses Liquid Glass. 16 GB of memory is recommended for the local model.</p></details>
     <details><summary>Does it work in my apps?</summary><p>Pointing, walkthroughs and screen reading work anywhere: native apps through Accessibility and everything else through on-device OCR. Browser control works with Chrome and Safari.</p></details>
     <details><summary>Why isn't this notarized?</summary><p>Notarizing needs Apple's paid developer program. The install command downloads with curl, which macOS doesn't flag, and checks a checksum and signature first. The .dmg works too, after one right-click approval the first time. A notarized build may come later.</p></details>
@@ -404,7 +437,7 @@ curl -fsSL https://anaylab.github.io/wisp/install.sh | bash
       <a href="https://github.com/anaylab/wisp#readme">Docs</a>
       <a href="https://github.com/anaylab/wisp/blob/main/CONTRIBUTING.md">Contribute</a>
       <a href="https://github.com/anaylab/wisp/blob/main/SECURITY.md">Security</a>
-      <a href="https://github.com/anaylab/wisp/blob/main/LICENSE">MIT License</a>
+      <a href="https://github.com/anaylab/wisp/blob/main/LICENSE">AGPL-3.0 License</a>
       <a href="https://anayparwal.pages.dev/wisp/">Built by Anay</a>
     </nav>
     <p>Made to stay out of your way.</p>
