@@ -1,0 +1,50 @@
+/* Kinetic type: the words are the motion graphics. Loaded last. */
+
+/* Minimal: take the decoration down so the type carries the page. */
+.float-chips { display: none; }
+.hero-orbs i { opacity: 0.3; }
+body::before { opacity: 0.62; }
+.eyebrow::before { display: none; }
+.eyebrow { letter-spacing: 0.24em; }
+.buddies, .everything, .privacy, .get, .faq { padding-top: 180px; }
+.numbers { padding-top: 120px; }
+.section-head { margin-bottom: 72px; }
+.section-head h2, .reel-head h2 { font-size: clamp(44px, 7.4vw, 108px); letter-spacing: -0.055em; }
+.hero h1 { font-size: clamp(52px, 10vw, 158px); letter-spacing: -0.06em; }
+.closing h2 { font-size: clamp(52px, 9vw, 140px); letter-spacing: -0.06em; }
+.reveal-words { font-size: clamp(32px, 5.4vw, 78px); }
+
+/* Split headings: every letter rises out of a mask, one after another. */
+.k-w { display: inline-block; white-space: nowrap; overflow: hidden; vertical-align: top; padding: 0.04em 0.08em 0.18em; margin: -0.04em -0.08em -0.18em; }
+.k-ch { display: inline-block; opacity: 0; transform: translateY(118%) rotate(7deg); transform-origin: 0 100%;
+  transition: transform 1.05s var(--ease) calc(var(--i) * 26ms), opacity 0.5s linear calc(var(--i) * 26ms); }
+.k-on .k-ch { opacity: 1; transform: none; }
+.k-ch > i { display: inline-block; font-style: normal; will-change: transform;
+  transform: translateY(calc(var(--d, 0) * -0.09em)) scale(calc(1 + var(--d, 0) * 0.14));
+  text-shadow: 0 0 calc(var(--d, 0) * 26px) rgba(169, 155, 255, calc(var(--d, 0) * 0.95));
+  transition: transform 0.3s var(--ease), text-shadow 0.3s; }
+h1 em.k-split, h2 em.k-split { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: inherit; padding-right: 0; }
+.js .hero .ln > span { animation: none; transform: none; }
+
+/* The hero's last word cycles, each swap a fresh wipe of letters. */
+.k-rot { position: relative; display: inline-block; vertical-align: top; overflow: hidden; height: 1.14em; margin-bottom: -0.14em; transition: width 0.8s var(--ease); }
+.k-rot-w { position: absolute; left: 0; top: 0; white-space: nowrap; }
+.k-rot-w .k-ch { transform: translateY(125%) rotate(7deg); opacity: 0; }
+.k-rot-w.is-on .k-ch { transform: none; opacity: 1; }
+.k-rot-w.is-off .k-ch { transform: translateY(-125%) rotate(-7deg); opacity: 0; }
+.k-rot-w.k-reset .k-ch { transition: none; }
+.k-rot .k-w { overflow: visible; margin: 0; padding: 0; }
+
+/* A giant band of type that slides with your scroll and leans into the speed. */
+.k-marquee { overflow: hidden; padding: 70px 0 30px; user-select: none; pointer-events: none; }
+.k-row { display: flex; width: max-content; white-space: nowrap; font-family: var(--font-display); font-weight: 700; line-height: 0.95; letter-spacing: -0.06em;
+  font-size: clamp(88px, 17vw, 270px); will-change: transform; }
+.k-row span { padding-right: 0.3em; }
+.k-row.solid { color: var(--ink); text-shadow: 0 0 60px rgba(142, 124, 255, 0.35); }
+.k-row.outline { color: transparent; -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.4); margin-top: -0.04em; }
+.k-row b { font-weight: 700; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-stroke: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .k-ch, .k-rot-w .k-ch { opacity: 1; transform: none; transition: none; }
+  .k-ch > i { transform: none; text-shadow: none; }
+}
