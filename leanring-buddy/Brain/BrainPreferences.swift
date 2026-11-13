@@ -22,6 +22,9 @@ final class BrainPreferences: ObservableObject {
         static let activityExcludedBundleIdentifiers = "brain.activityRecording.excludedBundleIdentifiers"
         static let activityExcludedDomains = "brain.activityRecording.excludedDomains"
         static let isPromptContextEnabled = "brain.promptContext.enabled"
+        static let isLockEnabled = "brain.lock.enabled"
+        static let autoLockMinutes = "brain.lock.autoLockMinutes"
+        static let readsWithLocalModel = "brain.reader.localModel"
     }
 
     /// Master switch. Off: nothing reads from or writes to the brain.
@@ -42,6 +45,18 @@ final class BrainPreferences: ObservableObject {
     /// Put relevant brain pages into each turn (default on).
     @Published var isPromptContextEnabled: Bool { didSet { defaults.set(isPromptContextEnabled, forKey: Key.isPromptContextEnabled) } }
 
+    /// Ask for Touch ID (or the Mac's password) before showing the Brain
+    /// pages (default off). Covers the window only — see `BrainLock`.
+    @Published var isLockEnabled: Bool { didSet { defaults.set(isLockEnabled, forKey: Key.isLockEnabled) } }
+    /// Lock again after this many minutes away from Wisp; 0 = only on quit.
+    @Published var autoLockMinutes: Int { didSet { defaults.set(autoLockMinutes, forKey: Key.autoLockMinutes) } }
+
+    /// Read sources, conversations and imports with the local model, whatever
+    /// model Wisp chats with (default on). Off, the brain uses the selected
+    /// provider — a cloud one then sees everything filed, and its rate limits
+    /// apply to a whole import.
+    @Published var readsWithLocalModel: Bool { didSet { defaults.set(readsWithLocalModel, forKey: Key.readsWithLocalModel) } }
+
     private let defaults = UserDefaults.standard
 
     private init() {
@@ -51,7 +66,10 @@ final class BrainPreferences: ObservableObject {
             Key.isInboxWatchingEnabled: true,
             Key.isActivityRecordingEnabled: false,
             Key.isActivityTextCaptureEnabled: false,
-            Key.isPromptContextEnabled: true
+            Key.isPromptContextEnabled: true,
+            Key.isLockEnabled: false,
+            Key.autoLockMinutes: 15,
+            Key.readsWithLocalModel: true
         ])
         isBrainEnabled = defaults.bool(forKey: Key.isBrainEnabled)
         isConversationDigestEnabled = defaults.bool(forKey: Key.isConversationDigestEnabled)
@@ -61,5 +79,8 @@ final class BrainPreferences: ObservableObject {
         activityExcludedBundleIdentifiers = defaults.stringArray(forKey: Key.activityExcludedBundleIdentifiers) ?? []
         activityExcludedDomains = defaults.stringArray(forKey: Key.activityExcludedDomains) ?? []
         isPromptContextEnabled = defaults.bool(forKey: Key.isPromptContextEnabled)
+        isLockEnabled = defaults.bool(forKey: Key.isLockEnabled)
+        autoLockMinutes = defaults.integer(forKey: Key.autoLockMinutes)
+        readsWithLocalModel = defaults.bool(forKey: Key.readsWithLocalModel)
     }
 }

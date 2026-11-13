@@ -186,5 +186,57 @@ check(rebuiltGraph.temperature < 1, "mostly-unchanged graph only nudged")
 
 check(BrainGraphLayout.build(pages: [], resolver: BrainLinkResolver(pages: [])).isSettled, "empty graph is settled")
 
+// MARK: - Spaces
+
+// Two tight triangles joined by one bridge, a lone page, and the user's page
+// linking to everything (it must not swallow the clusters).
+let spacePages = [
+    makePage("me", "Me", .me, body: "[[Run A]] [[Run B]] [[Run C]] [[Bake A]] [[Bake B]] [[Bake C]]"),
+    makePage("topics/run-a", "Run A", .topic, body: "[[Run B]] [[Run C]]"),
+    makePage("topics/run-b", "Run B", .topic, body: "[[Run C]]"),
+    makePage("topics/run-c", "Run C", .topic, body: "[[Bake A]]"),
+    makePage("topics/bake-a", "Bake A", .topic, body: "[[Bake B]] [[Bake C]]"),
+    makePage("topics/bake-b", "Bake B", .topic, body: "[[Bake C]]"),
+    makePage("topics/bake-c", "Bake C", .topic),
+    makePage("notes/lonely", "Lonely", .note)
+]
+let spaceLayout = BrainGraphLayout.build(pages: spacePages, resolver: BrainLinkResolver(pages: spacePages))
+let spaceAssignment = BrainGraphSpaces.detect(in: spaceLayout)
+func spaceName(_ slug: String) -> String? {
+    let nodeIndex = spaceLayout.nodes.firstIndex { $0.slug == slug }!
+    return spaceAssignment.space(ofNodeIndex: nodeIndex)?.name
+}
+check(spaceAssignment.spaces.filter { $0.hue != nil }.count == 2, "two coloured spaces found")
+check(spaceName("topics/run-a") == spaceName("topics/run-b") && spaceName("topics/run-b") == spaceName("topics/run-c"), "first triangle shares a space")
+check(spaceName("topics/bake-a") == spaceName("topics/bake-b") && spaceName("topics/bake-b") == spaceName("topics/bake-c"), "second triangle shares a space")
+check(spaceName("topics/run-a") != spaceName("topics/bake-a"), "the bridge doesn't merge the triangles")
+check(spaceName("me") == nil, "the user's page belongs to no space")
+check(spaceName("notes/lonely") == BrainGraphSpaces.unlinkedSpaceName, "a page with no links is Unlinked")
+check(spaceAssignment.spaces.first { $0.name == BrainGraphSpaces.unlinkedSpaceName }?.hue == nil, "Unlinked is grey")
+check(BrainGraphSpaces.detect(in: spaceLayout) == spaceAssignment, "spaces are deterministic")
+let spaceHues = spaceAssignment.spaces.compactMap(\.hue)
+check(spaceHues.first == 0 && spaceHues.last == BrainGraphSpaces.spectrumEndHue, "hues span the spectrum warm to cool")
+
+let cappedAssignment = BrainGraphSpaces.detect(in: spaceLayout, maximumSpaceCount: 1)
+check(cappedAssignment.spaces.contains { $0.name == BrainGraphSpaces.otherSpaceName && $0.memberCount == 3 }, "clusters past the cap fold into Other")
+check(BrainGraphSpaces.detect(in: .empty) == .empty, "empty graph has no spaces")
+
+// Weekly sparkline counts.
+var gregorianCalendar = Calendar(identifier: .gregorian)
+gregorianCalendar.timeZone = TimeZone(identifier: "UTC")!
+let sparklineEnd = gregorianCalendar.date(from: DateComponents(year: 2026, month: 11, day: 11))!
+let sparklineDates = [
+    sparklineEnd,
+    gregorianCalendar.date(byAdding: .day, value: -1, to: sparklineEnd)!,
+    gregorianCalendar.date(byAdding: .weekOfYear, value: -2, to: sparklineEnd)!,
+    gregorianCalendar.date(byAdding: .weekOfYear, value: -40, to: sparklineEnd)!
+]
+let sparklineCounts = BrainGraphSpaces.weeklyCounts(of: sparklineDates, endingAt: sparklineEnd, weekCount: 4, calendar: gregorianCalendar)
+check(sparklineCounts.count == 4, "one count per week")
+check(sparklineCounts.last == 2, "this week's pages counted")
+check(sparklineCounts[1] == 1, "two weeks ago counted")
+check(sparklineCounts.reduce(0, +) == 3, "dates before the window are ignored")
+check(BrainGraphSpaces.weeklyCounts(of: sparklineDates, endingAt: sparklineEnd, weekCount: 0).isEmpty, "zero weeks gives nothing")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 if failureCount > 0 { exit(1) }

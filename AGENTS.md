@@ -934,6 +934,44 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   and read-only `find_contact`, in the `.messaging` `AgentToolScope`. Needs
   `NSContactsUsageDescription` + the `com.apple.security.personal-information.addressbook`
   entitlement (hardened runtime) and Automation → Messages.
+- **Inbox** (`MailInbox/`, `WispWindow/MailInbox/`, phase 1 of `docs/rowboat-merge-plan.md`, from Rowboat's email client): the
+  user's mail from **Mail.app**, sorted into **Important** / **Everything else**, with replies written ahead. **Off by default**
+  (`MailInboxPreferences.isEnabled`, turned on from the Inbox page; rail item **Inbox**, `WispPage.mail`, section `.mail`).
+  `MailInboxReader` runs fixed AppleScript through `/usr/bin/osascript` (source on stdin, plain `argv`, off main, 240s timeout then
+  SIGKILL — osascript ignores SIGTERM mid Apple Event — both pipes drained); output is ASCII 30/31-separated text parsed by the pure
+  `MailInboxScriptOutputParser`, and each script's TIMING/`log` lines (counts and seconds only) go to the `com.gluepixel.wisp`/`inbox`
+  os log (read it with `/usr/bin/log`, since zsh has a `log` builtin). **Speed is the hard part** (measured on a 36,443-message inbox):
+  Mail answers per-message questions at ~1–2s each and a ranged query (`messages 1 thru 200`) at ~95s per field, but `<field> of every
+  message` in ~2–25s, so the inbox script reads each field of *every* message once and slices the recent ≤200 (14 days, newest end
+  found from the date list); full read ~40s warm, ~160s cold. A `whose date received >` filter was slower still (>4 min). Bodies come
+  from a second script (`content` + a List-Unsubscribe header check per message, ~5s each, 90s budget, ≤80 asked, people before
+  automated senders, newest first, located by mailbox number + index and checked against the message id) and are **cached in
+  inbox.json**, so later syncs read only new bodies. Each sync first runs a quick id-only check (~50s) and reuses the stored messages
+  unless the ids changed or the last full read (`lastFullReadAt`, saved) is over an hour old. A thread whose latest body isn't read
+  yet may only be sorted into Everything else. A quick probe (`count of accounts`) runs first so a missing permission is told apart
+  from a slow read. Own addresses = Mail accounts' addresses ∪ senders of sent mail ∪ the Me card (accounts' `email addresses` came
+  back empty live). Automatic syncs (launch + every 10 min from the last sync's *start*) run **only while Mail is open**; Sync now opens it.
+  Needs Automation → Mail (already needed for sending drafts). `MailInboxThread` groups by account + subject without Re:/Fwd:
+  (Mail's scripting has no thread id). **Sorting is rules first** (`MailInboxImportancePolicy`, pure): the user's own correction
+  for that sender wins; then own mail, List-Unsubscribe / Precedence bulk / bulk wording in the body ("unsubscribe", "view in browser"),
+  notification subjects (login/verification codes, receipts, orders, shipping, statements, password resets — unless from a contact
+  or someone the user wrote to), automated senders and >15 recipients → Everything else;
+  a contact (`ContactsDirectory.allEmailAddressesIfAuthorized`, never prompts) or someone the user wrote to, addressed directly or
+  asking something → Important. Only the rest (≤12 per sync) get one text-only call (`MailInboxTriagePrompt`, mail fenced as data,
+  the user's "what matters to you" text and their last 8 corrections as examples) at background priority through `ModelAccessGate`;
+  an unanswered or failed one shows under Everything else as "Not sorted yet" and is retried next sync. "Not important" / "Mark
+  important" records a `MailInboxCorrection` for the sender (60 kept) and re-sorts all their threads. The prompt leans to OTHER and
+  names company mail as OTHER, because live the 3B model called marketing mail and a login code important. **Drafts ahead**
+  (`MailInboxDraftPolicy`, on by default): an important thread placed by the rules or the user (never the model alone), unanswered,
+  whose latest message asks something and is ≤3 days old
+  gets a reply (≤4 per sync) from `EmailDraftPrompt` + the thread, Brain recall on sender/subject, next week's calendar (only if
+  Calendar access was already given) and the user's "how you write" notes. The greeting ("Hi Maya," / "Hi," for brands) and the
+  "Re:" subject are built in code (`greetingLine`, `replySubject`): the model copied "Hi Sam" out of the prompt's example. A draft belongs to one message id, so a newer message
+  makes it stale. Reply opens the existing email composer (drafted or written now); **Send there is the only way anything leaves**.
+  A send from the composer posts `.wispEmailSent`, which marks the thread answered and drops its draft. The model is the **local one**
+  unless "Use Wisp's chat model" is on (labelled with where mail goes). State in `inbox.json` (0600, via `WispDemoMode`; demo mode never
+  syncs); "Forget stored mail" deletes it. Today's Needs you shows "N important emails" (+ drafts ready). Not built yet: feeding
+  senders into the Brain's people pages, choosing which Mail accounts, a notch surface. Tested by `Tests/MailInbox`.
 - **Email drafts** (`Email/`): "draft an email to sam about moving friday's meeting", "write me a quick email to my
   landlord…", "email mom saying …", "send sam an email about …", "reply to this email saying …", "email this page to sam" are
   recognised by `EmailDraftRequestParser` (pure, conservative; checked in `sendTranscriptToClaudeWithScreenshot` right before the
@@ -1145,25 +1183,45 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   anything; locked pages are never changed. `BrainStore.apply` versions every overwritten page under
   `.brain/versions/<change>/` and records a `BrainChangeRecord`, so every batch is one Undo in
   Brain → Log (conflict-checked by content hash; `deletingSlugs:` makes a merge one record).
-  **Reading**: `BrainSearch` is BM25 with field weights (no embedding model — residency); each turn
-  the ≤4 relevant page summaries (`BrainPromptContext`, score bar, ~700 chars) join the per-turn
-  screen-context block on the **user message** and are stripped from history like `a`/`t` ids.
-  Agent tools (`.brain` scope): `search_brain`, `read_brain_page` (read-only), `add_to_brain`,
-  `ingest_into_brain` (ask). `BrainCommandRouter` sends "add this page/file to my brain" straight to
+  **Reading** (cognee-style graph-aware recall, `BrainRecall` pure + `BrainSemanticIndex` live):
+  `BrainSearch` BM25 (field weights) is fused by reciprocal rank with **meaning** — every page's
+  facts embedded with Apple's on-device `NLEmbedding.sentenceEmbedding` (no download, no resident
+  LLM; vectors cached by fact hash in `.brain/fact-vectors.json`, embedded off-main), a page scored
+  by its best fact (page-level vectors were measured useless) — then the top 3 seeds' **typed
+  relations** (`BrainRelations`: explicit `relation:: [[X]]` lines under `## Relations`, plus
+  relations derived from short linked facts like `- Runs design at [[Orbit]]`) and plain links are
+  followed one step. Each turn the ≤4 pages (`BrainPromptContext.promptText(recallHits:)`, ~700
+  chars) join the per-turn screen-context block on the **user message** and are stripped from
+  history like `a`/`t` ids; a page rides the turn only if the request names it, words *and* meaning
+  agree (≥half the words, ≥0.4), meaning alone is ≥0.65, or a typed relation ties it to one of
+  those — so "what's the weather like" adds nothing. Agent tools (`.brain` scope): `recall`,
+  `search_brain`, `read_brain_page` (read-only), `add_to_brain`, `ingest_into_brain`,
+  `forget_from_brain` (removes ≤3 matching bullets from one page as a user edit; ask). The graph
+  labels a hovered dot's edges with their relation. `BrainCommandRouter` sends "add this page/file to my brain" straight to
   the queue (front browser tab or Finder selection), no model. **Feeds**: `BrainIngestQueue`
   (serial, persisted, resumable; `BrainTextExtractor` md/txt/PDF/HTML/RTF/DOCX + user-requested URL
   fetch, `BrainTextChunker` ~2500-char chunks, `BrainKnowledgeExtractor` one call per chunk + a
   `source` page per material, `BrainInboxWatcher` polls `raw/inbox/`); `BrainConversationDigester`
   (ended sessions ≥30 min idle, user words + answers only, substantive-only heuristic, ≤3 per
   pass); `BrainNotesImporter` (folder/Obsidian, hash-deduped, 500 per run; Apple Notes via
-  AppleScript); `BrainActivityRecorder` (**opt-in, off by default**: app/window title/URL-without-
+  AppleScript). Every brain reader uses `BrainPreferences.readingModelProviderKind`: the **local
+  model by default** (`readsWithLocalModel`, Brain → Settings), whatever Wisp chats with. A
+  temporary model failure (rate limited, provider down, offline — `BuddyFailoverPolicy.isFailoverError`)
+  re-queues the job and pauses the queue (`BrainIngestRetryPolicy`: 5 min doubling to 1 h, "Try now"
+  in the Inbox) instead of failing every job behind it. The merger drops filler facts the 3B model
+  pads pages with ("- A topic"; `substantiveLines`). `BrainActivityRecorder` (**opt-in, off by default**: app/window title/URL-without-
   query once a minute while present and not on a call, built-in + user exclusions, Chrome incognito
   skipped, reuses existing OCR text only, never screenshots, 30-day retention, daily digest of a
   compact summary **always on the local model**). `BrainMaintenance` lints (broken links → stub
   pages, likely duplicates → merge + relink, oversized → split, missing summaries). All model work
   is background priority through `ModelAccessGate`; switches live in `BrainPreferences`. UI: sidebar
-  **Brain** with Pages (reader/editor, backlinks), Graph (force layout), Inbox (drop zone, jobs,
-  notes import), Health, Log (undo), Settings.
+  **Brain** with Pages (reader/editor, backlinks), Graph (force layout, coloured by **Spaces** —
+  link clusters from `BrainGraphSpaces`, no model — or kind), **Review** (pages the agents filed,
+  `BrainReviewPlanner`; fixes are user edits), Inbox (drop zone, jobs, notes import, **AI chat
+  import** — ChatGPT/Claude exports into `raw/chats/`, `.notesImport` provenance, the transcript
+  header says only the user's lines are about the user), Health, Log (undo), Settings (incl. the
+  opt-in **Touch ID lock**, `BrainLock`, which covers the window's Brain pages only — the vault
+  stays plain files and answers still use it).
 - **Demo mode** (`DemoMode/`, `scripts/demo.sh`): Wisp run on a sample day for screenshots and demos, so nothing personal is on
   screen. A launch option, not a switch (every store reads its file once at launch): `scripts/demo.sh` quits Wisp and opens it with
   `-WispDemoMode YES` (UserDefaults' argument domain, never saved); `--reset` starts from fresh sample data, `--off` goes back.
@@ -1447,6 +1505,10 @@ When the morning banner is built, `BrainMorningSuggestions` (`DynamicIsland/Brai
 | `Email/EmailDraft.swift` | ~490 | Pure: `EmailDraftRequestParser` ("draft an email to X about …" → recipient phrase, content?, screen?, reply?), `EmailDraftFields`, `EmailDraftPrompt`, `EmailDraftReplyParser`, `EmailAddressList` (field parsing, contact entries, pre-send problems) and `EmailComposeLinks` (Gmail compose URL, copy text). Tested by `Tests/EmailDraft`. |
 | `Email/EmailComposerWindowController.swift` | ~510 | The email composer panel (`EmailComposerModel` + `EmailComposerView`): writing placeholder, notice/discard banners, Send / Discard / More (Open in Mail, Open in Gmail, Copy). |
 | `Email/EmailDraftWriter.swift` | ~275 | Opens the composer for a request: Contacts → email address, screen OCR for screen-referring requests, the model call that writes the draft (retryable), and the `draft_email` agent tool. |
+| `MailInbox/MailInboxModel.swift` | ~580 | Pure Inbox core: `MailInboxMessage`/`Thread` (subject threading), `MailInboxImportancePolicy` (rules), `MailInboxTriagePrompt` (model prompt + lenient answer parsing), `MailInboxDraftPolicy` (when to draft ahead, draft request), `MailInboxScriptOutputParser`. Tested by `Tests/MailInbox`. |
+| `MailInbox/MailInboxReader.swift` | ~540 | Reads Mail.app over `osascript` off main: probe, quick id check, recent messages (bulk "every message" reads), bodies (budgeted), own addresses + who the user wrote to; `message://` open; error mapping (-1743, not running, timeout + kill). |
+| `MailInbox/MailInboxEngine.swift` | ~620 | `MailInboxPreferences` and the `MailInboxEngine` singleton: 10-minute sync while Mail is open, rules then model sorting, drafts ahead, corrections, reply into the composer, `inbox.json`. |
+| `WispWindow/MailInbox/MailInboxPage.swift` | ~560 | The Inbox page: turn-on card, Important / Everything else list with draft chips, thread detail (Reply, Open in Mail, move), settings sheet. |
 | `Email/MailAppSender.swift` | ~120 | Sends a draft from Mail (or opens it unsent) via a parameterised AppleScript handler; -1743 / no account → plain-words errors. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
@@ -1521,10 +1583,16 @@ When the morning banner is built, `BrainMorningSuggestions` (`DynamicIsland/Brai
 | `Brain/BrainIngestProposalMerger.swift / BrainIngestFileRules.swift / BrainInboxWatcher.swift` | ~405/~125/~115 | Cross-chunk merge + batch fitting + source page; supported types and inbox stability rules; `raw/inbox/` poller. |
 | `Brain/BrainConversationDigester.swift / BrainConversationDigestPlanning.swift` | ~225/~410 | Periodic digest of ended conversation sessions; pure exchange filtering, substance heuristic, material + state. |
 | `Brain/BrainNotesImporter.swift / BrainNotesImportPlanning.swift / BrainNotesImportAppleNotes.swift` | ~370/~255/~185 | Folder/Obsidian import (hash-deduped, capped) and Apple Notes export via a parameterised AppleScript. |
+| `Brain/BrainChatExportParsing.swift / BrainChatExportImporter.swift` | ~370/~175 | AI chat import: ChatGPT (`mapping` tree, current branch only) and Claude (`chat_messages`, current branch via `parent_message_uuid`, tool placeholders dropped) `conversations.json` → transcripts that mark the user's own lines; per-conversation hash plan (too short / unchanged / grown / capped); importer takes the .json, the export folder or the .zip (`ditto`), writes `raw/chats/<provider>/`, enqueues as `.notesImport`, and counts a chat imported only once its job finished (pending until then, so a failed one is re-queued by the next import). |
+| `Brain/BrainRelations.swift / BrainRecall.swift / BrainSemanticIndex.swift` | ~170/~290/~210 | Typed relations (explicit `relation:: [[X]]` + derived from short linked facts) and the relation graph; graph-aware recall (BM25 + on-device fact embeddings by reciprocal rank fusion, one-step relation/link expansion, tool text, facts to embed); the live `NLEmbedding` fact-vector index, cached in `.brain/fact-vectors.json`. |
+| `Brain/BrainReview.swift` | ~170 | Brain → Review policy: agent-touched pages (not yours, undone, deleted or >30 days old) once each with their newest change; reviewed-through date per page in `.brain/review-state.json`; tag parsing. |
+| `Brain/BrainLock.swift` | ~150 | Optional Touch ID / password lock for the Brain pages (`LAContext` `.deviceOwnerAuthentication`): starts locked at launch, relocks after N minutes away (`BrainLockPolicy`), toggling it needs the owner. |
 | `Brain/BrainActivityRecorder.swift / BrainActivitySampler.swift / BrainActivityLog.swift / BrainActivitySummary.swift / BrainActivityExclusions.swift` | ~360/~230/~245/~420/~205 | Opt-in activity feed: sampling, exclusions, day spans (0600 files, 30-day retention), summaries, daily local-model digest. |
 | `Brain/BrainLinter.swift / BrainLintChecks.swift / BrainPageMerger.swift / BrainPageSplitter.swift` | ~230/~595/~255/~190 | `BrainMaintenance` (periodic lint + fixes) and the pure checks, duplicate merge with relinking, and oversized-page split. |
 | `WispWindow/Brain/BrainPagesPage.swift / BrainPageReaderView.swift / BrainPageEditorView.swift` | ~445/~390/~155 | Brain → Pages: search/grouped list, markdown reader with in-app `[[links]]`, chips, backlinks, back/forward; raw-markdown editor with rename. |
-| `WispWindow/Brain/BrainGraphPage.swift / BrainGraphLayout.swift` | ~465/~340 | Brain → Graph: Canvas force-directed graph (clock stops when settled/hidden) and the pure layout + fast link resolver. |
+| `WispWindow/Brain/BrainGraphPage.swift / BrainGraphLayout.swift` | ~680/~340 | Brain → Graph: Canvas force-directed graph (clock stops when settled/hidden), coloured by Space (default) or kind, with a clickable spaces legend and a 26-week pages-added sparkline; and the pure layout + fast link resolver. |
+| `WispWindow/Brain/BrainGraphSpaces.swift` | ~220 | Pure Spaces: greedy modularity moves over the link graph (Me left out), clusters named after their hub page, warm→cool hues by size, past 11 folded into Other, linkless pages Unlinked; weekly counts for the sparkline. |
+| `WispWindow/Brain/BrainReviewPage.swift / BrainLockViews.swift` | ~270/~130 | Brain → Review (Looks right, edit tags, Move to another kind, Undo — fixes are `savePageEditedByUser`) and the lock's gate (wraps `pageContent` in `WispWindowView`), locked screen and Settings card. |
 | `WispWindow/Brain/BrainInboxPage.swift / BrainHealthPage.swift / BrainLogPage.swift / BrainSettingsPage.swift` | ~675/~370/~270/~610 | Inbox (drop zone, jobs, notes import), Health (overview + fixes), Log (undo), Settings (switches, activity privacy, vault, conversation history). |
 | `WispWindow/Brain/BrainSharedViews.swift / BrainMarkdownRendering.swift` | ~495/~330 | Shared navigation state, chips, markdown view; pure markdown block parser and `wisp-brain://` link rewriting. |
 
@@ -1774,12 +1842,13 @@ running):
 ./Tests/PartSelection/run.sh            # voice selection of a part: spoken-target parser, OCR list/ordinal resolver, pixels→region round trip
 ./Tests/UsageLog/run.sh                  # usage log: cost estimator, aggregation windows, retention, codec, no content fields, store file
 ./Tests/GuidedWalkthrough/run.sh         # guided walkthrough plan stepping, instruction → label, click-on-target matching
-./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration
+./Tests/BrainCore/run.sh                 # brain page format, edit planner, search, memory migration, review policy, lock timing, relations, recall
 ./Tests/BrainIngest/run.sh               # extraction, chunking, proposal merging, queue codec
 ./Tests/BrainDigest/run.sh               # conversation digest + notes import policy
 ./Tests/BrainActivity/run.sh             # activity exclusions, spans, summaries
 ./Tests/BrainLint/run.sh                 # lint checks, merge, split
-./Tests/BrainUI/run.sh                   # markdown rendering, graph layout
+./Tests/BrainUI/run.sh                   # markdown rendering, graph layout, spaces, sparkline counts
+./Tests/BrainChatImport/run.sh           # ChatGPT/Claude export parsing, transcripts, file names, import plan
 ./Tests/DemoMode/run.sh                  # demo mode: off by default, the sample day stays believable at any hour
 ./Tests/BuddyFlow/run.sh                 # buddy flows: links, loops, fan-in waiting for all, failures skipping what follows, blocked links
 ./Tests/BuddyMemoryReview/run.sh         # buddy memory review: triggers, prompt, reply parsing, the checks that keep the user's notes untouched
@@ -1790,6 +1859,7 @@ running):
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
 ./Tests/WindowManagement/run.sh          # window layout command parsing, app matching, frame math
 ./Tests/EmailDraft/run.sh                # email drafts: request parsing, model reply → fields, address checks, Gmail link
+./Tests/MailInbox/run.sh                 # inbox: threading, sorting rules (bulk wording, notification subjects), corrections, triage parsing, drafts ahead, greetings, Mail script + body output
 ./Tests/ScreenWatcher/run.sh             # screen-watch request parsing, text matching, evaluator
 ./Tests/EditableConfirmation/run.sh      # editable confirmation fields: which, edit application, refusals
 ./Tests/RoutineParameters/run.sh         # routine blanks: parsing, defaults, clipboard/date, filling in

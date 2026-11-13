@@ -149,6 +149,7 @@ struct WispSidebar: View {
             Destination(page: .buddies, symbolName: "person.2", title: "Buddies"),
             Destination(page: .home, symbolName: "sun.max", title: "Today"),
             Destination(page: .chat, symbolName: "bubble.left.and.bubble.right", title: "Chat"),
+            Destination(page: .mail, symbolName: "envelope", title: "Inbox"),
             Destination(page: .automations, symbolName: "bolt", title: "Automations"),
             Destination(page: .workflows, symbolName: "point.3.connected.trianglepath.dotted", title: "Workflows"),
             Destination(page: .canvas, symbolName: "graduationcap", title: "Canvas"),
@@ -687,6 +688,7 @@ struct WispSidebar: View {
         switch page {
         case .home: return "sun.max"
         case .chat: return "bubble.left.and.bubble.right"
+        case .mail: return "envelope"
         case .buddies: return "person.2"
         case .automations: return "bolt"
         case .canvas: return "graduationcap"
@@ -695,6 +697,7 @@ struct WispSidebar: View {
         case .routines: return "bolt.circle"
         case .brainPages: return "doc.text"
         case .brainGraph: return "point.3.connected.trianglepath.dotted"
+        case .brainReview: return "checkmark.seal"
         case .brainInbox: return "tray"
         case .brainHealth: return "stethoscope"
         case .brainLog: return "list.bullet.rectangle"

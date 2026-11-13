@@ -175,6 +175,7 @@ final class NotchWindowController {
             companionManager?.flashIsland(.success)
         }
         JobsEngine.shared.start()
+        MailInboxEngine.shared.start()
         // Study mode: a phase ending flashes the island like other finished work.
         StudySessionController.shared.flashIslandSuccess = { [weak companionManager] in
             companionManager?.flashIsland(.success)

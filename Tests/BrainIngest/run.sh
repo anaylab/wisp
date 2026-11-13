@@ -26,6 +26,10 @@ swiftc -target arm64-apple-macos26.0 \
   leanring-buddy/Brain/BrainTextExtractor.swift \
   leanring-buddy/Brain/BrainIngestProposalMerger.swift \
   leanring-buddy/Brain/BrainIngestJob.swift \
-  leanring-buddy/Brain/BrainSourceSanitizer.swift
+  leanring-buddy/Brain/BrainSourceSanitizer.swift \
+  leanring-buddy/Brain/BrainSearch.swift \
+  leanring-buddy/Brain/BrainRecall.swift \
+  leanring-buddy/Brain/BrainRelations.swift \
+  leanring-buddy/WispWindow/Brain/BrainGraphLayout.swift
 
 "$BUILD_DIR/brain-ingest"

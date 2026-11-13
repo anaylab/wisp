@@ -384,6 +384,17 @@ final class ContactsDirectory {
         )
     }
 
+    /// Every email address on a card in Contacts, lowercased, for the Inbox's
+    /// "from a contact" rule. Never prompts: empty without access.
+    func allEmailAddressesIfAuthorized() async -> Set<String> {
+        guard CNContactStore.authorizationStatus(for: .contacts) == .authorized else { return [] }
+        let contactStore = self.contactStore
+        return await Task.detached(priority: .utility) { () -> Set<String> in
+            guard let contacts = try? Self.fetchAllContactRecords(from: contactStore) else { return [] }
+            return Set(contacts.flatMap { $0.emailHandles.map { $0.value.lowercased() } })
+        }.value
+    }
+
     /// The user's own card (the Me card), or nil when there is none or Wisp
     /// can't read Contacts. Prompts for access only when `asksForAccess` —
     /// "email me" is a reason to ask; knowing a name to sign off with is not.

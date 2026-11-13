@@ -140,3 +140,21 @@ enum BrainIngestDrainNotification {
         return (title, "", bodyParts.joined(separator: " "))
     }
 }
+
+/// How long the ingest queue waits after the model couldn't be reached for a
+/// reason that passes (rate limited, provider down, offline): 5 minutes, then
+/// doubling, at most an hour. Before this, a rate limit failed every queued
+/// job in turn within seconds — a 181-chat import lost 171 that way.
+enum BrainIngestRetryPolicy {
+    static let firstPauseSeconds: TimeInterval = 5 * 60
+    static let longestPauseSeconds: TimeInterval = 60 * 60
+
+    static func pauseSeconds(afterConsecutivePauses consecutivePauseCount: Int) -> TimeInterval {
+        let doublings = max(0, min(consecutivePauseCount, 10))
+        return min(firstPauseSeconds * pow(2, Double(doublings)), longestPauseSeconds)
+    }
+
+    static func pauseMessage(reason: String, resumeDate: Date) -> String {
+        "Paused — \(reason). Trying again at \(resumeDate.formatted(date: .omitted, time: .shortened))."
+    }
+}

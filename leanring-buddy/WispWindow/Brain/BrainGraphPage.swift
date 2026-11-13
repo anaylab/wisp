@@ -7,6 +7,12 @@
 //  dot to see its name, summary and neighbours; drag dots around; drag empty
 //  space to pan; pinch or use the zoom buttons; click a dot to read the page.
 //
+//  Dots are coloured by Space by default (`BrainGraphSpaces`: clusters found
+//  from the links, each a hue on a warm-to-cool spectrum, links inside a space
+//  tinted to match) or by page kind. The legend lists the spaces with their
+//  sizes — click one to bring it forward — over a sparkline of pages added
+//  per week.
+//
 //  The physics lives in `BrainGraphLayout` (pure). This view runs it from a
 //  `TimelineView` clock that pauses as soon as the layout settles, while the
 //  window is hidden, and whenever the page is off screen (the view is only
@@ -23,6 +29,11 @@ import SwiftUI
 @MainActor
 final class BrainGraphSimulation: ObservableObject {
     private(set) var layout = BrainGraphLayout.empty
+    /// Clusters of the current layout, recomputed only when it is rebuilt.
+    private(set) var spaceAssignment = BrainGraphSpaceAssignment.empty
+    /// "lower-higher" node indices → the relation drawn on that edge when a
+    /// dot is hovered ("works at"), from `BrainRelationGraph`.
+    private(set) var relationLabelByEdgeKey: [String: String] = [:]
     @Published private(set) var isSettled = true
     /// Labels drawn even when zoomed out.
     private(set) var alwaysLabelledNodeIndices = Set<Int>()
@@ -47,6 +58,8 @@ final class BrainGraphSimulation: ObservableObject {
         )
         newLayout.adoptPositions(from: layout)
         layout = newLayout
+        spaceAssignment = BrainGraphSpaces.detect(in: newLayout)
+        relationLabelByEdgeKey = Self.relationLabels(pages: pages, layout: newLayout)
         alwaysLabelledNodeIndices = newLayout.mostConnectedNodeIndices(limit: 14)
         setSettled(layout.isSettled)
     }
@@ -97,6 +110,24 @@ final class BrainGraphSimulation: ObservableObject {
         if isSettled != newValue { isSettled = newValue }
     }
 
+    static func edgeKey(_ firstIndex: Int, _ secondIndex: Int) -> String {
+        "\(min(firstIndex, secondIndex))-\(max(firstIndex, secondIndex))"
+    }
+
+    private static func relationLabels(pages: [BrainPage], layout: BrainGraphLayout) -> [String: String] {
+        var nodeIndexBySlug: [String: Int] = [:]
+        for (nodeIndex, node) in layout.nodes.enumerated() { nodeIndexBySlug[node.slug] = nodeIndex }
+        var labels: [String: String] = [:]
+        for relation in BrainRelationGraph.relations(pages: pages, resolver: BrainLinkResolver(pages: pages)) {
+            guard let sourceIndex = nodeIndexBySlug[relation.sourceSlug],
+                  let targetIndex = nodeIndexBySlug[relation.targetSlug] else { continue }
+            let key = edgeKey(sourceIndex, targetIndex)
+            // An explicit relation names the edge over a derived one.
+            if labels[key] == nil || relation.isExplicit { labels[key] = relation.predicate }
+        }
+        return labels
+    }
+
     /// Pages, their links and the filter — the layout is rebuilt only when
     /// one of these changed, not on every unrelated store update.
     private static func signature(pages: [BrainPage], kinds: Set<BrainPageKind>) -> String {
@@ -109,6 +140,19 @@ final class BrainGraphSimulation: ObservableObject {
         }
         let kindList = kinds.map(\.rawValue).sorted().joined(separator: ",")
         return "\(pages.count)-\(hasher.finalize())-\(kindList)"
+    }
+}
+
+/// What the graph's dot colours mean.
+enum BrainGraphColorMode: String, CaseIterable {
+    case space
+    case kind
+
+    var title: String {
+        switch self {
+        case .space: return "Spaces"
+        case .kind: return "Kinds"
+        }
     }
 }
 
@@ -126,6 +170,16 @@ struct BrainGraphPage: View {
     @State private var isWindowVisible = true
     @State private var hasFittedToSettledLayout = false
     @State private var canvasSize: CGSize = .zero
+    @AppStorage("brain.graph.colorMode") private var colorModeRawValue = BrainGraphColorMode.space.rawValue
+    /// A space picked in the legend: its pages stay bright, the rest dim.
+    @State private var highlightedSpaceIndex: Int?
+
+    /// Weeks shown in the legend's sparkline.
+    private static let sparklineWeekCount = 26
+
+    private var colorMode: BrainGraphColorMode {
+        BrainGraphColorMode(rawValue: colorModeRawValue) ?? .space
+    }
 
     private static let minimumZoomScale: CGFloat = 0.15
     private static let maximumZoomScale: CGFloat = 4
@@ -151,13 +205,17 @@ struct BrainGraphPage: View {
                 graphCanvas
                     .overlay(alignment: .topLeading) { controlsOverlay }
                     .overlay(alignment: .bottomLeading) { hoveredNodeCard }
+                    .overlay(alignment: .bottomTrailing) { spacesLegend }
             }
         }
         .background(WispColor.windowBackground)
         .background(BrainWindowVisibilityReader { isVisible in isWindowVisible = isVisible })
         .onAppear { rebuildGraph() }
         .onChange(of: brainStore.pages) { _, _ in rebuildGraph() }
-        .onChange(of: visibleKinds) { _, _ in rebuildGraph() }
+        .onChange(of: visibleKinds) { _, _ in
+            highlightedSpaceIndex = nil
+            rebuildGraph()
+        }
         .onChange(of: simulation.isSettled) { _, isNowSettled in
             // Frame the picture once, the first time it comes to rest.
             if isNowSettled && !hasFittedToSettledLayout {
@@ -214,24 +272,65 @@ struct BrainGraphPage: View {
 
         let focusedNodeIndex = draggedNodeIndex ?? hoveredNodeIndex
         let focusedNeighborIndices = focusedNodeIndex.map { layout.neighborIndices(of: $0) } ?? []
+        let spaceAssignment = simulation.spaceAssignment
+        let isColoringBySpace = colorMode == .space
 
-        // Links first, so dots sit on top.
+        // Links first, so dots sit on top. In Spaces mode a link inside one
+        // coloured space is drawn in that space's hue, one path per space.
         var restingEdgesPath = Path()
         var focusedEdgesPath = Path()
+        var spaceEdgesPathBySpaceIndex: [Int: Path] = [:]
         for edge in layout.edges {
             let sourcePoint = viewPoint(layout.nodes[edge.sourceIndex].position)
             let targetPoint = viewPoint(layout.nodes[edge.targetIndex].position)
             if let focusedNodeIndex, edge.sourceIndex == focusedNodeIndex || edge.targetIndex == focusedNodeIndex {
                 focusedEdgesPath.move(to: sourcePoint)
                 focusedEdgesPath.addLine(to: targetPoint)
+            } else if isColoringBySpace,
+                      let sourceSpace = spaceAssignment.space(ofNodeIndex: edge.sourceIndex),
+                      sourceSpace.hue != nil,
+                      spaceAssignment.spaceIndexByNodeIndex[edge.targetIndex] == sourceSpace.spaceIndex {
+                spaceEdgesPathBySpaceIndex[sourceSpace.spaceIndex, default: Path()].move(to: sourcePoint)
+                spaceEdgesPathBySpaceIndex[sourceSpace.spaceIndex, default: Path()].addLine(to: targetPoint)
             } else {
                 restingEdgesPath.move(to: sourcePoint)
                 restingEdgesPath.addLine(to: targetPoint)
             }
         }
-        let restingEdgeOpacity: Double = focusedNodeIndex == nil ? 0.45 : 0.15
+        let isSomethingFocused = focusedNodeIndex != nil || highlightedSpaceIndex != nil
+        let restingEdgeOpacity: Double = isSomethingFocused ? 0.15 : 0.45
         graphicsContext.stroke(restingEdgesPath, with: .color(WispColor.textTertiary.opacity(restingEdgeOpacity)), lineWidth: 1)
+        for (spaceIndex, spaceEdgesPath) in spaceEdgesPathBySpaceIndex {
+            let isHighlightedSpace = highlightedSpaceIndex == spaceIndex
+            let spaceEdgeOpacity: Double = isHighlightedSpace ? 0.75 : (isSomethingFocused ? 0.12 : 0.4)
+            graphicsContext.stroke(
+                spaceEdgesPath,
+                with: .color(Self.spaceColor(hue: spaceAssignment.spaces[spaceIndex].hue).opacity(spaceEdgeOpacity)),
+                lineWidth: isHighlightedSpace ? 1.3 : 1
+            )
+        }
         graphicsContext.stroke(focusedEdgesPath, with: .color(WispColor.accentText.opacity(0.8)), lineWidth: 1.5)
+
+        // Name the hovered dot's relationships at the middle of each line.
+        if let focusedNodeIndex {
+            for edge in layout.edges where edge.sourceIndex == focusedNodeIndex || edge.targetIndex == focusedNodeIndex {
+                guard let relationLabel = simulation.relationLabelByEdgeKey[BrainGraphSimulation.edgeKey(edge.sourceIndex, edge.targetIndex)] else { continue }
+                let sourcePoint = viewPoint(layout.nodes[edge.sourceIndex].position)
+                let targetPoint = viewPoint(layout.nodes[edge.targetIndex].position)
+                let middlePoint = CGPoint(x: (sourcePoint.x + targetPoint.x) / 2, y: (sourcePoint.y + targetPoint.y) / 2)
+                let labelText = Text(relationLabel)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(WispColor.accentText)
+                let resolvedLabel = graphicsContext.resolve(labelText)
+                let labelSize = resolvedLabel.measure(in: CGSize(width: 200, height: 40))
+                let labelBackground = CGRect(
+                    x: middlePoint.x - labelSize.width / 2 - 4, y: middlePoint.y - labelSize.height / 2 - 2,
+                    width: labelSize.width + 8, height: labelSize.height + 4
+                )
+                graphicsContext.fill(Path(roundedRect: labelBackground, cornerRadius: 4), with: .color(WispColor.windowBackground.opacity(0.9)))
+                graphicsContext.draw(resolvedLabel, at: middlePoint, anchor: .center)
+            }
+        }
 
         let showsAllLabels = zoomScale >= Self.zoomScaleShowingAllLabels
         for nodeIndex in layout.nodes.indices {
@@ -240,8 +339,13 @@ struct BrainGraphPage: View {
             let scaledRadius = max(node.radius * min(max(zoomScale, 0.6), 1.6), 2.5)
             let isFocused = nodeIndex == focusedNodeIndex
             let isNeighborOfFocus = focusedNeighborIndices.contains(nodeIndex)
-            let isDimmed = focusedNodeIndex != nil && !isFocused && !isNeighborOfFocus
-            let nodeColor = BrainKindStyle.color(for: node.kind)
+            let isOutsideHighlightedSpace = highlightedSpaceIndex != nil
+                && spaceAssignment.spaceIndexByNodeIndex.indices.contains(nodeIndex)
+                && spaceAssignment.spaceIndexByNodeIndex[nodeIndex] != highlightedSpaceIndex
+            let isDimmed = focusedNodeIndex != nil
+                ? (!isFocused && !isNeighborOfFocus)
+                : isOutsideHighlightedSpace
+            let nodeColor = color(forNodeIndex: nodeIndex, node: node)
 
             let nodeRect = CGRect(
                 x: nodeCenter.x - scaledRadius, y: nodeCenter.y - scaledRadius,
@@ -265,6 +369,25 @@ struct BrainGraphPage: View {
                 graphicsContext.draw(label, at: CGPoint(x: nodeCenter.x, y: nodeCenter.y + scaledRadius + 3), anchor: .top)
             }
         }
+    }
+
+    // MARK: - Colours
+
+    private func color(forNodeIndex nodeIndex: Int, node: BrainGraphNode) -> Color {
+        // The user's own page keeps its accent in both modes: it is the
+        // centre the spaces orbit, not a member of one.
+        guard colorMode == .space, node.kind != .me,
+              let space = simulation.spaceAssignment.space(ofNodeIndex: nodeIndex) else {
+            return BrainKindStyle.color(for: node.kind)
+        }
+        return Self.spaceColor(hue: space.hue)
+    }
+
+    /// A space's colour: a bright spectrum hue, or a quiet grey for Other /
+    /// Unlinked so the real clusters carry the colour.
+    static func spaceColor(hue: Double?) -> Color {
+        guard let hue else { return WispColor.textTertiary }
+        return Color(hue: hue, saturation: 0.72, brightness: 0.95)
     }
 
     // MARK: - Coordinates
@@ -380,6 +503,23 @@ struct BrainGraphPage: View {
             .pointerCursor()
             .help("Choose which kinds of page to show")
 
+            Picker("Colour by", selection: Binding(
+                get: { colorMode },
+                set: { newColorMode in
+                    colorModeRawValue = newColorMode.rawValue
+                    highlightedSpaceIndex = nil
+                }
+            )) {
+                ForEach(BrainGraphColorMode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .pointerCursor()
+            .help("Colour the dots by the space they cluster into, or by page kind")
+
             ControlGroup {
                 Button { zoom(by: 1 / 1.3) } label: { Image(systemName: "minus.magnifyingglass") }
                     .help("Zoom out")
@@ -426,6 +566,127 @@ struct BrainGraphPage: View {
         return summary
     }
 
+    private func hoveredNodeDetailLine(nodeIndex: Int, node: BrainGraphNode) -> String {
+        var detailParts = [node.kind.displayName]
+        if node.kind != .me, let space = simulation.spaceAssignment.space(ofNodeIndex: nodeIndex) {
+            detailParts.append(space.hue == nil ? space.name : "in \(space.name)")
+        }
+        detailParts.append("\(node.linkCount) \(node.linkCount == 1 ? "link" : "links")")
+        detailParts.append("click to open")
+        return detailParts.joined(separator: " · ")
+    }
+
+    // MARK: - Spaces legend
+
+    @ViewBuilder
+    private var spacesLegend: some View {
+        let spaces = simulation.spaceAssignment.spaces
+        if colorMode == .space, !spaces.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("\(spaces.filter { $0.hue != nil }.count) spaces")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WispColor.textPrimary)
+                    Spacer(minLength: 12)
+                    if highlightedSpaceIndex != nil {
+                        Button("Show all") { highlightedSpaceIndex = nil }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(WispColor.accentText)
+                            .pointerCursor()
+                    }
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(spaces, id: \.spaceIndex) { space in
+                        spacesLegendRow(space)
+                    }
+                }
+                pagesAddedSparkline
+            }
+            .padding(12)
+            .frame(width: 220, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: WispRadius.medium, style: .continuous).fill(.regularMaterial))
+            .overlay(
+                RoundedRectangle(cornerRadius: WispRadius.medium, style: .continuous)
+                    .strokeBorder(WispColor.cardSeparator, lineWidth: 0.5)
+            )
+            .padding(12)
+        }
+    }
+
+    private func spacesLegendRow(_ space: BrainGraphSpace) -> some View {
+        let isHighlighted = highlightedSpaceIndex == space.spaceIndex
+        let isDimmed = highlightedSpaceIndex != nil && !isHighlighted
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                highlightedSpaceIndex = isHighlighted ? nil : space.spaceIndex
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(Self.spaceColor(hue: space.hue))
+                    .frame(width: 8, height: 8)
+                Text(space.name)
+                    .font(.caption.weight(isHighlighted ? .semibold : .regular))
+                    .foregroundStyle(WispColor.textPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text("\(space.memberCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(WispColor.textSecondary)
+            }
+            .padding(.vertical, 2)
+            .padding(.horizontal, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(isHighlighted ? WispColor.textPrimary.opacity(0.08) : Color.clear)
+            )
+            .opacity(isDimmed ? 0.45 : 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .help(space.hue == nil ? "Show these pages" : "Show the \(space.name) space")
+    }
+
+    /// Pages created per week over the last half year — how fast the brain grows.
+    private var pagesAddedSparkline: some View {
+        let creationDates = brainStore.pages.compactMap(\.createdDate)
+        let weeklyCounts = BrainGraphSpaces.weeklyCounts(of: creationDates, endingAt: Date(), weekCount: Self.sparklineWeekCount)
+        let highestWeeklyCount = max(weeklyCounts.max() ?? 0, 1)
+        let pagesAddedThisPeriod = weeklyCounts.reduce(0, +)
+        return VStack(alignment: .leading, spacing: 4) {
+            Canvas { graphicsContext, size in
+                guard weeklyCounts.count > 1 else { return }
+                var sparklinePath = Path()
+                for (weekOffset, weekCount) in weeklyCounts.enumerated() {
+                    let pointX = size.width * CGFloat(weekOffset) / CGFloat(weeklyCounts.count - 1)
+                    let pointY = size.height - size.height * CGFloat(weekCount) / CGFloat(highestWeeklyCount)
+                    if weekOffset == 0 {
+                        sparklinePath.move(to: CGPoint(x: pointX, y: pointY))
+                    } else {
+                        sparklinePath.addLine(to: CGPoint(x: pointX, y: pointY))
+                    }
+                }
+                let spectrumGradient = Gradient(colors: stride(from: 0.0, through: BrainGraphSpaces.spectrumEndHue, by: 0.1).map {
+                    Color(hue: $0, saturation: 0.72, brightness: 0.95)
+                })
+                graphicsContext.stroke(
+                    sparklinePath,
+                    with: .linearGradient(spectrumGradient, startPoint: .zero, endPoint: CGPoint(x: size.width, y: 0)),
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                )
+            }
+            .frame(height: 26)
+            Text("\(pagesAddedThisPeriod) \(pagesAddedThisPeriod == 1 ? "page" : "pages") added in 6 months")
+                .font(.caption2)
+                .foregroundStyle(WispColor.textTertiary)
+        }
+        .padding(.top, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(pagesAddedThisPeriod) pages added in the last six months")
+    }
+
     @ViewBuilder
     private var hoveredNodeCard: some View {
         if let hoveredNodeIndex, simulation.layout.nodes.indices.contains(hoveredNodeIndex) {
@@ -444,7 +705,7 @@ struct BrainGraphPage: View {
                         .foregroundStyle(WispColor.textSecondary)
                         .lineLimit(3)
                 }
-                Text("\(hoveredNode.kind.displayName) · \(hoveredNode.linkCount) \(hoveredNode.linkCount == 1 ? "link" : "links") · click to open")
+                Text(hoveredNodeDetailLine(nodeIndex: hoveredNodeIndex, node: hoveredNode))
                     .font(.caption)
                     .foregroundStyle(WispColor.textTertiary)
             }

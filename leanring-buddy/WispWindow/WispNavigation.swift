@@ -37,6 +37,7 @@ extension Notification.Name {
 enum WispSection: String, CaseIterable, Identifiable {
     case home
     case chat
+    case mail
     case buddies
     case brain
     case routines
@@ -50,6 +51,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Today"
         case .chat: return "Chat"
+        case .mail: return "Inbox"
         case .buddies: return "Buddies"
         case .brain: return "Brain"
         case .routines: return "Routines"
@@ -63,6 +65,7 @@ enum WispSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "sun.max"
         case .chat: return "bubble.left.and.bubble.right"
+        case .mail: return "envelope"
         case .buddies: return "person.2"
         case .brain: return "brain"
         case .routines: return "bolt"
@@ -77,13 +80,15 @@ enum WispSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: return [.home]
         case .chat: return [.chat]
+        // Mail from the Mail app, sorted, with replies written ahead (from Rowboat's email client).
+        case .mail: return [.mail]
         // The messenger, the automations buddies own, and the Canvas setup that
         // used to be the Jobs section (the Planner buddy's feeds).
         case .buddies: return [.buddies, .automations, .workflows, .canvas, .study]
         // What Wisp knows, how it got there, and how to steer it. The old
         // History → Memory page (memory.md facts + conversation history) folded
         // into Brain: the user's page is Pages → Me, history lives in Settings.
-        case .brain: return [.brainPages, .brainGraph, .brainInbox, .brainHealth, .brainLog, .brainSettings]
+        case .brain: return [.brainPages, .brainGraph, .brainReview, .brainInbox, .brainHealth, .brainLog, .brainSettings]
         case .routines: return [.routines]
         case .history: return [.timeline]
         case .connections: return [.marketplace, .tools, .sources]
@@ -100,7 +105,7 @@ enum WispSection: String, CaseIterable, Identifiable {
 
     /// The bar's contents. Advanced off: Today, Chat, Buddies, Settings.
     static func visibleSections(advancedEnabled: Bool) -> [WispSection] {
-        advancedEnabled ? allCases : [.home, .chat, .buddies, .settings]
+        advancedEnabled ? allCases : [.home, .chat, .mail, .buddies, .settings]
     }
 
     /// The pages shown in the section's strip. Settings gains the folded pages
@@ -117,6 +122,8 @@ enum WispSection: String, CaseIterable, Identifiable {
 enum WispPage: String, CaseIterable, Identifiable {
     case home
     case chat
+    /// The email inbox (Mail.app), not the Brain's file inbox.
+    case mail
     case buddies
     case automations
     /// The canvas of chained triggers, buddies and outputs (translated from OpenBot's workflows).
@@ -128,6 +135,8 @@ enum WispPage: String, CaseIterable, Identifiable {
     case routines
     case brainPages
     case brainGraph
+    /// What Wisp filed on its own, waiting for a quick check.
+    case brainReview
     case brainInbox
     case brainHealth
     case brainLog
@@ -163,7 +172,7 @@ enum WispPage: String, CaseIterable, Identifiable {
     /// first-class.
     var isHiddenWhenAdvancedIsOff: Bool {
         switch self {
-        case .brainPages, .brainGraph, .brainInbox, .brainHealth, .brainLog, .brainSettings:
+        case .brainPages, .brainGraph, .brainReview, .brainInbox, .brainHealth, .brainLog, .brainSettings:
             return true
         default:
             return false
@@ -175,6 +184,7 @@ enum WispPage: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Today"
         case .chat: return "Chat"
+        case .mail: return "Inbox"
         case .buddies: return "Buddies"
         case .automations: return "Automations"
         case .workflows: return "Workflows"
@@ -183,6 +193,7 @@ enum WispPage: String, CaseIterable, Identifiable {
         case .routines: return "Routines"
         case .brainPages: return "Pages"
         case .brainGraph: return "Graph"
+        case .brainReview: return "Review"
         case .brainInbox: return "Inbox"
         case .brainHealth: return "Health"
         case .brainLog: return "Log"

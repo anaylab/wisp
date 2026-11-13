@@ -22,6 +22,12 @@ struct BrainSearchResult: Equatable, Sendable {
     var score: Double
     /// A short excerpt of the body around the best-matching words.
     var snippet: String
+    /// How many of the query's distinct words the page holds, out of how
+    /// many there were — one common word ("like") is not a topic match.
+    var matchedTermCount: Int = 0
+    var queryTermCount: Int = 0
+    /// The query names the page (title or alias, whole words).
+    var namesThePage: Bool = false
 }
 
 enum BrainSearchTokenizer {
@@ -118,8 +124,10 @@ struct BrainSearchIndex: Sendable {
         for indexedPage in indexedPages {
             if let kinds, !kinds.contains(indexedPage.page.kind) { continue }
             var score = 0.0
+            var matchedTermCount = 0
             for term in queryTerms {
                 guard let termFrequency = indexedPage.weightedTermFrequencies[term] else { continue }
+                matchedTermCount += 1
                 let documentFrequency = Double(documentFrequencies[term] ?? 0)
                 let inverseDocumentFrequency = log(1 + (pageTotal - documentFrequency + 0.5) / (documentFrequency + 0.5))
                 let lengthRatio = indexedPage.weightedLength / averageWeightedLength
@@ -142,7 +150,10 @@ struct BrainSearchIndex: Sendable {
                 kind: indexedPage.page.kind,
                 summary: indexedPage.page.summary,
                 score: score,
-                snippet: Self.snippet(of: indexedPage.page.body, matching: queryTerms)
+                snippet: Self.snippet(of: indexedPage.page.body, matching: queryTerms),
+                matchedTermCount: matchedTermCount,
+                queryTermCount: queryTerms.count,
+                namesThePage: namesThePage
             ))
         }
         return Array(scoredResults.sorted { lhs, rhs in
@@ -196,6 +207,75 @@ enum BrainPromptContext {
         for result in relevantResults {
             let detail = result.summary.isEmpty ? result.snippet : result.summary
             let line = "- \(result.title) (\(result.kind.rawValue)): \(detail)"
+            guard charactersUsed + line.count <= characterBudget else { continue }
+            lines.append(line)
+            charactersUsed += line.count
+        }
+        return lines.count > 1 ? lines.joined(separator: "\n") : ""
+    }
+
+    /// A page rides every turn on meaning alone only above this. Measured on
+    /// a real 115-page brain: unrelated requests ("open safari and go to
+    /// youtube") reach 0.57 against some fact, on-topic ones 0.5–0.65.
+    static let minimumMeaningSimilarityAlone = 0.65
+    /// …or when words and meaning agree: half the request's words on the
+    /// page, and at least this close in meaning.
+    static let minimumMeaningSimilarityWithWords = 0.4
+    static let minimumShareOfRequestWords = 0.5
+
+    /// The per-turn block from graph-aware recall. A page rides the turn when
+    /// the request names it, when words and meaning agree on it, or when it is
+    /// very close in meaning — or when a typed relation ties it to one of
+    /// those. One shared common word is not enough (it used to be: "what's the
+    /// weather like today" brought every page with "likes" in it), and a plain
+    /// link alone never adds a page. The `recall` tool shows looser matches,
+    /// since the model asks for it on purpose.
+    static func promptText(
+        recallHits: [BrainRecallHit],
+        keywordResults: [BrainSearchResult],
+        characterBudget: Int = defaultCharacterBudget
+    ) -> String {
+        let keywordResultsBySlug = Dictionary(keywordResults.map { ($0.slug, $0) }, uniquingKeysWith: { first, _ in first })
+        func isStrongDirectMatch(_ recallHit: BrainRecallHit) -> Bool {
+            var meaningSimilarity = 0.0
+            for reason in recallHit.reasons {
+                if case .similarMeaning(let similarity, _) = reason { meaningSimilarity = similarity }
+            }
+            if meaningSimilarity >= minimumMeaningSimilarityAlone { return true }
+            guard let keywordResult = keywordResultsBySlug[recallHit.slug], keywordResult.score >= minimumRelevanceScore else { return false }
+            if keywordResult.namesThePage { return true }
+            let shareOfRequestWords = keywordResult.queryTermCount == 0 ? 0 : Double(keywordResult.matchedTermCount) / Double(keywordResult.queryTermCount)
+            return shareOfRequestWords >= minimumShareOfRequestWords && meaningSimilarity >= minimumMeaningSimilarityWithWords
+        }
+        let strongTitles = Set(recallHits.filter(isStrongDirectMatch).map(\.title))
+        let keptHits = recallHits.filter { recallHit in
+            guard recallHit.kind != .me else { return false }
+            if isStrongDirectMatch(recallHit) { return true }
+            return recallHit.reasons.contains { reason in
+                if case .connected(let seedTitle, let relationDescription) = reason {
+                    return strongTitles.contains(seedTitle) && relationDescription.contains(" → ")
+                }
+                return false
+            }
+        }.prefix(maximumPagesPerTurn)
+        guard !keptHits.isEmpty else { return "" }
+
+        var lines = ["notes the user has saved in their brain (about people, projects and topics — not facts about the user unless the page is \"Me\"); use what's relevant, don't recite it:"]
+        var charactersUsed = lines[0].count
+        for recallHit in keptHits {
+            var detail = recallHit.summary.isEmpty ? recallHit.snippet : recallHit.summary
+            if detail.isEmpty {
+                for reason in recallHit.reasons {
+                    if case .similarMeaning(_, let closestFact) = reason { detail = closestFact; break }
+                }
+            }
+            var line = "- \(recallHit.title) (\(recallHit.kind.rawValue)): \(detail)"
+            for reason in recallHit.reasons {
+                if case .connected(_, let relationDescription) = reason, relationDescription.contains(" → ") {
+                    line += " [\(relationDescription)]"
+                    break
+                }
+            }
             guard charactersUsed + line.count <= characterBudget else { continue }
             lines.append(line)
             charactersUsed += line.count

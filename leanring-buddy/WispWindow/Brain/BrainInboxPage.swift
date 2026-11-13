@@ -21,6 +21,7 @@ import UniformTypeIdentifiers
 struct BrainInboxPage: View {
     @ObservedObject private var ingestQueue = BrainIngestQueue.shared
     @ObservedObject private var notesImporter = BrainNotesImporter.shared
+    @ObservedObject private var chatExportImporter = BrainChatExportImporter.shared
     @ObservedObject private var brainPreferences = BrainPreferences.shared
     @ObservedObject private var brainStore = BrainStore.shared
 
@@ -39,6 +40,7 @@ struct BrainInboxPage: View {
                 dropZone
                 jobsSection
                 notesImportCard
+                chatImportCard
             }
             .padding(.horizontal, WispSpacing.xxl)
             .padding(.vertical, WispSpacing.xl)
@@ -269,6 +271,20 @@ struct BrainInboxPage: View {
             }
             .padding(.leading, 2)
 
+            if let modelPauseMessage = ingestQueue.modelPauseMessage {
+                HStack(spacing: 8) {
+                    Label(modelPauseMessage, systemImage: "pause.circle")
+                        .font(.caption)
+                        .foregroundStyle(WispColor.warningText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button("Try Now") { ingestQueue.resumeAfterModelPause() }
+                        .buttonStyle(.link)
+                        .pointerCursor()
+                }
+                .padding(.leading, 2)
+            }
+
             if ingestQueue.jobs.isEmpty {
                 Text("Nothing added this session. Items show up here while Wisp reads them, one at a time.")
                     .font(.callout)
@@ -375,6 +391,71 @@ struct BrainInboxPage: View {
             summaryParts.append("\(importRun.skippedFileCount) skipped")
         }
         return summaryParts.joined(separator: " · ")
+    }
+
+    // MARK: - AI chat import
+
+    private var chatImportCard: some View {
+        DashboardCard(title: "Import AI chats") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Bring in your ChatGPT or Claude history. Request a data export in their settings, then choose the .zip, the unzipped folder or its conversations.json. Each chat is kept word for word under raw/chats; only your own lines are read as facts about you.")
+                    .font(.callout)
+                    .foregroundStyle(WispColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button("Choose Export…", systemImage: "bubble.left.and.text.bubble.right", action: chooseChatExport)
+                        .buttonStyle(WispPillButtonStyle(isProminent: false))
+                        .disabled(chatExportImporter.isImporting)
+                        .pointerCursor(isEnabled: !chatExportImporter.isImporting)
+                    if chatExportImporter.isImporting {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                if let lastErrorMessage = chatExportImporter.lastErrorMessage {
+                    Label(lastErrorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(WispColor.warningText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !chatExportImporter.runs.isEmpty {
+                    Divider()
+                    ForEach(chatExportImporter.runs) { importRun in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Label(importRun.sourceName, systemImage: importRun.isFinished ? "checkmark.circle" : "bubble.left.and.bubble.right")
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(WispColor.textPrimary)
+                                Spacer()
+                                Text(importRun.startedDate.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(WispColor.textTertiary)
+                            }
+                            if let statusMessage = importRun.statusMessage {
+                                Text(statusMessage.prefix(1).uppercased() + statusMessage.dropFirst())
+                                    .font(.caption)
+                                    .foregroundStyle(WispColor.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                ProgressView().progressViewStyle(.linear)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func chooseChatExport() {
+        let openPanel = NSOpenPanel()
+        openPanel.title = "Import AI Chats"
+        openPanel.prompt = "Import"
+        openPanel.message = "Choose a ChatGPT or Claude export — the .zip, the unzipped folder, or conversations.json."
+        openPanel.canChooseDirectories = true
+        openPanel.canChooseFiles = true
+        openPanel.allowedContentTypes = [.zip, .json]
+        openPanel.allowsMultipleSelection = false
+        guard openPanel.runModal() == .OK, let chosenURL = openPanel.url else { return }
+        chatExportImporter.importExport(at: chosenURL)
     }
 
     private func chooseNotesFolder() {

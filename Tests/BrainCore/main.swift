@@ -474,5 +474,180 @@ check(BrainCommandRouter.normalized("  Hey Wisp,  Please ADD this… page!! than
 check(BrainCommandRouter.queuedReply(forTitles: ["Atlas spec"]) == "adding “Atlas spec” to your brain.", "one-title reply")
 check(BrainCommandRouter.queuedReply(forTitles: ["a", "b", "c"]) == "adding 3 things to your brain.", "many reply")
 
+// MARK: - Review
+
+func makeChangeRecord(
+    date: Date,
+    origin: BrainEditProvenance.Origin,
+    created: [String] = [],
+    modified: [String] = [],
+    isUndone: Bool = false
+) -> BrainChangeRecord {
+    BrainChangeRecord(
+        id: UUID(), date: date,
+        provenance: BrainEditProvenance(origin: origin, label: "test", trust: origin == .user ? .userAuthored : .derivedFromUser),
+        changeDescriptions: ["did a thing"], refusals: [],
+        createdSlugs: created, modifiedSlugs: modified, deletedSlugs: [],
+        resultingContentHashes: [:], isUndone: isUndone
+    )
+}
+
+let reviewNow = Date(timeIntervalSince1970: 1_800_000_000)
+let reviewRecords = [
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-3_600), origin: .conversation, created: ["topics/running"]),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-1_800), origin: .notesImport, modified: ["topics/running", "people/sam"]),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-900), origin: .user, modified: ["projects/thesis"]),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-600), origin: .ingest, created: ["sources/gone"]),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-300), origin: .agent, created: ["notes/undone"], isUndone: true),
+    makeChangeRecord(date: reviewNow.addingTimeInterval(-40 * 86_400), origin: .conversation, created: ["topics/old"])
+]
+let reviewExistingSlugs: Set<String> = ["topics/running", "people/sam", "projects/thesis", "notes/undone", "topics/old"]
+let reviewItems = BrainReviewPlanner.items(changeRecords: reviewRecords, existingSlugs: reviewExistingSlugs, state: BrainReviewState(), now: reviewNow)
+check(reviewItems.map(\.slug).sorted() == ["people/sam", "topics/running"], "review lists agent-touched pages only (not yours, deleted, undone or old)")
+let runningReviewItem = reviewItems.first { $0.slug == "topics/running" }
+check(runningReviewItem?.unreviewedChangeCount == 2, "two changes to one page show as one item")
+check(runningReviewItem?.latestOrigin == .notesImport, "the item shows the newest change")
+check(runningReviewItem?.wasCreatedByAgent == false, "newest change modified, not created")
+
+let reviewedState = BrainReviewPlanner.markingReviewed(BrainReviewState(), slug: "topics/running", through: reviewNow.addingTimeInterval(-1_800))
+let itemsAfterReview = BrainReviewPlanner.items(changeRecords: reviewRecords, existingSlugs: reviewExistingSlugs, state: reviewedState, now: reviewNow)
+check(!itemsAfterReview.contains { $0.slug == "topics/running" }, "a reviewed page leaves the list")
+let laterRecords = reviewRecords + [makeChangeRecord(date: reviewNow.addingTimeInterval(-60), origin: .conversation, modified: ["topics/running"])]
+let itemsAfterLaterChange = BrainReviewPlanner.items(changeRecords: laterRecords, existingSlugs: reviewExistingSlugs, state: reviewedState, now: reviewNow)
+check(itemsAfterLaterChange.first { $0.slug == "topics/running" }?.unreviewedChangeCount == 1, "a later agent change brings it back, counting only the new change")
+check(itemsAfterLaterChange.first?.slug == "topics/running", "newest first")
+let stateMarkedEarlier = BrainReviewPlanner.markingReviewed(reviewedState, slug: "topics/running", through: .distantPast)
+check(stateMarkedEarlier.reviewedThroughDateBySlug["topics/running"] == reviewNow.addingTimeInterval(-1_800), "marking never moves the date backwards")
+check(BrainReviewPlanner.pruned(reviewedState, existingSlugs: []).reviewedThroughDateBySlug.isEmpty, "deleted pages are pruned from the state")
+
+check(BrainReviewPlanner.parsedTags(from: "running, health,  #sleep, Running,,") == ["running", "health", "sleep"], "typed tags are trimmed, de-hashed and de-duplicated")
+check(BrainReviewPlanner.parsedTags(from: "  ").isEmpty, "blank tags give none")
+
+// MARK: - Lock
+
+let lockNow = Date(timeIntervalSince1970: 1_800_000_000)
+check(!BrainLockPolicy.shouldRelock(leftWispDate: nil, now: lockNow, autoLockMinutes: 1), "never relocks while Wisp is active")
+check(!BrainLockPolicy.shouldRelock(leftWispDate: lockNow.addingTimeInterval(-59), now: lockNow, autoLockMinutes: 1), "not before the delay")
+check(BrainLockPolicy.shouldRelock(leftWispDate: lockNow.addingTimeInterval(-60), now: lockNow, autoLockMinutes: 1), "relocks once the delay passes")
+check(!BrainLockPolicy.shouldRelock(leftWispDate: lockNow.addingTimeInterval(-86_400), now: lockNow, autoLockMinutes: 0), "0 minutes means only on quit")
+check(BrainLockPolicy.autoLockMinuteChoices.allSatisfy { !BrainLockPolicy.autoLockChoiceTitle(minutes: $0).isEmpty }, "every auto-lock choice has a title")
+
+// MARK: - Relations
+
+let relationBody = """
+## Facts
+- Runs design at [[Orbit]]
+- Annotating [[Speak]] by [[Laurie Halse Anderson]]
+- 2026-09-29: met [[Sam]] at the conference
+- [[Orbit]] ships in May
+- She said the deadline for [[Atlas]] slipped again because of the review.
+- [x] Email [[Sam]]
+
+## Relations
+- works at:: [[Orbit]]
+- **Mentor of**:: [[Sam]], [[Ana Ruiz]]
+```
+- fake:: [[Inside Code]]
+```
+"""
+let parsedRelations = BrainRelationParser.relations(inBody: relationBody)
+func hasRelation(_ predicate: String, _ target: String, explicit: Bool) -> Bool {
+    parsedRelations.contains { $0.predicate == predicate && $0.targetName == target && $0.isExplicit == explicit }
+}
+check(hasRelation("runs design at", "Orbit", explicit: false), "a short linked fact derives a relation")
+check(hasRelation("annotating", "Speak", explicit: false), "only the first link of a fact is derived")
+check(!parsedRelations.contains { $0.targetName == "Laurie Halse Anderson" && !$0.isExplicit }, "later links in a fact are not derived")
+check(!parsedRelations.contains { $0.predicate.contains("2026") }, "a dated timeline line is not a relation")
+check(!parsedRelations.contains { $0.targetName == "Atlas" }, "a long sentence is not a relation")
+check(hasRelation("email", "Sam", explicit: false), "a task bullet's box is ignored")
+check(hasRelation("works at", "Orbit", explicit: true), "an explicit relation is read")
+check(hasRelation("mentor of", "Sam", explicit: true) && hasRelation("mentor of", "Ana Ruiz", explicit: true), "an explicit relation can name several pages, bold stripped")
+check(!parsedRelations.contains { $0.targetName == "Inside Code" }, "code fences are skipped")
+check(BrainRelationParser.normalizedPredicate("CEO of") == "CEO of", "acronyms are kept")
+
+let relationPages = [
+    makePage(slug: "people/lena", title: "Lena Park", kind: .person, body: "## Facts\n- Runs design at [[Orbit]]\n## Relations\n- runs design at:: [[Orbit]]\n- mentor of:: [[Nowhere]]"),
+    makePage(slug: "projects/orbit", title: "Orbit", kind: .project, body: "## Facts\n- A budgeting app\n- Part of [[Orbit]]"),
+    makePage(slug: "topics/swiftui", title: "SwiftUI", kind: .topic, body: "## Facts\n- Used by [[Orbit]]")
+]
+let relationResolver = BrainLinkResolver(pages: relationPages)
+let builtRelations = BrainRelationGraph.relations(pages: relationPages, resolver: relationResolver)
+check(builtRelations.filter { $0.sourceSlug == "people/lena" && $0.targetSlug == "projects/orbit" }.count == 1, "the same relation stated twice is one edge")
+check(builtRelations.first { $0.sourceSlug == "people/lena" }?.isExplicit == true, "the explicit form wins")
+check(!builtRelations.contains { $0.targetSlug == $0.sourceSlug }, "self-relations are dropped")
+check(!builtRelations.contains { $0.predicate == "mentor of" }, "unresolved targets are dropped")
+check(BrainRelationGraph.describe(builtRelations[0], titleBySlug: ["people/lena": "Lena Park", "projects/orbit": "Orbit"]) == "Lena Park — runs design at → Orbit", "relation description")
+
+// MARK: - Recall
+
+let recallPages = relationPages + [
+    makePage(slug: "topics/budgeting", title: "Budgeting", kind: .topic, body: "## Facts\n- Spending plans"),
+    makePage(slug: "me", title: "Me", kind: .me, body: "## Facts\n- Uses [[Orbit]] daily")
+]
+let recallResolver = BrainLinkResolver(pages: recallPages)
+let recallRelations = BrainRelationGraph.relations(pages: recallPages, resolver: recallResolver)
+let recallLinks = BrainRecallPlanner.linkedSlugsBySlug(pages: recallPages, resolver: recallResolver)
+func searchResult(_ slug: String, _ score: Double, matched: Int = 1, of total: Int = 1, names: Bool = false) -> BrainSearchResult {
+    let page = recallPages.first { $0.slug == slug }!
+    return BrainSearchResult(slug: slug, title: page.title, kind: page.kind, summary: page.summary, score: score, snippet: "", matchedTermCount: matched, queryTermCount: total, namesThePage: names)
+}
+
+// Words find Orbit; meaning finds Budgeting; Lena and SwiftUI come along by relation.
+let recallHits = BrainRecallPlanner.recall(
+    pages: recallPages,
+    keywordResults: [searchResult("projects/orbit", 4)],
+    meaningMatchesBySlug: [
+        "topics/budgeting": BrainSemanticMatch(similarity: 0.62, closestFact: "Budgeting: Spending plans"),
+        "topics/swiftui": BrainSemanticMatch(similarity: 0.2, closestFact: "noise")
+    ],
+    relations: recallRelations,
+    linkedSlugsBySlug: recallLinks,
+    excludedKinds: [.me]
+)
+let recallTitles = recallHits.map(\.title)
+check(recallTitles.first == "Orbit", "the keyword match leads")
+check(recallTitles.contains("Budgeting"), "a meaning match is found without shared words")
+check(recallHits.first { $0.title == "Lena Park" }?.reasons.contains { if case .connected(_, let description) = $0 { return description == "Lena Park — runs design at → Orbit" }; return false } == true, "a related page comes along with its relation")
+check(recallHits.first { $0.title == "SwiftUI" }.map { !$0.isDirectMatch } == true, "a weak meaning match doesn't count; the page comes only as a neighbour")
+check(!recallTitles.contains("Me"), "excluded kinds stay out")
+let lenaHit = recallHits.first { $0.title == "Lena Park" }!
+let orbitHit = recallHits.first { $0.title == "Orbit" }!
+check(lenaHit.score < orbitHit.score, "a neighbour ranks below its seed")
+check(BrainRecallPlanner.recall(pages: recallPages, keywordResults: [], meaningMatchesBySlug: [:], relations: recallRelations, linkedSlugsBySlug: recallLinks).isEmpty, "nothing matched, nothing recalled")
+
+let recallToolText = BrainRecallPlanner.toolText(for: recallHits, query: "orbit")
+check(recallToolText.contains("connected: Lena Park — runs design at → Orbit"), "the tool text says how a page is connected")
+check(recallToolText.contains("close in meaning: \"Budgeting: Spending plans\""), "the tool text quotes the closest fact")
+
+// The per-turn block keeps strong matches and typed neighbours only.
+let perTurnText = BrainPromptContext.promptText(recallHits: recallHits, keywordResults: [searchResult("projects/orbit", 12, names: true)])
+check(perTurnText.contains("- Orbit (project)"), "a strong keyword match rides the turn")
+check(!perTurnText.contains("Budgeting (topic)"), "a meaning match below the bar on its own stays out of the turn")
+check(perTurnText.contains("Lena Park (person)") && perTurnText.contains("[Lena Park — runs design at → Orbit]"), "a typed neighbour rides with its relation")
+let weakTurnText = BrainPromptContext.promptText(recallHits: recallHits, keywordResults: [searchResult("projects/orbit", 0.5)])
+check(!weakTurnText.contains("- Orbit (project)"), "a weak keyword match stays out of the turn")
+check(BrainPromptContext.promptText(recallHits: [], keywordResults: []) == "", "an unrelated question pays nothing")
+let oneCommonWordText = BrainPromptContext.promptText(recallHits: recallHits, keywordResults: [searchResult("projects/orbit", 3.6, matched: 1, of: 3)])
+check(!oneCommonWordText.contains("- Orbit (project)"), "one shared common word doesn't put a page in the turn")
+let agreeingHits = BrainRecallPlanner.recall(pages: recallPages, keywordResults: [searchResult("topics/budgeting", 3, matched: 2, of: 3)], meaningMatchesBySlug: ["topics/budgeting": BrainSemanticMatch(similarity: 0.45, closestFact: "Budgeting: Spending plans")], relations: recallRelations, linkedSlugsBySlug: recallLinks)
+check(BrainPromptContext.promptText(recallHits: agreeingHits, keywordResults: [searchResult("topics/budgeting", 3, matched: 2, of: 3)]).contains("Budgeting (topic)"), "words and meaning agreeing put a page in the turn")
+let closeMeaningHits = BrainRecallPlanner.recall(pages: recallPages, keywordResults: [], meaningMatchesBySlug: ["topics/budgeting": BrainSemanticMatch(similarity: 0.7, closestFact: "Budgeting: Spending plans")], relations: recallRelations, linkedSlugsBySlug: recallLinks)
+check(BrainPromptContext.promptText(recallHits: closeMeaningHits, keywordResults: []).contains("Budgeting (topic)"), "a very close meaning match rides the turn on its own")
+
+// MARK: - Facts for the meaning index, and forgetting
+
+let factPage = makePage(slug: "people/lena", title: "Lena Park", kind: .person, body: "## Facts\n- Runs design at [[Orbit|the app]]\n- works at:: [[Orbit]]\n```\n- not a fact\n```\n- ok")
+let factTexts = BrainSemanticFacts.factTexts(for: factPage)
+check(factTexts.contains("Lena Park: Runs design at the app"), "a fact is embedded with its page title and plain link text")
+check(factTexts.contains("Lena Park: works at Orbit"), "an explicit relation is embedded as words")
+check(!factTexts.contains { $0.contains("not a fact") }, "code is not embedded")
+check(!factTexts.contains("Lena Park: ok"), "a too-short fact is skipped")
+
+let forgetBody = "## Facts\n- Moved to [[Berlin]] in 2025\n- Likes Berlin techno\n- Lives in Lisbon"
+check(BrainFactRemoval.matchingBulletLines(in: forgetBody, describedBy: "moved to berlin") == ["- Moved to [[Berlin]] in 2025"], "the fact holding every word is found")
+check(BrainFactRemoval.matchingBulletLines(in: forgetBody, describedBy: "berlin").count == 2, "a vague description matches several")
+check(BrainFactRemoval.body(forgetBody, removing: ["- Lives in Lisbon"]) == "## Facts\n- Moved to [[Berlin]] in 2025\n- Likes Berlin techno", "the line is removed in place")
+check(BrainFactRemoval.matchingBulletLines(in: forgetBody, describedBy: "the").isEmpty, "stop words alone match nothing")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed, \(knownIssueCount) known core issues")
 exit(failureCount == 0 ? 0 : 1)

@@ -209,7 +209,7 @@ final class BrainMaintenance: ObservableObject {
             maxOutputTokens: 60,
             temperature: 0
         )
-        let modelProvider = ModelProviderFactory.make()
+        let modelProvider = ModelProviderFactory.make(BrainPreferences.shared.readingModelProviderKind)
         let summaryTurn = try? await ModelAccessGate.shared.withAccess(priority: .background) {
             try await modelProvider.completeTurn(summaryRequest)
         }

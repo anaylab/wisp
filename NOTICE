@@ -17,4 +17,12 @@ Portions of Wisp are adapted from Sentient OS
     paste-then-restore-clipboard flow)
   - leanring-buddy/NotchSpace.swift  (fixed window-server space for the notch overlay)
 
+Portions of Wisp are adapted from Rowboat (https://github.com/rowboatlabs/rowboat), which is
+licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
+Wisp translates behaviour and prompt ideas into Swift; no Rowboat source files are copied:
+
+  - leanring-buddy/MailInbox/  (the Important / Everything else email triage and learning
+    from the user's corrections, from Rowboat's classify_thread.ts and
+    email_importance_feedback.ts; replies drafted ahead for important mail)
+
 Because of this, the combined work is distributed under AGPL-3.0.

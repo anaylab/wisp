@@ -431,5 +431,22 @@ do {
     check(sanitized.text == "Atlas books hiking trips.\nMarcus owns offline maps.", "the rest of the source survives")
 }
 
+// Chunk labels the model copied onto facts are dropped, so copies from two chunks merge.
+check(BrainIngestProposalMerger.uniqueLines(of: ["- Annotating [[Speak]] by [[Laurie Halse Anderson]] (part 2 of 7)", "- Annotating [[Speak]] by [[Laurie Halse Anderson]] (part 6 of 7)"]) == ["- Annotating [[Speak]] by [[Laurie Halse Anderson]]"], "chunk labels stripped and the copies merged")
+check(BrainIngestProposalMerger.withoutChunkLabel("- Read chapter 3 — part 1 of 4") == "- Read chapter 3", "dash-form chunk label stripped")
+check(BrainIngestProposalMerger.withoutChunkLabel("- Read part 2 of 3 for class") == "- Read part 2 of 3 for class" && BrainIngestProposalMerger.withoutChunkLabel("- Read part 2 of 3") == "- Read part 2 of 3", "an unbracketed part number in a fact is kept")
+check(BrainIngestProposalMerger.withoutChunkLabel("- Finished part 2 of the essay") == "- Finished part 2 of the essay", "a fact that mentions a part is left alone")
+
+// A model that couldn't be reached pauses the queue, longer each time, never past an hour.
+check(BrainIngestRetryPolicy.pauseSeconds(afterConsecutivePauses: 0) == 300, "first pause is five minutes")
+check(BrainIngestRetryPolicy.pauseSeconds(afterConsecutivePauses: 2) == 1200, "pauses double")
+check(BrainIngestRetryPolicy.pauseSeconds(afterConsecutivePauses: 50) == 3600, "pauses stop at an hour")
+
+// Filler facts from the local model are dropped; real ones stay.
+let fillerFacts = "- A topic\n- A person\n- Wisp is a project\n- Works on projects\n- Likes The Weeknd\n- Uses Xcode\n- Melinda\n- Friend of [[Rachel]]\n- 2030: Dominating\n## Notes"
+check(BrainIngestProposalMerger.substantiveLines(of: fillerFacts, pageTitle: "Melinda") == ["- Likes The Weeknd", "- Uses Xcode", "- Friend of [[Rachel]]", "- 2030: Dominating", "## Notes"], "filler facts dropped, real ones kept")
+let fillerOnlyMerge = BrainIngestProposalMerger.merge([BrainEditProposal(operation: .append, pageTitle: "Ocean acidification", pageKind: .topic, section: "Facts", content: "- A topic", summary: "Topic")])
+check(fillerOnlyMerge.isEmpty, "an append with only filler is dropped, so no page is made for it")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

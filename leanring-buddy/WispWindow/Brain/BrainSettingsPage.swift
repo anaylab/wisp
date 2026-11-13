@@ -32,6 +32,7 @@ struct BrainSettingsPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 brainCard
+                BrainLockSettingsCard()
                 conversationsCard
                 inboxCard
                 screenActivityCard
@@ -68,6 +69,17 @@ struct BrainSettingsPage: View {
                     detail: "Before each question, the few pages that matter are included, so \"what did Sarah say about Atlas?\" just works."
                 ) {
                     Toggle("Use it in answers", isOn: $brainPreferences.isPromptContextEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(!brainPreferences.isBrainEnabled)
+                        .pointerCursor(isEnabled: brainPreferences.isBrainEnabled)
+                }
+                Divider()
+                SettingRow(
+                    title: "Read with the local model",
+                    detail: "Files, links, imports and conversations are read into pages on this Mac, whatever model Wisp chats with. Off, they're read by the model selected in Settings → Model."
+                ) {
+                    Toggle("Read with the local model", isOn: $brainPreferences.readsWithLocalModel)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .disabled(!brainPreferences.isBrainEnabled)
