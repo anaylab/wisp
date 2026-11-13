@@ -237,6 +237,31 @@ nonisolated enum MailInboxImportancePolicy {
         return keptLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// One line for a list row: the new part of the latest message, every run of spaces and line
+    /// breaks folded to one space (HTML mail comes through Mail's plain text full of them).
+    static func previewLine(of bodyText: String) -> String {
+        latestReplyText(of: withoutInvisibleCharacters(bodyText))
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Mail's plain text puts U+FFFC where each inline image was, and marketing mail pads its
+    /// preview line with zero-width characters; neither means anything to a reader.
+    static func withoutInvisibleCharacters(_ text: String) -> String {
+        text.replacingOccurrences(of: "[\u{FFFC}\u{200B}-\u{200D}\u{034F}\u{FEFF}\u{00AD}\u{2060}]", with: "", options: .regularExpression)
+    }
+
+    /// A body for reading: trailing spaces dropped from each line and runs of blank lines folded
+    /// to one, so a newsletter's layout spacing doesn't leave big empty gaps.
+    static func bodyForReading(_ bodyText: String) -> String {
+        withoutInvisibleCharacters(bodyText)
+            .components(separatedBy: "\n")
+            .map { $0.replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }
+            .joined(separator: "\n")
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func decide(
         thread: MailInboxThread,
         signals: MailInboxUserSignals,

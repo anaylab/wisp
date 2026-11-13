@@ -211,5 +211,17 @@ check(!MailInboxImportancePolicy.subjectLooksLikeNotification("Border crossing p
 check(!MailInboxImportancePolicy.subjectLooksLikeNotification("Can you review the code?"), "a person's 'code' question is not a code notification")
 check(verdict(thread(message(subject: "Here's the receipt you asked for", body: "Can you check it?")))?.category == .important, "a contact sending a receipt stays important")
 
+
+// MARK: - Page text
+
+check(MailInboxImportancePolicy.previewLine(of: "  RECALL ALERT:  Cheese\n\n  is   recalled") == "RECALL ALERT: Cheese is recalled",
+      "row preview folds spaces and line breaks")
+check(MailInboxImportancePolicy.bodyForReading("ci run   \n\n\n\n\nView run\n\n\n") == "ci run\n\nView run",
+      "reading body folds blank-line runs and trailing spaces")
+
+check(MailInboxImportancePolicy.previewLine(of: "\u{FFFC}\n\u{FFFC}\nRECALL\u{200C}\u{034F} ALERT") == "RECALL ALERT",
+      "image placeholders and zero-width padding dropped")
+check(MailInboxImportancePolicy.bodyForReading("\u{FFFC}\n\u{FFFC}\n\u{FFFC}\nHello") == "Hello", "no gap where images were")
+
 print("\(checkCount - failureCount)/\(checkCount) checks passed")
 exit(failureCount == 0 ? 0 : 1)

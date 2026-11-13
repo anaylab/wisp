@@ -255,7 +255,7 @@ private struct MailInboxThreadRow: View {
                         .font(.callout)
                         .foregroundStyle(WispColor.textPrimary)
                         .lineLimit(1)
-                    Text(MailInboxImportancePolicy.latestReplyText(of: latest.bodyExcerpt).replacingOccurrences(of: "\n", with: " "))
+                    Text(MailInboxImportancePolicy.previewLine(of: latest.bodyExcerpt))
                         .font(.caption)
                         .foregroundStyle(WispColor.textSecondary)
                         .lineLimit(2)
@@ -402,7 +402,7 @@ private struct MailInboxThreadDetail: View {
                     .font(.caption)
                     .foregroundStyle(WispColor.textTertiary)
             }
-            Text(message.bodyExcerpt.trimmingCharacters(in: .whitespacesAndNewlines))
+            Text(MailInboxImportancePolicy.bodyForReading(message.bodyExcerpt))
                 .font(.callout)
                 .foregroundStyle(WispColor.textSecondary)
                 .textSelection(.enabled)
@@ -432,45 +432,25 @@ private struct MailInboxSettingsSheet: View {
             Text("Inbox settings")
                 .font(.title3.weight(.semibold))
             SettingRow(title: "Write replies ahead", detail: "For important mail that asks you something. Never sent.") {
-                Toggle("Write replies ahead", isOn: $preferences.draftsAhead).labelsHidden()
+                Toggle("Write replies ahead", isOn: $preferences.draftsAhead).labelsHidden().toggleStyle(.switch)
             }
             SettingRow(
                 title: "Use Wisp's chat model",
-                detail: preferences.usesChatModel && BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine
-                    ? "Your email goes to \(BuddyChatProviderSelection.current.displayName) to be sorted and answered."
-                    : "Off: mail is read by the local model on this Mac."
+                detail: !preferences.usesChatModel
+                    ? "Off: mail is read by the local model on this Mac."
+                    : BuddyChatProviderSelection.current.sendsScreenshotsOffThisMachine
+                        ? "Your email goes to \(BuddyChatProviderSelection.current.displayName) to be sorted and answered."
+                        : "On: \(BuddyChatProviderSelection.current.displayName) reads your mail, still on this Mac."
             ) {
-                Toggle("Use Wisp's chat model", isOn: $preferences.usesChatModel).labelsHidden()
+                Toggle("Use Wisp's chat model", isOn: $preferences.usesChatModel).labelsHidden().toggleStyle(.switch)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("What matters to you").font(.body.weight(.medium))
-                TextEditor(text: $preferences.userRules)
-                    .font(.callout)
-                    .frame(height: 64)
-                    .overlay(alignment: .topLeading) {
-                        if preferences.userRules.isEmpty {
-                            Text("Anything from my professors. Invoices are not important.")
-                                .font(.callout)
-                                .foregroundStyle(WispColor.textTertiary)
-                                .padding(.top, 1).padding(.leading, 5)
-                                .allowsHitTesting(false)
-                        }
-                    }
+                settingsTextEditor(text: $preferences.userRules, placeholder: "Anything from my professors. Invoices are not important.", height: 64)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("How you write").font(.body.weight(.medium))
-                TextEditor(text: $preferences.styleNotes)
-                    .font(.callout)
-                    .frame(height: 48)
-                    .overlay(alignment: .topLeading) {
-                        if preferences.styleNotes.isEmpty {
-                            Text("Short and warm. Sign off with “Best”.")
-                                .font(.callout)
-                                .foregroundStyle(WispColor.textTertiary)
-                                .padding(.top, 1).padding(.leading, 5)
-                                .allowsHitTesting(false)
-                        }
-                    }
+                settingsTextEditor(text: $preferences.styleNotes, placeholder: "Short and warm. Sign off with “Best”.", height: 48)
             }
             Divider()
             HStack {
@@ -493,5 +473,32 @@ private struct MailInboxSettingsSheet: View {
         }
         .padding(20)
         .frame(width: 460)
+    }
+
+    /// A multi-line field drawn as a field (fill + hairline), like the Brain's paste box, with a
+    /// grey example inside while it's empty.
+    private func settingsTextEditor(text: Binding<String>, placeholder: String, height: CGFloat) -> some View {
+        TextEditor(text: text)
+            .font(.callout)
+            .scrollContentBackground(.hidden)
+            .padding(6)
+            .frame(height: height)
+            .background(
+                RoundedRectangle(cornerRadius: WispRadius.small, style: .continuous)
+                    .fill(WispColor.groupedCardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: WispRadius.small, style: .continuous)
+                    .strokeBorder(WispColor.cardSeparator, lineWidth: 0.5)
+            )
+            .overlay(alignment: .topLeading) {
+                if text.wrappedValue.isEmpty {
+                    Text(placeholder)
+                        .font(.callout)
+                        .foregroundStyle(WispColor.textTertiary)
+                        .padding(.top, 7).padding(.leading, 11)
+                        .allowsHitTesting(false)
+                }
+            }
     }
 }
