@@ -101,7 +101,7 @@
       return { holder: holder, letters: letters };
     });
     var shown = 0;
-    function widthOf(holder) { return holder.getBoundingClientRect().width; }
+    function widthOf(holder) { return holder.offsetWidth; }
     function sizeTo(position) { rotator.style.width = Math.ceil(widthOf(wordElements[position].holder)) + "px"; }
     ready.then(function () { sizeTo(0); });
     window.addEventListener("resize", function () { sizeTo(shown); });

@@ -26,12 +26,15 @@ body::before { opacity: 0.62; }
 h1 em.k-split, h2 em.k-split { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: inherit; padding-right: 0; }
 .js .hero .ln > span { animation: none; transform: none; }
 
-/* The hero's last word cycles, each swap a fresh wipe of letters. */
-.k-rot { position: relative; display: inline-block; vertical-align: top; overflow: hidden; height: 1.14em; margin-bottom: -0.14em; transition: width 0.8s var(--ease); }
+/* The hero's last word cycles: the old word blurs away, and only then does the new one arrive,
+   so the two are never on screen together and nothing travels into the line above. */
+.k-rot { position: relative; display: inline-block; vertical-align: top; height: 1.14em; margin-bottom: -0.14em; transition: width 0.5s var(--ease) 0.35s; }
 .k-rot-w { position: absolute; left: 0; top: 0; white-space: nowrap; }
-.k-rot-w .k-ch { transform: translateY(125%) rotate(7deg); opacity: 0; }
-.k-rot-w.is-on .k-ch { transform: none; opacity: 1; }
-.k-rot-w.is-off .k-ch { transform: translateY(-125%) rotate(-7deg); opacity: 0; }
+.k-rot-w .k-ch { opacity: 0; filter: blur(10px); transform: translateY(0.22em);
+  transition: transform 0.7s var(--ease) calc(0.45s + var(--i) * 26ms), opacity 0.5s linear calc(0.45s + var(--i) * 26ms), filter 0.6s linear calc(0.45s + var(--i) * 26ms); }
+.k-rot-w.is-on .k-ch { opacity: 1; filter: none; transform: none; }
+.k-rot-w.is-off .k-ch { opacity: 0; filter: blur(10px); transform: translateY(-0.12em);
+  transition: transform 0.35s ease-in calc(var(--i) * 14ms), opacity 0.3s linear calc(var(--i) * 14ms), filter 0.35s linear calc(var(--i) * 14ms); }
 .k-rot-w.k-reset .k-ch { transition: none; }
 .k-rot .k-w { overflow: visible; margin: 0; padding: 0; }
 
