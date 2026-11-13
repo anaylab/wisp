@@ -38,6 +38,8 @@ struct HomeTab: View {
     @ObservedObject private var automationEngine = AutomationEngine.shared
     @ObservedObject private var advancedFeatures = WispAdvancedFeaturesPreference.shared
     @ObservedObject private var finishedWorkInbox = FinishedWorkInbox.shared
+    @ObservedObject private var mailInboxEngine = MailInboxEngine.shared
+    @ObservedObject private var mailInboxPreferences = MailInboxPreferences.shared
 
     /// Moves the Wisp window to another page (e.g. "All routines").
     let onSelectPage: (WispPage) -> Void
@@ -793,6 +795,22 @@ struct HomeTab: View {
                 automationAttentionItemID: attentionItem.id,
                 kind: .failure,
                 occurredAt: attentionItem.occurredAt
+            ))
+        }
+
+        // Important mail waiting, and replies Wisp wrote ahead for it.
+        if mailInboxPreferences.isEnabled && mailInboxEngine.importantWaitingCount > 0 {
+            let waitingCount = mailInboxEngine.importantWaitingCount
+            let draftCount = mailInboxEngine.draftsReadyCount
+            alerts.append(NeedsYouAlert(
+                id: "mail-\(waitingCount)-\(draftCount)",
+                symbolName: "envelope.badge",
+                title: waitingCount == 1 ? "1 important email" : "\(waitingCount) important emails",
+                detail: draftCount == 0 ? "Waiting in your Inbox." : (draftCount == 1 ? "A reply is written and waiting for you." : "\(draftCount) replies are written and waiting for you."),
+                actionTitle: "Open Inbox",
+                action: { onSelectPage(.mail) },
+                kind: .result,
+                occurredAt: mailInboxEngine.lastSyncAt ?? .distantPast
             ))
         }
 

@@ -100,6 +100,8 @@ struct WispWindowView: View {
             )
         case .chat:
             ChatPage(companionManager: companionManager, taskRegistry: taskRegistry)
+        case .mail:
+            MailInboxPage()
         case .buddies:
             BuddiesPage(taskRegistry: taskRegistry)
         case .automations:

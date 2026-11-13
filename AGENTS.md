@@ -934,6 +934,44 @@ named "Wisp Today"; study blocks are written only after one approval card (`wisp
   and read-only `find_contact`, in the `.messaging` `AgentToolScope`. Needs
   `NSContactsUsageDescription` + the `com.apple.security.personal-information.addressbook`
   entitlement (hardened runtime) and Automation → Messages.
+- **Inbox** (`MailInbox/`, `WispWindow/MailInbox/`, phase 1 of `docs/rowboat-merge-plan.md`, from Rowboat's email client): the
+  user's mail from **Mail.app**, sorted into **Important** / **Everything else**, with replies written ahead. **Off by default**
+  (`MailInboxPreferences.isEnabled`, turned on from the Inbox page; rail item **Inbox**, `WispPage.mail`, section `.mail`).
+  `MailInboxReader` runs fixed AppleScript through `/usr/bin/osascript` (source on stdin, plain `argv`, off main, 240s timeout then
+  SIGKILL — osascript ignores SIGTERM mid Apple Event — both pipes drained); output is ASCII 30/31-separated text parsed by the pure
+  `MailInboxScriptOutputParser`, and each script's TIMING/`log` lines (counts and seconds only) go to the `com.gluepixel.wisp`/`inbox`
+  os log (read it with `/usr/bin/log`, since zsh has a `log` builtin). **Speed is the hard part** (measured on a 36,443-message inbox):
+  Mail answers per-message questions at ~1–2s each and a ranged query (`messages 1 thru 200`) at ~95s per field, but `<field> of every
+  message` in ~2–25s, so the inbox script reads each field of *every* message once and slices the recent ≤200 (14 days, newest end
+  found from the date list); full read ~40s warm, ~160s cold. A `whose date received >` filter was slower still (>4 min). Bodies come
+  from a second script (`content` + a List-Unsubscribe header check per message, ~5s each, 90s budget, ≤80 asked, people before
+  automated senders, newest first, located by mailbox number + index and checked against the message id) and are **cached in
+  inbox.json**, so later syncs read only new bodies. Each sync first runs a quick id-only check (~50s) and reuses the stored messages
+  unless the ids changed or the last full read (`lastFullReadAt`, saved) is over an hour old. A thread whose latest body isn't read
+  yet may only be sorted into Everything else. A quick probe (`count of accounts`) runs first so a missing permission is told apart
+  from a slow read. Own addresses = Mail accounts' addresses ∪ senders of sent mail ∪ the Me card (accounts' `email addresses` came
+  back empty live). Automatic syncs (launch + every 10 min from the last sync's *start*) run **only while Mail is open**; Sync now opens it.
+  Needs Automation → Mail (already needed for sending drafts). `MailInboxThread` groups by account + subject without Re:/Fwd:
+  (Mail's scripting has no thread id). **Sorting is rules first** (`MailInboxImportancePolicy`, pure): the user's own correction
+  for that sender wins; then own mail, List-Unsubscribe / Precedence bulk / bulk wording in the body ("unsubscribe", "view in browser"),
+  notification subjects (login/verification codes, receipts, orders, shipping, statements, password resets — unless from a contact
+  or someone the user wrote to), automated senders and >15 recipients → Everything else;
+  a contact (`ContactsDirectory.allEmailAddressesIfAuthorized`, never prompts) or someone the user wrote to, addressed directly or
+  asking something → Important. Only the rest (≤12 per sync) get one text-only call (`MailInboxTriagePrompt`, mail fenced as data,
+  the user's "what matters to you" text and their last 8 corrections as examples) at background priority through `ModelAccessGate`;
+  an unanswered or failed one shows under Everything else as "Not sorted yet" and is retried next sync. "Not important" / "Mark
+  important" records a `MailInboxCorrection` for the sender (60 kept) and re-sorts all their threads. The prompt leans to OTHER and
+  names company mail as OTHER, because live the 3B model called marketing mail and a login code important. **Drafts ahead**
+  (`MailInboxDraftPolicy`, on by default): an important thread placed by the rules or the user (never the model alone), unanswered,
+  whose latest message asks something and is ≤3 days old
+  gets a reply (≤4 per sync) from `EmailDraftPrompt` + the thread, Brain recall on sender/subject, next week's calendar (only if
+  Calendar access was already given) and the user's "how you write" notes. The greeting ("Hi Maya," / "Hi," for brands) and the
+  "Re:" subject are built in code (`greetingLine`, `replySubject`): the model copied "Hi Sam" out of the prompt's example. A draft belongs to one message id, so a newer message
+  makes it stale. Reply opens the existing email composer (drafted or written now); **Send there is the only way anything leaves**.
+  A send from the composer posts `.wispEmailSent`, which marks the thread answered and drops its draft. The model is the **local one**
+  unless "Use Wisp's chat model" is on (labelled with where mail goes). State in `inbox.json` (0600, via `WispDemoMode`; demo mode never
+  syncs); "Forget stored mail" deletes it. Today's Needs you shows "N important emails" (+ drafts ready). Not built yet: feeding
+  senders into the Brain's people pages, choosing which Mail accounts, a notch surface. Tested by `Tests/MailInbox`.
 - **Email drafts** (`Email/`): "draft an email to sam about moving friday's meeting", "write me a quick email to my
   landlord…", "email mom saying …", "send sam an email about …", "reply to this email saying …", "email this page to sam" are
   recognised by `EmailDraftRequestParser` (pure, conservative; checked in `sendTranscriptToClaudeWithScreenshot` right before the
@@ -1467,6 +1505,10 @@ When the morning banner is built, `BrainMorningSuggestions` (`DynamicIsland/Brai
 | `Email/EmailDraft.swift` | ~490 | Pure: `EmailDraftRequestParser` ("draft an email to X about …" → recipient phrase, content?, screen?, reply?), `EmailDraftFields`, `EmailDraftPrompt`, `EmailDraftReplyParser`, `EmailAddressList` (field parsing, contact entries, pre-send problems) and `EmailComposeLinks` (Gmail compose URL, copy text). Tested by `Tests/EmailDraft`. |
 | `Email/EmailComposerWindowController.swift` | ~510 | The email composer panel (`EmailComposerModel` + `EmailComposerView`): writing placeholder, notice/discard banners, Send / Discard / More (Open in Mail, Open in Gmail, Copy). |
 | `Email/EmailDraftWriter.swift` | ~275 | Opens the composer for a request: Contacts → email address, screen OCR for screen-referring requests, the model call that writes the draft (retryable), and the `draft_email` agent tool. |
+| `MailInbox/MailInboxModel.swift` | ~580 | Pure Inbox core: `MailInboxMessage`/`Thread` (subject threading), `MailInboxImportancePolicy` (rules), `MailInboxTriagePrompt` (model prompt + lenient answer parsing), `MailInboxDraftPolicy` (when to draft ahead, draft request), `MailInboxScriptOutputParser`. Tested by `Tests/MailInbox`. |
+| `MailInbox/MailInboxReader.swift` | ~540 | Reads Mail.app over `osascript` off main: probe, quick id check, recent messages (bulk "every message" reads), bodies (budgeted), own addresses + who the user wrote to; `message://` open; error mapping (-1743, not running, timeout + kill). |
+| `MailInbox/MailInboxEngine.swift` | ~620 | `MailInboxPreferences` and the `MailInboxEngine` singleton: 10-minute sync while Mail is open, rules then model sorting, drafts ahead, corrections, reply into the composer, `inbox.json`. |
+| `WispWindow/MailInbox/MailInboxPage.swift` | ~560 | The Inbox page: turn-on card, Important / Everything else list with draft chips, thread detail (Reply, Open in Mail, move), settings sheet. |
 | `Email/MailAppSender.swift` | ~120 | Sends a draft from Mail (or opens it unsent) via a parameterised AppleScript handler; -1743 / no account → plain-words errors. |
 | `ChromeTabAgentTools.swift` | ~260 | `ChromeTabCommandRouter` (plain spoken commands, questions left to the model) and the five `chrome_*` agent tools. |
 | `BrowserController.swift` | ~285 | The DOM-first browser contract: `BrowserElement`/`BrowserPageSnapshot`, element ids instead of coordinates, `BrowserControllerError`, and the `BrowserController` protocol. |
@@ -1817,6 +1859,7 @@ running):
 ./Tests/BuddyThread/run.sh               # buddy thread history projection, caps, store round trip
 ./Tests/WindowManagement/run.sh          # window layout command parsing, app matching, frame math
 ./Tests/EmailDraft/run.sh                # email drafts: request parsing, model reply → fields, address checks, Gmail link
+./Tests/MailInbox/run.sh                 # inbox: threading, sorting rules (bulk wording, notification subjects), corrections, triage parsing, drafts ahead, greetings, Mail script + body output
 ./Tests/ScreenWatcher/run.sh             # screen-watch request parsing, text matching, evaluator
 ./Tests/EditableConfirmation/run.sh      # editable confirmation fields: which, edit application, refusals
 ./Tests/RoutineParameters/run.sh         # routine blanks: parsing, defaults, clipboard/date, filling in

@@ -74,6 +74,11 @@ final class EmailComposerModel: ObservableObject {
     }
 }
 
+extension Notification.Name {
+    /// Mail accepted a draft sent from the composer. userInfo: "subject", "to".
+    static let wispEmailSent = Notification.Name("wispEmailSent")
+}
+
 @MainActor
 final class EmailComposerWindowController {
     static let shared = EmailComposerWindowController()
@@ -136,6 +141,8 @@ final class EmailComposerWindowController {
                 try MailAppSender.send(draftFieldsToSend)
                 self?.close()
                 self?.onEmailSent?(draftFieldsToSend)
+                // The Inbox listens too, to drop the draft it wrote for this reply.
+                NotificationCenter.default.post(name: .wispEmailSent, object: nil, userInfo: ["subject": draftFieldsToSend.subject, "to": draftFieldsToSend.toField])
             } catch {
                 model.phase = .ready
                 model.noticeText = error.localizedDescription
